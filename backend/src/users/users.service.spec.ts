@@ -1,5 +1,7 @@
 import { jest } from '@jest/globals'
+import { ConfigService } from '@nestjs/config'
 import { Test, TestingModule } from '@nestjs/testing'
+import { EmailService } from '../email/email.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { UsersService } from './users.service.js'
 
@@ -19,6 +21,14 @@ describe('UsersService', () => {
               update: jest.fn(),
             },
           },
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn() },
+        },
+        {
+          provide: EmailService,
+          useValue: { send: jest.fn() },
         },
       ],
     }).compile()

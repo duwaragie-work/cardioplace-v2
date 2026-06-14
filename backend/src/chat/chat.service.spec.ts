@@ -19,6 +19,8 @@ import { OcrService } from '../ocr/ocr.service.js'
 import { MedicationAdherenceService } from './services/medication-adherence.service.js'
 import { SymptomQuickLogService } from './services/symptom-quick-log.service.js'
 import { AlertEngineService } from '../daily_journal/services/alert-engine.service.js'
+import { IntakeStatusService } from '../intake/intake-status.service.js'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 
 const NOW = new Date('2026-04-22T10:00:00Z')
 const DOB = new Date('1980-06-15T00:00:00Z')
@@ -46,6 +48,7 @@ function buildResolvedContext(
       hasDCM: false,
       hasTachycardia: false,
       hasBradycardia: false,
+      hasAorticStenosis: false,
       diagnosedHypertension: true,
       verificationStatus: 'VERIFIED',
       verifiedAt: NOW,
@@ -71,7 +74,7 @@ function buildResolvedContext(
 describe('ChatService.buildPatientSystemPrompt() — phase/16', () => {
   let service: ChatService
   let prisma: Record<string, any>
-  let profileResolver: { resolve: jest.Mock }
+  let profileResolver: { resolve: jest.Mock<any> }
 
   beforeEach(async () => {
     prisma = {
@@ -115,6 +118,16 @@ describe('ChatService.buildPatientSystemPrompt() — phase/16', () => {
         // (alertEngine: this.alertEngineService) — no method is invoked in the
         // spec's paths, so a bare mock satisfies the constructor DI.
         { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
+        {
+          provide: IntakeStatusService,
+          useValue: {
+            getStatus: jest.fn(async () => ({ completed: true, profileExists: true })),
+          },
+        },
+        {
+          provide: EventEmitter2,
+          useValue: { emit: jest.fn(), on: jest.fn() },
+        },
       ],
     }).compile()
     service = module.get(ChatService)
@@ -265,6 +278,25 @@ describe('ChatService.buildPatientSystemPrompt() — phase/16', () => {
     it('PATIENT tone directive present', async () => {
       const prompt = await run('user-1')
       expect(prompt).toContain('TONE — patient mode')
+    })
+  })
+
+  // ─── Bug 58 — JournalEntry mutations invalidate the chat patient-
+  // context cache so the NEXT chat turn reads fresh values after any edit
+  // (chat tool, voice tool, HTTP REST). Without this listener, the chat
+  // would keep serving cached pre-edit data for up to 60 seconds (TTL)
+  // after edits made outside the chat dispatcher.
+  describe('onJournalEntryMutated (Bug 58)', () => {
+    it('invalidates the context cache when a journal entry is updated', () => {
+      const spy = jest.spyOn(service, 'invalidateContextCache')
+      service.onJournalEntryMutated({ userId: 'user-1' })
+      expect(spy).toHaveBeenCalledWith('user-1')
+    })
+
+    it('handles ENTRY_CREATED payloads the same way (same listener method)', () => {
+      const spy = jest.spyOn(service, 'invalidateContextCache')
+      service.onJournalEntryMutated({ userId: 'user-create' })
+      expect(spy).toHaveBeenCalledWith('user-create')
     })
   })
 })

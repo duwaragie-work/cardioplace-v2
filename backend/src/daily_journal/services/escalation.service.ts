@@ -1,6 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
+import {
+  EMERGENCY_EVENTS,
+  type EmergencyFlaggedPayload,
+} from '../../chat/emergency-events.js'
 import { Cron } from '@nestjs/schedule'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
@@ -37,6 +41,7 @@ import {
   nextBusinessHoursStart,
   type BusinessHoursConfig,
 } from '../utils/business-hours.js'
+import { wasEverEnrolled } from '../../practice/enrollment-helpers.js'
 
 /**
  * Cluster 7 A.6 — rules whose primary delivery channel is the caregiver
@@ -149,6 +154,113 @@ export class EscalationService {
     }
   }
 
+  /**
+   * Bug 11 — chat/voice `flag_emergency` tool fires an emergency.flagged event
+   * after ChatService persists the EmergencyEvent row. This listener pages the
+   * patient's consenting caregivers AND their assigned provider so the care
+   * team learns about an acute emergency in real time, not via DB audit
+   * scrape. Reuses findCaregivers + the SMS/email/DASHBOARD plumbing the
+   * standard alert path uses.
+   */
+  @OnEvent(EMERGENCY_EVENTS.FLAGGED, { async: true })
+  async onEmergencyFlagged(payload: EmergencyFlaggedPayload): Promise<void> {
+    try {
+      await this.dispatchEmergencyToCareTeam(payload)
+    } catch (err) {
+      this.logger.error(
+        `[SECURITY-CRITICAL] Emergency dispatch failed userId=${payload.userId} situation="${payload.situation}"`,
+        err instanceof Error ? err.stack : err,
+      )
+    }
+  }
+
+  private async dispatchEmergencyToCareTeam(
+    payload: EmergencyFlaggedPayload,
+  ): Promise<void> {
+    const subject = `URGENT — Cardioplace patient emergency`
+    const body =
+      `A Cardioplace patient flagged an acute emergency during a ${
+        payload.source === 'voice-tool' ? 'voice' : 'chat'
+      } session.\n\n` +
+      `Situation reported by the patient: ${payload.situation}\n\n` +
+      `Please reach out to the patient immediately or escalate per your practice's emergency protocol. ` +
+      `An EmergencyEvent has been recorded in the audit log.`
+
+    // 1) Consenting caregivers — same dispatch pattern as L1 alerts.
+    const caregivers = await this.findCaregivers(payload.userId)
+    for (const caregiver of caregivers) {
+      try {
+        switch (caregiver.notifyChannel) {
+          case 'EMAIL':
+            if (caregiver.email) {
+              await this.emailService.sendEmail(caregiver.email, subject, body)
+            }
+            break
+          case 'SMS':
+            if (caregiver.phone) {
+              await this.smsService.sendSms(caregiver.phone, body)
+            }
+            break
+          case 'DASHBOARD':
+            if (caregiver.caregiverUserId) {
+              await this.prisma.notification.create({
+                data: {
+                  userId: caregiver.caregiverUserId,
+                  patientUserId: payload.userId,
+                  channel: 'DASHBOARD',
+                  title: subject,
+                  body,
+                },
+              })
+            }
+            break
+          default:
+            break
+        }
+      } catch (err) {
+        this.logger.error(
+          `Emergency dispatch to caregiver ${caregiver.id} failed`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+    }
+
+    // 2) Assigned providers — DASHBOARD notification to the primary AND
+    // backup so the emergency lands in someone's inbox without depending on
+    // SMS/email config. PatientProviderAssignment uses `userId` (the
+    // patient) as the unique key, and stores `primaryProviderId` +
+    // `backupProviderId`.
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId: payload.userId },
+      select: { primaryProviderId: true, backupProviderId: true },
+    })
+    const providerIds = new Set<string>()
+    if (assignment?.primaryProviderId) providerIds.add(assignment.primaryProviderId)
+    if (assignment?.backupProviderId) providerIds.add(assignment.backupProviderId)
+    for (const providerId of providerIds) {
+      try {
+        await this.prisma.notification.create({
+          data: {
+            userId: providerId,
+            patientUserId: payload.userId,
+            channel: 'DASHBOARD',
+            title: subject,
+            body,
+          },
+        })
+      } catch (err) {
+        this.logger.error(
+          `Emergency notification to provider ${providerId} failed`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+    }
+
+    this.logger.log(
+      `Emergency dispatched userId=${payload.userId} caregivers=${caregivers.length} providers=${providerIds.size} source=${payload.source}`,
+    )
+  }
+
   @Cron('*/15 * * * *')
   async handleCron(): Promise<void> {
     // Managed Prisma Postgres occasionally hands the pool a stale connection
@@ -188,6 +300,39 @@ export class EscalationService {
   async runScan(now: Date): Promise<void> {
     await this.firePendingScheduled(now)
     await this.advanceOverdueLadders(now)
+  }
+
+  /**
+   * Test-only deterministic T+0 driver. In production, T+0 fires via the
+   * fire-and-forget `@OnEvent(ALERT_CREATED)` handler — a Playwright spec
+   * can't await that, and `runScan` does NOT fire a fresh alert's T+0 (it
+   * only does firePendingScheduled + advanceOverdueLadders). This reconstructs
+   * the AlertCreatedEvent from the persisted alert and awaits the SAME private
+   * `fireT0` path, so the T+0 Notification rows are guaranteed written before
+   * the caller continues. Idempotent — the dispatchStep dedup guard makes a
+   * second fire (or a race with the async handler) a safe no-op. Errors
+   * propagate, unlike the @OnEvent wrapper which swallows them, so a real
+   * dispatch failure surfaces to the test instead of vanishing into the log.
+   */
+  async dispatchT0ForAlert(alertId: string, now: Date = new Date()): Promise<void> {
+    const alert = await this.loadAlert(alertId)
+    if (!alert) throw new NotFoundException(`Alert ${alertId} not found`)
+    // fireT0 routes solely on alertId + tier; type/severity/escalated are not
+    // read on the dispatch path (the ladder is resolved from tier), so the
+    // narrowed AlertRow — which omits them — is sufficient. Placeholders keep
+    // the AlertCreatedEvent shape without re-fetching the full row.
+    await this.fireT0(
+      {
+        userId: alert.userId,
+        alertId: alert.id,
+        type: 'SYSTOLIC_BP',
+        severity: 'HIGH',
+        escalated: true,
+        tier: alert.tier,
+        ruleId: alert.ruleId,
+      },
+      now,
+    )
   }
 
   /**
@@ -339,10 +484,23 @@ export class EscalationService {
     // fail-loud path would just write DISPATCH ERROR rows. See
     // TESTING_FLOW_GUIDE.md §6.2–§6.3.
     if (alert.user.enrollmentStatus !== 'ENROLLED') {
+      // Manisha sign-off 2026-06-12 — a patient who was EVER enrolled keeps
+      // their full dispatch + ladder after an auto-un-enroll (serious condition
+      // added without a threshold). Care team + routing are already in place;
+      // only the personalized threshold is pending. A truly never-enrolled
+      // patient still defers (original gate intent). See enrollment-gate-
+      // emergency-gap memory note.
+      const previouslyEnrolled = await wasEverEnrolled(this.prisma, alert.userId)
+      if (!previouslyEnrolled) {
+        this.logger.log(
+          `Alert ${alert.id}: patient ${alert.userId} never enrolled — deferring dispatch at T+0`,
+        )
+        return
+      }
       this.logger.log(
-        `Alert ${payload.alertId}: patient ${alert.userId} not enrolled — deferring dispatch`,
+        `Alert ${alert.id}: patient ${alert.userId} un-enrolled (threshold pending) — dispatching anyway (previously enrolled, at T+0)`,
       )
-      return
+      // fall through to normal T+0 dispatch
     }
 
     const practice = alert.user.providerAssignmentAsPatient?.practice ?? null
@@ -476,10 +634,20 @@ export class EscalationService {
       // time (e.g. admin revoked enrollment). Leave the row in place;
       // re-enrollment will pick it up on the next cron pass.
       if (alert.user.enrollmentStatus !== 'ENROLLED') {
-        this.logger.debug(
-          `Pending event ${row.id}: patient ${alert.userId} not enrolled — deferring`,
+        // Manisha sign-off 2026-06-12 — previously-enrolled patients dispatch
+        // even while un-enrolled (threshold pending). See enrollment-gate-
+        // emergency-gap memory note + fireT0 gate above.
+        const previouslyEnrolled = await wasEverEnrolled(this.prisma, alert.userId)
+        if (!previouslyEnrolled) {
+          this.logger.debug(
+            `Pending event ${row.id}: patient ${alert.userId} never enrolled — deferring at firePendingScheduled`,
+          )
+          continue
+        }
+        this.logger.log(
+          `Pending event ${row.id}: patient ${alert.userId} un-enrolled (threshold pending) — dispatching anyway (previously enrolled, at firePendingScheduled)`,
         )
-        continue
+        // fall through — dispatch the queued/scheduled event
       }
 
       // Check alert still open + not acknowledged; if it's been resolved /
@@ -575,10 +743,20 @@ export class EscalationService {
       // catches alerts created pre-enrollment-split (when fireT0 didn't gate)
       // so their ladders don't keep walking once the filter kicks in.
       if (alert.user.enrollmentStatus !== 'ENROLLED') {
-        this.logger.debug(
-          `Alert ${alert.id}: patient ${alert.userId} not enrolled — ladder paused`,
+        // Manisha sign-off 2026-06-12 — previously-enrolled patients keep their
+        // ladder advancing even while un-enrolled (threshold pending). See
+        // enrollment-gate-emergency-gap memory note + fireT0 gate above.
+        const previouslyEnrolled = await wasEverEnrolled(this.prisma, alert.userId)
+        if (!previouslyEnrolled) {
+          this.logger.debug(
+            `Alert ${alert.id}: patient ${alert.userId} never enrolled — ladder paused at advanceOverdueLadders`,
+          )
+          continue
+        }
+        this.logger.log(
+          `Alert ${alert.id}: patient ${alert.userId} un-enrolled (threshold pending) — advancing ladder anyway (previously enrolled, at advanceOverdueLadders)`,
         )
-        continue
+        // fall through — advance the ladder normally
       }
 
       // Fetch all escalation events for the alert — need both dispatched rows

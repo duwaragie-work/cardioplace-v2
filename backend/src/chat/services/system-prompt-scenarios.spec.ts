@@ -18,6 +18,9 @@ const DOB = new Date('1980-06-15T00:00:00Z')
 function profile(
   over: Partial<ResolvedContext['profile']> = {},
 ): ResolvedContext['profile'] {
+  // Cast at the end — spreading `over` (Partial) makes every overridable
+  // field appear as `T | undefined` to TS even when an explicit default
+  // precedes the spread. Defaults above guarantee the runtime shape.
   return {
     gender: 'FEMALE',
     heightCm: 165,
@@ -33,12 +36,13 @@ function profile(
     hasDCM: false,
     hasTachycardia: false,
     hasBradycardia: false,
+    hasAorticStenosis: false,
     diagnosedHypertension: false,
     verificationStatus: 'VERIFIED',
     verifiedAt: NOW,
     lastEditedAt: NOW,
     ...over,
-  }
+  } as ResolvedContext['profile']
 }
 
 function med(over: Partial<ContextMedication> = {}): ContextMedication {
@@ -373,5 +377,32 @@ describe('SystemPromptService — end-to-end rendering scenarios', () => {
     expect(out).not.toContain('Provider-set')
     // Guardrails still present
     expect(out).toContain('Never suggest starting, stopping')
+  })
+
+  // Bug 58 — recent-entries weight rendering must convert kg → lbs before
+  // appending the "lbs" label. Pre-fix this line emitted the raw kg number
+  // (e.g. 226.8) with a hardcoded " lbs" label — so a patient who saved
+  // 500 lbs (stored as 226.8 kg) saw "Weight: 226.8 lbs" in the chat
+  // context block. The chart + popup display correctly because they
+  // convert; the prompt did not.
+  it('Scenario 11 — Bug 58 — recent-entry weight is converted kg → lbs before the "lbs" label', () => {
+    // 226.8 kg ≈ 500 lbs (patient saved 500 lbs, backend stored 226.8 kg).
+    const out = render(
+      patientContext({
+        recentEntries: [
+          {
+            measuredAt: new Date('2026-06-12T13:00:00Z'),
+            systolicBP: 138,
+            diastolicBP: 85,
+            weight: 226.8,
+            medicationTaken: true,
+            otherSymptoms: [],
+          },
+        ],
+      }),
+    )
+    // Must render 500 lbs (the patient's input), NOT 226.8 lbs (raw kg).
+    expect(out).toMatch(/Weight: 500(\.\d+)? lbs/)
+    expect(out).not.toMatch(/Weight: 226\.8 lbs/)
   })
 })

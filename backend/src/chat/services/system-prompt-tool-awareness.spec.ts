@@ -80,19 +80,23 @@ describe('Text-chat system prompt — tool awareness', () => {
       expect(prompt.toLowerCase()).toContain('right now')
     })
 
-    // v1 is the pre-Phase/27 prompt. The newer partial-logging tools were
-    // intentionally NOT added until Manisha re-signs — v1 should remain
-    // silent on them. These assertions lock that behaviour so a future
-    // edit doesn't quietly leak partial-tool guidance into v1.
-    it('does NOT mention log_medication_adherence (v1 is intentionally silent)', () => {
-      expect(prompt).not.toContain('log_medication_adherence')
+    // Closed 2026-06 — v1 chat now teaches the Phase/27 partial-logging
+    // tools after Manisha's follow-up clinical sign-off. The original
+    // negative canaries (`v1 is intentionally silent`) were flipped to
+    // positive once the prompt actually exposed each tool. If a future
+    // PR strips the teaching, these positive assertions catch it.
+    it('mentions log_medication_adherence with the per-med adherence trigger', () => {
+      expect(prompt).toContain('log_medication_adherence')
     })
 
-    it('does NOT mention log_symptom_quick (v1 is intentionally silent)', () => {
-      expect(prompt).not.toContain('log_symptom_quick')
+    it('mentions log_symptom_quick with the present-tense symptom trigger', () => {
+      expect(prompt).toContain('log_symptom_quick')
     })
 
-    it('does NOT mention submit_bp_from_photo (v1 is intentionally silent)', () => {
+    // submit_bp_from_photo is still gated — the photo OCR UI is only on the
+    // voice surface today; text chat will pick it up when a file-upload
+    // path lands.
+    it('does NOT mention submit_bp_from_photo (text chat has no photo upload UI)', () => {
       expect(prompt).not.toContain('submit_bp_from_photo')
     })
   })
@@ -183,14 +187,16 @@ describe('Voice-chat system instruction — tool awareness', () => {
       expect(prompt.toUpperCase()).toContain('PHOTO OCR FLOW')
     })
 
-    it('does NOT mention flag_emergency (voice has no such tool today)', () => {
-      // Voice handles 911 inline via speech. There is no flag_emergency
-      // declaration on the voice service, so the prompt must not invite
-      // a hallucinated tool call.
-      expect(prompt).not.toContain('flag_emergency')
+    // Closed 2026-06 — voice service added a flag_emergency tool
+    // declaration (voice-tools.service.ts) so the care team is paged in
+    // parallel with the in-speech 911 advice. V1 voice prompt now teaches
+    // the tool + the present-tense emergency trigger gate. The original
+    // negative canary was flipped to positive once both sides landed.
+    it('mentions flag_emergency with the present-tense emergency trigger', () => {
+      expect(prompt).toContain('flag_emergency')
     })
 
-    it('does NOT mention log_medication_adherence / log_symptom_quick', () => {
+    it('does NOT mention log_medication_adherence / log_symptom_quick (voice service has no log_*_quick declarations)', () => {
       expect(prompt).not.toContain('log_medication_adherence')
       expect(prompt).not.toContain('log_symptom_quick')
     })
@@ -253,20 +259,29 @@ describe('Voice-chat system instruction — tool awareness', () => {
       expect(prompt).toContain('throatTightness')
     })
 
-    it('GAP — v2 voice prompt still does NOT teach Cluster 7 (BB/ACE side-effect) symptom keys', () => {
-      // Cluster 7 (fatigue / shortnessOfBreath / dryCough / nsaidUse) is
-      // pending Manisha sign-off; voice during-check-in path doesn't
-      // capture them yet. The prompt and the voice schema both stay
-      // silent on these — internally consistent. Remove this assertion
-      // when Manisha approves and the schema is extended.
-      const cluster7 = ['fatigue', 'shortnessOfBreath', 'dryCough']
-      for (const key of cluster7) {
-        expect(prompt).not.toContain(key)
+    // Closed 2026-06 — voice schema was extended for Cluster 7 (BB/ACE
+    // side-effect surveillance keys) and the V2 voice prompt now teaches
+    // the LLM to set the booleans during the symptom probe. Originally
+    // this was a GAP marker that explicitly stayed red until Manisha
+    // signed off — once she did, the test was flipped to positive so a
+    // future PR can't quietly drop the teaching.
+    it('teaches Cluster 7 (BB/ACE side-effect) structured symptom keys', () => {
+      for (const key of ['fatigue', 'shortnessOfBreath', 'dryCough', 'nsaidUse']) {
+        expect(prompt).toContain(key)
       }
     })
 
-    it('still has no flag_emergency / log_*_quick tools', () => {
-      expect(prompt).not.toContain('flag_emergency')
+    // flag_emergency landed on the voice service alongside the V2 prompt
+    // teaching — see V1 voice canary above. log_*_quick still has no
+    // voice declaration: voice uses sparse-submit_checkin for partial
+    // logs (see "PARTIAL LOGGING (voice)" block). Keep the negative
+    // canary on the log_*_quick names so a stray prompt edit can't
+    // teach a tool that doesn't exist on the voice surface.
+    it('mentions flag_emergency with the present-tense emergency trigger', () => {
+      expect(prompt).toContain('flag_emergency')
+    })
+
+    it('does NOT mention log_medication_adherence / log_symptom_quick (voice uses sparse-submit_checkin for partials)', () => {
       expect(prompt).not.toContain('log_medication_adherence')
       expect(prompt).not.toContain('log_symptom_quick')
     })

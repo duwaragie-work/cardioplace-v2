@@ -579,6 +579,7 @@ const de: Record<TranslationKey, string> = {
   'readings.detailTitle': 'Messdetails',
   'readings.viewDetails': 'Messdetails anzeigen',
   'readings.noBpRecorded': 'Kein BD aufgezeichnet',
+  'readings.symptomLog': 'Symptom-Eintrag',
   'readings.meds': 'Meds',
   'readings.taken': 'Genommen',
   'readings.missed': 'Versäumt',

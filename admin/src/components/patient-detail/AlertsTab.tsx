@@ -43,6 +43,12 @@ interface Props {
    *  never sent. AlertCard surfaces a "No dispatch — awaiting enrollment"
    *  badge so a provider can prioritize enrolling them. */
   patientPreEnrollment?: boolean;
+  /** Manisha 2026-06-12 — true when this NOT_ENROLLED patient was previously
+   *  enrolled. Selects the "threshold pending" badge over the F27 badge. */
+  previouslyEnrolled?: boolean;
+  /** Navigate to the patient's threshold-editing tab — wired from the shell's
+   *  setTab('thresholds'); used by the threshold-pending badge. */
+  onSetThreshold?: () => void;
 }
 
 type TierBucket = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
@@ -132,7 +138,7 @@ export function groupAlertsByReading(alerts: PatientAlert[]): AlertGroup[] {
   return groups;
 }
 
-export default function AlertsTab({ alerts, loading, onResolved, heightCm, patientName, patientPreEnrollment = false }: Props) {
+export default function AlertsTab({ alerts, loading, onResolved, heightCm, patientName, patientPreEnrollment = false, previouslyEnrolled = false, onSetThreshold }: Props) {
   const [tierFilter, setTierFilter] = useState<TierBucket>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('OPEN');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -307,6 +313,8 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
         ackInFlight={acking.has(a.id)}
         heightCm={heightCm}
         patientPreEnrollment={patientPreEnrollment}
+        previouslyEnrolled={previouslyEnrolled}
+        onThresholdAction={onSetThreshold}
         // P3 — the pre-personalization note is shown once in the patient-header
         // band above; suppress the per-card copy so a cofire group doesn't
         // repeat it on each of its alerts.

@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
 import { PatientAccessService } from '../common/patient-access.service.js'
@@ -24,6 +25,7 @@ describe('IntakeService.listMedications filter scoping', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: DrugEnrichmentService, useValue: {} },
         { provide: PatientAccessService, useValue: {} },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
 
@@ -31,7 +33,7 @@ describe('IntakeService.listMedications filter scoping', () => {
   })
 
   function whereOf(callIndex = 0) {
-    return findMany.mock.calls[callIndex][0].where
+    return (findMany.mock.calls[callIndex][0] as { where: unknown }).where
   }
 
   it('default: excludes both discontinued and REJECTED', async () => {
@@ -76,7 +78,7 @@ describe('IntakeService.listMedications filter scoping', () => {
     ])
     const res = await service.listMedications('u1')
     // The default filter only carves out REJECTED — HOLD is NOT excluded.
-    expect(whereOf().verificationStatus).toEqual({ not: 'REJECTED' })
+    expect((whereOf() as { verificationStatus: unknown }).verificationStatus).toEqual({ not: 'REJECTED' })
     expect(res.data).toHaveLength(1)
     expect(res.data[0]).toMatchObject({
       verificationStatus: 'HOLD',
@@ -123,6 +125,7 @@ async function makeService(prisma: unknown): Promise<IntakeService> {
       { provide: PrismaService, useValue: prisma },
       { provide: DrugEnrichmentService, useValue: {} },
       { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+      { provide: EventEmitter2, useValue: { emit: jest.fn() } },
     ],
   }).compile()
   return module.get<IntakeService>(IntakeService)
@@ -316,6 +319,7 @@ describe('IntakeService.listVerificationLogs caregiver resolution (Round 2 A4)',
         { provide: PrismaService, useValue: prisma },
         { provide: DrugEnrichmentService, useValue: {} },
         { provide: PatientAccessService, useValue: {} },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
     service = module.get<IntakeService>(IntakeService)
@@ -438,6 +442,9 @@ describe('IntakeService.createMedications — F13 ACE/ARB contraindication', () 
         { provide: PrismaService, useValue: p },
         { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
         { provide: PatientAccessService, useValue: {} },
+        // Bug 11 — IntakeService emits intake.updated; sibling test helpers
+        // (lines 28 / 128 / 322 / 632) already include this mock.
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
     return module.get<IntakeService>(IntakeService)
@@ -544,6 +551,9 @@ describe('IntakeService.verifyMedication — F16 administrative hold dedup', () 
         { provide: PrismaService, useValue: p },
         { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
         { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+        // Bug 11 — IntakeService emits intake.updated; sibling test helpers
+        // (lines 28 / 128 / 322 / 632) already include this mock.
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
     return module.get<IntakeService>(IntakeService)
@@ -631,6 +641,11 @@ describe('IntakeService.adminAddMedication (#92)', () => {
         { provide: PrismaService, useValue: p },
         { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
         { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+        // Bug 11 — IntakeService emits intake.updated via EventEmitter2 so
+        // ChatService / VoiceService can invalidate their context caches and
+        // push live "intake complete" notices into ongoing voice sessions.
+        // Match the sibling test helpers at lines 28 / 128 / 322.
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
     return module.get<IntakeService>(IntakeService)

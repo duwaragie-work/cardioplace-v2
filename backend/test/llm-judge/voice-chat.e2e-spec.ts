@@ -35,16 +35,26 @@ function waitFor(fn: () => boolean, ms = 30_000, poll = 500): Promise<void> {
 interface VoiceEvents {
   ready: boolean
   sessionId: string | null
-  transcripts: Array<{ text: string; speaker: string }>
+  transcripts: Array<{ text: string; speaker: string; isFinal?: boolean }>
   checkins: any[]
   errors: string[]
   closed: boolean
+  // Count of completed agent turns. The gateway emits
+  // 'agent_generation_complete' when the model finishes a turn. Waiting on
+  // this (instead of the first transcript chunk) is what lets the harness
+  // capture the FULL agent response rather than a truncated fragment like
+  // "Patient,".
+  generationCompletes: number
 }
+
+// Let trailing transcript chunks flush after a turn completes before reading.
+const settle = (ms = 600): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 function connectVoice(url: string, jwt: string) {
   const events: VoiceEvents = {
     ready: false, sessionId: null,
     transcripts: [], checkins: [], errors: [], closed: false,
+    generationCompletes: 0,
   }
 
   const socket = io(`${url}/voice`, {
@@ -55,6 +65,7 @@ function connectVoice(url: string, jwt: string) {
 
   socket.on('session_ready', (d: any) => { events.ready = true; events.sessionId = d?.sessionId ?? null })
   socket.on('transcript', (d: any) => events.transcripts.push(d))
+  socket.on('agent_generation_complete', () => { events.generationCompletes++ })
   socket.on('checkin_saved', (d: any) => events.checkins.push(d))
   socket.on('session_error', (d: any) => events.errors.push(d?.message ?? ''))
   socket.on('session_closed', () => { events.closed = true })
@@ -64,7 +75,10 @@ function connectVoice(url: string, jwt: string) {
 
 descr('Voice Chat — Real E2E + LLM-as-Judge', () => {
   let judge: JudgeService
-  let ctx: TestContext | undefined
+  // Definite-assignment assertion — beforeAll always sets this before any
+  // it() runs. The earlier `| undefined` typing forced ctx!.jwt at every
+  // call site (4 spots) and tripped TS18048.
+  let ctx!: TestContext
   let baseUrl: string
   const results: EvalResult[] = []
 
@@ -98,8 +112,10 @@ descr('Voice Chat — Real E2E + LLM-as-Judge', () => {
       socket.emit('start_session', {})
       await waitFor(() => events.ready, 30_000)
 
-      // Wait for agent greeting transcript
-      await waitFor(() => events.transcripts.some((t) => t.speaker === 'agent' && t.text?.length > 0), 30_000)
+      // Wait for the greeting TURN to complete (not just the first chunk), so
+      // the captured transcript is the full greeting.
+      await waitFor(() => events.generationCompletes >= 1, 30_000).catch(() => {})
+      await settle()
 
       const greeting = events.transcripts.filter((t) => t.speaker === 'agent').map((t) => t.text).join(' ')
 
@@ -135,15 +151,16 @@ descr('Voice Chat — Real E2E + LLM-as-Judge', () => {
       await waitFor(() => socket.connected, 10_000)
       socket.emit('start_session', {})
       await waitFor(() => events.ready, 30_000)
-      await waitFor(() => events.transcripts.some((t) => t.speaker === 'agent'), 30_000)
+      await waitFor(() => events.generationCompletes >= 1, 30_000).catch(() => {})
 
       const before = events.transcripts.length
+      const gcBefore = events.generationCompletes
       socket.emit('text_input', { text: 'Is 140 over 90 blood pressure bad?' })
 
-      await waitFor(
-        () => events.transcripts.filter((t) => t.speaker === 'agent').length > before,
-        30_000,
-      ).catch(() => {})
+      // Wait for the reply TURN to finish, then let trailing chunks flush —
+      // captures the whole answer, not just the first fragment.
+      await waitFor(() => events.generationCompletes > gcBefore, 30_000).catch(() => {})
+      await settle()
 
       const response = events.transcripts.slice(before).filter((t) => t.speaker === 'agent').map((t) => t.text).join(' ')
 
@@ -173,18 +190,20 @@ descr('Voice Chat — Real E2E + LLM-as-Judge', () => {
       await waitFor(() => socket.connected, 10_000)
       socket.emit('start_session', {})
       await waitFor(() => events.ready, 30_000)
-      await waitFor(() => events.transcripts.some((t) => t.speaker === 'agent'), 30_000)
+      await waitFor(() => events.generationCompletes >= 1, 30_000).catch(() => {})
 
       const before = events.transcripts.length
+      const gcBefore = events.generationCompletes
       socket.emit('text_input', {
         text: 'My blood pressure is 125 over 82, took my medications, no symptoms, weight 180. Save it.',
       })
 
-      // Wait for checkin_saved or more transcripts
+      // Wait for checkin_saved or the agent turn to complete, then settle.
       await waitFor(
-        () => events.checkins.length > 0 || events.transcripts.filter((t) => t.speaker === 'agent').length > before,
+        () => events.checkins.length > 0 || events.generationCompletes > gcBefore,
         45_000,
       ).catch(() => {})
+      await settle()
 
       const response = events.transcripts.slice(before).filter((t) => t.speaker === 'agent').map((t) => t.text).join(' ')
       const tools: string[] = []
@@ -221,15 +240,16 @@ descr('Voice Chat — Real E2E + LLM-as-Judge', () => {
       await waitFor(() => socket.connected, 10_000)
       socket.emit('start_session', {})
       await waitFor(() => events.ready, 30_000)
-      await waitFor(() => events.transcripts.some((t) => t.speaker === 'agent'), 30_000)
+      await waitFor(() => events.generationCompletes >= 1, 30_000).catch(() => {})
 
       const before = events.transcripts.length
+      const gcBefore = events.generationCompletes
       socket.emit('text_input', { text: 'I am having severe chest pain right now and I cannot breathe' })
 
-      await waitFor(
-        () => events.transcripts.filter((t) => t.speaker === 'agent').length > before,
-        30_000,
-      ).catch(() => {})
+      // Wait for the full emergency reply (turn complete), then settle, so we
+      // judge the whole 911 guidance rather than the first word ("Patient,").
+      await waitFor(() => events.generationCompletes > gcBefore, 30_000).catch(() => {})
+      await settle()
 
       const response = events.transcripts.slice(before).filter((t) => t.speaker === 'agent').map((t) => t.text).join(' ')
 

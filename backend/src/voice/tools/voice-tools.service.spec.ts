@@ -6,10 +6,14 @@
 
 import { jest } from '@jest/globals'
 import { Test } from '@nestjs/testing'
-import { VoiceToolsService } from './voice-tools.service.js'
+import { EventEmitter2 } from '@nestjs/event-emitter'
+import { VoiceToolsService, mapVoiceSymptomsToFlags } from './voice-tools.service.js'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
+import { IntakeStatusService } from '../../intake/intake-status.service.js'
+import { PrismaService } from '../../prisma/prisma.service.js'
+import { EMERGENCY_EVENTS } from '../../chat/emergency-events.js'
 
 const CTX = { userId: 'user-1', timezone: 'America/New_York' }
 
@@ -18,6 +22,9 @@ describe('VoiceToolsService.dispatch', () => {
   let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
   let gemini: { extractBpFromImage: jest.Mock }
   let alertEngine: { evaluateAdHoc: jest.Mock }
+  let intakeStatus: { getStatus: jest.Mock }
+  let prisma: { emergencyEvent: { create: jest.Mock } }
+  let eventEmitter: { emit: jest.Mock }
 
   beforeEach(async () => {
     dailyJournal = {
@@ -29,6 +36,11 @@ describe('VoiceToolsService.dispatch', () => {
     }
     gemini = { extractBpFromImage: jest.fn() }
     alertEngine = { evaluateAdHoc: jest.fn() }
+    intakeStatus = {
+      getStatus: jest.fn(async () => ({ completed: true, profileExists: true })) as jest.Mock,
+    }
+    prisma = { emergencyEvent: { create: jest.fn() as jest.Mock } }
+    eventEmitter = { emit: jest.fn() as jest.Mock }
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -36,6 +48,9 @@ describe('VoiceToolsService.dispatch', () => {
         { provide: DailyJournalService, useValue: dailyJournal },
         { provide: GeminiService, useValue: gemini },
         { provide: AlertEngineService, useValue: alertEngine },
+        { provide: IntakeStatusService, useValue: intakeStatus },
+        { provide: PrismaService, useValue: prisma },
+        { provide: EventEmitter2, useValue: eventEmitter },
       ],
     }).compile()
 
@@ -44,17 +59,148 @@ describe('VoiceToolsService.dispatch', () => {
 
   // ── declarations ──────────────────────────────────────────────────────────
 
-  it('exposes 6 function declarations (5 Python-contract + evaluate_reading)', () => {
+  it('exposes 9 function declarations (8 prior + flag_emergency)', () => {
     const decls = service.getToolDeclarations()
     const names = decls.map((d) => d.name).sort()
     expect(names).toEqual([
+      'check_intake_status',
       'delete_checkin',
       'evaluate_reading',
+      'finalize_checkin',
+      'flag_emergency',
       'get_recent_readings',
       'submit_bp_from_photo',
       'submit_checkin',
       'update_checkin',
     ])
+  })
+
+  // ── Bug 12 regression — flag_emergency on voice ──────────────────────────
+  // Voice used to have no emergency surface at all; patients saying "I'm
+  // having a stroke" got verbal "call 911" but no audit row and no care-team
+  // page. The new tool persists EmergencyEvent + emits EMERGENCY_EVENTS.FLAGGED
+  // so EscalationService can dispatch caregivers / provider notifications.
+
+  it('flag_emergency: persists EmergencyEvent + emits EMERGENCY_EVENTS.FLAGGED + returns flagged:true', async () => {
+    ;(prisma.emergencyEvent.create as jest.Mock<any>).mockResolvedValue({} as never)
+    const r = await service.dispatch(
+      'flag_emergency',
+      { emergency_situation: 'patient says they cannot breathe' },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({
+        flagged: true,
+        emergency_situation: 'patient says they cannot breathe',
+      }),
+    )
+    expect(prisma.emergencyEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: 'user-1',
+          isEmergency: true,
+          emergency_situation: 'patient says they cannot breathe',
+        }),
+      }),
+    )
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      EMERGENCY_EVENTS.FLAGGED,
+      expect.objectContaining({
+        userId: 'user-1',
+        situation: 'patient says they cannot breathe',
+        source: 'voice-tool',
+      }),
+    )
+  })
+
+  it('flag_emergency: still returns flagged:true (and 911 guidance) even when DB write fails', async () => {
+    ;(prisma.emergencyEvent.create as jest.Mock<any>).mockRejectedValue(new Error('DB down'))
+    const r = await service.dispatch(
+      'flag_emergency',
+      { emergency_situation: 'chest pain right now' },
+      CTX,
+    )
+    // The patient's verbal "call 911" path must NEVER be blocked by an
+    // audit-write failure — that's the whole point of the [SECURITY-CRITICAL]
+    // log in the catch block.
+    expect(r.llmResponse).toEqual(expect.objectContaining({ flagged: true }))
+    // The event is NOT emitted when the persistence failed (we only emit on
+    // successful row insert so EscalationService doesn't dispatch for a row
+    // it can't audit-link to later).
+    expect(eventEmitter.emit).not.toHaveBeenCalled()
+  })
+
+  // Regression guard for the natural-language delete/update UX fix. Mirrors
+  // the same guard in chat/tools/journal-tools.spec.ts. Without this,
+  // someone could trim the voice tool descriptions and the bot would go back
+  // to asking the patient for date+time on "delete the last reading".
+  it('delete_checkin description spells out natural-language target resolution', () => {
+    const decls = service.getToolDeclarations()
+    const del = decls.find((d) => d.name === 'delete_checkin')
+    expect(del).toBeDefined()
+    const desc = (del?.description ?? '').toLowerCase()
+    expect(desc).toContain('get_recent_readings')
+    expect(desc).toContain('last reading')
+    expect(desc).toMatch(/do not ask.*date/i)
+  })
+
+  // Bug 50 — voice tool schema must require the same BP + adherence + symptoms
+  // fields the chat tool schema requires (see
+  // backend/src/chat/tools/journal-tools.ts:443). The voice schema previously
+  // only marked medication_taken required, which let Gemini Live omit BP
+  // entirely; the dispatcher then saw `undefined → 0` and rejected as a
+  // malformed "no over no" sparse log, forcing the patient to re-state BP.
+  it('Bug 50 — submit_checkin tool schema requires BP + entry_date + measurement_time + medication_taken + symptoms (chat parity)', () => {
+    const decls = service.getToolDeclarations()
+    const submit = decls.find((d) => d.name === 'submit_checkin')
+    expect(submit).toBeDefined()
+    const required = (submit?.parameters as { required?: string[] } | undefined)?.required ?? []
+    expect(required).toEqual(
+      expect.arrayContaining([
+        'entry_date',
+        'measurement_time',
+        'systolic_bp',
+        'diastolic_bp',
+        'medication_taken',
+        'symptoms',
+      ]),
+    )
+  })
+
+  // Bug 50 — the description must explicitly warn against passing 0/0 when
+  // the bot has real BP numbers. Without this, the LLM treats sparse-log
+  // support as a license to call submit_checkin with placeholder zeros.
+  it('Bug 50 — submit_checkin description warns the LLM not to pass 0/0 when it has real BP', () => {
+    const decls = service.getToolDeclarations()
+    const submit = decls.find((d) => d.name === 'submit_checkin')
+    const desc = (submit?.description ?? '').toLowerCase()
+    expect(desc).toMatch(/0\/0|sparse[- ]log/i)
+    expect(desc).toMatch(/138|positive integer|real (numbers|bp)/i)
+  })
+
+  it('update_checkin description spells out natural-language target resolution', () => {
+    const decls = service.getToolDeclarations()
+    const update = decls.find((d) => d.name === 'update_checkin')
+    expect(update).toBeDefined()
+    const desc = (update?.description ?? '').toLowerCase()
+    expect(desc).toContain('get_recent_readings')
+    expect(desc).toContain('last reading')
+    expect(desc).toMatch(/do not ask.*date/i)
+  })
+
+  // Bug 21c — voice get_recent_readings description was narrow ("Use for
+  // history questions"). LLM didn't reliably route phrases like "give me
+  // my readings" / "show me my BP" / "my history" to this tool. Now the
+  // description enumerates common patient phrasings so the LLM has concrete
+  // examples to match against.
+  it('get_recent_readings description lists patient phrasings (Bug 21c)', () => {
+    const decls = service.getToolDeclarations()
+    const get = decls.find((d) => d.name === 'get_recent_readings')
+    expect(get).toBeDefined()
+    const desc = (get?.description ?? '').toLowerCase()
+    expect(desc).toContain('give me my readings')
+    expect(desc).toContain('show me my')
+    expect(desc).toMatch(/my history|my check-ins|my measurements/)
   })
 
   it('returns ok:false for an unknown tool name', async () => {
@@ -91,7 +237,10 @@ describe('VoiceToolsService.dispatch', () => {
       systolicBP: 130,
       diastolicBP: 80,
       medicationTaken: true,
-      weight: 165,
+      // Bug 19 — args.weight is lbs (per tool description + voice prompt);
+      // DTO must be kg. Bug 24 — now rounded to 2 dp for clean round-trip.
+      // 165 × 0.45359237 = 74.84274 → 74.84 kg.
+      weight: 74.84,
       pulse: 72,
       position: 'SITTING',
       severeHeadache: true,
@@ -142,6 +291,240 @@ describe('VoiceToolsService.dispatch', () => {
     expect(ac.success).toBe(false)
   })
 
+  // ─── Bug 32 — surface specific create() errors to the LLM ─────────────
+  // Pre-fix the dispatcher swallowed every error except isIntakeIncompleteError
+  // and gave the LLM a generic "There was a problem saving the check-in"
+  // message. The LLM would then tell the patient "having trouble in recording
+  // the BP reading" and retry with the SAME args, looping forever on the same
+  // failure. Now each known exception gets a specific, actionable message so
+  // the LLM knows what to fix on the next call.
+
+  it('Bug 32 — UnprocessableEntityException (transposed BP) → LLM gets re-ask guidance', async () => {
+    const { UnprocessableEntityException } = await import('@nestjs/common')
+    ;(dailyJournal.create as jest.Mock<any>).mockRejectedValue(
+      new UnprocessableEntityException({
+        message: 'implausible-reading',
+        reason: "That reading doesn't look right.",
+      }),
+    )
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 80, diastolic_bp: 120, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false }))
+    expect((r.llmResponse as any).message).toMatch(/transposed/i)
+    expect((r.llmResponse as any).message).toMatch(/re-call submit_checkin/i)
+  })
+
+  it('Bug 32 — ConflictException (duplicate timestamp) → LLM gets "ask for the time" guidance', async () => {
+    const { ConflictException } = await import('@nestjs/common')
+    ;(dailyJournal.create as jest.Mock<any>).mockRejectedValue(
+      new ConflictException('A journal entry already exists for this timestamp'),
+    )
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false }))
+    expect((r.llmResponse as any).message).toMatch(/already a reading/i)
+    expect((r.llmResponse as any).message).toMatch(/do NOT retry/i)
+  })
+
+  it('Bug 32 — generic Error → real message surfaces to LLM (not the swallowed default)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockRejectedValue(new Error('connection refused'))
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false }))
+    expect((r.llmResponse as any).message).toMatch(/connection refused/i)
+  })
+
+  // ─── Bug 40 — voice popup weight conversion ───────────────────────────
+  // Pre-fix the CheckinSummary/UpdateSummary payload emitted the RAW
+  // LLM-passed weight value (could be lbs or kg depending on weight_unit).
+  // The VoiceChat card hardcodes the "lbs" label, so a patient saying
+  // "150 kg" via voice saw "150 lbs" in the popup (off by 2.2x). Bug 36
+  // fixed the chat surface; this is the symmetric voice fix.
+
+  it('Bug 40 — submit_checkin: patient says "150 lbs" → popup payload = 150 lbs', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 130,
+        diastolic_bp: 80,
+        medication_taken: true,
+        weight: 150,
+        weight_unit: 'LBS',
+      },
+      CTX,
+    )
+    const event = r.events.find((e) => e.kind === 'checkin_saved') as any
+    expect(event.payload.weight).toBe(150)
+  })
+
+  it('Bug 40 — submit_checkin: patient says "68 kg" → popup payload = 149.9 lbs (not 68)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 130,
+        diastolic_bp: 80,
+        medication_taken: true,
+        weight: 68,
+        weight_unit: 'KG',
+      },
+      CTX,
+    )
+    const event = r.events.find((e) => e.kind === 'checkin_saved') as any
+    // 68 kg / 0.45359237 = 149.91 lbs → rounded to 1 dp = 149.9.
+    expect(event.payload.weight).toBe(149.9)
+  })
+
+  it('Bug 40 — update_checkin: same conversion on the update popup', async () => {
+    ;(dailyJournal.update as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'e1', weight: 200, weight_unit: 'LBS' },
+      CTX,
+    )
+    const event = r.events.find((e) => e.kind === 'checkin_updated') as any
+    expect(event.payload.weight).toBe(200)
+  })
+
+  // ─── Bug 33 — ghost-save guard ────────────────────────────────────────
+  // The dispatcher allows BP=0/0 to support V2 partial logging (medication-
+  // only, symptom-only, missed-med-only). But if the LLM misfires
+  // submit_checkin from ambient conversation, the patient ends up with a
+  // phantom journal entry containing nothing. The guard rejects calls
+  // with no BP AND no symptoms AND no missed meds AND no scheduled-later
+  // AND no partial-log marker. medication_taken=true alone does NOT count
+  // (it's required by schema on every call).
+
+  it('Bug 33 — rejects ghost save: no BP, no symptoms, no missed meds, no scheduled-later, no notes', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 0, diastolic_bp: 0, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ saved: false, reason: 'NO_DATA_TO_SAVE' }),
+    )
+    expect((r.llmResponse as any).message).toMatch(/anything to record|nothing to record/i)
+    expect(dailyJournal.create).not.toHaveBeenCalled()
+  })
+
+  it('Bug 33 — allows valid partial log: medication-only with explicit notes marker', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 0,
+        diastolic_bp: 0,
+        medication_taken: true,
+        notes: 'Medication-only log: Lisinopril',
+      },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: true }))
+    expect(dailyJournal.create).toHaveBeenCalled()
+  })
+
+  it('Bug 33 — allows valid partial log: symptom-only with structured boolean', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 0,
+        diastolic_bp: 0,
+        medication_taken: true,
+        severe_headache: true,
+      },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: true }))
+    expect(dailyJournal.create).toHaveBeenCalled()
+  })
+
+  it('Bug 33 — allows valid partial log: medication_scheduled_later=true', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 0,
+        diastolic_bp: 0,
+        medication_taken: false,
+        medication_scheduled_later: true,
+      },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: true }))
+    expect(dailyJournal.create).toHaveBeenCalled()
+  })
+
+  it('Bug 33 — allows valid partial log: missed_medications array present', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 0,
+        diastolic_bp: 0,
+        medication_taken: false,
+        missed_medications: [{ drug_name: 'Lisinopril', reason: 'FORGOT', missed_doses: 1 }],
+      },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: true }))
+    expect(dailyJournal.create).toHaveBeenCalled()
+  })
+
+  it('Bug 33 — BP present means guard does NOT fire (normal check-in path)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: true }))
+    expect(dailyJournal.create).toHaveBeenCalled()
+  })
+
+  // Bug 5 regression — without the guard, an LLM call without medication_taken
+  // would silently flag the patient as non-adherent (toBool default false).
+  // Stage-B medication-adherence alerts (Tier 2/3) would fire on a patient who
+  // actually took their meds — the bot just never asked.
+  it('submit_checkin: rejects with MISSING_FIELD when medication_taken is omitted', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80 }, // medication_taken intentionally absent
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({
+        saved: false,
+        reason: 'MISSING_FIELD',
+      }),
+    )
+    expect((r.llmResponse as any).message).toMatch(/medication/i)
+    expect(dailyJournal.create).not.toHaveBeenCalled()
+  })
+
+  it('submit_checkin: rejects with MISSING_FIELD when medication_taken is null', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: null },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ saved: false, reason: 'MISSING_FIELD' }),
+    )
+    expect(dailyJournal.create).not.toHaveBeenCalled()
+  })
+
   // ── get_recent_readings ───────────────────────────────────────────────────
 
   it('get_recent_readings: clamps days to [1,30] and returns line summary', async () => {
@@ -176,12 +559,140 @@ describe('VoiceToolsService.dispatch', () => {
     expect((r.llmResponse as any).count).toBe(0)
   })
 
+  // ─── Bug 19 — weight lbs→kg conversion at voice dispatcher ────────────
+  // Voice tool description + voice prompt both tell the LLM to pass
+  // weight in lbs. JournalEntry.weight stores kg. submitCheckin /
+  // updateCheckin both must convert before writing — pre-fix they
+  // persisted the lbs value as kg, then formatWeightLbs() re-multiplied
+  // for display (150 lbs → 330.7 lbs in My Readings).
+
+  it('submit_checkin: omits weight when args.weight is 0 (skipped)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 120,
+        diastolic_bp: 80,
+        medication_taken: true,
+        weight: 0,
+        symptoms: [],
+      },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1] as { weight?: number }
+    // 0-weight (skip sentinel from voice) must not land as 0 kg.
+    expect(dto.weight).toBeUndefined()
+  })
+
+  // ─── kg/lbs follow-up — weight_unit handling on voice ─────────────────
+  it('submit_checkin: weight_unit="KG" persists raw (no conversion)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 120,
+        diastolic_bp: 80,
+        medication_taken: true,
+        weight: 68,
+        weight_unit: 'KG',
+        symptoms: [],
+      },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1] as { weight: number }
+    // KG branch keeps 1-dp rounding — patient said 68 kg, store 68.0 kg.
+    // Display will show 149.9 lbs which is correct for 68 kg.
+    expect(dto.weight).toBe(68.0)
+  })
+
+  it('submit_checkin: weight_unit="LBS" converts to kg', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        systolic_bp: 120,
+        diastolic_bp: 80,
+        medication_taken: true,
+        weight: 150,
+        weight_unit: 'LBS',
+        symptoms: [],
+      },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1] as { weight: number }
+    // Bug 24 — 150 lbs × 0.45359237 = 68.0388555 → stored as 68.04 kg
+    // (two decimal places). Display round-trip is exact: 68.04 /
+    // 0.45359237 = 150.00 lbs. Pre-fix this rounded to 68.0 kg, which
+    // displayed back as 149.9 lbs.
+    expect(dto.weight).toBe(68.04)
+  })
+
+  it('update_checkin: weight_unit="KG" persists raw on update', async () => {
+    ;(dailyJournal.update as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'update_checkin',
+      { entry_id: 'entry-1', weight: 90, weight_unit: 'KG' },
+      CTX,
+    )
+    const dto = (dailyJournal.update as jest.Mock).mock.calls[0][2] as { weight: number }
+    expect(dto.weight).toBe(90.0)
+  })
+
+  it('update_checkin: applies same lbs→kg conversion when weight is updated', async () => {
+    ;(dailyJournal.update as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'update_checkin',
+      { entry_id: 'entry-1', weight: 200 },
+      CTX,
+    )
+    expect(dailyJournal.update).toHaveBeenCalledTimes(1)
+    const dto = (dailyJournal.update as jest.Mock).mock.calls[0][2] as { weight: number }
+    // Bug 24 — 200 × 0.45359237 = 90.718474 → rounded to 2 dp = 90.72 kg.
+    expect(dto.weight).toBe(90.72)
+  })
+
   // ── update_checkin ────────────────────────────────────────────────────────
 
   it('update_checkin: returns updated:false when only entry_id is given (no fields)', async () => {
     const r = await service.dispatch('update_checkin', { entry_id: 'abc' }, CTX)
     expect(dailyJournal.update).not.toHaveBeenCalled()
-    expect(r.llmResponse).toEqual({ updated: false, message: 'No fields to update.' })
+    // Bug 57 — the empty-dto message was upgraded from "No fields to update."
+    // to an actionable hint that tells the LLM to pass the actual new value
+    // (not the 0/""/[] sentinel) so consecutive-update failures self-recover.
+    const llm = r.llmResponse as { updated: boolean; message: string }
+    expect(llm.updated).toBe(false)
+    expect(llm.message).toMatch(/positive number|sentinel|new value/i)
+  })
+
+  // Bug 6 regression — when patient asks to change the time and `findOne`
+  // throws (entry deleted, id hallucinated), do NOT silently apply OTHER
+  // field changes while dropping the requested time. Reject the whole update
+  // so the LLM tells the patient honestly instead of claiming success.
+  it('update_checkin: rejects with updated:false when measurement_time is given but findOne throws', async () => {
+    ;(dailyJournal.findOne as jest.Mock<any>).mockRejectedValue(new Error('Entry not found'))
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'stale-id', measurement_time: '09:00', systolic_bp: 140 },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ updated: false }),
+    )
+    expect((r.llmResponse as any).message).toMatch(/get_recent_readings/i)
+    expect(dailyJournal.update).not.toHaveBeenCalled()
+  })
+
+  it('update_checkin: rejects with updated:false when findOne returns no measuredAt', async () => {
+    ;(dailyJournal.findOne as jest.Mock<any>).mockResolvedValue({ data: { measuredAt: null } })
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'weird-id', measurement_time: '09:00', systolic_bp: 140 },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ updated: false }),
+    )
+    expect(dailyJournal.update).not.toHaveBeenCalled()
   })
 
   it('update_checkin: maps medication_taken="yes" → true and calls update', async () => {
@@ -207,6 +718,77 @@ describe('VoiceToolsService.dispatch', () => {
     expect(r.llmResponse).toEqual(expect.objectContaining({ updated: true }))
     const cu = r.events.find((e) => e.kind === 'checkin_updated') as any
     expect(cu.payload.entryId).toBe('abc')
+  })
+
+  // ─── Bug 34 — surface dailyJournal.update exceptions to LLM ───────────
+  // Pre-fix every exception was swallowed with a generic "Could not update
+  // the reading. Please try again." message — same family as Bug 32 on
+  // submit. The LLM had no way to know whether the entry_id was stale,
+  // BP was transposed, or the new time collided with another entry.
+
+  it('Bug 34 — NotFoundException → LLM gets stale-id guidance', async () => {
+    const { NotFoundException } = await import('@nestjs/common')
+    ;(dailyJournal.update as jest.Mock<any>).mockRejectedValue(
+      new NotFoundException('Journal entry not found'),
+    )
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'stale-id', systolic_bp: 135, diastolic_bp: 85 },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ updated: false }))
+    expect((r.llmResponse as any).message).toMatch(/stale-id/)
+    expect((r.llmResponse as any).message).toMatch(/not found|stale|hallucinated/i)
+    expect((r.llmResponse as any).message).toMatch(/get_recent_readings/i)
+  })
+
+  it('Bug 34 — UnprocessableEntityException (transposed BP) → LLM gets re-ask guidance', async () => {
+    const { UnprocessableEntityException } = await import('@nestjs/common')
+    ;(dailyJournal.update as jest.Mock<any>).mockRejectedValue(
+      new UnprocessableEntityException({
+        message: 'implausible-reading',
+        reason: "That reading doesn't look right.",
+      }),
+    )
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'e1', systolic_bp: 80, diastolic_bp: 120 },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ updated: false }))
+    expect((r.llmResponse as any).message).toMatch(/transposed/i)
+    expect((r.llmResponse as any).message).toMatch(/re-call update_checkin/i)
+  })
+
+  it('Bug 34 — ConflictException (time collision) → LLM gets "ask for different time" guidance', async () => {
+    const { ConflictException } = await import('@nestjs/common')
+    // findOne returns the existing entry so the rebase path succeeds and we
+    // reach dailyJournal.update where we throw the ConflictException.
+    ;(dailyJournal.findOne as jest.Mock<any>).mockResolvedValue({
+      data: { measuredAt: new Date('2026-04-22T12:00:00Z') },
+    })
+    ;(dailyJournal.update as jest.Mock<any>).mockRejectedValue(
+      new ConflictException('A journal entry already exists for this timestamp'),
+    )
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'e1', measurement_time: '08:30' },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ updated: false }))
+    expect((r.llmResponse as any).message).toMatch(/collides/i)
+    expect((r.llmResponse as any).message).toMatch(/different time/i)
+  })
+
+  it('Bug 34 — generic Error → real message surfaces (not the swallowed default)', async () => {
+    ;(dailyJournal.update as jest.Mock<any>).mockRejectedValue(new Error('connection refused'))
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'e1', systolic_bp: 135, diastolic_bp: 85 },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ updated: false }))
+    expect((r.llmResponse as any).message).toMatch(/connection refused/i)
   })
 
   // ── delete_checkin ────────────────────────────────────────────────────────
@@ -240,6 +822,55 @@ describe('VoiceToolsService.dispatch', () => {
       failed_count: 0,
       message: 'No entry IDs provided.',
     })
+  })
+
+  // ─── Bug 35 — surface per-id delete failures to LLM ───────────────────
+  // Pre-fix the dispatcher swallowed per-id errors with a generic "Could
+  // not delete the reading(s)" — the LLM had no idea WHY each id failed
+  // and would retry the same stale ids forever. Now each failure carries
+  // its reason (NotFoundException is the common case for stale ids).
+
+  it('Bug 35 — NotFoundException on delete → LLM gets specific stale-id guidance', async () => {
+    const { NotFoundException } = await import('@nestjs/common')
+    ;(dailyJournal.delete as jest.Mock<any>).mockRejectedValue(
+      new NotFoundException('Journal entry not found'),
+    )
+    const r = await service.dispatch('delete_checkin', { entry_ids: 'stale-id' }, CTX)
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ deleted_count: 0, failed_count: 1 }),
+    )
+    expect((r.llmResponse as any).message).toMatch(/stale-id/)
+    expect((r.llmResponse as any).message).toMatch(/not found|stale/i)
+    expect((r.llmResponse as any).message).toMatch(/get_recent_readings/i)
+    expect((r.llmResponse as any).failures).toEqual([
+      expect.objectContaining({ entry_id: 'stale-id', reason: expect.stringMatching(/not found/i) }),
+    ])
+  })
+
+  it('Bug 35 — partial failure: aggregates per-id reasons in message', async () => {
+    const { NotFoundException } = await import('@nestjs/common')
+    ;(dailyJournal.delete as jest.Mock).mockImplementation((_uid: unknown, id: unknown) => {
+      if (id === 'b') return Promise.reject(new NotFoundException('Journal entry not found'))
+      return Promise.resolve({})
+    })
+    const r = await service.dispatch('delete_checkin', { entry_ids: 'a,b,c' }, CTX)
+    expect(r.llmResponse).toEqual(
+      expect.objectContaining({ deleted_count: 2, failed_count: 1 }),
+    )
+    expect((r.llmResponse as any).message).toMatch(/Deleted 2/)
+    expect((r.llmResponse as any).message).toMatch(/b \(not found/i)
+    expect((r.llmResponse as any).failures).toEqual([
+      expect.objectContaining({ entry_id: 'b' }),
+    ])
+  })
+
+  it('Bug 35 — generic Error surfaces real message per failed id', async () => {
+    ;(dailyJournal.delete as jest.Mock<any>).mockRejectedValue(new Error('connection refused'))
+    const r = await service.dispatch('delete_checkin', { entry_ids: 'x' }, CTX)
+    expect((r.llmResponse as any).message).toMatch(/connection refused/)
+    expect((r.llmResponse as any).failures).toEqual([
+      { entry_id: 'x', reason: 'connection refused' },
+    ])
   })
 
   // ── submit_bp_from_photo ──────────────────────────────────────────────────
@@ -431,5 +1062,287 @@ describe('VoiceToolsService.dispatch', () => {
         }),
       )
     })
+  })
+})
+
+// ─── Bug 2 + 3 regression guards for the voice symptom mapper ───────────────
+// Mirrors the text-side guards in chat/tools/journal-tools.spec.ts. Both
+// mappers must stay in lockstep or the LLM gets surface-dependent behaviour.
+describe('mapVoiceSymptomsToFlags', () => {
+  it('flips structured booleans on positive freeform phrases', () => {
+    expect(mapVoiceSymptomsToFlags(['chest pain'])).toEqual({
+      chestPainOrDyspnea: true,
+    })
+    expect(mapVoiceSymptomsToFlags(['dizzy', 'palpitations'])).toEqual({
+      dizziness: true,
+      palpitations: true,
+    })
+  })
+
+  it('Bug 2 regression — does NOT flip flags on negation phrases', () => {
+    expect(mapVoiceSymptomsToFlags(['no chest pain'])).toBeUndefined()
+    expect(mapVoiceSymptomsToFlags(['denies dizziness'])).toBeUndefined()
+    expect(mapVoiceSymptomsToFlags(['without headache'])).toBeUndefined()
+    expect(mapVoiceSymptomsToFlags(['none'])).toBeUndefined()
+    expect(mapVoiceSymptomsToFlags(['negative for chest pain'])).toBeUndefined()
+  })
+
+  it('Bug 2 regression — mixed negated + positive list keeps only the positives', () => {
+    expect(
+      mapVoiceSymptomsToFlags(['no chest pain', 'dizzy', 'denies headache']),
+    ).toEqual({ dizziness: true })
+  })
+
+  it('Bug 3 regression — face_swelling underscore variant flips faceSwelling', () => {
+    expect(mapVoiceSymptomsToFlags(['face_swelling'])).toEqual({
+      faceSwelling: true,
+    })
+  })
+
+  it('Bug 3 regression — all snake_case schema keys round-trip', () => {
+    expect(mapVoiceSymptomsToFlags(['severe_headache'])).toEqual({ severeHeadache: true })
+    expect(mapVoiceSymptomsToFlags(['chest_pain_or_dyspnea'])).toEqual({ chestPainOrDyspnea: true })
+    expect(mapVoiceSymptomsToFlags(['altered_mental_status'])).toEqual({ alteredMentalStatus: true })
+    expect(mapVoiceSymptomsToFlags(['throat_tightness'])).toEqual({ throatTightness: true })
+  })
+
+})
+
+// ─── Bug 56 — chest pain in symptoms[] or other_symptoms[] auto-sets the
+// structured chestPainOrDyspnea flag AND gets stripped from the freeform
+// array so the chart doesn't double-render the same symptom. Lives in its
+// own describe so it sees the same per-test setup as the main suite.
+describe('VoiceToolsService.dispatch — Bug 56 (symptom auto-map + dedupe)', () => {
+  let service: VoiceToolsService
+  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
+
+  beforeEach(async () => {
+    dailyJournal = {
+      create: jest.fn() as jest.Mock,
+      findAll: jest.fn() as jest.Mock,
+      findOne: jest.fn() as jest.Mock,
+      update: jest.fn() as jest.Mock,
+      delete: jest.fn() as jest.Mock,
+    }
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        VoiceToolsService,
+        { provide: DailyJournalService, useValue: dailyJournal },
+        { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
+        { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
+        {
+          provide: IntakeStatusService,
+          useValue: {
+            getStatus: jest.fn(async () => ({ completed: true, profileExists: true })) as jest.Mock,
+          },
+        },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    service = moduleRef.get(VoiceToolsService)
+  })
+
+  function dtoOf(mock: jest.Mock): Record<string, unknown> {
+    const call = mock.mock.calls[0] as [string, Record<string, unknown>]
+    return call[1]
+  }
+
+  it('LLM puts "chest pain" in symptoms[] without setting chest_pain_or_dyspnea → flag auto-set, freeform stripped', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        entry_date: '2026-06-12',
+        measurement_time: '08:00',
+        systolic_bp: 138,
+        diastolic_bp: 85,
+        medication_taken: true,
+        symptoms: ['chest pain'],
+        // intentionally omit chest_pain_or_dyspnea
+      },
+      CTX,
+    )
+    const dto = dtoOf(dailyJournal.create)
+    expect(dto.chestPainOrDyspnea).toBe(true)
+    expect(dto.symptoms).toEqual([])
+  })
+
+  it('LLM puts "chest pain" in other_symptoms[] without setting chest_pain_or_dyspnea → flag auto-set, freeform stripped', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        entry_date: '2026-06-12',
+        measurement_time: '08:00',
+        systolic_bp: 138,
+        diastolic_bp: 85,
+        medication_taken: true,
+        other_symptoms: ['chest pain'],
+      },
+      CTX,
+    )
+    const dto = dtoOf(dailyJournal.create)
+    expect(dto.chestPainOrDyspnea).toBe(true)
+    const other = dto.otherSymptoms
+    expect(other === undefined || (Array.isArray(other) && other.length === 0)).toBe(true)
+  })
+
+  it('LLM correctly sets BOTH boolean AND adds to other_symptoms → freeform mention is stripped (no double-render)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        entry_date: '2026-06-12',
+        measurement_time: '08:00',
+        systolic_bp: 138,
+        diastolic_bp: 85,
+        medication_taken: true,
+        chest_pain_or_dyspnea: true,
+        other_symptoms: ['chest pain'],
+      },
+      CTX,
+    )
+    const dto = dtoOf(dailyJournal.create)
+    expect(dto.chestPainOrDyspnea).toBe(true)
+    const other = dto.otherSymptoms
+    expect(other === undefined || (Array.isArray(other) && other.length === 0)).toBe(true)
+  })
+
+  it('genuinely unrecognised freeform (e.g. "knee pain") survives dedupe', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({})
+    await service.dispatch(
+      'submit_checkin',
+      {
+        entry_date: '2026-06-12',
+        measurement_time: '08:00',
+        systolic_bp: 138,
+        diastolic_bp: 85,
+        medication_taken: true,
+        other_symptoms: ['knee pain'],
+      },
+      CTX,
+    )
+    const dto = dtoOf(dailyJournal.create)
+    expect(dto.chestPainOrDyspnea).toBe(false)
+    expect(dto.otherSymptoms).toEqual(['knee pain'])
+  })
+})
+
+// ─── Bug 57 — dispatcher error messages on consecutive-update failure
+// modes are actionable enough for the LLM to recover without re-asking
+// the patient. The voice prompt also tells the LLM to reuse entry_id;
+// the dispatcher backstop catches cases where the model drops it or
+// sends 0 / "" sentinels for the field it actually wanted to change.
+describe('VoiceToolsService.dispatch — Bug 57 (actionable update errors)', () => {
+  let service: VoiceToolsService
+
+  beforeEach(async () => {
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        VoiceToolsService,
+        {
+          provide: DailyJournalService,
+          useValue: {
+            create: jest.fn(),
+            findAll: jest.fn(),
+            findOne: jest.fn(),
+            update: jest.fn(),
+            delete: jest.fn(),
+          },
+        },
+        { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
+        { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
+        {
+          provide: IntakeStatusService,
+          useValue: {
+            getStatus: jest.fn(async () => ({ completed: true, profileExists: true })) as jest.Mock,
+          },
+        },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    service = moduleRef.get(VoiceToolsService)
+  })
+
+  it('missing entry_id returns a recovery hint mentioning get_recent_readings and prior update_checkin', async () => {
+    const r = await service.dispatch('update_checkin', {}, CTX)
+    const llm = r.llmResponse as { updated: boolean; message: string }
+    expect(llm.updated).toBe(false)
+    expect(llm.message).toMatch(/entry_id/i)
+    expect(llm.message).toMatch(/get_recent_readings/i)
+    expect(llm.message).toMatch(/prior update_checkin|consecutive|same reading/i)
+  })
+
+  it('all-sentinel args (e.g. weight=0) returns a hint about passing the actual new value', async () => {
+    const r = await service.dispatch(
+      'update_checkin',
+      {
+        entry_id: 'real-id',
+        systolic_bp: 0,
+        diastolic_bp: 0,
+        weight: 0,
+      },
+      CTX,
+    )
+    const llm = r.llmResponse as { updated: boolean; message: string }
+    expect(llm.updated).toBe(false)
+    expect(llm.message).toMatch(/positive number|new value|not.{0,20}0|Sentinels|sentinel/i)
+  })
+})
+
+// ─── Bug 59 — voice update_checkin propagates the service's noChange flag
+// so the LLM tells the patient "already those values" instead of falsely
+// claiming a successful update.
+describe('VoiceToolsService.dispatch — Bug 59 (no-change graceful response)', () => {
+  let service: VoiceToolsService
+  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
+
+  beforeEach(async () => {
+    dailyJournal = {
+      create: jest.fn() as jest.Mock,
+      findAll: jest.fn() as jest.Mock,
+      findOne: jest.fn() as jest.Mock,
+      update: jest.fn() as jest.Mock,
+      delete: jest.fn() as jest.Mock,
+    }
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        VoiceToolsService,
+        { provide: DailyJournalService, useValue: dailyJournal },
+        { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
+        { provide: AlertEngineService, useValue: { evaluateAdHoc: jest.fn() } },
+        {
+          provide: IntakeStatusService,
+          useValue: {
+            getStatus: jest.fn(async () => ({ completed: true, profileExists: true })) as jest.Mock,
+          },
+        },
+        { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    service = moduleRef.get(VoiceToolsService)
+  })
+
+  it('service returns noChange:true → llmResponse carries no_change:true + canonical message + updated:false', async () => {
+    ;(dailyJournal.update as jest.Mock<any>).mockResolvedValue({
+      statusCode: 200,
+      noChange: true,
+      message: 'No changes — the reading already has those values. Nothing to update.',
+      data: { id: 'e1', systolicBP: 138, diastolicBP: 85 },
+    })
+
+    const r = await service.dispatch(
+      'update_checkin',
+      { entry_id: 'e1', systolic_bp: 138, diastolic_bp: 85 },
+      CTX,
+    )
+
+    const llm = r.llmResponse as { updated: boolean; no_change?: boolean; message: string }
+    expect(llm.updated).toBe(false)
+    expect(llm.no_change).toBe(true)
+    expect(llm.message).toMatch(/already (have|has) those values/i)
   })
 })

@@ -27,11 +27,15 @@ import type { AlertCreatedEvent } from '../interfaces/events.interface.js'
 function caregiverPayload(
   over: Partial<AlertCreatedEvent> = {},
 ): AlertCreatedEvent {
+  // Tier-3 caregiver-only alerts have null type/severity at the DB layer.
+  // The AlertCreatedEvent interface declares both as `string` (non-null),
+  // which is a separate interface-vs-runtime drift not in scope for this
+  // test — cast through `unknown` to preserve the intended fixture shape.
   return {
     userId: 'patient-1',
     alertId: 'alert-cg-1',
-    type: null,
-    severity: null,
+    type: null as unknown as string,
+    severity: null as unknown as string,
     escalated: false,
     tier: 'TIER_3_INFO',
     ruleId: 'RULE_HF_CAREGIVER_EDEMA',

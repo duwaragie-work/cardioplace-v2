@@ -12,6 +12,12 @@ import { EventEmitter2 } from '@nestjs/event-emitter'
 import { randomUUID } from 'node:crypto'
 import { SESSION_WINDOW_MS } from '@cardioplace/shared'
 import { Prisma, EntrySource, EscalationLevel } from '../generated/prisma/client.js'
+import {
+  UserRole,
+  VerifierRole,
+  VerificationChangeType,
+} from '../generated/prisma/enums.js'
+import type { ActorUser } from '../common/patient-access.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from './constants/events.js'
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto.js'
@@ -25,6 +31,31 @@ const SOURCE_MAP: Record<string, EntrySource> = {
 }
 
 const POSITION_VALUES = ['SITTING', 'STANDING', 'LYING'] as const
+
+// Structured symptom booleans snapshotted into journal audit rows — collapsed
+// to the names that are true so the Timeline renders one readable list
+// instead of 19 booleans. Order mirrors the schema groupings.
+const AUDIT_SYMPTOM_FLAGS = [
+  'severeHeadache',
+  'visualChanges',
+  'alteredMentalStatus',
+  'chestPainOrDyspnea',
+  'focalNeuroDeficit',
+  'severeEpigastricPain',
+  'newOnsetHeadache',
+  'ruqPain',
+  'edema',
+  'dizziness',
+  'syncope',
+  'palpitations',
+  'legSwelling',
+  'fatigue',
+  'shortnessOfBreath',
+  'dryCough',
+  'nsaidUse',
+  'faceSwelling',
+  'throatTightness',
+] as const
 
 /**
  * Channel-aware predicate for the in-app bell LIST + unread COUNT. Both
@@ -59,7 +90,14 @@ export class DailyJournalService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  async create(userId: string, dto: CreateJournalEntryDto) {
+  /**
+   * `actor` is set when care-team staff create the reading on the patient's
+   * behalf via the admin readings endpoints (Phase 3B) — it flips the audit
+   * changeType to ADMIN_READING_ADDED, stamps addedByUserId + source=ADMIN,
+   * and makes a stale client sessionId a hard 400 instead of a silent
+   * re-group. Patient-app calls leave it undefined.
+   */
+  async create(userId: string, dto: CreateJournalEntryDto, actor?: ActorUser) {
     // Layer A journaling gate — patient must have a PatientProfile row
     // (completed clinical intake) before their readings get persisted. The
     // rule engine relies on PatientProfile for every safety-net bias; without
@@ -129,7 +167,13 @@ export class DailyJournalService {
     // Reject attaching this reading to an EXPIRED session. The client supplies
     // sessionId, so a stale/reused id (e.g. a cached id from a prior sitting)
     // could otherwise smuggle a reading hours apart into one averaged session.
-    // Dropped (not 400) so voice/chat flows that pass a cached id don't fail.
+    // Patient path: dropped (not 400) so voice/chat flows that pass a cached
+    // id don't fail. Admin path: strict 400 — the admin multi-reading flow
+    // passes sessionId deliberately, so a stale id is an error the staff
+    // member must see, not silently re-group.
+    if (actor && dto.sessionId) {
+      await this.assertSessionJoinable(userId, dto.sessionId, new Date(dto.measuredAt))
+    }
     const effectiveSessionId = await this.resolveCreateSessionId(
       userId,
       dto.sessionId,
@@ -137,9 +181,14 @@ export class DailyJournalService {
     )
 
     try {
-      const entry = await this.prisma.journalEntry.create({
+      // Audit write is transaction-scoped with the insert — a reading can't
+      // exist without its PATIENT_READING_CREATED / ADMIN_READING_ADDED audit
+      // row; an audit failure rolls the insert back (succeed/fail together).
+      const entry = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.journalEntry.create({
         data: {
           userId,
+          addedByUserId: actor?.id ?? null,
           measuredAt: new Date(dto.measuredAt),
           systolicBP: dto.systolicBP ?? null,
           diastolicBP: dto.diastolicBP ?? null,
@@ -186,11 +235,31 @@ export class DailyJournalService {
           teachBackAnswer: dto.teachBackAnswer ?? null,
           teachBackCorrect: dto.teachBackCorrect ?? null,
           notes: dto.notes ?? null,
-          source: dto.source ? SOURCE_MAP[dto.source] : EntrySource.MANUAL,
+          source: actor
+            ? EntrySource.ADMIN
+            : dto.source
+              ? SOURCE_MAP[dto.source]
+              : EntrySource.MANUAL,
           sourceMetadata: (dto.sourceMetadata as JsonValue) ?? Prisma.JsonNull,
         },
+        })
+
+        await this.writeJournalAudit(tx, {
+          userId,
+          actor,
+          changeType: actor
+            ? VerificationChangeType.ADMIN_READING_ADDED
+            : VerificationChangeType.PATIENT_READING_CREATED,
+          fieldPath: actor ? 'journal_entry.admin_added' : 'journal_entry.created',
+          previousValue: null,
+          newValue: this.serializeForAudit(created),
+        })
+
+        return created
       })
 
+      // Engine evaluation runs for BOTH patient and admin creates — a new
+      // reading is a new clinical datapoint regardless of who keyed it in.
       this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_CREATED, {
         userId,
         entryId: entry.id,
@@ -233,7 +302,20 @@ export class DailyJournalService {
     }
   }
 
-  async update(userId: string, entryId: string, dto: UpdateJournalEntryDto) {
+  /**
+   * `actor` set = care-team edit via the admin readings endpoints: audit row
+   * is ADMIN_READING_EDITED and the engine is NOT re-triggered (CTO Option C
+   * — the corrected value flows into the next new reading's batch). Patient
+   * edits (actor undefined) KEEP the existing ENTRY_UPDATED re-evaluation
+   * until Manisha signs off her pending Q2 on removing it — safety net for
+   * e.g. a reading corrected upward into emergency range.
+   */
+  async update(
+    userId: string,
+    entryId: string,
+    dto: UpdateJournalEntryDto,
+    actor?: ActorUser,
+  ) {
     const existing = await this.prisma.journalEntry.findFirst({
       where: { id: entryId, userId },
     })
@@ -264,6 +346,7 @@ export class DailyJournalService {
           ? (dto.position as typeof POSITION_VALUES[number])
           : null
       if (dto.sessionId !== undefined) data.sessionId = dto.sessionId
+
       if (dto.measurementConditions !== undefined)
         data.measurementConditions =
           (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull
@@ -321,26 +404,94 @@ export class DailyJournalService {
       if (dto.sourceMetadata !== undefined)
         data.sourceMetadata = (dto.sourceMetadata as JsonValue) ?? Prisma.JsonNull
 
-      const updated = await this.prisma.journalEntry.update({
-        where: { id: entryId },
-        data,
+      // Bug 41 + 42 — no-op filter. Strip any field whose new value equals
+      // the existing value so the LLM/patient gets a graceful "nothing to
+      // update" response instead of a successful but meaningless Prisma
+      // round-trip. Side effect (Bug 42): the resolveUpdateSessionId call
+      // below is now gated on data.measuredAt SURVIVING the filter — i.e.
+      // it only fires when the new time actually differs. Pre-fix Bug 25's
+      // regroup churned sessionId even when the LLM re-set measuredAt to
+      // its current value.
+      this.filterNoOpFieldsInPlace(data, existing)
+      if (Object.keys(data).length === 0) {
+        // Bug 59 — explicit `noChange: true` flag so dispatchers can route
+        // the response to a graceful "values already match" reply for the
+        // patient instead of claiming "Reading updated successfully." when
+        // nothing actually changed. Pre-fix dispatchers ignored result.message
+        // and hardcoded "Reading updated successfully." — the patient got
+        // told their reading was edited even when it wasn't.
+        return {
+          statusCode: 200,
+          noChange: true,
+          message:
+            'No changes — the reading already has those values. Nothing to update.',
+          data: this.serializeEntry(existing),
+        }
+      }
+
+      // Bug 25 — when measuredAt is being changed AND the caller did NOT
+      // explicitly override sessionId, re-evaluate the session assignment
+      // against the new time. Auto-joins a 5-min-window sibling session,
+      // leaves a stale session when moving away from originals, or stays
+      // put when still grouped with current siblings. Bug 42 — gated on
+      // data.measuredAt surviving the no-op filter above so we don't churn
+      // sessionId on a no-change "edit".
+      if (data.measuredAt !== undefined && dto.sessionId === undefined) {
+        const resolved = await this.resolveUpdateSessionId(
+          userId,
+          entryId,
+          existing.sessionId,
+          data.measuredAt as Date,
+        )
+        if (resolved !== existing.sessionId) {
+          this.logger.log(
+            `update: time-edit auto-regrouping entry=${entryId} ` +
+              `${existing.sessionId ?? 'null'} → ${resolved}`,
+          )
+        }
+        data.sessionId = resolved
+      }
+
+      // Update + audit are one transaction — the edit can't land without its
+      // prior/new snapshot pair, and an audit failure rolls the edit back.
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.journalEntry.update({
+          where: { id: entryId },
+          data,
+        })
+        await this.writeJournalAudit(tx, {
+          userId,
+          actor,
+          changeType: actor
+            ? VerificationChangeType.ADMIN_READING_EDITED
+            : VerificationChangeType.PATIENT_READING_EDITED,
+          fieldPath: actor ? 'journal_entry.admin_edited' : 'journal_entry.edited',
+          previousValue: this.serializeForAudit(existing),
+          newValue: this.serializeForAudit(row),
+        })
+        return row
       })
 
-      this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
-        userId,
-        entryId: updated.id,
-        measuredAt: updated.measuredAt,
-        systolicBP: updated.systolicBP,
-        diastolicBP: updated.diastolicBP,
-        pulse: updated.pulse,
-        weight: updated.weight != null ? Number(updated.weight) : null,
-        sessionId: updated.sessionId,
-      })
+      // Patient edits keep the engine re-evaluation (see method doc). Admin
+      // edits skip it per CTO Option C — no new emit, existing alerts stand.
+      if (!actor) {
+        this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
+          userId,
+          entryId: updated.id,
+          measuredAt: updated.measuredAt,
+          systolicBP: updated.systolicBP,
+          diastolicBP: updated.diastolicBP,
+          pulse: updated.pulse,
+          weight: updated.weight != null ? Number(updated.weight) : null,
+          sessionId: updated.sessionId,
+        })
+      }
 
       return {
-        statusCode: 202,
-        message:
-          'Journal entry updated. Background re-analysis in progress.',
+        statusCode: actor ? 200 : 202,
+        message: actor
+          ? 'Journal entry updated.'
+          : 'Journal entry updated. Background re-analysis in progress.',
         data: this.serializeEntry(updated),
       }
     } catch (error) {
@@ -866,15 +1017,15 @@ export class DailyJournalService {
     }
   }
 
-  async delete(userId: string, id: string) {
+  /**
+   * Hard delete (soft-delete is paused with Chunk E). `actor` set = care-team
+   * delete via the admin readings endpoints — ADMIN_READING_DELETED audit row
+   * and NO session re-evaluation emit. Full row fetched (not a narrow select)
+   * because the audit snapshot must capture the state being destroyed.
+   */
+  async delete(userId: string, id: string, actor?: ActorUser) {
     const entry = await this.prisma.journalEntry.findFirst({
       where: { id, userId },
-      select: {
-        id: true,
-        userId: true,
-        sessionId: true,
-        measuredAt: true,
-      },
     })
 
     if (!entry) {
@@ -897,10 +1048,28 @@ export class DailyJournalService {
     // explicitly via /admin/alerts/:id/resolve. Re-evaluation may surface
     // NEW alerts on the surviving entry, but it never silently closes
     // existing ones.
-    const survivingAnchor = await this.findSessionReevalAnchor(entry)
+    const survivingAnchor = actor ? null : await this.findSessionReevalAnchor(entry)
 
-    await this.prisma.journalEntry.delete({ where: { id } })
+    // Audit row is written BEFORE the row is removed, in the same transaction
+    // — the snapshot survives the hard delete, and a failed audit write rolls
+    // the delete back (a reading can't vanish without its audit row).
+    await this.prisma.$transaction(async (tx) => {
+      await this.writeJournalAudit(tx, {
+        userId,
+        actor,
+        changeType: actor
+          ? VerificationChangeType.ADMIN_READING_DELETED
+          : VerificationChangeType.PATIENT_READING_DELETED,
+        fieldPath: actor ? 'journal_entry.admin_deleted' : 'journal_entry.deleted',
+        previousValue: this.serializeForAudit(entry),
+        newValue: null,
+      })
+      await tx.journalEntry.delete({ where: { id } })
+    })
 
+    // Patient deletes keep the surviving-sibling re-evaluation (session-
+    // integrity maintenance — the averaged vitals must recompute for what's
+    // left of the session). Admin deletes skip it per CTO Option C.
     if (survivingAnchor) {
       this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
         userId: survivingAnchor.userId,
@@ -1152,6 +1321,122 @@ export class DailyJournalService {
     }
   }
 
+  /**
+   * Compact JSON snapshot of a reading for the journal audit rows
+   * (ProfileVerificationLog.previousValue / newValue) — the patient-visible
+   * state only: vitals, timing, session, symptoms, notes. Internal engine
+   * flags (narrowPpArtifact, singleReadingFinalized, teach-back) are not
+   * audit-surface. `symptoms` collapses the structured booleans to the names
+   * that are true plus freeform otherSymptoms.
+   */
+  private serializeForAudit(entry: {
+    id: string
+    measuredAt: Date
+    systolicBP?: number | null
+    diastolicBP?: number | null
+    pulse?: number | null
+    weight?: Prisma.Decimal | number | null
+    position?: string | null
+    sessionId?: string | null
+    medicationTaken?: boolean | null
+    missedDoses?: number | null
+    otherSymptoms?: string[]
+    notes?: string | null
+    source?: EntrySource
+    [key: string]: unknown
+  }): Prisma.InputJsonValue {
+    const symptoms: string[] = [
+      ...AUDIT_SYMPTOM_FLAGS.filter((flag) => entry[flag] === true),
+      ...(entry.otherSymptoms ?? []),
+    ]
+    return {
+      entryId: entry.id,
+      measuredAt: entry.measuredAt.toISOString(),
+      systolicBP: entry.systolicBP ?? null,
+      diastolicBP: entry.diastolicBP ?? null,
+      pulse: entry.pulse ?? null,
+      weight: entry.weight != null ? Number(entry.weight) : null,
+      position: entry.position ?? null,
+      sessionId: entry.sessionId ?? null,
+      medicationTaken: entry.medicationTaken ?? null,
+      missedDoses: entry.missedDoses ?? null,
+      symptoms,
+      notes: entry.notes ?? null,
+      source: entry.source ? entry.source.toLowerCase() : null,
+    }
+  }
+
+  /**
+   * Journal-entry audit row writer — HIPAA/JCAHO closure for reading
+   * create/edit/delete, which previously left no trace. Transaction-scoped
+   * (caller passes the tx) so the audit row and the data operation succeed
+   * or fail together; mirrors caregiver.service.ts writeAudit.
+   */
+  private async writeJournalAudit(
+    tx: Prisma.TransactionClient,
+    args: {
+      userId: string
+      actor?: ActorUser
+      changeType: VerificationChangeType
+      fieldPath: string
+      previousValue: Prisma.InputJsonValue | null
+      newValue: Prisma.InputJsonValue | null
+    },
+  ): Promise<void> {
+    await tx.profileVerificationLog.create({
+      data: {
+        userId: args.userId,
+        fieldPath: args.fieldPath,
+        previousValue: args.previousValue ?? Prisma.JsonNull,
+        newValue: args.newValue ?? Prisma.JsonNull,
+        changedBy: args.actor?.id ?? args.userId,
+        changedByRole: this.verifierRoleFor(args.actor),
+        changeType: args.changeType,
+      },
+    })
+  }
+
+  /**
+   * VerifierRole predates the 5-role split, so admin actors collapse:
+   * PROVIDER (without a broader admin role) keeps its own VerifierRole;
+   * SUPER_ADMIN / MEDICAL_DIRECTOR map to ADMIN. No actor = patient action.
+   */
+  private verifierRoleFor(actor?: ActorUser): VerifierRole {
+    if (!actor) return VerifierRole.PATIENT
+    if (
+      actor.roles.includes(UserRole.PROVIDER) &&
+      !actor.roles.includes(UserRole.SUPER_ADMIN) &&
+      !actor.roles.includes(UserRole.MEDICAL_DIRECTOR)
+    ) {
+      return VerifierRole.PROVIDER
+    }
+    return VerifierRole.ADMIN
+  }
+
+  /**
+   * Strict admin-POST variant of resolveCreateSessionId's staleness check.
+   * The admin multi-reading flow passes sessionId deliberately, so a stale id
+   * must surface as a 400 ("Session expired or invalid") rather than being
+   * silently re-grouped like the forgiving patient/voice path. A sessionId
+   * with no members yet is fine — the reading establishes the session.
+   */
+  private async assertSessionJoinable(
+    userId: string,
+    sessionId: string,
+    measuredAt: Date,
+  ): Promise<void> {
+    const newest = await this.prisma.journalEntry.findFirst({
+      where: { userId, sessionId },
+      orderBy: { measuredAt: 'desc' },
+      select: { measuredAt: true },
+    })
+    if (!newest) return
+    const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
+    if (gapMs > SESSION_WINDOW_MS) {
+      throw new BadRequestException('Session expired or invalid')
+    }
+  }
+
   private serializeEntry(entry: {
     id: string
     userId: string
@@ -1361,6 +1646,251 @@ export class DailyJournalService {
       select: { sessionId: true },
     })
     return openInWindow?.sessionId ?? randomUUID()
+  }
+
+  /**
+   * Bug 25 — when the patient edits an existing entry's measurement_time, the
+   * session_id must be re-evaluated against the new time. Pre-fix, `update()`
+   * mutated `measuredAt` but left `sessionId` untouched. Two failure modes:
+   *
+   *   1. Entry moves AWAY from its current session's siblings: stays glued
+   *      to a stale session_id whose other members are now > 5 min away.
+   *      The averaging window already prevents data corruption (sibling
+   *      lookup bounds by measuredAt too), but the session_id is misleading
+   *      and the UI groups them visually as one session.
+   *
+   *   2. Entry moves INTO another session's window: stays in its lone /
+   *      stale session and is never grouped with what the clinical spec
+   *      ("readings within 5 min average together") says should be its
+   *      new session-mates.
+   *
+   * Resolution policy:
+   *   • Caller explicitly passed dto.sessionId → respect it (LLM move).
+   *     Handled by the caller; this helper is only invoked when sessionId
+   *     was NOT explicitly set.
+   *   • New time falls within ±5 min of a sibling sharing the CURRENT
+   *     session_id (excluding self) → keep current session_id. (Still
+   *     grouped with our originals.)
+   *   • New time falls within ±5 min of a DIFFERENT-session entry → adopt
+   *     the newest such entry's session_id. (Join their session.)
+   *   • New time is not within ±5 min of any other entry → if current
+   *     session has other siblings, mint a fresh UUID (we're leaving);
+   *     else keep current session_id (we were alone — nothing to regroup).
+   */
+  /**
+   * Bug 41 — strip fields from a Prisma update payload when the new value
+   * equals the existing value, so the LLM/patient gets a clean "no changes"
+   * response when they ask to edit a reading to its current value (instead
+   * of a successful but meaningless DB round-trip + an "updated" message
+   * that confuses them). Side-effect supports Bug 42 — the gated
+   * resolveUpdateSessionId call only fires when data.measuredAt actually
+   * survives this filter, preventing spurious session-id churn.
+   *
+   * Mutates `data` in place. Compares the common-path fields the LLM
+   * touches on edit: measuredAt (millisecond compare), numeric BP/pulse,
+   * weight (Decimal → number compare), position, sessionId, medication
+   * flags, structured symptom booleans, source, notes, and the freeform
+   * otherSymptoms array (set-equality, order-irrelevant).
+   *
+   * Complex JSON fields (measurementConditions, missedMedications,
+   * medicationStatuses, sourceMetadata) are NOT compared — they're rare
+   * on LLM-edits AND their deep-equality is expensive + error-prone. If
+   * present in `data` they pass through to Prisma unchanged; in practice
+   * the LLM doesn't re-issue them without intent.
+   */
+  private filterNoOpFieldsInPlace(
+    data: Prisma.JournalEntryUpdateInput,
+    existing: {
+      measuredAt: Date | string
+      systolicBP: number | null
+      diastolicBP: number | null
+      pulse: number | null
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      weight: any
+      position: string | null
+      sessionId: string | null
+      medicationTaken: boolean | null
+      medicationScheduledLater: boolean | null
+      missedDoses: number | null
+      severeHeadache: boolean
+      visualChanges: boolean
+      alteredMentalStatus: boolean
+      chestPainOrDyspnea: boolean
+      focalNeuroDeficit: boolean
+      severeEpigastricPain: boolean
+      newOnsetHeadache: boolean
+      ruqPain: boolean
+      edema: boolean
+      dizziness: boolean
+      syncope: boolean
+      palpitations: boolean
+      legSwelling: boolean
+      fatigue: boolean
+      shortnessOfBreath: boolean
+      dryCough: boolean
+      nsaidUse: boolean
+      faceSwelling: boolean
+      throatTightness: boolean
+      otherSymptoms: string[]
+      teachBackAnswer: string | null
+      teachBackCorrect: boolean | null
+      notes: string | null
+      source: string | null
+    },
+  ): void {
+    // measuredAt — millisecond equality. Avoids a regroup when LLM re-set
+    // time to its current value.
+    if (data.measuredAt !== undefined) {
+      const newMs = (data.measuredAt as Date).getTime?.()
+      const existingMs =
+        existing.measuredAt instanceof Date
+          ? existing.measuredAt.getTime()
+          : new Date(existing.measuredAt).getTime()
+      if (newMs === existingMs) delete data.measuredAt
+    }
+    // Numeric scalars.
+    if (data.systolicBP !== undefined && data.systolicBP === existing.systolicBP)
+      delete data.systolicBP
+    if (data.diastolicBP !== undefined && data.diastolicBP === existing.diastolicBP)
+      delete data.diastolicBP
+    if (data.pulse !== undefined && data.pulse === existing.pulse) delete data.pulse
+    // Weight is Decimal in storage — compare via Number().
+    if (data.weight !== undefined) {
+      const newW = data.weight === null ? null : Number(data.weight)
+      const existingW =
+        existing.weight === null || existing.weight === undefined
+          ? null
+          : Number(existing.weight)
+      if (newW === existingW) delete data.weight
+    }
+    if (data.position !== undefined && data.position === existing.position)
+      delete data.position
+    if (data.sessionId !== undefined && data.sessionId === existing.sessionId)
+      delete data.sessionId
+    // Medication flags.
+    if (data.medicationTaken !== undefined && data.medicationTaken === existing.medicationTaken)
+      delete data.medicationTaken
+    if (
+      data.medicationScheduledLater !== undefined &&
+      data.medicationScheduledLater === existing.medicationScheduledLater
+    )
+      delete data.medicationScheduledLater
+    if (data.missedDoses !== undefined && data.missedDoses === existing.missedDoses)
+      delete data.missedDoses
+    // Structured symptom booleans (Flow B + Cluster 6/7/8).
+    const symptomBools: Array<
+      keyof Prisma.JournalEntryUpdateInput & keyof typeof existing
+    > = [
+      'severeHeadache',
+      'visualChanges',
+      'alteredMentalStatus',
+      'chestPainOrDyspnea',
+      'focalNeuroDeficit',
+      'severeEpigastricPain',
+      'newOnsetHeadache',
+      'ruqPain',
+      'edema',
+      'dizziness',
+      'syncope',
+      'palpitations',
+      'legSwelling',
+      'fatigue',
+      'shortnessOfBreath',
+      'dryCough',
+      'nsaidUse',
+      'faceSwelling',
+      'throatTightness',
+    ]
+    for (const k of symptomBools) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (data[k] !== undefined && (data as any)[k] === (existing as any)[k]) {
+        delete data[k]
+      }
+    }
+    // otherSymptoms — set equality, order-irrelevant.
+    if (Array.isArray(data.otherSymptoms)) {
+      const newSet = new Set(data.otherSymptoms as string[])
+      const existingSet = new Set(existing.otherSymptoms ?? [])
+      if (
+        newSet.size === existingSet.size &&
+        [...newSet].every((s) => existingSet.has(s))
+      ) {
+        delete data.otherSymptoms
+      }
+    }
+    if (data.teachBackAnswer !== undefined && data.teachBackAnswer === existing.teachBackAnswer)
+      delete data.teachBackAnswer
+    if (
+      data.teachBackCorrect !== undefined &&
+      data.teachBackCorrect === existing.teachBackCorrect
+    )
+      delete data.teachBackCorrect
+    if (data.notes !== undefined && data.notes === existing.notes) delete data.notes
+    if (data.source !== undefined && data.source === existing.source) delete data.source
+  }
+
+  private async resolveUpdateSessionId(
+    userId: string,
+    entryId: string,
+    currentSessionId: string | null,
+    newMeasuredAt: Date,
+  ): Promise<string> {
+    const windowStart = new Date(newMeasuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(newMeasuredAt.getTime() + SESSION_WINDOW_MS)
+
+    // Any sibling in our CURRENT session (other than us) still within the
+    // new window? If yes, stay put — we're still grouped with our originals.
+    if (currentSessionId) {
+      const stillNearOriginalSibling =
+        await this.prisma.journalEntry.findFirst({
+          where: {
+            userId,
+            sessionId: currentSessionId,
+            id: { not: entryId },
+            measuredAt: { gte: windowStart, lte: windowEnd },
+          },
+          select: { id: true },
+        })
+      if (stillNearOriginalSibling) return currentSessionId
+    }
+
+    // No sibling-in-original-session match. Look for a different-session
+    // entry within the window — we should join it. AND-stacking the two
+    // sessionId constraints because Prisma's field-level filter takes
+    // exactly one `not`; layering needs explicit AND.
+    const otherSessionInWindow = await this.prisma.journalEntry.findFirst({
+      where: {
+        userId,
+        id: { not: entryId },
+        singleReadingFinalized: false,
+        measuredAt: { gte: windowStart, lte: windowEnd },
+        AND: [
+          { sessionId: { not: null } },
+          ...(currentSessionId ? [{ sessionId: { not: currentSessionId } }] : []),
+        ],
+      },
+      orderBy: { measuredAt: 'desc' },
+      select: { sessionId: true },
+    })
+    if (otherSessionInWindow?.sessionId) return otherSessionInWindow.sessionId
+
+    // Nothing within ±5 min. If our original session has other members
+    // (we're leaving them behind), mint a fresh id. Otherwise we were
+    // alone in our session — keep the id so we don't churn the UUID.
+    if (currentSessionId) {
+      const originalSibling = await this.prisma.journalEntry.findFirst({
+        where: {
+          userId,
+          sessionId: currentSessionId,
+          id: { not: entryId },
+        },
+        select: { id: true },
+      })
+      if (originalSibling) return randomUUID()
+      return currentSessionId
+    }
+    // No current session id (rare — pre-#91 data) — mint one.
+    return randomUUID()
   }
 
   /**

@@ -87,6 +87,10 @@ interface PatientHeader {
    *  between the header and the tab nav. Pulled from getPatientSummary
    *  (which already returns it). */
   enrollmentStatus: string | null;
+  /** Manisha 2026-06-12 — true when a NOT_ENROLLED patient was previously
+   *  enrolled (auto-un-enrolled on serious-condition add). Drives the alert-
+   *  card "threshold pending" badge vs the F27 "no dispatch" badge. */
+  previouslyEnrolled?: boolean;
 }
 
 interface Props {
@@ -180,6 +184,7 @@ export default function PatientDetailShell({ patientId }: Props) {
           latestBP: p?.latestBP ?? null,
           lastEntryDate: p?.lastEntryDate ?? null,
           enrollmentStatus: p?.enrollmentStatus ?? null,
+          previouslyEnrolled: p?.previouslyEnrolled ?? false,
         });
       })
       .catch((e) => {
@@ -847,6 +852,8 @@ export default function PatientDetailShell({ patientId }: Props) {
                     header?.enrollmentStatus != null &&
                     header.enrollmentStatus !== 'ENROLLED'
                   }
+                  previouslyEnrolled={header?.previouslyEnrolled ?? false}
+                  onSetThreshold={() => setTab('thresholds')}
                 />
               </>
             )}

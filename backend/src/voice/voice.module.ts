@@ -8,6 +8,7 @@ import { PrismaModule } from '../prisma/prisma.module.js'
 import { ChatModule } from '../chat/chat.module.js'
 import { GeminiModule } from '../gemini/gemini.module.js'
 import { DailyJournalModule } from '../daily_journal/daily_journal.module.js'
+import { IntakeModule } from '../intake/intake.module.js'
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { DailyJournalModule } from '../daily_journal/daily_journal.module.js'
     ChatModule,
     DailyJournalModule,
     GeminiModule,
+    IntakeModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
