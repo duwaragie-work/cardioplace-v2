@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { DailyJournalModule } from '../daily_journal/daily_journal.module.js'
+import { AdminReadingsController } from './admin-readings.controller.js'
 import { AssignmentController } from './assignment.controller.js'
 import { AssignmentService } from './assignment.service.js'
 import { ClinicianController } from './clinician.controller.js'
@@ -20,6 +21,7 @@ import { ThresholdService } from './threshold.service.js'
   imports: [DailyJournalModule],
   controllers: [
     PracticeController,
+    AdminReadingsController,
     AssignmentController,
     ClinicianController,
     ThresholdController,

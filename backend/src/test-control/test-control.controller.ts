@@ -66,6 +66,18 @@ export class TestControlController {
     return this.svc.runEscalationScan(body?.now ? new Date(body.now) : new Date())
   }
 
+  // Deterministic T+0 fire for one alert (spec 22 G.4) — runScan does not
+  // dispatch a fresh alert's T+0, so the spec drives it explicitly here.
+  @Post('escalation/fire-t0')
+  @HttpCode(200)
+  async fireEscalationT0(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { alertId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.fireEscalationT0(body.alertId)
+  }
+
   @Post('cron/gap-alert/run')
   @HttpCode(200)
   async runGapAlert(

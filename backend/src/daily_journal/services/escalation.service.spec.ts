@@ -133,6 +133,13 @@ describe('EscalationService', () => {
         }),
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
+      profileVerificationLog: {
+        // Manisha 2026-06-12 — wasEverEnrolled() reads this. Default null
+        // (never enrolled) so existing NOT_ENROLLED gate tests still defer;
+        // bypass tests override to a row to simulate a previously-enrolled
+        // (auto-un-enrolled) patient.
+        findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+      },
     }
 
     // Create stub auto-generates a stable id per call so tests can assert.
@@ -326,6 +333,40 @@ describe('EscalationService', () => {
   })
 
   // ────────────────────────────────────────────────────────────────────────
+  // dispatchT0ForAlert — test-control deterministic T+0 driver (spec 22 G.4)
+  //   Reconstructs the AlertCreatedEvent from the persisted alert and awaits
+  //   the same fireT0 path, so a Playwright spec can guarantee the T+0
+  //   Notification rows exist (the async @OnEvent handler can't be awaited).
+  // ────────────────────────────────────────────────────────────────────────
+  describe('dispatchT0ForAlert', () => {
+    it('writes the patient PUSH Notification row for a BP_LEVEL_2 alert', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(
+        buildAlert({ tier: 'BP_LEVEL_2', ruleId: 'RULE_ABSOLUTE_EMERGENCY' }),
+      )
+
+      await service.dispatchT0ForAlert('alert-1')
+
+      // The patient (alert.userId) gets a PUSH row linked to the alert — the
+      // exact row spec 22 asserts the write path produced (G.4 hides it from
+      // the bell on the READ side, but the WRITE must happen).
+      const patientPush = (prisma.notification.create as jest.Mock).mock.calls.find(
+        ([arg]: [any]) =>
+          arg?.data?.userId === 'patient-1' &&
+          arg?.data?.channel === 'PUSH' &&
+          arg?.data?.alertId === 'alert-1',
+      )
+      expect(patientPush).toBeDefined()
+    })
+
+    it('throws NotFoundException when the alert does not exist', async () => {
+      prisma.deviationAlert.findUnique.mockResolvedValue(null)
+      await expect(service.dispatchT0ForAlert('missing')).rejects.toThrow(
+        /not found/i,
+      )
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
   // Layer B — escalation dispatch gate
   //   The DeviationAlert row is already persisted by the rule engine; this
   //   gate only controls whether EscalationEvent rows + Notifications get
@@ -367,6 +408,227 @@ describe('EscalationService', () => {
         buildAlertCreatedPayload({ tier: 'BP_LEVEL_2' }),
       )
       expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Was-ever-enrolled dispatch bypass (Manisha 2026-06-12)
+  //   A NOT_ENROLLED patient who was PREVIOUSLY enrolled (auto-un-enrolled on a
+  //   serious-condition add) keeps full dispatch + ladder; only the threshold
+  //   is pending. A truly never-enrolled patient still defers. Applies to every
+  //   escalatable tier (no per-tier branching). Mirrors the same check at all
+  //   three gates: fireT0, firePendingScheduled, advanceOverdueLadders.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('was-ever-enrolled dispatch bypass', () => {
+    const ESCALATABLE_TIERS = [
+      'BP_LEVEL_2',
+      'BP_LEVEL_1_HIGH',
+      'TIER_1_ANGIOEDEMA',
+      'TIER_1_CONTRAINDICATION',
+      'TIER_2_DISCREPANCY',
+    ] as const
+
+    function unenrolledAlert(tier: string) {
+      return buildAlert({
+        tier,
+        user: {
+          id: 'patient-1',
+          enrollmentStatus: 'NOT_ENROLLED',
+          providerAssignmentAsPatient: ASSIGNMENT_FULL,
+        },
+      })
+    }
+
+    describe('fireT0 dispatch matrix', () => {
+      it.each(ESCALATABLE_TIERS)(
+        '%s: previously-enrolled NOT_ENROLLED patient → dispatches',
+        async (tier) => {
+          prisma.profileVerificationLog.findFirst.mockResolvedValue({ id: 'log-1' })
+          prisma.deviationAlert.findUnique.mockResolvedValue(unenrolledAlert(tier))
+          await service.handleAlertCreated(buildAlertCreatedPayload({ tier }))
+          expect(prisma.escalationEvent.create).toHaveBeenCalled()
+        },
+      )
+
+      it.each(ESCALATABLE_TIERS)(
+        '%s: never-enrolled NOT_ENROLLED patient → defers',
+        async (tier) => {
+          prisma.profileVerificationLog.findFirst.mockResolvedValue(null)
+          prisma.deviationAlert.findUnique.mockResolvedValue(unenrolledAlert(tier))
+          await service.handleAlertCreated(buildAlertCreatedPayload({ tier }))
+          expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
+        },
+      )
+
+      it.each(ESCALATABLE_TIERS)(
+        '%s: ENROLLED patient → dispatches, no history lookup',
+        async (tier) => {
+          prisma.deviationAlert.findUnique.mockResolvedValue(buildAlert({ tier }))
+          await service.handleAlertCreated(buildAlertCreatedPayload({ tier }))
+          expect(prisma.escalationEvent.create).toHaveBeenCalled()
+          // ENROLLED short-circuits the gate — no audit-log query.
+          expect(prisma.profileVerificationLog.findFirst).not.toHaveBeenCalled()
+        },
+      )
+
+      it('queries ProfileVerificationLog with the defensive OR predicate', async () => {
+        prisma.profileVerificationLog.findFirst.mockResolvedValue(null)
+        prisma.deviationAlert.findUnique.mockResolvedValue(
+          unenrolledAlert('BP_LEVEL_2'),
+        )
+        await service.handleAlertCreated(
+          buildAlertCreatedPayload({ tier: 'BP_LEVEL_2' }),
+        )
+        expect(prisma.profileVerificationLog.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              userId: 'patient-1',
+              fieldPath: 'user.enrollmentStatus',
+              OR: [
+                { newValue: { equals: 'ENROLLED' } },
+                { previousValue: { equals: 'ENROLLED' } },
+              ],
+            }),
+          }),
+        )
+      })
+    })
+
+    describe('catch-up does not double-dispatch (Manisha concern)', () => {
+      it('dispatchDeferredForUser only targets alerts with zero EscalationEvents', async () => {
+        prisma.deviationAlert.findMany.mockResolvedValue([])
+        await service.dispatchDeferredForUser('patient-1', new Date())
+        // An alert dispatched in real-time by the bypass HAS EscalationEvent
+        // rows, so this `none: {}` filter excludes it from catch-up → no
+        // double-dispatch. Only zero-event (truly deferred) alerts match.
+        expect(prisma.deviationAlert.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              userId: 'patient-1',
+              status: 'OPEN',
+              escalationEvents: { none: {} },
+            }),
+          }),
+        )
+      })
+
+      it('no deferred alerts → no dispatch', async () => {
+        prisma.deviationAlert.findMany.mockResolvedValue([])
+        const res = await service.dispatchDeferredForUser('patient-1', new Date())
+        expect(res).toEqual({ dispatched: 0, skipped: 0 })
+        expect(prisma.escalationEvent.create).not.toHaveBeenCalled()
+      })
+
+      it('a deferred (zero-event) alert is dispatched exactly once via catch-up', async () => {
+        prisma.deviationAlert.findMany.mockResolvedValue([
+          {
+            id: 'alert-deferred',
+            userId: 'patient-1',
+            type: 'SYSTOLIC_BP',
+            severity: 'HIGH',
+            escalated: true,
+            tier: 'BP_LEVEL_2',
+            ruleId: 'RULE_ABSOLUTE_EMERGENCY',
+          },
+        ])
+        prisma.deviationAlert.findUnique.mockResolvedValue(
+          buildAlert({ id: 'alert-deferred', tier: 'BP_LEVEL_2' }),
+        )
+        const res = await service.dispatchDeferredForUser('patient-1', new Date())
+        expect(res.dispatched).toBe(1)
+        const t0 = createdEvents.filter((e) => e.data.alertId === 'alert-deferred')
+        expect(t0.length).toBeGreaterThan(0)
+      })
+    })
+
+    describe('firePendingScheduled gate', () => {
+      const pendingRow = () => ({
+        id: 'esc-pending',
+        alertId: 'alert-1',
+        userId: 'patient-1',
+        ladderStep: 'T4H',
+        recipientRoles: ['PRIMARY_PROVIDER', 'BACKUP_PROVIDER'],
+        triggeredByResolution: false,
+        scheduledFor: new Date('2026-04-22T10:00:00Z'),
+        notificationSentAt: null,
+      })
+      const unenrolled = () =>
+        buildAlert({
+          user: {
+            id: 'patient-1',
+            enrollmentStatus: 'NOT_ENROLLED',
+            providerAssignmentAsPatient: ASSIGNMENT_FULL,
+          },
+        })
+
+      it('previously-enrolled NOT_ENROLLED patient → dispatches the pending event', async () => {
+        prisma.profileVerificationLog.findFirst.mockResolvedValue({ id: 'log-1' })
+        prisma.escalationEvent.findMany.mockResolvedValue([pendingRow()])
+        prisma.deviationAlert.findUnique.mockResolvedValue(unenrolled())
+        await service.runScan(new Date('2026-04-22T10:30:00Z'))
+        expect(prisma.escalationEvent.update).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 'esc-pending' } }),
+        )
+        expect(prisma.notification.create).toHaveBeenCalled()
+      })
+
+      it('never-enrolled NOT_ENROLLED patient → defers (no notifications)', async () => {
+        prisma.profileVerificationLog.findFirst.mockResolvedValue(null)
+        prisma.escalationEvent.findMany.mockResolvedValue([pendingRow()])
+        prisma.deviationAlert.findUnique.mockResolvedValue(unenrolled())
+        await service.runScan(new Date('2026-04-22T10:30:00Z'))
+        expect(prisma.notification.create).not.toHaveBeenCalled()
+      })
+    })
+
+    describe('advanceOverdueLadders gate', () => {
+      const alertCreatedAt = new Date('2026-04-20T14:00:00Z') // Mon 10:00 NY
+      const scanAt = new Date('2026-04-20T18:30:00Z') // Mon 14:30 NY (> T+4h)
+
+      const overdueUnenrolled = () =>
+        buildAlert({
+          createdAt: alertCreatedAt,
+          user: {
+            id: 'patient-1',
+            enrollmentStatus: 'NOT_ENROLLED',
+            providerAssignmentAsPatient: ASSIGNMENT_FULL,
+          },
+        })
+
+      function withT0Event(alertId: string) {
+        prisma.escalationEvent.findMany.mockImplementation((args: any) => {
+          if (args?.where?.alertId === alertId) {
+            return Promise.resolve([
+              {
+                ladderStep: 'T0',
+                recipientRoles: ['PRIMARY_PROVIDER'],
+                triggeredAt: alertCreatedAt,
+                scheduledFor: null,
+                notificationSentAt: alertCreatedAt,
+              },
+            ])
+          }
+          return Promise.resolve([])
+        })
+      }
+
+      it('previously-enrolled → ladder advances to T+4h', async () => {
+        prisma.profileVerificationLog.findFirst.mockResolvedValue({ id: 'log-1' })
+        const alert = overdueUnenrolled()
+        prisma.deviationAlert.findMany.mockResolvedValue([alert])
+        withT0Event(alert.id)
+        await service.runScan(scanAt)
+        expect(createdEvents.some((e) => e.data.ladderStep === 'T4H')).toBe(true)
+      })
+
+      it('never-enrolled → ladder stays paused', async () => {
+        prisma.profileVerificationLog.findFirst.mockResolvedValue(null)
+        const alert = overdueUnenrolled()
+        prisma.deviationAlert.findMany.mockResolvedValue([alert])
+        withT0Event(alert.id)
+        await service.runScan(scanAt)
+        expect(createdEvents.some((e) => e.data.ladderStep === 'T4H')).toBe(false)
+      })
     })
   })
 

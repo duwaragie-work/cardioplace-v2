@@ -35,6 +35,17 @@ export class TestControlService {
     return { scanned: 1, dispatched: Math.max(0, after - before) }
   }
 
+  /**
+   * Deterministically fire T+0 for a specific alert (spec 22 G.4). Awaits the
+   * real fireT0 path so the T+0 Notification rows exist before the spec polls —
+   * unlike runEscalationScan, which does not dispatch a fresh alert's T+0.
+   * Idempotent + error-propagating (see EscalationService.dispatchT0ForAlert).
+   */
+  async fireEscalationT0(alertId: string): Promise<{ ok: true }> {
+    await this.escalation.dispatchT0ForAlert(alertId)
+    return { ok: true }
+  }
+
   async runGapAlertScan(now: Date): Promise<{ scanned: number; nudged: number }> {
     const sent = await this.gapAlerts.runScan(now)
     return { scanned: 1, nudged: sent }

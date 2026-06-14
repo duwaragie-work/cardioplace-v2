@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import AlertCard from './AlertCard'
 import type { PatientAlert } from '@/lib/services/patient-detail.service'
 
@@ -190,5 +190,71 @@ describe('AlertCard — pre-personalization disclaimer suppression (P3)', () => 
     expect(
       screen.queryByTestId('admin-alert-prepersonalization-alert-1'),
     ).not.toBeInTheDocument()
+  })
+})
+
+
+describe('enrollment badges (Manisha 2026-06-12)', () => {
+  function renderBadgeCard(over: {
+    previouslyEnrolled?: boolean
+    patientPreEnrollment?: boolean
+    onThresholdAction?: () => void
+  }) {
+    return render(
+      <AlertCard
+        alert={makeAlert({ status: 'OPEN' })}
+        expanded={false}
+        onRowClick={noop}
+        onToggleExpand={noop}
+        onResolve={noop}
+        onAcknowledge={noop}
+        patientPreEnrollment={over.patientPreEnrollment ?? false}
+        previouslyEnrolled={over.previouslyEnrolled ?? false}
+        onThresholdAction={over.onThresholdAction}
+      />,
+    )
+  }
+
+  it('previously-enrolled NOT_ENROLLED → threshold-pending badge, not no-dispatch', () => {
+    renderBadgeCard({ patientPreEnrollment: true, previouslyEnrolled: true })
+    expect(
+      screen.getByTestId('admin-alert-threshold-pending-badge-alert-1'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByTestId('admin-alert-no-dispatch-badge-alert-1'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('never-enrolled NOT_ENROLLED → no-dispatch badge (F27 preserved)', () => {
+    renderBadgeCard({ patientPreEnrollment: true, previouslyEnrolled: false })
+    expect(
+      screen.getByTestId('admin-alert-no-dispatch-badge-alert-1'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByTestId('admin-alert-threshold-pending-badge-alert-1'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('enrolled patient (not pre-enrollment) → neither badge', () => {
+    renderBadgeCard({ patientPreEnrollment: false, previouslyEnrolled: false })
+    expect(
+      screen.queryByTestId('admin-alert-no-dispatch-badge-alert-1'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('admin-alert-threshold-pending-badge-alert-1'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('clicking the threshold-pending badge invokes onThresholdAction', () => {
+    const onThresholdAction = jest.fn()
+    renderBadgeCard({
+      patientPreEnrollment: true,
+      previouslyEnrolled: true,
+      onThresholdAction,
+    })
+    fireEvent.click(
+      screen.getByTestId('admin-alert-threshold-pending-badge-alert-1'),
+    )
+    expect(onThresholdAction).toHaveBeenCalledTimes(1)
   })
 })
