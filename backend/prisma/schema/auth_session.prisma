@@ -1,0 +1,25 @@
+// June 2026 — concurrent-session enforcement (Manisha 2026-06-12 Doc 2 Q1).
+// Up to 3 concurrent admin/provider sessions per user (4th evicts the most
+// idle); patient users are limited to 1 active session at a time. 1:1 with
+// RefreshToken — every issued refresh-token row gets a matching AuthSession
+// row in the same transaction. lastActivityAt drives both eviction
+// (Phase 3) and idle-timeout enforcement (Phase 2: 15 min web / 5 min
+// mobile, Manisha 2026-06-12 Doc 3 Q7).
+model AuthSession {
+  id             String       @id @default(ulid())
+  userId         String
+  refreshTokenId String       @unique
+  deviceType     String? // 'web' | 'mobile' | null
+  deviceId       String?
+  deviceName     String?
+  userAgent      String?
+  ipAddress      String?
+  createdAt      DateTime     @default(now())
+  lastActivityAt DateTime     @updatedAt
+  expiresAt      DateTime
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken   RefreshToken @relation(fields: [refreshTokenId], references: [id], onDelete: Cascade)
+
+  @@index([userId, lastActivityAt])
+  @@index([userId, createdAt])
+}

@@ -145,6 +145,18 @@ export class TestControl {
     await this.post('test-control/journal/backdate-latest', { userId, deltaSeconds })
   }
 
+  /**
+   * June 2026 — Phase 2 idle-timeout driver. Backdate every active
+   * AuthSession.lastActivityAt for a user so the next /refresh crosses
+   * the 15-min (web) / 5-min (mobile) idle gate without sleeping.
+   */
+  async backdateAuthSessions(
+    userId: string,
+    deltaSeconds: number,
+  ): Promise<{ updated: number }> {
+    return this.post('test-control/auth-session/backdate', { userId, deltaSeconds })
+  }
+
   /** Backdate a medication's `verifiedAt` / `reportedAt` (monthly-reask). */
   async backdateMedicationVerified(medId: string, deltaSeconds: number): Promise<void> {
     await this.post('test-control/medication/backdate-verified', { medId, deltaSeconds })

@@ -59,13 +59,41 @@ export class AuthController {
     ipAddress?: string
     userAgent?: string
     timezone?: string
+    deviceType?: string
   } {
+    const userAgent = req.headers['user-agent']
     return {
       deviceId: req.headers['x-device-id'] as string | undefined,
       ipAddress: this.extractIpAddress(req),
-      userAgent: req.headers['user-agent'],
+      userAgent,
       timezone: req.headers['x-timezone'] as string | undefined,
+      deviceType: this.resolveDeviceType(
+        req.headers['x-device-platform'] as string | undefined,
+        userAgent,
+      ),
     }
+  }
+
+  /**
+   * Resolve the canonical device type for AuthSession.deviceType. The
+   * explicit `x-device-platform` header (sent by the mobile shell) wins;
+   * otherwise we fall back to a basic User-Agent mobile-token scan so
+   * regular browser sessions still pick the right idle threshold
+   * (Phase 2: 15 min web / 5 min mobile).
+   */
+  private resolveDeviceType(
+    platform: string | undefined,
+    userAgent: string | undefined,
+  ): 'web' | 'mobile' {
+    const normalized = platform?.trim().toLowerCase()
+    if (normalized === 'mobile' || normalized === 'ios' || normalized === 'android') {
+      return 'mobile'
+    }
+    if (normalized === 'web') return 'web'
+    if (userAgent && /Mobi|Android|iPhone|iPad|iPod|Mobile/i.test(userAgent)) {
+      return 'mobile'
+    }
+    return 'web'
   }
 
   /* ═══ DISABLED – OTP-only auth ═══════════════════════════════════════════════

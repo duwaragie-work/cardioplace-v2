@@ -19,6 +19,7 @@ import {
   AUTH_ROLE_COOKIE,
   LEGACY_MARKER_COOKIES,
 } from '@/lib/cookie-names';
+import { useIdleTimeout } from '@/lib/hooks/useIdleTimeout';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -309,6 +310,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // response (auth.controller.setRefreshCookie). Keeping it out of JS
     // closes the XSS path that ate refresh sessions in v1.
   };
+
+  // Manisha 2026-06-12 Doc 3 Q7 — idle session timeout. 15 min web, 5 min
+  // mobile. We arm only while the user is signed in (token present). The
+  // warning fires a custom event so the app-level chrome can render a
+  // banner / toast; the actual sign-out re-uses the existing logout flow.
+  useIdleTimeout({
+    enabled: !!token,
+    onWarn: () => {
+      if (typeof window === 'undefined') return;
+      window.dispatchEvent(new CustomEvent('auth:idle-warning'));
+    },
+    onTimeout: () => {
+      if (typeof window === 'undefined') return;
+      // Best-effort backend logout + hard nav to sign-in. We don't await
+      // because the backend may already 401 on the refresh chain — the UX
+      // contract is just "user gets bounced back to sign-in promptly".
+      fetch(`${API_URL}/api/v2/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      }).catch(() => {});
+      setToken(null);
+      setUser(null);
+      clearTokenState();
+      clearAuthMarkers();
+      window.location.href = '/sign-in?session_expired=1';
+    },
+  });
 
   const logout = async () => {
     // Tell the backend so it can clear both HttpOnly cookies + revoke the

@@ -1,11 +1,11 @@
 model PatientProviderAssignment {
-  id                 String   @id @default(uuid())
-  userId             String   @unique
-  practiceId         String
-  primaryProviderId  String
-  backupProviderId   String
-  medicalDirectorId  String
-  assignedAt         DateTime @default(now())
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  practiceId        String
+  primaryProviderId String
+  backupProviderId  String
+  medicalDirectorId String
+  assignedAt        DateTime @default(now())
 
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   practice        Practice @relation(fields: [practiceId], references: [id], onDelete: Restrict)

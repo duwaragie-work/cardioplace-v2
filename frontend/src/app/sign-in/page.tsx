@@ -10,6 +10,7 @@ import type { TranslationKey } from "@/i18n";
 import { shouldShowOnboardingForUser } from "@/lib/onboarding";
 import LandingHeader from "@/components/cardio/LandingHeader";
 import LandingFooter from "@/components/cardio/LandingFooter";
+import SessionExpiredBanner from "@/components/auth/SessionExpiredBanner";
 
 const OTP_LENGTH = 6;
 
@@ -293,7 +294,8 @@ export default function RegisterPage() {
     <Suspense>
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <main id="main" className="min-h-[100dvh] pt-24 pb-10 flex items-center-safe justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" className="min-h-[100dvh] pt-24 pb-10 flex flex-col items-center-safe justify-center px-4 sm:px-6 lg:px-12">
+      <SessionExpiredBanner />
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}

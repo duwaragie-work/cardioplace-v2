@@ -1,5 +1,5 @@
 model ProfileVerificationLog {
-  id              String                  @id @default(uuid())
+  id              String                 @id @default(uuid())
   userId          String
   fieldPath       String
   previousValue   Json?
@@ -7,9 +7,9 @@ model ProfileVerificationLog {
   changedBy       String
   changedByRole   VerifierRole
   changeType      VerificationChangeType
-  discrepancyFlag Boolean                 @default(false)
-  rationale       String?                 @db.Text
-  createdAt       DateTime                @default(now())
+  discrepancyFlag Boolean                @default(false)
+  rationale       String?                @db.Text
+  createdAt       DateTime               @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
