@@ -1643,12 +1643,16 @@ function ConfirmationScreen({
   heightCm,
   missedMedNames,
   isEnrolled,
+  isEmergency,
   onAddAnother,
   onDone,
   pendingFinalizeEntryId,
   onFinalized,
 }: {
   lastReading: SessionReading;
+  /** Bug 8 — the just-submitted reading triggered an emergency-class rule.
+   *  Suppresses the Q3 / AFib reading-prompt (show the emergency CTA instead). */
+  isEmergency: boolean;
   /** #88 — true once the patient is ENROLLED (clinical dispatch gate). When
    *  false, the engine never ran and no care team was notified, so the
    *  post-submit copy must not claim otherwise. */
@@ -1684,7 +1688,7 @@ function ConfirmationScreen({
   // The copy teaches that without clinical jargon, and tapping "Back to
   // dashboard" before the 3rd reading prompts a confirm (going to the
   // dashboard ends the session).
-  const readingPrompt = selectReadingPrompt({ hasAFib, sessionTotal: total, pendingFinalizeEntryId });
+  const readingPrompt = selectReadingPrompt({ hasAFib, sessionTotal: total, pendingFinalizeEntryId, isEmergency });
   const aFibSatisfied = readingPrompt.kind === 'afib' ? readingPrompt.satisfied : true;
   const afibStateKey = readingPrompt.kind === 'afib' ? readingPrompt.stateKey : 'state1';
   const needsMoreReadings = readingPrompt.kind === 'afib' ? readingPrompt.needsMoreReadings : false;
@@ -2082,6 +2086,9 @@ export default function CheckIn() {
   const [optionDActive, setOptionDActive] = useState(false);
   const [optionDFirstId, setOptionDFirstId] = useState<string | null>(null);
   const [optionDFirstBp, setOptionDFirstBp] = useState<{ sys: number; dia: number } | null>(null);
+  // Bug 8 — true when the just-submitted reading triggered an emergency-class
+  // rule; suppresses the Q3 / AFib reading-prompt on the confirmation screen.
+  const [confirmationIsEmergency, setConfirmationIsEmergency] = useState(false);
 
   // Cross-visit session continuity — the patient's currently OPEN session (if
   // any) fetched on mount. While set + unresolved + not expired, the "add to
@@ -2461,13 +2468,20 @@ export default function CheckIn() {
       setSessionReadings((prev) => [...prev, reading]);
       setReadingNumber((n) => n + 1);
       setShowConfirmation(true);
+      // Bug 8 (live-test 2026-06-15) — this non-Option-D path is reached by
+      // symptom-bearing emergencies (e.g. 195/120 + chest pain → immediate
+      // symptom-override). On an emergency, the confirmation screen must show
+      // the emergency CTA, NOT the Q3 "take a second reading" / AFib nudge.
+      const submittedEmergency = isEmergencyBP || hasAnySymptom;
+      setConfirmationIsEmergency(submittedEmergency);
       // Cluster 6 Q2 (Manisha 5/9/26) — backend tells us this is a first-
       // in-session non-AFib non-preDay3 reading. Frontend shows "Take a
       // second reading in about 1 minute" prompt + arms a 5-min timer
       // that POSTs the finalize endpoint when it elapses without a 2nd
       // reading. The actual UI lives in <ConfirmationScreen>; pass the
-      // entryId + flag down so it can manage the timer.
-      if (created.pendingSecondReading) {
+      // entryId + flag down so it can manage the timer. Suppressed on an
+      // emergency (Bug 8).
+      if (created.pendingSecondReading && !submittedEmergency) {
         setPendingFinalizeEntryId(created.entry.id);
       } else {
         setPendingFinalizeEntryId(null);
@@ -2848,6 +2862,7 @@ export default function CheckIn() {
             sessionTotal={readingNumber}
             hasAFib={hasAFib}
             isEnrolled={user?.enrollmentStatus === 'ENROLLED'}
+            isEmergency={confirmationIsEmergency}
             heightCm={profile?.heightCm ?? null}
             missedMedNames={medications
               .filter((m) => form.medicationStatus[m.id]?.taken === 'no')

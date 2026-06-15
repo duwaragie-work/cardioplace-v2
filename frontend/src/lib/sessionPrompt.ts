@@ -37,8 +37,17 @@ export function selectReadingPrompt(input: {
   /** Backend single-reading finalize hint id; truthy only for a first-in-session
    *  non-AFib non-preDay3 reading. Null tears down the nudge. */
   pendingFinalizeEntryId: string | null
+  /** Bug 8 (live-test 2026-06-15) — the just-submitted reading triggered an
+   *  emergency-class rule (BP ≥180/120 or a target-organ-damage symptom). On an
+   *  emergency, NEITHER the 2nd-reading nudge NOR the AFib 3-reading prompt is
+   *  appropriate — the patient must see the emergency CTA, not a mixed-signal
+   *  "take another reading". Suppress all reading prompts. */
+  isEmergency?: boolean
 }): ReadingPrompt {
-  const { hasAFib, sessionTotal, pendingFinalizeEntryId } = input
+  const { hasAFib, sessionTotal, pendingFinalizeEntryId, isEmergency } = input
+
+  // Bug 8 — an emergency reading shows no reading-prompt at all.
+  if (isEmergency) return { kind: 'none' }
 
   if (hasAFib) {
     const stateKey: 'state1' | 'state2' | 'state3' =

@@ -42,3 +42,35 @@ describe('selectReadingPrompt — non-AFib default', () => {
     expect(p.kind).not.toBe('afib')
   })
 })
+
+describe('selectReadingPrompt — Bug 8 emergency suppression', () => {
+  it('non-AFib emergency suppresses the 2nd-reading nudge even when the finalize hint is set', () => {
+    const p = selectReadingPrompt({
+      hasAFib: false,
+      sessionTotal: 1,
+      pendingFinalizeEntryId: 'entry-123',
+      isEmergency: true,
+    })
+    expect(p).toEqual({ kind: 'none' })
+  })
+
+  it('AFib emergency suppresses the 3-reading prompt (patient must see the emergency CTA)', () => {
+    const p = selectReadingPrompt({
+      hasAFib: true,
+      sessionTotal: 1,
+      pendingFinalizeEntryId: null,
+      isEmergency: true,
+    })
+    expect(p).toEqual({ kind: 'none' })
+  })
+
+  it('non-emergency is unaffected (isEmergency:false behaves as before)', () => {
+    const p = selectReadingPrompt({
+      hasAFib: false,
+      sessionTotal: 1,
+      pendingFinalizeEntryId: 'entry-123',
+      isEmergency: false,
+    })
+    expect(p).toEqual({ kind: 'takeSecond' })
+  })
+})
