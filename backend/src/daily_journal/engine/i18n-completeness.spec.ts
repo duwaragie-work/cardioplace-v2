@@ -42,7 +42,17 @@ function isPatientOrCaregiverFacing(key: string): boolean {
     key.startsWith('checkin.b3.symptom') ||
     key.startsWith('checkin.b3.otherLabel') ||
     key.startsWith('notification.angioedema') ||
-    key.startsWith('notification.adherence')
+    key.startsWith('notification.adherence') ||
+    // Bug 2b (live-test 2026-06-15) — these patient-facing post-submit / modal
+    // surfaces shipped untranslated (English passthrough) because the gate
+    // didn't scan them. Widen to the confirmation, backdating-delay, historical
+    // note, AFib state cards + leave modal, and Option D retake screens. These
+    // are all read by the patient, so compliance signs off on their translation.
+    key.startsWith('checkin.confirm.') ||
+    key.startsWith('checkin.delay.') ||
+    key.startsWith('checkin.historical.') ||
+    key.startsWith('checkin.afib.') ||
+    key.startsWith('checkin.optionD.')
   )
 }
 
@@ -51,7 +61,9 @@ function isPatientOrCaregiverFacing(key: string): boolean {
  * nouns, medical abbreviations, etc. Each entry MUST cite why.
  */
 const KNOWN_IDENTICAL_OK: Record<string, string> = {
-  // Add entries here as needed. Each must include locale + reason.
+  // 'mmHg' is the universal blood-pressure unit symbol — identical across locales.
+  'es:checkin.confirm.unit': '"mmHg" is a unit symbol, identical across locales',
+  'am:checkin.confirm.unit': '"mmHg" is a unit symbol, identical across locales',
 }
 
 function loadLocaleFile(locale: 'en' | Locale): Map<string, string> {
