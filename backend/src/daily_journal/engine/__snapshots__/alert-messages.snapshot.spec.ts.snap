@@ -276,6 +276,18 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_DHP_CCB_LEG_SWE
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_DHP_CCB_LEG_SWELLING STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Tier 3 — Possible DHP-CCB peripheral edema. Patient on dihydropyridine CCB reports leg swelling without HF flag. Consider dose reduction or non-DHP alternative."`;
 
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Patient's initial reading was 185/122 mmHg (emergency range); confirmatory reading was 145/85 mmHg (below emergency threshold). No emergency alert fired. Review at next encounter."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Patient's initial reading was 185/122 mmHg (emergency range); confirmatory reading was 145/85 mmHg (below emergency threshold). No emergency alert fired. Review at next encounter."`;
+
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_FIRST_MONTH_ADHERENCE_NUDGE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `""`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_FIRST_MONTH_ADHERENCE_NUDGE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Starting a new medicine can take some getting used to. If you missed a dose, that's okay — just try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule."`;
@@ -647,3 +659,15 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_TACHY_WITH_PALP
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_TACHY_WITH_PALPITATIONS STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"You reported your heart racing, and your pulse is higher than usual. Please rest, drink water, and let your care team know if it doesn't settle in the next hour."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_TACHY_WITH_PALPITATIONS STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Tier 2 — Symptomatic tachycardia: HR 72 bpm with palpitations reported. Rule out causes; consider Holter / event monitor."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Single unconfirmed emergency-range reading: 145/85 mmHg. Patient did not complete confirmatory measurement. Recommend phone outreach to verify current status."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Single unconfirmed emergency-range reading: 145/85 mmHg. Patient did not complete confirmatory measurement. Recommend phone outreach to verify current status."`;

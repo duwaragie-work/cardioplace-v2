@@ -185,6 +185,14 @@ export interface AlertContext {
    * re-touching the plumbing.
    */
   activeMedications?: Array<{ drugName: string; drugClass: string }>
+
+  /** Option D (Manisha 2026-06-12 Q2) — RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL
+   *  only. The patient's INITIAL emergency-range reading (BP1) in the
+   *  retake-to-confirm flow. The confirmatory below-threshold reading (BP2) is
+   *  the standard `systolicBP` / `diastolicBP`. Undefined for every other rule
+   *  (the helper renders "?/?" — never reached in production for those rules). */
+  initialSystolicBP?: number | null
+  initialDiastolicBP?: number | null
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -236,6 +244,15 @@ function bp(ctx: AlertContext): string {
 
 function hr(ctx: AlertContext): string {
   return `HR ${ctx.pulse ?? '?'} bpm`
+}
+
+// Option D (Manisha 2026-06-12 Q2) — renders the INITIAL emergency-range
+// reading (BP1) for RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL. BP2 (the
+// confirmatory reading) uses the standard bp(ctx).
+function initialBp(ctx: AlertContext): string {
+  const sbp = ctx.initialSystolicBP ?? '?'
+  const dbp = ctx.initialDiastolicBP ?? '?'
+  return `${sbp}/${dbp} mmHg`
 }
 
 function physSuffix(ctx: AlertContext): string {
@@ -1196,6 +1213,34 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       "Starting a new medicine can take some getting used to. If you missed a dose, that's okay — just try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule.",
     caregiverMessage: () => '',
     physicianMessage: () => '',
+  },
+
+  // ── Option D — retake-to-confirm outcomes (Manisha 2026-06-12 Q2) ───────
+  // Both are PROVIDER-ONLY (no patient/caregiver message). The physician
+  // wording is LOCKED to Manisha's 2026-06-12 sign-off (Edit-Window + Session
+  // Policy, Q2 + Implementation Note 5) — do NOT soften without a fresh
+  // sign-off. No physSuffix() is appended: the strings are verbatim-locked and
+  // self-contained (the single-reading caveat would be redundant — these rules
+  // ARE the single-/unconfirmed-reading outcome).
+
+  // Patient declined the confirmatory measurement / closed the app / the 5-min
+  // window expired. Tier 1 provider-only (Implementation Note 5: unconfirmed,
+  // possibly artifactual → Tier 1, NOT Tier 2). [BP] = the unconfirmed reading.
+  RULE_UNCONFIRMED_EMERGENCY: {
+    patientMessage: () => '',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Single unconfirmed emergency-range reading: ${bp(ctx)}. Patient did not complete confirmatory measurement. Recommend phone outreach to verify current status.`,
+  },
+
+  // Second reading came back below the emergency threshold — no emergency
+  // alert fired. Tier 3 informational, no ladder. [BP1] = initial emergency
+  // reading; [BP2] = confirmatory below-threshold reading.
+  RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL: {
+    patientMessage: () => '',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Patient's initial reading was ${initialBp(ctx)} (emergency range); confirmatory reading was ${bp(ctx)} (below emergency threshold). No emergency alert fired. Review at next encounter.`,
   },
 }
 
