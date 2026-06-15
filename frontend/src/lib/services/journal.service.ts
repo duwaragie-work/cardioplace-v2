@@ -369,15 +369,15 @@ export interface DeviationAlertDto {
 export async function getAlerts(): Promise<DeviationAlertDto[]> {
   const res = await fetchWithAuth(`${API}/api/daily-journal/alerts`)
   const all = await unwrap<DeviationAlertDto[]>(res)
-  // Manual-test round 2 — Group C frontend safety net. The backend already
-  // filters Tier-3 caregiver/physician-only alerts (empty patientMessage) out
-  // of the patient surface; this guard is defense-in-depth so a backend
-  // regression can't leak a "FOR YOUR INFORMATION" green card or an empty
-  // notification row onto the patient.
-  return all.filter((a) => {
-    if (a.tier !== 'TIER_3_INFO') return true
-    return typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0
-  })
+  // Bug 12 (live-test 2026-06-15) — defense-in-depth. The backend now filters
+  // EVERY provider-only alert (empty patientMessage, any tier) out of the
+  // patient surface; this mirrors that universally so a backend regression
+  // can't leak a tier-generic "Important medication alert" card (e.g. the
+  // Tier-1 RULE_UNCONFIRMED_EMERGENCY) onto the patient. Only alerts with a
+  // real patient message render.
+  return all.filter(
+    (a) => typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0,
+  )
 }
 
 export async function acknowledgeAlert(alertId: string) {

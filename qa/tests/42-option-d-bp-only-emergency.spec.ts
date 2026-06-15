@@ -208,6 +208,18 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
       expect(a.patientMessage).toBeFalsy()
       // No emergency (BP Level 2) on the lone unconfirmed reading.
       expect(alerts.some((x) => x.status === 'OPEN' && x.tier === 'BP_LEVEL_2')).toBeFalsy()
+
+      // Bug 12 — the provider-only flag must NOT appear on the PATIENT's own
+      // alerts feed (it has an empty patientMessage). The patient endpoint
+      // filters it server-side regardless of tier.
+      const feedRes = await api.get('daily-journal/alerts')
+      expect(feedRes.status()).toBe(200)
+      const feed = await feedRes.json()
+      const patientAlerts = (feed.data ?? feed) as Array<{ ruleId?: string | null }>
+      expect(
+        patientAlerts.some((x) => x.ruleId === 'RULE_UNCONFIRMED_EMERGENCY'),
+        'provider-only RULE_UNCONFIRMED_EMERGENCY must not leak into the patient alerts feed',
+      ).toBeFalsy()
     } finally {
       await api.dispose()
       await tc.dispose()

@@ -763,18 +763,21 @@ export class DailyJournalService {
       },
     })
 
-    // Manual-test round 2 — Group C: hide Tier-3 caregiver/physician-only rules
-    // from the patient surfaces entirely. RULE_HF_CAREGIVER_EDEMA,
-    // RULE_HCM_VASODILATOR, RULE_PULSE_PRESSURE_NARROW, RULE_DHP_CCB_LEG_SWELLING,
-    // loop-diuretic et al. emit empty patientMessage by design — patient sees no
-    // card and no notification (caregiver still gets their dispatch in
-    // escalation.service.ts:dispatchCaregiverNotification). Tier-3 with a
-    // non-empty patientMessage (e.g. RULE_FIRST_MONTH_ADHERENCE_NUDGE) stays.
-    // The admin endpoint is unchanged — admin keeps seeing them in Physician Notes.
-    const patientVisible = alerts.filter((a) => {
-      if (a.tier !== 'TIER_3_INFO') return true
-      return typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0
-    })
+    // Bug 12 (live-test 2026-06-15) — provider-only alerts must NEVER reach the
+    // patient surface, regardless of tier. A PROVIDER-ONLY alert is one with an
+    // empty patientMessage: Tier-3 caregiver/physician notes
+    // (RULE_HF_CAREGIVER_EDEMA, RULE_HCM_VASODILATOR, RULE_PULSE_PRESSURE_NARROW,
+    // loop-diuretic, etc.) AND the Option D Tier-1 RULE_UNCONFIRMED_EMERGENCY /
+    // Tier-3 RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL. The previous filter only
+    // gated TIER_3_INFO, so RULE_UNCONFIRMED_EMERGENCY (TIER_1_CONTRAINDICATION,
+    // empty patientMessage) leaked into the patient feed with a tier-generic
+    // "Important medication alert" title. Filtering on a non-empty patientMessage
+    // universally is the robust guard — every genuinely patient-facing alert
+    // (BP L1/L2, emergencies, contraindications, adherence) carries one; the
+    // admin endpoint is unchanged (Physician Notes keep everything).
+    const patientVisible = alerts.filter(
+      (a) => typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0,
+    )
 
     return {
       statusCode: 200,

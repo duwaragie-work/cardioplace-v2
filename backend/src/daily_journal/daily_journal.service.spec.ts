@@ -621,6 +621,23 @@ describe('DailyJournalService', () => {
       const ids = (out.data as Array<{ id: string }>).map((a) => a.id)
       expect(ids).toEqual(['nudge'])
     })
+
+    it('Bug 12 — hides a TIER_1 provider-only alert (RULE_UNCONFIRMED_EMERGENCY, empty patientMessage) from the patient list', async () => {
+      mockPrisma.deviationAlert.findMany.mockResolvedValueOnce([
+        row({ id: 'bp', tier: 'BP_LEVEL_2', patientMessage: 'Call 911 now.' }),
+        // Option D provider-only flag — must NOT reach the patient surface even
+        // though it is Tier 1, not Tier 3.
+        row({
+          id: 'unconfirmed',
+          tier: 'TIER_1_CONTRAINDICATION',
+          ruleId: 'RULE_UNCONFIRMED_EMERGENCY',
+          patientMessage: '',
+        }),
+      ])
+      const out = await service.getAlerts('u1')
+      const ids = (out.data as Array<{ id: string }>).map((a) => a.id)
+      expect(ids).toEqual(['bp'])
+    })
   })
 
   // ─── H5 G.4 — bell visibility filter (read-side; #80 EMAIL + alert-linked PUSH) ──
