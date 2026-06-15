@@ -75,6 +75,20 @@ export interface SessionAverage {
    *  "confirm with next reading" annotation. */
   singleReadingFinalized: boolean
 
+  /** Option D (Manisha 2026-06-12 Q2) — the anchor entry's emergencyConfirmation
+   *  state ('AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED'), or null/undefined for
+   *  non-Option-D entries. Drives the retake-resolution branch in runPipeline.
+   *  String (not the Prisma enum) to keep engine types prisma-light. The
+   *  held AWAITING first-of-pair never reaches the engine (the service skips its
+   *  ENTRY_CREATED emit), so only CONFIRMATORY + UNCONFIRMED are evaluated. */
+  emergencyConfirmation?: string | null
+  /** Option D — on a CONFIRMATORY session, the first-of-pair (BP1) reading's
+   *  raw SBP/DBP (the AWAITING reading being confirmed). BP2 is the anchor's
+   *  submittedSystolicBP/submittedDiastolicBP. Both feed the
+   *  RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL physician message (BP1/BP2). */
+  optionDInitialSystolicBP?: number | null
+  optionDInitialDiastolicBP?: number | null
+
   /** Structured symptom flags — OR-reduced across the session's entries. */
   symptoms: SessionSymptoms
 

@@ -3,6 +3,7 @@ import { EventEmitter2, OnEvent } from '@nestjs/event-emitter'
 import {
   ProfileNotFoundException,
   RULE_IDS,
+  getPulsePressure,
   type ResolvedContext,
 } from '@cardioplace/shared'
 import { Prisma } from '../../generated/prisma/client.js'
@@ -47,6 +48,7 @@ import {
 } from '../engine/symptom-override.js'
 import { angioedemaRule } from '../engine/angioedema.js'
 import { absoluteEmergencyRule } from '../engine/absolute-emergency.js'
+import { decideOptionDOutcome } from '../engine/option-d.js'
 import {
   pregnancyL1HighRule,
   pregnancyL2Rule,
@@ -576,6 +578,68 @@ export class AlertEngineService {
     }
   }
 
+  /**
+   * Option D resolution (Manisha 2026-06-12 Q2). Builds the single outcome
+   * RuleResult for a CONFIRMATORY or UNCONFIRMED session. The decision uses the
+   * confirmatory reading's OWN value (submitted*), never the session average —
+   * see engine/option-d.ts for why. BP1 (the held first-of-pair) rides on
+   * session.optionDInitial* for the CONFIRMED_NORMAL physician message.
+   */
+  private resolveOptionD(session: SessionAverage): RuleResult | null {
+    const state = session.emergencyConfirmation
+    const sbp = session.submittedSystolicBP ?? session.systolicBP
+    const dbp = session.submittedDiastolicBP ?? session.diastolicBP
+    const pp = getPulsePressure(sbp, dbp)
+
+    if (state === 'UNCONFIRMED') {
+      // Patient declined / window expired. Tier 1 PROVIDER-ONLY (Implementation
+      // Note 5: unconfirmed + possibly artifactual → Tier 1, not Tier 2).
+      return {
+        ruleId: RULE_IDS.UNCONFIRMED_EMERGENCY,
+        tier: 'TIER_1_CONTRAINDICATION',
+        mode: 'STANDARD',
+        pulsePressure: pp,
+        suboptimalMeasurement: session.suboptimalMeasurement,
+        actualValue: sbp,
+        reason: `Unconfirmed emergency-range reading ${sbp ?? '?'}/${dbp ?? '?'} — patient did not complete confirmatory measurement.`,
+        metadata: {},
+      }
+    }
+
+    if (state === 'CONFIRMATORY') {
+      const outcome = decideOptionDOutcome(sbp, dbp)
+      if (outcome === 'EMERGENCY') {
+        // Second reading also ≥180/120 → a genuine, confirmed emergency. Fire
+        // the existing RULE_ABSOLUTE_EMERGENCY (BP Level 2, full ladder).
+        const sbpTrigger = sbp != null && sbp >= 180
+        return {
+          ruleId: RULE_IDS.ABSOLUTE_EMERGENCY,
+          tier: 'BP_LEVEL_2',
+          mode: 'STANDARD',
+          pulsePressure: pp,
+          suboptimalMeasurement: session.suboptimalMeasurement,
+          actualValue: sbpTrigger ? sbp : dbp,
+          reason: `Confirmed emergency: confirmatory reading ${sbp ?? '?'}/${dbp ?? '?'} also in emergency range.`,
+          metadata: { thresholdValue: sbpTrigger ? 180 : 120 },
+        }
+      }
+      // Second reading below threshold → no emergency. Tier 3 informational;
+      // BP1/BP2 rendered by the registry from systolicBP (BP2) + initialSystolicBP.
+      return {
+        ruleId: RULE_IDS.EMERGENCY_RANGE_CONFIRMED_NORMAL,
+        tier: 'TIER_3_INFO',
+        mode: 'STANDARD',
+        pulsePressure: pp,
+        suboptimalMeasurement: session.suboptimalMeasurement,
+        actualValue: sbp,
+        reason: `Emergency-range first reading confirmed normal on retake (${sbp ?? '?'}/${dbp ?? '?'}).`,
+        metadata: {},
+      }
+    }
+
+    return null
+  }
+
   // ─── pipeline ──────────────────────────────────────────────────────────
 
   private async runPipeline(
@@ -643,6 +707,30 @@ export class AlertEngineService {
         continue
       }
       claimed.set(axis, r)
+    }
+
+    // Option D resolution (Manisha 2026-06-12 Q2) — TERMINAL. The held AWAITING
+    // first-of-pair never reaches the engine (the service skips its
+    // ENTRY_CREATED emit), so only a CONFIRMATORY resolution or a cron/decline
+    // UNCONFIRMED finalize land here. Each produces EXACTLY ONE outcome alert
+    // (Tier 1 unconfirmed / BP L2 confirmed-emergency / Tier 3 confirmed-
+    // normal); returning here prevents the average-based absoluteEmergencyRule
+    // (Stage B) and standardL1High (Stage C) from co-firing on the pair (e.g. a
+    // 195/120 + 135/85 session averages to ~165/102, which would otherwise fire
+    // a spurious BP Level 1). If a confirmatory reading ALSO carries a new
+    // symptom, Stage A's symptom override already claimed 'emergency' (Option A
+    // immediate fire) and wins — we defer to it.
+    if (
+      session.emergencyConfirmation === 'CONFIRMATORY' ||
+      session.emergencyConfirmation === 'UNCONFIRMED'
+    ) {
+      if (!claimed.has('emergency')) {
+        const optionD = this.resolveOptionD(session)
+        if (optionD) claimed.set(axisFor(optionD), optionD)
+      }
+      return AXIS_PRIORITY.map((axis) => claimed.get(axis)).filter(
+        (r): r is RuleResult => r !== undefined,
+      )
     }
 
     // AFib <3-reading gate — stops Stage B + Stage C (BP/HR-dependent

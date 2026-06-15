@@ -10,8 +10,14 @@ import {
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import { randomUUID } from 'node:crypto'
-import { SESSION_WINDOW_MS } from '@cardioplace/shared'
-import { Prisma, EntrySource, EscalationLevel, DelayBand } from '../generated/prisma/client.js'
+import { SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared'
+import {
+  Prisma,
+  EntrySource,
+  EscalationLevel,
+  DelayBand,
+  EmergencyConfirmationState,
+} from '../generated/prisma/client.js'
 import {
   UserRole,
   VerifierRole,
@@ -200,6 +206,27 @@ export class DailyJournalService {
       new Date(dto.measuredAt),
     )
 
+    // Option D (Manisha 2026-06-12 Q2) — retake-to-confirm state from the DTO.
+    // AWAITING = first-of-pair emergency reading (held; engine NOT run here);
+    // CONFIRMATORY = second reading confirming/clearing the first.
+    const optionDState: EmergencyConfirmationState | null =
+      dto.beginEmergencyConfirmation
+        ? EmergencyConfirmationState.AWAITING
+        : dto.confirmsEntryId
+          ? EmergencyConfirmationState.CONFIRMATORY
+          : null
+
+    // Step 2 edit window (Manisha 2026-06-12 Q1+Q4) — patient (non-admin)
+    // readings are editable/deletable for 5 min before the engine commits. The
+    // readings page reads this to surface the edit/delete affordance; the engine
+    // firing itself is still gated by the existing single-reading hold. Admin
+    // entries and Option D AWAITING readings (held under their own retake
+    // semantics) get no window.
+    const engineEvaluationDeferredUntil =
+      actor || optionDState === EmergencyConfirmationState.AWAITING
+        ? null
+        : new Date(Date.now() + SINGLE_READING_FINALIZE_MS)
+
     try {
       // Chunk A — compute the measurement-lag band at persist time so the
       // patient app + admin can render the right affordance off a stored value.
@@ -221,6 +248,10 @@ export class DailyJournalService {
           weight: dto.weight != null ? new Prisma.Decimal(dto.weight) : null,
           position: dto.position ?? null,
           sessionId: effectiveSessionId,
+          // Option D + edit window (Manisha 2026-06-12).
+          emergencyConfirmation: optionDState,
+          confirmsEntryId: dto.confirmsEntryId ?? null,
+          engineEvaluationDeferredUntil,
           measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
           medicationTaken: dto.medicationTaken ?? null,
           medicationScheduledLater: dto.medicationScheduledLater ?? false,
@@ -282,18 +313,37 @@ export class DailyJournalService {
         return created
       })
 
+      // Option D (Manisha 2026-06-12 Q2) — when this reading CONFIRMS a held
+      // first-of-pair, release that first-of-pair's hold so the session-finalize
+      // cron won't ALSO fire RULE_UNCONFIRMED_EMERGENCY on it. The atomic
+      // updateMany guard mirrors finalizeSingleReadingSession.
+      if (
+        optionDState === EmergencyConfirmationState.CONFIRMATORY &&
+        dto.confirmsEntryId
+      ) {
+        await this.prisma.journalEntry.updateMany({
+          where: { id: dto.confirmsEntryId, userId, singleReadingFinalized: false },
+          data: { singleReadingFinalized: true },
+        })
+      }
+
       // Engine evaluation runs for BOTH patient and admin creates — a new
       // reading is a new clinical datapoint regardless of who keyed it in.
-      this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_CREATED, {
-        userId,
-        entryId: entry.id,
-        measuredAt: entry.measuredAt,
-        systolicBP: entry.systolicBP,
-        diastolicBP: entry.diastolicBP,
-        pulse: entry.pulse,
-        weight: entry.weight != null ? Number(entry.weight) : null,
-        sessionId: entry.sessionId,
-      })
+      // EXCEPTION: an Option D AWAITING first-of-pair is HELD — the engine must
+      // NOT run (no emergency may page until the patient confirms or the
+      // cron/decline path resolves it as UNCONFIRMED). So skip the emit.
+      if (optionDState !== EmergencyConfirmationState.AWAITING) {
+        this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_CREATED, {
+          userId,
+          entryId: entry.id,
+          measuredAt: entry.measuredAt,
+          systolicBP: entry.systolicBP,
+          diastolicBP: entry.diastolicBP,
+          pulse: entry.pulse,
+          weight: entry.weight != null ? Number(entry.weight) : null,
+          sessionId: entry.sessionId,
+        })
+      }
 
       // Cluster 6 Q2 (Manisha 5/9/26): frontend hint to render the "Take a
       // second reading in about 1 minute" prompt + 5-min timeout. True when
@@ -301,7 +351,11 @@ export class DailyJournalService {
       // (which has its own ≥3-reading gate) AND isn't Pre-Day-3. The engine
       // gate is the authoritative source — this hint is just for UX so the
       // patient sees the prompt without polling.
-      const pendingSecondReading = await this.computePendingSecondReading(userId, entry)
+      // Option D readings drive their own retake UI (Screen B), not the
+      // ordinary Cluster 6 Q2 "take a second reading" non-emergency prompt.
+      const pendingSecondReading = optionDState
+        ? false
+        : await this.computePendingSecondReading(userId, entry)
 
       // Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) —
       // Gate A (structural "is new latest?") POST signal. If a strictly later
@@ -332,6 +386,11 @@ export class DailyJournalService {
           gateASuppressed: newerOutsideSession != null,
         }),
         pendingSecondReading,
+        // Option D (Manisha 2026-06-12 Q2) — tells the patient app to show the
+        // confirmatory second-reading screen (Screen B). The held first-of-pair
+        // id is `data.id`, which the app passes back as `confirmsEntryId`.
+        pendingEmergencyConfirmation:
+          optionDState === EmergencyConfirmationState.AWAITING,
       }
     } catch (error) {
       if (
@@ -1066,6 +1125,83 @@ export class DailyJournalService {
   }
 
   /**
+   * Option D (Manisha 2026-06-12 Q2) — resolve a held AWAITING first-of-pair as
+   * UNCONFIRMED. Called by the explicit decline endpoint (patient closed/declined
+   * the retake) and by the SessionFinalizeService cron (app-closed safety net,
+   * 5-min window elapsed with no confirmatory reading). Flips the row to
+   * UNCONFIRMED + releases the hold, then re-triggers the engine, which fires
+   * RULE_UNCONFIRMED_EMERGENCY (Tier 1 provider-only).
+   *
+   * Idempotent via the same `singleReadingFinalized` atomic claim as
+   * finalizeSingleReadingSession — a CONFIRMATORY resolution releases the hold
+   * first (sets singleReadingFinalized=true), so a racing cron tick no-ops and
+   * never double-fires.
+   */
+  async finalizeUnconfirmedEmergency(userId: string, entryId: string) {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { id: entryId, userId },
+      select: {
+        id: true,
+        userId: true,
+        sessionId: true,
+        measuredAt: true,
+        systolicBP: true,
+        diastolicBP: true,
+        pulse: true,
+        weight: true,
+        singleReadingFinalized: true,
+        emergencyConfirmation: true,
+      },
+    })
+    if (!entry) {
+      throw new NotFoundException('Journal entry not found')
+    }
+    // Only a still-held AWAITING entry becomes UNCONFIRMED. A CONFIRMATORY
+    // resolution already released the hold — no-op.
+    if (
+      entry.emergencyConfirmation !== EmergencyConfirmationState.AWAITING ||
+      entry.singleReadingFinalized
+    ) {
+      return { statusCode: 200, message: 'Already resolved — no-op.' }
+    }
+
+    // Atomic claim — flip hold + state only while still AWAITING + unfinalized.
+    const claim = await this.prisma.journalEntry.updateMany({
+      where: {
+        id: entryId,
+        singleReadingFinalized: false,
+        emergencyConfirmation: EmergencyConfirmationState.AWAITING,
+      },
+      data: {
+        singleReadingFinalized: true,
+        emergencyConfirmation: EmergencyConfirmationState.UNCONFIRMED,
+      },
+    })
+    if (claim.count === 0) {
+      return { statusCode: 200, message: 'Already resolved — no-op.' }
+    }
+
+    // Re-trigger evaluation. runPipeline sees emergencyConfirmation=UNCONFIRMED
+    // and fires RULE_UNCONFIRMED_EMERGENCY.
+    this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
+      userId: entry.userId,
+      entryId: entry.id,
+      measuredAt: entry.measuredAt,
+      systolicBP: entry.systolicBP,
+      diastolicBP: entry.diastolicBP,
+      pulse: entry.pulse,
+      weight: entry.weight != null ? Number(entry.weight) : null,
+      sessionId: entry.sessionId,
+    })
+
+    return {
+      statusCode: 202,
+      message:
+        'Unconfirmed emergency finalized. Background analysis in progress.',
+    }
+  }
+
+  /**
    * Hard delete (soft-delete is paused with Chunk E). `actor` set = care-team
    * delete via the admin readings endpoints — ADMIN_READING_DELETED audit row
    * and NO session re-evaluation emit. Full row fetched (not a narrow select)
@@ -1533,6 +1669,10 @@ export class DailyJournalService {
     notes: string | null
     source: EntrySource
     sourceMetadata: JsonValue
+    // Option D + edit window (Manisha 2026-06-12). Optional so mocked/legacy
+    // callers keep compiling; Prisma supplies them on real reads.
+    engineEvaluationDeferredUntil?: Date | null
+    emergencyConfirmation?: string | null
     createdAt: Date
     updatedAt: Date
   },
@@ -1599,6 +1739,12 @@ export class DailyJournalService {
       notes: entry.notes,
       source: entry.source.toLowerCase(),
       sourceMetadata: entry.sourceMetadata,
+      // Option D + edit window (Manisha 2026-06-12) — the readings page uses
+      // engineEvaluationDeferredUntil to show the "editable for 5 min / not yet
+      // sent to your care team" affordance; emergencyConfirmation lets the app
+      // distinguish a held/retake reading from an ordinary one.
+      engineEvaluationDeferredUntil: entry.engineEvaluationDeferredUntil ?? null,
+      emergencyConfirmation: entry.emergencyConfirmation ?? null,
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
     }

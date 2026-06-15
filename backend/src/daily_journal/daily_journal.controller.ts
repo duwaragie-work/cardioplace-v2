@@ -218,6 +218,22 @@ export class DailyJournalController {
     return this.dailyJournalService.finalizeSingleReadingSession(userId, id)
   }
 
+  /**
+   * Option D (Manisha 2026-06-12 Q2) — patient declined / closed the
+   * confirmatory retake (Screen C), or the 5-min window elapsed client-side.
+   * Resolves the held AWAITING first-of-pair as UNCONFIRMED, firing
+   * RULE_UNCONFIRMED_EMERGENCY (Tier 1 provider-only). The SessionFinalizeService
+   * cron is the app-closed safety net that calls the same service method.
+   */
+  @Post(':id/decline-confirmation')
+  declineEmergencyConfirmation(
+    @Req() req: Request,
+    @Param('id') id: string,
+  ) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.finalizeUnconfirmedEmergency(userId, id)
+  }
+
   @Patch('alerts/:id/acknowledge')
   acknowledgeAlert(@Req() req: Request, @Param('id') id: string) {
     const { id: userId } = req.user as { id: string }

@@ -100,6 +100,11 @@ export class SessionAveragerService {
        *  present on real reads (averageForEntry passes the full Prisma row);
        *  optional so pure-aggregation test callers keep compiling. */
       createdAt?: Date
+      /** Option D (Manisha 2026-06-12 Q2) — anchor's retake-confirm state +
+       *  the first-of-pair id (for BP1 lookup among siblings). Optional so
+       *  pure-aggregation test callers keep compiling. */
+      emergencyConfirmation?: string | null
+      confirmsEntryId?: string | null
     },
     siblings: Array<{
       id: string
@@ -165,6 +170,14 @@ export class SessionAveragerService {
     const medicationTaken = orReduceMedicationTaken(siblings)
     const missedMedications = unionMissedMedications(siblings)
 
+    // Option D (Manisha 2026-06-12 Q2) — on a CONFIRMATORY session, BP1 is the
+    // first-of-pair (AWAITING) reading. It always shares this session, so it's
+    // a sibling; locate it by confirmsEntryId. BP2 is the anchor (submitted*).
+    const optionDFirst =
+      anchor.emergencyConfirmation === 'CONFIRMATORY' && anchor.confirmsEntryId
+        ? siblings.find((s) => s.id === anchor.confirmsEntryId)
+        : undefined
+
     return {
       entryId: anchor.id,
       userId: anchor.userId,
@@ -184,6 +197,11 @@ export class SessionAveragerService {
       // Cluster 6 Q2 — bypass the non-emergency single-reading gate when
       // the anchor entry has been finalized by the frontend 5-min timeout.
       singleReadingFinalized: anchor.singleReadingFinalized ?? false,
+      // Option D (Manisha 2026-06-12 Q2) — retake-confirm state + BP1 for the
+      // CONFIRMED_NORMAL physician message. Null for non-Option-D sessions.
+      emergencyConfirmation: anchor.emergencyConfirmation ?? null,
+      optionDInitialSystolicBP: optionDFirst?.systolicBP ?? null,
+      optionDInitialDiastolicBP: optionDFirst?.diastolicBP ?? null,
       // Chunk B (Manisha Backdated Readings sign-off 2026-06-06) — carry the
       // anchor entry's measurement-lag band so the engine can suppress ALL
       // alerts on HISTORICAL_ENTRY (fix-up) and the registry can drop the

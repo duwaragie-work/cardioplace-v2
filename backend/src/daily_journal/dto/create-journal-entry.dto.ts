@@ -294,4 +294,24 @@ export class CreateJournalEntryDto {
   @IsOptional()
   @IsObject({ message: 'sourceMetadata must be a JSON object' })
   sourceMetadata?: Record<string, unknown>
+
+  // ── Option D — retake-to-confirm (Manisha 2026-06-12 Q2) ──────────────────
+  // The patient app sets ONE of these when resolving the BP-only emergency
+  // retake flow (≥180/120, no symptoms). Mutually exclusive in practice.
+
+  // First-of-pair: persist the emergency reading as AWAITING (held — the engine
+  // is NOT run) and prompt the patient for a confirmatory second reading. The
+  // 202 response carries the new entry id so the app can pass `confirmsEntryId`
+  // on the second reading.
+  @IsOptional()
+  @IsBoolean()
+  beginEmergencyConfirmation?: boolean
+
+  // Second-of-pair: this reading confirms/clears the AWAITING first-of-pair
+  // whose id is given here. The service marks this entry CONFIRMATORY, releases
+  // the first-of-pair's hold, and the engine fires the resolved outcome
+  // (ABSOLUTE_EMERGENCY if still ≥180/120, else EMERGENCY_RANGE_CONFIRMED_NORMAL).
+  @IsOptional()
+  @IsUUID()
+  confirmsEntryId?: string
 }

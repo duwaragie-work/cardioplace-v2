@@ -2841,5 +2841,87 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
         expect(createArgs.data.physicianMessage).not.toContain('Delayed entry:')
       })
     })
+
+    // ====================================================================
+    // Option D — retake-to-confirm (Manisha 2026-06-12 Q2). The held AWAITING
+    // first-of-pair never reaches the engine; these cover the two resolutions
+    // that DO evaluate (CONFIRMATORY + UNCONFIRMED). Each is TERMINAL — exactly
+    // one outcome alert, no average-based co-fire.
+    // ====================================================================
+    describe('Option D — retake-to-confirm', () => {
+      it('CONFIRMATORY + second reading still ≥180/120 → RULE_ABSOLUTE_EMERGENCY (BP Level 2)', async () => {
+        const { result, createArgs } = await run(
+          buildSession({
+            emergencyConfirmation: 'CONFIRMATORY',
+            readingCount: 2,
+            systolicBP: 192,
+            diastolicBP: 121,
+            submittedSystolicBP: 195,
+            submittedDiastolicBP: 122,
+            optionDInitialSystolicBP: 190,
+            optionDInitialDiastolicBP: 120,
+          }),
+          buildCtx({}),
+        )
+        expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+        expect(createArgs.data.tier).toBe('BP_LEVEL_2')
+        expect(prisma.deviationAlert.create.mock.calls.length).toBe(1)
+      })
+
+      it('CONFIRMATORY + second reading below threshold → RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL (Tier 3); names BP1+BP2, NOT the average; no spurious L1', async () => {
+        const { result, createArgs } = await run(
+          buildSession({
+            emergencyConfirmation: 'CONFIRMATORY',
+            readingCount: 2,
+            // Session AVERAGE of 195/120 + 135/85 — would fire STANDARD_L1_HIGH
+            // (≥160/100) if the resolution weren't terminal.
+            systolicBP: 165,
+            diastolicBP: 102,
+            // BP2 (confirmatory) — below the 180/120 emergency band.
+            submittedSystolicBP: 135,
+            submittedDiastolicBP: 85,
+            // BP1 (the held first-of-pair, emergency range).
+            optionDInitialSystolicBP: 195,
+            optionDInitialDiastolicBP: 120,
+          }),
+          buildCtx({}),
+        )
+        expect(result?.ruleId).toBe('RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL')
+        expect(createArgs.data.tier).toBe('TIER_3_INFO')
+        // BP1 (emergency) + BP2 (confirmatory) spelled out; the average is NOT.
+        expect(createArgs.data.physicianMessage).toContain('195/120 mmHg')
+        expect(createArgs.data.physicianMessage).toContain('135/85 mmHg')
+        expect(createArgs.data.physicianMessage).not.toContain('165/102')
+        // Provider-only + terminal (no average-based BP Level 1 co-fire).
+        expect(createArgs.data.patientMessage).toBeFalsy()
+        expect(createArgs.data.caregiverMessage).toBeFalsy()
+        expect(prisma.deviationAlert.create.mock.calls.length).toBe(1)
+      })
+
+      it('UNCONFIRMED → RULE_UNCONFIRMED_EMERGENCY (Tier 1 contraindication), provider-only, no L2/L1 co-fire on the lone ≥180/120 reading', async () => {
+        const { result, createArgs } = await run(
+          buildSession({
+            emergencyConfirmation: 'UNCONFIRMED',
+            readingCount: 1,
+            singleReadingFinalized: true,
+            systolicBP: 195,
+            diastolicBP: 120,
+            submittedSystolicBP: 195,
+            submittedDiastolicBP: 120,
+          }),
+          buildCtx({}),
+        )
+        expect(result?.ruleId).toBe('RULE_UNCONFIRMED_EMERGENCY')
+        expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+        expect(createArgs.data.physicianMessage).toContain(
+          'Single unconfirmed emergency-range reading',
+        )
+        expect(createArgs.data.physicianMessage).toContain('195/120 mmHg')
+        expect(createArgs.data.patientMessage).toBeFalsy()
+        expect(createArgs.data.caregiverMessage).toBeFalsy()
+        // Lone ≥180/120 reading must NOT also fire ABSOLUTE_EMERGENCY / L1.
+        expect(prisma.deviationAlert.create.mock.calls.length).toBe(1)
+      })
+    })
   })
 })

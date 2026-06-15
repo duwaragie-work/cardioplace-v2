@@ -92,6 +92,28 @@ model JournalEntry {
   // single-reading sessions.
   singleReadingFinalized Boolean @default(false)
 
+  // Option D + Edit-Window (Manisha 2026-06-12 Edit-Window + Session Policy
+  // sign-off). Server-authoritative deadline before this entry's engine
+  // evaluation commits — while now() < this, the patient may edit/delete and no
+  // alert fires (Q1 + Q4, 5-min window). Null = evaluate immediately (legacy
+  // rows + emergencies that bypass the window). Stamped at create =
+  // createdAt + FIVE_MIN; cleared (set to a past instant / now) on "I'm done".
+  engineEvaluationDeferredUntil DateTime?
+
+  // Option D retake-to-confirm (Manisha 2026-06-12 Q2). Null for every
+  // non-Option-D entry. AWAITING = first emergency-range, no-symptom reading,
+  // held (engine NOT run) pending a confirmatory reading; CONFIRMATORY = the
+  // second reading that confirms/clears the first; UNCONFIRMED = resolved by
+  // decline / 5-min expiry → fires RULE_UNCONFIRMED_EMERGENCY (Tier 1
+  // provider-only). See docs/design/OPTION_D_AND_EDIT_WINDOW_DESIGN.md.
+  emergencyConfirmation EmergencyConfirmationState?
+
+  // On a CONFIRMATORY entry, the first-of-pair (AWAITING) entry id. Lets the
+  // engine read BP1 for the RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL physician
+  // message (→ AlertContext.initialSystolicBP/initialDiastolicBP). The pair
+  // always shares a sessionId, so BP1 is also reachable as a session sibling.
+  confirmsEntryId String?
+
   // Manisha 5/24 Q1 Tier 2 — narrow pulse pressure (SBP−DBP < 15) on this
   // INDIVIDUAL reading at entry. Physician-only artifact flag (no alert tier,
   // no patient message); the reading still enters the session average, where
@@ -126,6 +148,14 @@ enum Position {
   SITTING
   STANDING
   LYING
+}
+
+// Option D retake-to-confirm state (Manisha 2026-06-12 Q2). See JournalEntry
+// .emergencyConfirmation + docs/design/OPTION_D_AND_EDIT_WINDOW_DESIGN.md.
+enum EmergencyConfirmationState {
+  AWAITING     // first-of-pair emergency reading; held, awaiting confirmation
+  CONFIRMATORY // second-of-pair reading submitted to confirm/clear the first
+  UNCONFIRMED  // resolved: patient declined / window expired → Tier 1 flag
 }
 
 // Manisha Backdated Readings sign-off 2026-06-06 — bucketed lag between when

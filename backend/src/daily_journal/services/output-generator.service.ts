@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import {
   ALL_RULE_IDS,
+  RULE_IDS,
   alertMessageRegistry,
   physL1DelayedDisclaimer,
   type AlertContext,
@@ -120,11 +121,28 @@ export class OutputGeneratorService implements OnModuleInit {
           ? [result.metadata.drugName]
           : []
 
+    // Option D (Manisha 2026-06-12 Q2) — the CONFIRMED_NORMAL physician message
+    // names BP1 (the emergency-range first reading) and BP2 (the confirmatory
+    // reading). BP2 is the confirmatory reading itself (submitted*), NOT the
+    // session average — so for this one rule the physician ctx uses the
+    // submitted reading; BP1 comes from session.optionDInitial*.
+    const isConfirmedNormal =
+      result.ruleId === RULE_IDS.EMERGENCY_RANGE_CONFIRMED_NORMAL
+    const physSystolic = isConfirmedNormal
+      ? (session.submittedSystolicBP ?? session.systolicBP)
+      : session.systolicBP
+    const physDiastolic = isConfirmedNormal
+      ? (session.submittedDiastolicBP ?? session.diastolicBP)
+      : session.diastolicBP
+
     return {
       // #83 — scopes the single-reading caveat to BP/HR rules in physSuffix.
       ruleId: result.ruleId,
-      systolicBP: session.systolicBP,
-      diastolicBP: session.diastolicBP,
+      systolicBP: physSystolic,
+      diastolicBP: physDiastolic,
+      // Option D — BP1 (held first-of-pair) for RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL.
+      initialSystolicBP: session.optionDInitialSystolicBP ?? null,
+      initialDiastolicBP: session.optionDInitialDiastolicBP ?? null,
       pulse: session.pulse,
       pulsePressure: result.pulsePressure,
       drugName: result.metadata.drugName ?? null,
