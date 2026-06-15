@@ -237,6 +237,21 @@ const en = {
   'checkin.confirm.takeSecondReading': 'Take a second reading in about 1 minute',
   'checkin.confirm.takeSecondReadingHint':
     "One reading on its own can be off — a second one helps your care team get the full picture. We'll wait a few minutes for you to take it.",
+  // Option D — retake-to-confirm (Manisha 2026-06-12 Q2). PLACEHOLDER wording
+  // (Manisha-drafted, pending formal CONFIRM) — swap here on her redline.
+  'checkin.optionD.screenA.title': 'That reading is very high',
+  'checkin.optionD.screenA.body': 'Your reading of {bp} is very high. Please sit calmly for 1 minute, then take a second reading to confirm.',
+  'checkin.optionD.screenA.retake': 'Take a second reading',
+  'checkin.optionD.screenA.cantNow': "I can't right now",
+  'checkin.optionD.screenB.title': 'Take your second reading',
+  'checkin.optionD.screenB.body': 'When you have rested for about a minute, enter your second reading below.',
+  'checkin.optionD.screenB.submit': 'Submit second reading',
+  'checkin.optionD.screenB.cantNow': "I'm done for now",
+  'checkin.optionD.screenB.bothNumbers': 'Please enter both the top and bottom numbers.',
+  'checkin.optionD.screenC.title': 'Your reading was recorded',
+  'checkin.optionD.screenC.body': 'We saved your reading and let your care team know they should check in with you.',
+  'checkin.optionD.screenC.safetyFooter': "If you're feeling unwell right now, please call your doctor or 911.",
+  'checkin.optionD.screenC.done': 'Back to dashboard',
   'checkin.b3.otherLabel': 'Anything else? (optional)',
   'checkin.b3.otherPlaceholder': 'In your own words…',
   'checkin.b3.otherSymptomsLabel': 'Any other symptoms? (optional)',
@@ -596,6 +611,9 @@ const en = {
   'readings.viewDetails': 'View reading details',
   'readings.noBpRecorded': 'No BP recorded',
   'readings.symptomLog': 'Symptom log',
+  // Option D + edit window (Manisha 2026-06-12 Q1+Q4) — shown while a reading is
+  // still within its 5-min grace period (not yet committed to the engine).
+  'readings.editableWindow': 'Editable for a few more minutes',
   'readings.meds': 'Meds',
   'readings.taken': 'Taken',
   'readings.missed': 'Missed',

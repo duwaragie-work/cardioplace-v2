@@ -88,6 +88,13 @@ export interface JournalEntryPayload {
   otherSymptoms?: string[]
   notes?: string
   source?: 'manual' | 'healthkit'
+  // ── Option D — retake-to-confirm (Manisha 2026-06-12 Q2) ──────────────────
+  /** First-of-pair: persist this emergency reading as held (AWAITING) and
+   *  prompt for a confirmatory second reading. The 202 response carries
+   *  `pendingEmergencyConfirmation: true` + the entry id (data.id). */
+  beginEmergencyConfirmation?: boolean
+  /** Second-of-pair: the AWAITING first-of-pair id this reading confirms/clears. */
+  confirmsEntryId?: string
 }
 
 export interface JournalEntryDto extends JournalEntryPayload {
@@ -105,6 +112,13 @@ export interface JournalEntryDto extends JournalEntryPayload {
    *  'HISTORICAL_ENTRY' also appears on GETs (derived from delayBand). Both
    *  render the same "recorded but won't trigger real-time alerts" banner. */
   alertsSuppressedReason?: 'GATE_A' | 'HISTORICAL_ENTRY' | null
+  /** Option D + edit window (Manisha 2026-06-12) — ISO deadline before the
+   *  engine commits; while now < this, the readings page shows the "editable /
+   *  not yet sent" affordance. Null for admin / Option D AWAITING readings. */
+  engineEvaluationDeferredUntil?: string | null
+  /** Option D retake-confirm state: 'AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED'
+   *  or null for ordinary readings. */
+  emergencyConfirmation?: 'AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED' | null
 }
 
 /**
@@ -155,6 +169,10 @@ async function unwrap<T>(res: Response): Promise<T> {
 export interface JournalEntryCreated {
   entry: JournalEntryDto
   pendingSecondReading: boolean
+  /** Option D (Manisha 2026-06-12 Q2) — true when this was a BP-only emergency
+   *  submitted with `beginEmergencyConfirmation`: the reading is held and the
+   *  app should show the confirmatory second-reading screen (Screen B). */
+  pendingEmergencyConfirmation: boolean
 }
 
 export async function createJournalEntry(
@@ -179,6 +197,7 @@ export async function createJournalEntry(
   return {
     entry: (json.data ?? json) as JournalEntryDto,
     pendingSecondReading: Boolean(json.pendingSecondReading),
+    pendingEmergencyConfirmation: Boolean(json.pendingEmergencyConfirmation),
   }
 }
 
@@ -223,6 +242,25 @@ export async function finalizeSingleReadingSession(entryId: string): Promise<voi
   if (!res.ok && res.status !== 200 && res.status !== 202) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.message || `Finalize failed: ${res.status}`)
+  }
+}
+
+/**
+ * Option D (Manisha 2026-06-12 Q2) — patient declined / closed the
+ * confirmatory retake (Screen C) or the 5-min window elapsed client-side.
+ * Resolves the held AWAITING first-of-pair as UNCONFIRMED (fires
+ * RULE_UNCONFIRMED_EMERGENCY, Tier 1 provider-only). Idempotent; the cron is
+ * the app-closed safety net. Best-effort — a failure is non-fatal (the cron
+ * still finalizes), so callers swallow errors.
+ */
+export async function declineEmergencyConfirmation(entryId: string): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/daily-journal/${entryId}/decline-confirmation`,
+    { method: 'POST' },
+  )
+  if (!res.ok && res.status !== 200 && res.status !== 202) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Decline failed: ${res.status}`)
   }
 }
 

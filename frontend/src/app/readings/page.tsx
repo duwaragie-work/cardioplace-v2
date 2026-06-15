@@ -94,6 +94,10 @@ type Entry = {
   symptoms?: string[];
   otherSymptoms?: string[];
   notes?: string;
+  /** Option D + edit window (Manisha 2026-06-12 Q1+Q4) — ISO deadline before the
+   *  engine commits this reading. While now < this, the card shows an "editable /
+   *  not yet sent to your care team" hint (edit/delete stay available either way). */
+  engineEvaluationDeferredUntil?: string | null;
 };
 
 type SymptomKey =
@@ -561,6 +565,23 @@ function EntryCard({
               </span>
             );
           })()}
+          {/* Option D + edit window (Manisha 2026-06-12 Q1+Q4) — within the 5-min
+              grace period this reading hasn't been committed to the engine yet,
+              so edits/deletes are "free". Informational only; edit/delete stay
+              available after the window too. */}
+          {entry.engineEvaluationDeferredUntil &&
+            new Date(entry.engineEvaluationDeferredUntil).getTime() > Date.now() && (
+              <span
+                data-testid={`reading-editable-${entry.id}`}
+                className="text-[0.625rem] px-1.5 py-0.5 rounded-full font-semibold"
+                style={{
+                  backgroundColor: 'var(--brand-info-bg, #EEF2FF)',
+                  color: 'var(--brand-primary-purple)',
+                }}
+              >
+                {t('readings.editableWindow')}
+              </span>
+            )}
         </div>
 
         {/* Actions — stop click bubbling so tapping these doesn't also open

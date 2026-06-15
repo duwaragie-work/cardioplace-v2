@@ -57,7 +57,8 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
-import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, getActiveSession, type ActiveSessionDto } from '@/lib/services/journal.service';
+import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, declineEmergencyConfirmation, getActiveSession, type ActiveSessionDto, type JournalEntryPayload } from '@/lib/services/journal.service';
+import { OptionDFlow, type OptionDSecondReading } from '@/components/cardio/OptionDFlow';
 import { delayBandFor, showsSuppressedBanner, type DelayBand } from '@/lib/delayBand';
 import { selectReadingPrompt } from '@/lib/sessionPrompt';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
@@ -2075,6 +2076,12 @@ export default function CheckIn() {
   // non-preDay3 reading. Drives the "Take a second reading" prompt + 5-min
   // finalize timer in <ConfirmationScreen>. Null otherwise.
   const [pendingFinalizeEntryId, setPendingFinalizeEntryId] = useState<string | null>(null);
+  // Option D (Manisha 2026-06-12 Q2) — when a BP-only emergency (≥180/120, no
+  // symptoms) is submitted, the first reading is persisted held (AWAITING) and
+  // this activates the retake-to-confirm flow (<OptionDFlow>).
+  const [optionDActive, setOptionDActive] = useState(false);
+  const [optionDFirstId, setOptionDFirstId] = useState<string | null>(null);
+  const [optionDFirstBp, setOptionDFirstBp] = useState<{ sys: number; dia: number } | null>(null);
 
   // Cross-visit session continuity — the patient's currently OPEN session (if
   // any) fetched on mount. While set + unresolved + not expired, the "add to
@@ -2351,9 +2358,7 @@ export default function CheckIn() {
         ...(e.state.taken === 'no' ? { missedDoses: e.state.missedDoses } : {}),
       }));
 
-    setSubmitting(true);
-    try {
-      const created = await createJournalEntry({
+    const basePayload: JournalEntryPayload = {
         measuredAt: measuredAtIso,
         systolicBP: sys,
         diastolicBP: dia,
@@ -2392,7 +2397,49 @@ export default function CheckIn() {
         // Patient-typed custom symptom chips → otherSymptoms; free-text → notes.
         otherSymptoms: form.otherSymptomsList.length ? form.otherSymptomsList : undefined,
         notes: form.notes.trim() ? form.notes.trim() : undefined,
-      });
+    };
+
+    // Option D (Manisha 2026-06-12 Q2) — a BP-only emergency (≥180/120) with NO
+    // co-occurring symptoms enters the retake-to-confirm flow rather than firing
+    // immediately. ANY reported symptom (target-organ-damage or otherwise) is a
+    // co-occurring symptom → fall through to immediate submit (Option A), so a
+    // symptomatic emergency is never asked to "sit calmly and retake". Backdated
+    // readings (DELAYED/HISTORICAL) skip Option D — the engine's own suppression
+    // gates handle stale data; only current/near-real-time readings retake.
+    const optionDBand = delayBandFor(
+      new Date(`${form.measuredDate}T${form.measuredTime}`).getTime(),
+      Date.now(),
+    );
+    const isEmergencyBP = (sys != null && sys >= 180) || (dia != null && dia >= 120);
+    const hasAnySymptom =
+      form.severeHeadache || form.visualChanges || form.alteredMentalStatus ||
+      form.chestPainOrDyspnea || form.focalNeuroDeficit || form.severeEpigastricPain ||
+      form.newOnsetHeadache || form.ruqPain || form.edema ||
+      form.dizziness || form.syncope || form.palpitations || form.legSwelling ||
+      form.fatigue || form.shortnessOfBreath || form.dryCough ||
+      form.faceSwelling || form.throatTightness ||
+      form.otherSymptomsList.length > 0;
+    const optionDEligible =
+      isEmergencyBP &&
+      !hasAnySymptom &&
+      (optionDBand === 'REAL_TIME' || optionDBand === 'NEAR_REAL_TIME');
+
+    setSubmitting(true);
+    try {
+      if (optionDEligible && sys != null && dia != null) {
+        // Persist the first reading HELD (AWAITING) so the server-side safety
+        // net (cron) can flag it UNCONFIRMED if the patient abandons the flow;
+        // no alert pages anyone until the patient confirms or declines.
+        const held = await createJournalEntry({ ...basePayload, beginEmergencyConfirmation: true });
+        if (user?.id) clearCheckInDraft(user.id);
+        setImplausibleCount(0);
+        setOptionDFirstId(held.entry.id);
+        setOptionDFirstBp({ sys, dia });
+        setOptionDActive(true);
+        return;
+      }
+
+      const created = await createJournalEntry(basePayload);
 
       // Reading saved — drop the draft so the patient isn't prompted to resume
       // a check-in they already submitted. Also reset the impossible-reading
@@ -2445,6 +2492,27 @@ export default function CheckIn() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Option D (Manisha 2026-06-12 Q2) — the confirmatory second reading. Same
+  // session, linked to the held first-of-pair via confirmsEntryId; the engine
+  // resolves ABSOLUTE_EMERGENCY (still ≥180/120) vs EMERGENCY_RANGE_CONFIRMED_NORMAL.
+  async function submitOptionDSecond(reading: OptionDSecondReading) {
+    await createJournalEntry({
+      measuredAt: new Date().toISOString(),
+      systolicBP: reading.systolicBP,
+      diastolicBP: reading.diastolicBP,
+      pulse: reading.pulse,
+      position: form.position ?? undefined,
+      sessionId: sessionId ?? undefined,
+      confirmsEntryId: optionDFirstId ?? undefined,
+    });
+  }
+
+  // Option D — patient declined / couldn't retake. Flag the held first-of-pair
+  // UNCONFIRMED (Tier 1 provider-only). Best-effort: the cron is the backstop.
+  async function handleOptionDDecline() {
+    if (optionDFirstId) await declineEmergencyConfirmation(optionDFirstId);
   }
 
   // Resume prompt — load the saved draft into the wizard. Merge over a fresh
@@ -2753,6 +2821,20 @@ export default function CheckIn() {
   }
 
   // Confirmation overlays the whole flow
+  // Option D (Manisha 2026-06-12 Q2) — retake-to-confirm takes over the screen
+  // once a BP-only emergency reading has been held.
+  if (optionDActive && optionDFirstId && optionDFirstBp) {
+    return (
+      <OptionDFlow
+        firstSystolic={optionDFirstBp.sys}
+        firstDiastolic={optionDFirstBp.dia}
+        onSubmitSecond={submitOptionDSecond}
+        onDecline={handleOptionDDecline}
+        onDone={() => router.push('/dashboard')}
+      />
+    );
+  }
+
   if (showConfirmation) {
     const last = sessionReadings[sessionReadings.length - 1];
     return (
