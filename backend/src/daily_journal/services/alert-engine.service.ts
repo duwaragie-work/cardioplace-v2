@@ -283,8 +283,15 @@ export class AlertEngineService {
     )
   }
 
-  @OnEvent(JOURNAL_EVENTS.ENTRY_UPDATED, { async: true })
-  async handleEntryUpdated(payload: JournalEntryUpdatedEvent) {
+  // Signed CTO 2026-06-09 "no re-trigger" policy (Manisha 2026-06-12 Q2 "we
+  // cannot un-page"): the engine MUST NOT re-evaluate on a patient EDIT/DELETE
+  // (ENTRY_UPDATED). It subscribes ONLY to ENTRY_FINALIZED — the FIRST
+  // evaluation of a previously-HELD reading (Cluster 6 Q2 single-reading
+  // finalize + Option D UNCONFIRMED finalize). A patient editing a fired
+  // reading no longer flips/double-fires its alert; the corrected value rides
+  // into the next new entry's evaluation batch (e.g. session averaging).
+  @OnEvent(JOURNAL_EVENTS.ENTRY_FINALIZED, { async: true })
+  async handleEntryFinalized(payload: JournalEntryUpdatedEvent) {
     await this.evaluate(payload.entryId).catch((err) =>
       this.logEvaluationError(payload.entryId, err),
     )

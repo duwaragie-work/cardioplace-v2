@@ -411,11 +411,15 @@ export class DailyJournalService {
 
   /**
    * `actor` set = care-team edit via the admin readings endpoints: audit row
-   * is ADMIN_READING_EDITED and the engine is NOT re-triggered (CTO Option C
-   * — the corrected value flows into the next new reading's batch). Patient
-   * edits (actor undefined) KEEP the existing ENTRY_UPDATED re-evaluation
-   * until Manisha signs off her pending Q2 on removing it — safety net for
-   * e.g. a reading corrected upward into emergency range.
+   * is ADMIN_READING_EDITED and no event is emitted at all.
+   *
+   * Patient edits (actor undefined) emit ENTRY_UPDATED — but per the signed CTO
+   * 2026-06-09 no-re-trigger policy (Manisha 2026-06-12 Q2 "we cannot un-page"),
+   * the rule engine deliberately does NOT subscribe to ENTRY_UPDATED. The emit
+   * exists ONLY so chat / voice refresh their context cache. The edited value
+   * is seen by the engine only when it next evaluates a NEW entry (e.g. session
+   * averaging picks up the corrected sibling). A patient editing a fired reading
+   * never flips/double-fires its alert.
    */
   async update(
     userId: string,
@@ -1105,8 +1109,11 @@ export class DailyJournalService {
       }
     }
 
-    // Re-trigger evaluation. AlertEngineService.handleEntryUpdated subscribes.
-    this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
+    // FIRST evaluation of the held single reading (not a re-trigger).
+    // AlertEngineService.handleEntryFinalized subscribes to ENTRY_FINALIZED;
+    // ENTRY_UPDATED (patient edits) deliberately no longer reaches the engine
+    // per the CTO 2026-06-09 no-re-trigger policy.
+    this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_FINALIZED, {
       userId: entry.userId,
       entryId: entry.id,
       measuredAt: entry.measuredAt,
@@ -1181,9 +1188,10 @@ export class DailyJournalService {
       return { statusCode: 200, message: 'Already resolved — no-op.' }
     }
 
-    // Re-trigger evaluation. runPipeline sees emergencyConfirmation=UNCONFIRMED
-    // and fires RULE_UNCONFIRMED_EMERGENCY.
-    this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
+    // FIRST evaluation of the held reading (not a re-trigger). runPipeline sees
+    // emergencyConfirmation=UNCONFIRMED and fires RULE_UNCONFIRMED_EMERGENCY.
+    // Uses ENTRY_FINALIZED so the no-re-trigger policy on ENTRY_UPDATED holds.
+    this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_FINALIZED, {
       userId: entry.userId,
       entryId: entry.id,
       measuredAt: entry.measuredAt,

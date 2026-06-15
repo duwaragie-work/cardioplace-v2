@@ -9,6 +9,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EntrySource, DelayBand, Prisma } from '../generated/prisma/client.js';
 import { DailyJournalService, computeDelayBand } from './daily_journal.service.js';
+import { JOURNAL_EVENTS } from './constants/events.js';
 import { SESSION_WINDOW_MS } from '@cardioplace/shared';
 
 const mockPrisma = {
@@ -855,9 +856,11 @@ describe('DailyJournalService', () => {
   // Every reading create/edit/delete writes a ProfileVerificationLog row,
   // transaction-scoped with the data operation. Patient actions →
   // PATIENT_READING_*; care-team actions (actor param, Phase 3B admin
-  // endpoints) → ADMIN_READING_*. CTO Option C: admin edit/delete do NOT
-  // re-trigger the engine; patient edit/delete re-evaluation KEPT pending
-  // Manisha's Q2 sign-off.
+  // endpoints) → ADMIN_READING_*. CTO 2026-06-09 no-re-trigger policy: NEITHER
+  // admin NOR patient edit/delete re-triggers the engine. Admin edits emit
+  // nothing; patient edits/deletes emit ENTRY_UPDATED for chat/voice context
+  // refresh only — the engine listens to ENTRY_FINALIZED + ENTRY_CREATED, never
+  // ENTRY_UPDATED.
   describe('journal-entry audit log', () => {
     const measuredAt = '2026-06-12T10:00:00Z'
     const ADMIN: any = { id: 'admin-1', roles: ['SUPER_ADMIN'] }
@@ -1026,7 +1029,7 @@ describe('DailyJournalService', () => {
       expect(mockPrisma.journalEntry.create.mock.calls[0][0].data.sessionId).toBe('s-live')
     })
 
-    it('PUT (patient) → PATIENT_READING_EDITED with prior + new snapshots; engine emit KEPT', async () => {
+    it('PUT (patient) → PATIENT_READING_EDITED; emits ENTRY_UPDATED (chat/voice) but NOT ENTRY_FINALIZED — no engine re-trigger (CTO 2026-06-09)', async () => {
       mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(fullRow({ systolicBP: 130 }))
       mockPrisma.journalEntry.update.mockResolvedValueOnce(fullRow({ systolicBP: 145 }))
       mockPrisma.profileVerificationLog.create.mockResolvedValueOnce({})
@@ -1038,8 +1041,13 @@ describe('DailyJournalService', () => {
       expect(audit.data.fieldPath).toBe('journal_entry.edited')
       expect(audit.data.previousValue).toMatchObject({ entryId: 'e1', systolicBP: 130 })
       expect(audit.data.newValue).toMatchObject({ entryId: 'e1', systolicBP: 145 })
-      // Manisha Q2 pending — patient edits still re-trigger the engine.
+      // Bug 9 / CTO 2026-06-09 no-re-trigger: the edit emits ENTRY_UPDATED for
+      // chat/voice context refresh, but NEVER ENTRY_FINALIZED — the engine
+      // (which only listens to ENTRY_FINALIZED + ENTRY_CREATED) does not re-fire.
       expect(mockEventEmitter.emit).toHaveBeenCalledTimes(1)
+      const emitted = mockEventEmitter.emit.mock.calls.map((c: any[]) => c[0])
+      expect(emitted).toContain(JOURNAL_EVENTS.ENTRY_UPDATED)
+      expect(emitted).not.toContain(JOURNAL_EVENTS.ENTRY_FINALIZED)
       expect(r.statusCode).toBe(202)
     })
 
@@ -1087,7 +1095,7 @@ describe('DailyJournalService', () => {
       expect(auditOrder).toBeLessThan(deleteOrder)
     })
 
-    it('DELETE (patient) with surviving session sibling → re-eval emit KEPT', async () => {
+    it('DELETE (patient) with surviving session sibling → emits ENTRY_UPDATED (context refresh only; engine does not re-eval per CTO 2026-06-09)', async () => {
       mockPrisma.journalEntry.findFirst
         .mockResolvedValueOnce(fullRow())
         .mockResolvedValueOnce({
