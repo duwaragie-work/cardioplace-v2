@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import ReadingsTab, { groupReadingsBySession, type ReadingGroup } from './ReadingsTab'
 import type { PatientJournalEntry } from '@/lib/services/provider.service'
 import * as providerService from '@/lib/services/provider.service'
@@ -10,6 +10,24 @@ import * as providerService from '@/lib/services/provider.service'
 jest.mock('@/lib/services/provider.service', () => ({
   getPatientJournalEntries: jest.fn(),
   getPatientRejectedReadings: jest.fn(),
+  addReading: jest.fn(),
+  editReading: jest.fn(),
+  deleteReading: jest.fn(),
+}))
+
+// Role-gated CRUD — default to the broadest write role; per-test overrides
+// flip to OPS to assert the read-only rendering.
+let mockUser: { id: string; roles: string[] } = { id: 'admin-1', roles: ['SUPER_ADMIN'] }
+jest.mock('@/lib/auth-context', () => ({
+  useAuth: () => ({ user: mockUser }),
+}))
+
+// Profile fetch gates the modal's Pregnancy-specific section; medication
+// fetch drives the per-med adherence question. Defaults: not pregnant, no
+// meds on file.
+jest.mock('@/lib/services/patient-detail.service', () => ({
+  getPatientProfile: jest.fn(() => Promise.resolve({ isPregnant: false })),
+  getPatientMedications: jest.fn(() => Promise.resolve([])),
 }))
 
 const getEntries = providerService.getPatientJournalEntries as jest.MockedFunction<
@@ -17,6 +35,9 @@ const getEntries = providerService.getPatientJournalEntries as jest.MockedFuncti
 >
 const getRejected = providerService.getPatientRejectedReadings as jest.MockedFunction<
   typeof providerService.getPatientRejectedReadings
+>
+const deleteReading = providerService.deleteReading as jest.MockedFunction<
+  typeof providerService.deleteReading
 >
 
 function entry(over: Partial<PatientJournalEntry> = {}): PatientJournalEntry {
@@ -67,6 +88,35 @@ describe('groupReadingsBySession (F25)', () => {
     expect(groups).toHaveLength(3)
     expect(groups.every((g) => g.kind === 'single')).toBe(true)
   })
+
+  it('groups an admin-entered session exactly like a patient session (source-agnostic)', () => {
+    // Patient logs 2 readings in one sitting, later an admin keys in 2 more
+    // via the modal session flow — both pairs must render as session cards.
+    const groups = groupReadingsBySession([
+      entry({ id: 'adm-1', sessionId: 's-admin', source: 'admin', addedByUserId: 'md-1' }),
+      entry({ id: 'adm-2', sessionId: 's-admin', source: 'admin', addedByUserId: 'md-1' }),
+      entry({ id: 'pat-1', sessionId: 's-patient', source: 'manual' }),
+      entry({ id: 'pat-2', sessionId: 's-patient', source: 'manual' }),
+    ])
+    expect(groups).toHaveLength(2)
+    expect(groups.every((g) => g.kind === 'session')).toBe(true)
+    const [admin, patient] = groups as Extract<ReadingGroup, { kind: 'session' }>[]
+    expect(admin.sessionId).toBe('s-admin')
+    expect(admin.entries).toHaveLength(2)
+    expect(patient.sessionId).toBe('s-patient')
+    expect(patient.entries).toHaveLength(2)
+  })
+
+  it('groups a mixed patient + admin-joined session as one card', () => {
+    // Admin reading proximity-joined the patient's open session (same
+    // sessionId) — one sitting, one card, regardless of who keyed each row.
+    const groups = groupReadingsBySession([
+      entry({ id: 'pat-1', sessionId: 's-mixed', source: 'manual' }),
+      entry({ id: 'adm-1', sessionId: 's-mixed', source: 'admin', addedByUserId: 'md-1' }),
+    ])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].kind).toBe('session')
+  })
 })
 
 describe('ReadingsTab — session grouping render (F25)', () => {
@@ -92,5 +142,122 @@ describe('ReadingsTab — session grouping render (F25)', () => {
     }
     // Only one session container exists (the standalone is not wrapped).
     expect(screen.getAllByTestId('admin-readings-session-header')).toHaveLength(1)
+  })
+})
+
+// ─── Admin readings CRUD (Add button / kebab / delete confirm) ───────────────
+
+describe('ReadingsTab — role-gated CRUD affordances', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    getRejected.mockResolvedValue([])
+    mockUser = { id: 'admin-1', roles: ['SUPER_ADMIN'] }
+  })
+
+  it('shows the Add Reading button + per-row kebab for a write role', async () => {
+    getEntries.mockResolvedValue([entry({ id: 'a' })])
+    render(<ReadingsTab patientId="p1" />)
+
+    await screen.findByTestId('admin-readings-card-a')
+    expect(screen.getByTestId('admin-readings-add')).toBeInTheDocument()
+    expect(screen.getByTestId('admin-reading-kebab-a')).toBeInTheDocument()
+  })
+
+  it('hides the Add Reading button + kebab for HEALPLACE_OPS (read-only)', async () => {
+    mockUser = { id: 'ops-1', roles: ['HEALPLACE_OPS'] }
+    getEntries.mockResolvedValue([entry({ id: 'a' })])
+    render(<ReadingsTab patientId="p1" />)
+
+    await screen.findByTestId('admin-readings-card-a')
+    expect(screen.queryByTestId('admin-readings-add')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('admin-reading-kebab-a')).not.toBeInTheDocument()
+  })
+
+  it('Add Reading opens the add modal', async () => {
+    getEntries.mockResolvedValue([])
+    render(<ReadingsTab patientId="p1" />)
+
+    fireEvent.click(await screen.findByTestId('admin-readings-add'))
+    expect(screen.getByTestId('admin-add-edit-reading-modal')).toBeInTheDocument()
+    expect(screen.getByText('Add reading')).toBeInTheDocument()
+  })
+
+  it('kebab → Edit opens the modal pre-populated with the row values', async () => {
+    getEntries.mockResolvedValue([entry({ id: 'a', systolicBP: 151, diastolicBP: 93 })])
+    render(<ReadingsTab patientId="p1" />)
+
+    fireEvent.click(await screen.findByTestId('admin-reading-kebab-a'))
+    fireEvent.click(screen.getByTestId('admin-reading-edit-a'))
+
+    expect(screen.getByTestId('admin-add-edit-reading-modal')).toBeInTheDocument()
+    expect(screen.getByTestId('admin-reading-systolic')).toHaveValue(151)
+    expect(screen.getByTestId('admin-reading-diastolic')).toHaveValue(93)
+  })
+
+  it('kebab → Delete opens the confirmation; confirm calls DELETE and refreshes', async () => {
+    getEntries.mockResolvedValue([entry({ id: 'a' })])
+    deleteReading.mockResolvedValue(undefined)
+    render(<ReadingsTab patientId="p1" />)
+
+    fireEvent.click(await screen.findByTestId('admin-reading-kebab-a'))
+    fireEvent.click(screen.getByTestId('admin-reading-delete-a'))
+    expect(screen.getByTestId('admin-delete-reading-dialog')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('admin-reading-delete-confirm'))
+    await waitFor(() => expect(deleteReading).toHaveBeenCalledWith('p1', 'a'))
+    // List refetched after the mutation (initial load + reload).
+    await waitFor(() => expect(getEntries).toHaveBeenCalledTimes(2))
+  })
+
+  it('card press opens the modal read-only with an Edit switch (write role)', async () => {
+    getEntries.mockResolvedValue([entry({ id: 'a', systolicBP: 151, diastolicBP: 93 })])
+    render(<ReadingsTab patientId="p1" />)
+
+    fireEvent.click(await screen.findByTestId('admin-readings-card-a'))
+
+    expect(screen.getByTestId('admin-add-edit-reading-modal')).toBeInTheDocument()
+    expect(screen.getByText('Reading details')).toBeInTheDocument()
+    // Read-only: fields disabled, no Save — but the Edit switch is offered.
+    expect(screen.getByTestId('admin-reading-systolic')).toBeDisabled()
+    expect(screen.queryByTestId('admin-reading-save')).not.toBeInTheDocument()
+    expect(screen.getByTestId('admin-reading-edit-switch')).toBeInTheDocument()
+
+    // Edit switch flips the same modal into the editable form.
+    fireEvent.click(screen.getByTestId('admin-reading-edit-switch'))
+    expect(screen.getByText('Edit reading')).toBeInTheDocument()
+    expect(screen.getByTestId('admin-reading-systolic')).not.toBeDisabled()
+    expect(screen.getByTestId('admin-reading-save')).toBeInTheDocument()
+  })
+
+  it('card press for HEALPLACE_OPS opens read-only view WITHOUT the Edit switch', async () => {
+    mockUser = { id: 'ops-1', roles: ['HEALPLACE_OPS'] }
+    getEntries.mockResolvedValue([entry({ id: 'a' })])
+    render(<ReadingsTab patientId="p1" />)
+
+    fireEvent.click(await screen.findByTestId('admin-readings-card-a'))
+
+    expect(screen.getByTestId('admin-add-edit-reading-modal')).toBeInTheDocument()
+    expect(screen.getByTestId('admin-reading-systolic')).toBeDisabled()
+    expect(screen.queryByTestId('admin-reading-edit-switch')).not.toBeInTheDocument()
+  })
+
+  it('kebab clicks do not bubble into the card view modal', async () => {
+    getEntries.mockResolvedValue([entry({ id: 'a' })])
+    render(<ReadingsTab patientId="p1" />)
+
+    fireEvent.click(await screen.findByTestId('admin-reading-kebab-a'))
+    // Menu opened; the view modal did NOT.
+    expect(screen.getByTestId('admin-reading-edit-a')).toBeInTheDocument()
+    expect(screen.queryByTestId('admin-add-edit-reading-modal')).not.toBeInTheDocument()
+  })
+
+  it('renders the Staff source pill with the actor name on admin-entered rows', async () => {
+    getEntries.mockResolvedValue([
+      entry({ id: 'a', source: 'admin', addedByUserId: 'md-1', addedByName: 'Manisha Patel' }),
+    ])
+    render(<ReadingsTab patientId="p1" />)
+
+    const pill = await screen.findByTestId('admin-readings-staff-pill')
+    expect(pill).toHaveTextContent(/staff · manisha patel/i)
   })
 })

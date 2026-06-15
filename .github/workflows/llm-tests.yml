@@ -1,10 +1,19 @@
 name: Chatbot E2E + LLM-as-Judge
 
+# Mirrors the E2E (Playwright) flow: runs on PRs targeting `dev` (feature → dev)
+# and `main` (the dev → main promotion). All changes go through `dev` first, so
+# this is the chatbot gate at that boundary.
 on:
-  push:
-    branches: ['phase/*', main, main2]
   pull_request:
-    branches: [main, main2]
+    branches:
+      - dev
+      - main
+
+# Cancel older runs when a new commit lands on the same PR (matches e2e.yml) —
+# saves runner minutes when reviewers keep pushing fixups.
+concurrency:
+  group: llm-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
@@ -25,17 +34,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - run: cd backend && npm ci
-      - run: cd backend && npx prisma generate
-      - run: cd backend && npm test -- --passWithNoTests
+        with:
+          node-version: 22
+          cache: npm
+      # npm workspaces: deps + lockfile live at the repo ROOT (there is no
+      # backend/package-lock.json), so install once from the root. jest is
+      # hoisted to the root node_modules — invoke it via `npx jest`, not the
+      # backend `node_modules/jest/bin/jest.js` path (that path 404s under
+      # hoisting and was the original failure).
+      - name: Install workspace deps
+        run: npm ci
+      - name: Build shared package
+        run: npm run build:shared
+      - name: Prisma generate
+        working-directory: backend
+        run: npx prisma generate
+      - name: Backend unit tests
+        working-directory: backend
+        env:
+          NODE_OPTIONS: --experimental-vm-modules
+        run: npx jest --passWithNoTests
 
   # ─────────────────────────────────────────────────────────────────────────
   text-chat-eval:
     name: Text Chat — E2E + LLM Judge
     runs-on: ubuntu-latest
     needs: unit-tests
-    if: github.event_name == 'push' || !github.event.pull_request.draft
+    if: ${{ !github.event.pull_request.draft }}
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -50,16 +75,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-
-      - name: Install & setup
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install workspace deps
+        run: npm ci
+      - name: Build shared package
+        run: npm run build:shared
+      - name: Prisma generate + migrate
+        working-directory: backend
         run: |
-          cd backend && npm ci
           npx prisma generate
           npx prisma migrate deploy
-
       - name: Run text chat E2E + LLM-as-Judge
-        run: cd backend && npm run test:e2e -- --testPathPatterns=text-chat.e2e --forceExit
+        working-directory: backend
+        run: npm run test:e2e -- --testPathPatterns=text-chat.e2e --forceExit
         timeout-minutes: 15
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -67,7 +97,7 @@ jobs:
     name: Voice Chat — E2E + LLM Judge
     runs-on: ubuntu-latest
     needs: unit-tests
-    if: github.event_name == 'push' || !github.event.pull_request.draft
+    if: ${{ !github.event.pull_request.draft }}
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -82,14 +112,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-
-      - name: Install backend
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install workspace deps
+        run: npm ci
+      - name: Build shared package
+        run: npm run build:shared
+      - name: Prisma generate + migrate
+        working-directory: backend
         run: |
-          cd backend && npm ci
           npx prisma generate
           npx prisma migrate deploy
-
       - name: Run voice chat E2E + LLM-as-Judge
-        run: cd backend && npm run test:e2e -- --testPathPatterns=voice-chat.e2e --forceExit
+        working-directory: backend
+        run: npm run test:e2e -- --testPathPatterns=voice-chat.e2e --forceExit
         timeout-minutes: 15
