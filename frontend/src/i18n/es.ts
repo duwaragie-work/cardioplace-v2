@@ -604,6 +604,9 @@ const es: Record<TranslationKey, string> = {
   'readings.noBpRecorded': 'Sin PA registrada',
   'readings.symptomLog': 'Registro de síntomas',
   'readings.editableWindow': 'Editable por unos minutos más',
+  'readings.held': 'En espera',
+  'readings.heldAwaitingConfirmation':
+    'Esta lectura se está confirmando. Termine los pasos en su control para completarla — no puede cambiarla aquí.',
   'readings.meds': 'Medicamentos',
   'readings.taken': 'Tomada',
   'readings.missed': 'Omitida',

@@ -14,6 +14,7 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
+  Lock,
 } from 'lucide-react';
 import {
   getJournalEntries,
@@ -98,6 +99,9 @@ type Entry = {
    *  engine commits this reading. While now < this, the card shows an "editable /
    *  not yet sent to your care team" hint (edit/delete stay available either way). */
   engineEvaluationDeferredUntil?: string | null;
+  /** Option D retake-confirm state. 'AWAITING' rows are held and read-only on
+   *  the readings tab (Bug 10+11). */
+  emergencyConfirmation?: 'AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED' | null;
 };
 
 type SymptomKey =
@@ -591,23 +595,45 @@ function EntryCard({
           onClick={(e) => e.stopPropagation()}
         >
           <AudioButton size="sm" text={audioSummary} />
-          <button
-            onClick={onEdit}
-            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
-            style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
-            aria-label={t('accessibility.editReading')}
-          >
-            <Pencil className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
-          </button>
-          <button
-            data-testid={`readings-delete-button-${entry.id}`}
-            onClick={onDelete}
-            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
-            style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
-            aria-label={t('accessibility.deleteReading')}
-          >
-            <Trash2 className="w-3.5 h-3.5" style={{ color: 'var(--brand-alert-red)' }} />
-          </button>
+          {/* Bug 10+11 (live-test 2026-06-15) — a HELD Option D emergency reading
+              (AWAITING confirmation) is read-only on the readings tab: editing or
+              deleting it mid-flow would point the confirmatory reading (or the
+              cron safety-net) at a changed/missing row. Show a lock badge instead;
+              the patient resolves it in the check-in confirmation flow. */}
+          {entry.emergencyConfirmation === 'AWAITING' ? (
+            <span
+              data-testid={`reading-held-${entry.id}`}
+              className="text-[0.6875rem] px-2.5 py-1 rounded-full font-semibold flex items-center gap-1"
+              style={{
+                backgroundColor: 'var(--brand-warning-amber-light)',
+                color: 'var(--brand-warning-amber-text)',
+              }}
+              title={t('readings.heldAwaitingConfirmation')}
+            >
+              <Lock className="w-3 h-3" aria-hidden="true" />
+              {t('readings.held')}
+            </span>
+          ) : (
+            <>
+              <button
+                onClick={onEdit}
+                className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
+                style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
+                aria-label={t('accessibility.editReading')}
+              >
+                <Pencil className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
+              </button>
+              <button
+                data-testid={`readings-delete-button-${entry.id}`}
+                onClick={onDelete}
+                className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
+                style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
+                aria-label={t('accessibility.deleteReading')}
+              >
+                <Trash2 className="w-3.5 h-3.5" style={{ color: 'var(--brand-alert-red)' }} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 

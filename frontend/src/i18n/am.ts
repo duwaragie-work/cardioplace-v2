@@ -607,6 +607,9 @@ const am: Record<TranslationKey, string> = {
   'readings.noBpRecorded': 'ደም ግፊት አልተመዘገበም',
   'readings.symptomLog': 'የምልክት ምዝገባ',
   'readings.editableWindow': 'ለጥቂት ደቂቃዎች ተጨማሪ ሊስተካከል ይችላል',
+  'readings.held': 'ተይዟል',
+  'readings.heldAwaitingConfirmation':
+    'ይህ ንባብ እየተረጋገጠ ነው። ለማጠናቀቅ በቼክ-ኢንዎ ላይ ያሉትን ደረጃዎች ይጨርሱ — እዚህ መለወጥ አይችሉም።',
   'readings.meds': 'መድሃኒቶች',
   'readings.taken': 'ተወስዷል',
   'readings.missed': 'ተዘልሏል',

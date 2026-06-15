@@ -604,6 +604,9 @@ const fr: Record<TranslationKey, string> = {
   'readings.noBpRecorded': 'Pas de TA enregistrée',
   'readings.symptomLog': 'Journal des symptômes',
   'readings.editableWindow': 'Modifiable pendant encore quelques minutes',
+  'readings.held': 'En attente',
+  'readings.heldAwaitingConfirmation':
+    "Cette mesure est en cours de confirmation. Terminez les étapes de votre suivi pour la valider — vous ne pouvez pas la modifier ici.",
   'readings.meds': 'Méds',
   'readings.taken': 'Prise',
   'readings.missed': 'Manquée',

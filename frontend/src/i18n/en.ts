@@ -614,6 +614,10 @@ const en = {
   // Option D + edit window (Manisha 2026-06-12 Q1+Q4) — shown while a reading is
   // still within its 5-min grace period (not yet committed to the engine).
   'readings.editableWindow': 'Editable for a few more minutes',
+  // Bug 10+11 — held Option D emergency reading (AWAITING confirmation) is read-only.
+  'readings.held': 'Held',
+  'readings.heldAwaitingConfirmation':
+    "This reading is being confirmed. Finish the steps on your check-in to complete it — you can't change it here.",
   'readings.meds': 'Meds',
   'readings.taken': 'Taken',
   'readings.missed': 'Missed',

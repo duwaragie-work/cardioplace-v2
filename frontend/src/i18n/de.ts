@@ -604,6 +604,9 @@ const de: Record<TranslationKey, string> = {
   'readings.noBpRecorded': 'Kein BD aufgezeichnet',
   'readings.symptomLog': 'Symptom-Eintrag',
   'readings.editableWindow': 'Noch ein paar Minuten bearbeitbar',
+  'readings.held': 'Zurückgehalten',
+  'readings.heldAwaitingConfirmation':
+    'Diese Messung wird bestätigt. Schließen Sie die Schritte in Ihrem Check-in ab — hier können Sie sie nicht ändern.',
   'readings.meds': 'Meds',
   'readings.taken': 'Genommen',
   'readings.missed': 'Versäumt',
