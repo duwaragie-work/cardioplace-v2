@@ -2089,6 +2089,13 @@ export default function CheckIn() {
   // Bug 8 — true when the just-submitted reading triggered an emergency-class
   // rule; suppresses the Q3 / AFib reading-prompt on the confirmation screen.
   const [confirmationIsEmergency, setConfirmationIsEmergency] = useState(false);
+  // Bug 3 (live-test 2026-06-15) — derive the confirmation screen's enrolled
+  // wording from a STABLE snapshot rather than the live auth `user`, whose
+  // optional enrollmentStatus can flicker to undefined during a re-render (the
+  // backdated "Save anyway" path adds a modal step that widened that window,
+  // making an ENROLLED patient briefly see the "We're setting up your care
+  // team" copy). Enrollment never reverts mid-session, so once observed it sticks.
+  const [enrolledSnapshot, setEnrolledSnapshot] = useState(false);
 
   // Cross-visit session continuity — the patient's currently OPEN session (if
   // any) fetched on mount. While set + unresolved + not expired, the "add to
@@ -2206,6 +2213,13 @@ export default function CheckIn() {
       setSessionPromptResolved(true);
     }
   }, [activeSession, sessionExpired, sessionPromptResolved]);
+
+  // Bug 3 — snapshot enrollment the moment the auth context confirms it; it
+  // never reverts within a session, so the confirmation screen's enrolled
+  // wording stays correct even if `user` momentarily re-renders without it.
+  useEffect(() => {
+    if (user?.enrollmentStatus === 'ENROLLED') setEnrolledSnapshot(true);
+  }, [user?.enrollmentStatus]);
 
   // Snap the page to the top whenever the wizard advances (or goes back) to
   // a different step — otherwise the user lands wherever the previous step's
@@ -2874,7 +2888,7 @@ export default function CheckIn() {
             lastReading={last}
             sessionTotal={readingNumber}
             hasAFib={hasAFib}
-            isEnrolled={user?.enrollmentStatus === 'ENROLLED'}
+            isEnrolled={enrolledSnapshot}
             isEmergency={confirmationIsEmergency}
             heightCm={profile?.heightCm ?? null}
             missedMedNames={medications
