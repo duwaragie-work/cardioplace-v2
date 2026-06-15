@@ -21,6 +21,21 @@ export class EmbeddingService implements OnModuleInit {
   }
 
   private async loadModel(): Promise<void> {
+    // Skip the embedding model in test mode. Jest's
+    // `--experimental-vm-modules` runs ONNX in a separate JS realm —
+    // the WASM binding's Float32Array doesn't match the test runner's,
+    // so the Tensor constructor's `instanceof Float32Array` check
+    // throws "A float32 tensor's data must be type of Float32Array()".
+    // Production (vanilla `node main.js`, single realm) is unaffected.
+    // Leaving `ready=false` here means the existing graceful path in
+    // getEmbeddings() returns empty vectors, RagService skips, and the
+    // chatbot E2E tests stop emitting noisy ONNX stack traces.
+    if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
+      this.logger.log(
+        'Embedding model load skipped in test mode (Jest VM-modules realm boundary)',
+      )
+      return
+    }
     try {
       const { pipeline, env } = await import('@huggingface/transformers')
       // Disable local model check warnings
