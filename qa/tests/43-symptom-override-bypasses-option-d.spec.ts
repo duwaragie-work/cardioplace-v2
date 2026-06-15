@@ -9,45 +9,23 @@ import { API_BASE_URL } from '../playwright.config.js'
  * Step 4 regression guard — symptom-override emergencies BYPASS Option D.
  *
  * Manisha 2026-06-12 Q2 (Edit-Window + Session Policy sign-off) is a HYBRID:
- *   • BP ≥180/120 WITHOUT symptoms → Option D (client-side retake-to-confirm,
- *     reading not submitted until a confirmatory reading / decline / 5-min
- *     expiry). Built in Step 3.
+ *   • BP ≥180/120 WITHOUT symptoms → Option D (client-side retake-to-confirm).
  *   • BP ≥180/120 WITH a target-organ-damage symptom, OR a symptom at any BP
  *     → Option A: fire IMMEDIATELY. A patient reporting chest pain must never
  *     be asked to "sit calmly and retake".
  *
- * Option D is not built yet (Step 3), so the retake screen does not exist and
- * every reading still submits immediately. This spec locks the invariant that
- * Step 3 MUST preserve: a symptom-bearing reading fires an emergency alert
- * immediately on a single reading and is never held for a confirmatory retake.
+ * The Option D retake is a CLIENT-side decision made in CheckIn before
+ * submission; the symptom-override emergency is a BACKEND pre-gate rule that
+ * fires on a single reading regardless of preDay3 / session size. This spec
+ * locks the invariant that the symptom path fires immediately and is never
+ * held — so the Step-3 Option D work (now landed) can't have entangled it.
  *
  * Verified end-to-end via the public daily-journal POST (the same call the
- * check-in submit handler makes). The "no retake / no hold" signal at the API
- * layer is: response.pendingSecondReading is NOT true (the single-reading hold
- * the non-emergency Q2 flow uses), and a BP_LEVEL_2_SYMPTOM_OVERRIDE alert is
- * OPEN within the stability window.
- *
- * When Option D lands, add the UI assertion (emergency BP + chest pain →
- * straight to the confirmation screen, no Screen A) alongside these.
+ * check-in submit handler makes). No history seeding is needed — the symptom
+ * override is a pre-gate emergency that fires on the first reading.
  */
 
 type AlertRow = Awaited<ReturnType<TestControl['listAlerts']>>[number]
-
-// Clear preDay3 (readingCount ≥ 7) so the single-reading HOLD would normally
-// engage for a non-emergency reading at this point — making the "emergency
-// bypasses the hold" assertion meaningful rather than incidentally true
-// because the patient is still pre-baseline.
-async function seedHistoryToClearPreDay3(tc: TestControl, userId: string): Promise<void> {
-  const now = Date.now()
-  const readings = Array.from({ length: 8 }).map((_, i) => ({
-    measuredAt: new Date(now - (i + 1) * 24 * 60 * 60 * 1000).toISOString(),
-    systolicBP: 120,
-    diastolicBP: 78,
-    pulse: 72,
-    sessionId: randomUUID(),
-  }))
-  await tc.seedReadingsAtTime(userId, readings)
-}
 
 async function waitForAlerts(
   tc: TestControl,
@@ -71,11 +49,10 @@ test.describe('Step 4 — symptom-override bypasses Option D (Manisha 2026-06-12
     'Write tests gated behind RUN_WRITE_TESTS=1 (mutates seed-patient journal entries)',
   )
 
-  test('emergency BP (195/120) + chest pain → BP_LEVEL_2_SYMPTOM_OVERRIDE fires immediately, no hold', async () => {
+  test('emergency BP (195/120) + chest pain → BP_LEVEL_2_SYMPTOM_OVERRIDE fires immediately, not held', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
-    await seedHistoryToClearPreDay3(tc, u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
       const res = await api.post('daily-journal', {
@@ -91,12 +68,10 @@ test.describe('Step 4 — symptom-override bypasses Option D (Manisha 2026-06-12
       })
       expect(res.status()).toBe(202)
       const body = await res.json()
-      // No single-reading hold: a symptom emergency is never deferred for a
-      // confirmatory retake (that is what Option D would do to a NO-symptom
-      // emergency only).
+      // A symptom emergency is never routed into the Option D retake flow.
       expect(
-        body.pendingSecondReading,
-        'symptom emergency must NOT be held for a second reading',
+        body.pendingEmergencyConfirmation,
+        'symptom emergency must NOT enter Option D (no held confirmation)',
       ).not.toBe(true)
 
       const alerts = await waitForAlerts(tc, u.id, (xs) =>
@@ -117,7 +92,6 @@ test.describe('Step 4 — symptom-override bypasses Option D (Manisha 2026-06-12
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
-    await seedHistoryToClearPreDay3(tc, u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
       const res = await api.post('daily-journal', {
@@ -133,7 +107,7 @@ test.describe('Step 4 — symptom-override bypasses Option D (Manisha 2026-06-12
       })
       expect(res.status()).toBe(202)
       const body = await res.json()
-      expect(body.pendingSecondReading).not.toBe(true)
+      expect(body.pendingEmergencyConfirmation).not.toBe(true)
 
       // BP is below the 180/120 emergency band, so the ONLY way an emergency
       // tier can appear is the symptom override — proving the symptom path is
