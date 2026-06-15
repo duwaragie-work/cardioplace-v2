@@ -89,6 +89,38 @@ describe('groupReadingsBySession (F25)', () => {
     expect(groups.every((g) => g.kind === 'single')).toBe(true)
   })
 
+  it('Bug 5 — groups consecutive NULL-session readings within the 5-min window (legacy / chat rows)', () => {
+    const groups = groupReadingsBySession([
+      entry({ id: 'a', sessionId: null, measuredAt: '2026-05-22T03:00:00Z' }),
+      entry({ id: 'b', sessionId: null, measuredAt: '2026-05-22T03:02:00Z' }),
+      entry({ id: 'c', sessionId: null, measuredAt: '2026-05-22T03:04:00Z' }),
+    ])
+    expect(groups).toHaveLength(1)
+    const session = groups[0] as Extract<ReadingGroup, { kind: 'session' }>
+    expect(session.kind).toBe('session')
+    expect(session.entries).toHaveLength(3)
+  })
+
+  it('Bug 5 — does NOT group NULL-session readings more than 5 min apart', () => {
+    const groups = groupReadingsBySession([
+      entry({ id: 'a', sessionId: null, measuredAt: '2026-05-22T03:00:00Z' }),
+      entry({ id: 'b', sessionId: null, measuredAt: '2026-05-22T03:08:00Z' }),
+    ])
+    expect(groups).toHaveLength(2)
+    expect(groups.every((g) => g.kind === 'single')).toBe(true)
+  })
+
+  it('Bug 5 — a NULL-session reading never merges into an adjacent sessioned group', () => {
+    const groups = groupReadingsBySession([
+      entry({ id: 'a', sessionId: 's1', measuredAt: '2026-05-22T03:00:00Z' }),
+      entry({ id: 'b', sessionId: 's1', measuredAt: '2026-05-22T03:01:00Z' }),
+      entry({ id: 'c', sessionId: null, measuredAt: '2026-05-22T03:02:00Z' }),
+    ])
+    expect(groups).toHaveLength(2)
+    expect((groups[0] as Extract<ReadingGroup, { kind: 'session' }>).entries).toHaveLength(2)
+    expect(groups[1].kind).toBe('single')
+  })
+
   it('groups an admin-entered session exactly like a patient session (source-agnostic)', () => {
     // Patient logs 2 readings in one sitting, later an admin keys in 2 more
     // via the modal session flow — both pairs must render as session cards.

@@ -143,25 +143,41 @@ export type ReadingGroup =
   | { kind: 'session'; sessionId: string; entries: PatientJournalEntry[] }
   | { kind: 'single'; entry: PatientJournalEntry };
 
+const READINGS_PROXIMITY_MS = 5 * 60 * 1000; // CLINICAL_SPEC §5.2 — 5-min window.
+
+// Bug 5 (live-test 2026-06-15) — whether two consecutive readings belong to the
+// same sitting. Explicit sessionId is authoritative: two non-null sessionIds
+// group only when equal (and a null never merges into a sessioned group — the
+// session boundary is respected). NULL-session rows (legacy data + chat-tool
+// entries that never carried a sessionId) fall back to the 5-min time-proximity
+// window, mirroring the patient app's grouping so the two surfaces agree.
+function sameSitting(a: PatientJournalEntry, b: PatientJournalEntry): boolean {
+  if (a.sessionId != null && b.sessionId != null) return a.sessionId === b.sessionId;
+  if (a.sessionId == null && b.sessionId == null) {
+    const ta = new Date(a.measuredAt).getTime();
+    const tb = new Date(b.measuredAt).getTime();
+    if (Number.isNaN(ta) || Number.isNaN(tb)) return false;
+    return Math.abs(ta - tb) <= READINGS_PROXIMITY_MS;
+  }
+  return false;
+}
+
 export function groupReadingsBySession(entries: PatientJournalEntry[]): ReadingGroup[] {
   const groups: ReadingGroup[] = [];
   let i = 0;
   while (i < entries.length) {
-    const sid = entries[i].sessionId;
-    if (sid != null) {
-      let j = i + 1;
-      while (j < entries.length && entries[j].sessionId === sid) j++;
-      const slice = entries.slice(i, j);
-      groups.push(
-        slice.length >= 2
-          ? { kind: 'session', sessionId: sid, entries: slice }
-          : { kind: 'single', entry: slice[0] },
-      );
-      i = j;
+    let j = i + 1;
+    while (j < entries.length && sameSitting(entries[j - 1], entries[j])) j++;
+    const slice = entries.slice(i, j);
+    if (slice.length >= 2) {
+      // Prefer a real sessionId for the key; null-proximity groups get a
+      // synthetic key derived from the anchor entry's id.
+      const sid = slice.find((e) => e.sessionId != null)?.sessionId ?? `proximity-${slice[0].id}`;
+      groups.push({ kind: 'session', sessionId: sid, entries: slice });
     } else {
-      groups.push({ kind: 'single', entry: entries[i] });
-      i++;
+      groups.push({ kind: 'single', entry: slice[0] });
     }
+    i = j;
   }
   return groups;
 }
