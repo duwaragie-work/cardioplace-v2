@@ -59,6 +59,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, getActiveSession, type ActiveSessionDto } from '@/lib/services/journal.service';
 import { delayBandFor, showsSuppressedBanner, type DelayBand } from '@/lib/delayBand';
+import { selectReadingPrompt } from '@/lib/sessionPrompt';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import { hasDraft, loadDraft } from '@/lib/intake/draft';
 import {
@@ -1673,14 +1674,19 @@ function ConfirmationScreen({
 }) {
   const { t } = useLanguage();
   const total = sessionTotal;
-  const aFibSatisfied = !hasAFib || total >= 3;
+  // Q3 hybrid prompt-selection (Manisha 2026-06-12 Q3 — Option C). Single
+  // source of truth for the AFib 3-reading variant vs the non-AFib
+  // single→second-reading nudge, extracted to a pure helper so the branch is
+  // unit-tested (lib/sessionPrompt.test.ts) and the two cohorts can't cross.
   // #90 — AFib check-in state machine. AFib patients need three readings taken
   // close together (5-min session) for the engine's beat-to-beat averaging.
   // The copy teaches that without clinical jargon, and tapping "Back to
   // dashboard" before the 3rd reading prompts a confirm (going to the
   // dashboard ends the session).
-  const afibStateKey = total >= 3 ? 'state3' : total === 2 ? 'state2' : 'state1';
-  const needsMoreReadings = hasAFib && total < 3;
+  const readingPrompt = selectReadingPrompt({ hasAFib, sessionTotal: total, pendingFinalizeEntryId });
+  const aFibSatisfied = readingPrompt.kind === 'afib' ? readingPrompt.satisfied : true;
+  const afibStateKey = readingPrompt.kind === 'afib' ? readingPrompt.stateKey : 'state1';
+  const needsMoreReadings = readingPrompt.kind === 'afib' ? readingPrompt.needsMoreReadings : false;
   const [showLeaveAfibModal, setShowLeaveAfibModal] = useState(false);
   const handleBackToDashboard = () => {
     if (needsMoreReadings) setShowLeaveAfibModal(true);
@@ -1907,7 +1913,7 @@ function ConfirmationScreen({
          them to take a second one. Helps the engine fire on an averaged
          BP instead of a one-off. 5-min timer (above) finalizes the
          session as single-reading if they don't. */}
-      {pendingFinalizeEntryId && (
+      {readingPrompt.kind === 'takeSecond' && (
         <div
           data-testid="pending-second-reading"
           className="w-full mb-3 rounded-2xl border-2 px-4 py-3 text-[0.8125rem] leading-snug"
