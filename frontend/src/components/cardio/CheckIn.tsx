@@ -2194,6 +2194,19 @@ export default function CheckIn() {
     return () => clearInterval(id);
   }, [activeSession, sessionPromptResolved]);
 
+  // Bug 6 (live-test 2026-06-15) — an open session that has aged past the 5-min
+  // window must not keep showing the "Reading session in progress" resume
+  // prompt. The 30s nowTick above flips `sessionExpired`; the moment it does,
+  // drop the stale session so the wizard silently continues with its own fresh
+  // sessionId (CLINICAL_SPEC §5.2 — sessions expire at 5 min). Without this the
+  // prompt could linger on a stale mount-time fetch until a full page reload.
+  useEffect(() => {
+    if (activeSession && sessionExpired && !sessionPromptResolved) {
+      setActiveSession(null);
+      setSessionPromptResolved(true);
+    }
+  }, [activeSession, sessionExpired, sessionPromptResolved]);
+
   // Snap the page to the top whenever the wizard advances (or goes back) to
   // a different step — otherwise the user lands wherever the previous step's
   // scroll position left them, which is disorienting.

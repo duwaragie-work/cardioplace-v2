@@ -1892,8 +1892,17 @@ export class DailyJournalService {
         orderBy: { measuredAt: 'desc' },
         select: { measuredAt: true },
       })
-      // Fresh session — this reading establishes it; keep the id.
-      if (!newest) return sessionId
+      // Bug 4 (live-test 2026-06-15) — fresh supplied id (no members yet). If
+      // the patient already has an OPEN in-window session (e.g. they started a
+      // brand-new check-in within 5 min of their last reading, so the wizard
+      // minted a fresh uuid), JOIN that session rather than anchoring a separate
+      // one — CLINICAL_SPEC §5.2: the 5-min window is the authoritative session
+      // boundary, the client sessionId is only a storage shortcut. Otherwise
+      // honor the supplied id as a genuine new session.
+      if (!newest) {
+        const joinable = await this.findOpenInWindowSession(userId, measuredAt)
+        return joinable ?? sessionId
+      }
       const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
       if (gapMs <= SESSION_WINDOW_MS) return sessionId
       // Window elapsed → don't smuggle this reading into the stale session.
@@ -1904,19 +1913,35 @@ export class DailyJournalService {
     }
     // No usable client id — join an open, non-finalized session within the
     // window if the patient has one, else mint a fresh UUID. Never null.
+    const joinable = await this.findOpenInWindowSession(userId, measuredAt)
+    return joinable ?? randomUUID()
+  }
+
+  /**
+   * The most-recent OPEN, in-window, non-finalized ORDINARY session for the
+   * patient, or null. Used to group readings within CLINICAL_SPEC §5.2's 5-min
+   * window regardless of the client's sessionId (Bug 4). Held Option D sessions
+   * (emergencyConfirmation set, e.g. AWAITING) are EXCLUDED — a fresh reading
+   * must never auto-join a held emergency-confirmation session.
+   */
+  private async findOpenInWindowSession(
+    userId: string,
+    measuredAt: Date,
+  ): Promise<string | null> {
     const windowStart = new Date(measuredAt.getTime() - SESSION_WINDOW_MS)
     const windowEnd = new Date(measuredAt.getTime() + SESSION_WINDOW_MS)
-    const openInWindow = await this.prisma.journalEntry.findFirst({
+    const open = await this.prisma.journalEntry.findFirst({
       where: {
         userId,
         sessionId: { not: null },
         singleReadingFinalized: false,
+        emergencyConfirmation: null,
         measuredAt: { gte: windowStart, lte: windowEnd },
       },
       orderBy: { measuredAt: 'desc' },
       select: { sessionId: true },
     })
-    return openInWindow?.sessionId ?? randomUUID()
+    return open?.sessionId ?? null
   }
 
   /**
