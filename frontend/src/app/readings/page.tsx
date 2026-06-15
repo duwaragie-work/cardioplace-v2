@@ -354,7 +354,12 @@ type ReadingShape = {
   notes: string | null | undefined;
 };
 
-function humanizeReading(r: ReadingShape, t: TFn): string {
+/**
+ * Bug 60 — `hasActiveMedications` flag is threaded in so the spoken
+ * summary doesn't say "You took your medications" for 0-meds patients
+ * (whose `medicationTaken=true` is vacuously true per Bug 53).
+ */
+function humanizeReading(r: ReadingShape, t: TFn, hasActiveMedications: boolean = true): string {
   try {
     const parts: string[] = [];
     const dt = new Date(r.measuredAt);
@@ -393,8 +398,13 @@ function humanizeReading(r: ReadingShape, t: TFn): string {
       parts.push(`${weightSentencePieces.join(', ')}.`);
     }
 
-    if (r.medicationTaken === true) parts.push('You took your medications.');
-    else if (r.medicationTaken === false) parts.push('You missed at least one medication.');
+    // Bug 60 — 0-meds patients should NOT hear "You took your medications" —
+    // their medicationTaken=true is vacuously true per Bug 53. Skip the
+    // medication sentence entirely.
+    if (hasActiveMedications) {
+      if (r.medicationTaken === true) parts.push('You took your medications.');
+      else if (r.medicationTaken === false) parts.push('You missed at least one medication.');
+    }
 
     if (r.symptomCount > 0) {
       parts.push(
@@ -455,6 +465,7 @@ function EntrySkeleton() {
 function EntryCard({
   entry,
   heightCm,
+  hasActiveMedications,
   onView,
   onEdit,
   onDelete,
@@ -463,6 +474,14 @@ function EntryCard({
   /** From PatientProfile.heightCm — fixed at intake. Used to compute BMI
    *  next to the weight chip. Optional — when missing, BMI is hidden. */
   heightCm: number | null;
+  /**
+   * Bug 60 — does the patient currently have ANY active medications on
+   * file? When false, suppress the "Meds: Taken / Missed" chip entirely —
+   * 0-meds patients have medicationTaken=true vacuously (per Bug 53 the
+   * bot skips the question and passes true to the required-field gate),
+   * so rendering "Meds: Taken" for them is misleading.
+   */
+  hasActiveMedications: boolean;
   /** Tapping the card body (not an action button) opens the read-only detail. */
   onView: () => void;
   onEdit: () => void;
@@ -692,7 +711,12 @@ function EntryCard({
                 BMI {bmi.toFixed(1)}
               </span>
             )}
-            {entry.medicationTaken != null && (
+            {/* Bug 60 — only render the medication chip when the patient
+                currently has at least one active medication. Otherwise
+                the chip would falsely claim "Meds: Taken" for 0-meds
+                patients (whose medicationTaken=true is vacuously true
+                per Bug 53). */}
+            {hasActiveMedications && entry.medicationTaken != null && (
               <span
                 className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium"
                 style={{
@@ -782,12 +806,16 @@ function EntryCard({
 function SessionCard({
   entries,
   heightCm,
+  hasActiveMedications,
   onView,
   onEdit,
   onDelete,
 }: {
   entries: Entry[];
   heightCm: number | null;
+  /** Bug 60 — passed through to each EntryCard so 0-meds patients don't
+   *  see the misleading "Meds: Taken" chip. */
+  hasActiveMedications: boolean;
   onView: (e: Entry) => void;
   onEdit: (e: Entry) => void;
   onDelete: (id: string) => void;
@@ -880,6 +908,7 @@ function SessionCard({
                   key={e.id}
                   entry={e}
                   heightCm={heightCm}
+                  hasActiveMedications={hasActiveMedications}
                   onView={() => onView(e)}
                   onEdit={() => onEdit(e)}
                   onDelete={() => onDelete(e.id)}
@@ -2412,6 +2441,7 @@ export default function ReadingsPage() {
                             key={bucket.sessionId ?? `proximity-${group.date}-${i}`}
                             entries={bucket.items}
                             heightCm={heightCm}
+                            hasActiveMedications={medications.length > 0}
                             onView={(e) => setDetailEntry(e)}
                             onEdit={openEdit}
                             onDelete={(id) => setDeleteId(id)}
@@ -2421,6 +2451,7 @@ export default function ReadingsPage() {
                             key={bucket.items[0].id + (bucket.sessionId ?? `solo-${i}`)}
                             entry={bucket.items[0]}
                             heightCm={heightCm}
+                            hasActiveMedications={medications.length > 0}
                             onView={() => setDetailEntry(bucket.items[0])}
                             onEdit={() => openEdit(bucket.items[0])}
                             onDelete={() => setDeleteId(bucket.items[0].id)}

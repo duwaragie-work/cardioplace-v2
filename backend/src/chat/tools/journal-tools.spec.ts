@@ -244,6 +244,11 @@ describe('journal-tools', () => {
       findAll: jest.fn<any>(),
       update: jest.fn<any>(),
       delete: jest.fn<any>(),
+      // Bug 60 — dispatcher reads this for the popup hasActiveMedications
+      // signal. Default to true (= patient has meds) so existing test
+      // assertions that don't care about this field stay green; the
+      // dedicated Bug 60 tests can override per-case.
+      hasActiveMedications: jest.fn<any>().mockResolvedValue(true),
     }
 
     // Lock the wall clock so `new Date().toISOString().slice(0, 10)` (used
@@ -1174,6 +1179,11 @@ describe('journal-tools', () => {
       findAll: jest.fn<any>(),
       update: jest.fn<any>(),
       delete: jest.fn<any>(),
+      // Bug 60 — dispatcher reads this for the popup hasActiveMedications
+      // signal. Default to true (= patient has meds) so existing test
+      // assertions that don't care about this field stay green; the
+      // dedicated Bug 60 tests can override per-case.
+      hasActiveMedications: jest.fn<any>().mockResolvedValue(true),
     }
     const ctx = {
       journalService: mockJournalService as any,

@@ -80,6 +80,15 @@ export interface CheckinSummary {
   medicationTaken?: boolean
   symptoms: string[]
   saved: boolean
+  /**
+   * Bug 60 — whether the patient has ANY active (non-discontinued,
+   * non-rejected, non-PRN) medications on file. When false, frontend
+   * renderers (CheckinCard popup, verbal audio summary, My Readings card)
+   * SUPPRESS the medication label entirely — otherwise the vacuously-true
+   * `medicationTaken=true` we save for 0-meds patients (per Bug 53) gets
+   * rendered as the misleading "All medications taken ✓" pill.
+   */
+  hasActiveMedications?: boolean
 }
 
 export interface UpdateSummary {
@@ -91,6 +100,8 @@ export interface UpdateSummary {
   medicationTaken?: boolean
   symptoms: string[]
   updated: boolean
+  /** Bug 60 — see CheckinSummary.hasActiveMedications. */
+  hasActiveMedications?: boolean
 }
 
 export interface DeleteSummary {

@@ -100,6 +100,15 @@ export interface CheckinSummary {
     reason?: string;
     missedDoses?: number;
   }>;
+  /**
+   * Bug 60 — whether the patient has ANY active (non-discontinued,
+   * non-rejected, non-PRN) medications on file. When false, render sites
+   * (CheckinCard popup, verbal audio summary) SUPPRESS the medication
+   * label entirely. Without this, the vacuously-true `medicationTaken=true`
+   * we save for 0-meds patients (per Bug 53) was rendering as the
+   * misleading "All medications taken ✓" pill everywhere.
+   */
+  hasActiveMedications?: boolean;
   /** structured Level-2 booleans set on the entry */
   structuredSymptoms?: StructuredSymptoms;
   /** legacy + "anything else" symptoms — both shown in the card */
@@ -139,6 +148,8 @@ export interface UpdateSummary {
   otherSymptoms?: string[];
   updated: boolean;
   alert?: AlertTierEcho | null;
+  /** Bug 60 — see CheckinSummary.hasActiveMedications. */
+  hasActiveMedications?: boolean;
 }
 
 export interface DeleteSummary {

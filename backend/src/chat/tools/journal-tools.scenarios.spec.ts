@@ -35,6 +35,8 @@ function makeCtx() {
       findOne: jest.fn<any>().mockResolvedValue({ data: {} }),
       update: jest.fn<any>().mockResolvedValue({ data: {} }),
       delete: jest.fn<any>().mockResolvedValue(undefined),
+      // Bug 60 — dispatcher reads this for popup hasActiveMedications.
+      hasActiveMedications: jest.fn<any>().mockResolvedValue(true),
     },
     adherenceService: {
       log: jest.fn<any>().mockResolvedValue({ logged: true, message: 'Logged.' }),
@@ -697,7 +699,7 @@ describe('log_medication_adherence scenarios', () => {
     const result = await executeJournalTool(
       'log_medication_adherence',
       { drug_name: 'X', status: 'taken' },
-      { create: jest.fn(), findAll: jest.fn(), update: jest.fn(), delete: jest.fn() } as any,
+      { create: jest.fn(), findAll: jest.fn(), update: jest.fn(), delete: jest.fn(), hasActiveMedications: jest.fn(async () => true) } as any,
       USER,
     )
     const parsed = JSON.parse(result)
@@ -770,7 +772,7 @@ describe('log_symptom_quick scenarios', () => {
     const result = await executeJournalTool(
       'log_symptom_quick',
       { symptom: 'severeHeadache' },
-      { create: jest.fn(), findAll: jest.fn(), update: jest.fn(), delete: jest.fn() } as any,
+      { create: jest.fn(), findAll: jest.fn(), update: jest.fn(), delete: jest.fn(), hasActiveMedications: jest.fn(async () => true) } as any,
       USER,
     )
     const parsed = JSON.parse(result)
@@ -815,7 +817,7 @@ describe('submit_bp_from_photo scenarios', () => {
     const result = await executeJournalTool(
       'submit_bp_from_photo',
       { image_base64: 'aGk=', mime_type: 'image/jpeg' },
-      { create: jest.fn(), findAll: jest.fn(), update: jest.fn(), delete: jest.fn() } as any,
+      { create: jest.fn(), findAll: jest.fn(), update: jest.fn(), delete: jest.fn(), hasActiveMedications: jest.fn(async () => true) } as any,
       USER,
     )
     const parsed = JSON.parse(result)

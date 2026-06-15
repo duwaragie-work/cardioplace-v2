@@ -1757,6 +1757,13 @@ export default function AIChatInterface() {
           // result payload. Blocked/failed results are filtered server-side.
           if (tool === 'submit_checkin' && (result as { saved?: boolean }).saved) {
             const d = (result as { data?: Record<string, unknown> }).data ?? {};
+            // Bug 60 — read the dispatcher's has_active_medications signal
+            // so the popup card + audio recap know whether the patient
+            // actually has medications to take. Without this, the
+            // vacuously-true medicationTaken=true we save for 0-meds
+            // patients (per Bug 53) renders as "All medications taken ✓".
+            const hasActiveMeds =
+              (result as { has_active_medications?: boolean }).has_active_medications;
             setPendingCheckin({
               systolicBP: d.systolicBP as number | undefined,
               diastolicBP: d.diastolicBP as number | undefined,
@@ -1768,6 +1775,7 @@ export default function AIChatInterface() {
               // correctly showed 400 lbs.
               weight: typeof d.weight === 'number' ? kgToLbs(d.weight) : undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
+              hasActiveMedications: hasActiveMeds,
               // Bug 16B fix — read missedMedications so the card surfaces
               // WHICH meds were missed (was: rendered "All taken" even when
               // missed array was non-empty). Bug 16A normalises
@@ -1787,6 +1795,9 @@ export default function AIChatInterface() {
             });
           } else if (tool === 'update_checkin' && (result as { updated?: boolean }).updated) {
             const d = (result as { data?: Record<string, unknown> }).data ?? {};
+            // Bug 60 — same has_active_medications threading as submit_checkin.
+            const hasActiveMedsUpd =
+              (result as { has_active_medications?: boolean }).has_active_medications;
             setPendingUpdateCard({
               entryId: (d.id as string | undefined) ?? '',
               entryDate: d.entryDate as string | undefined,
@@ -1797,6 +1808,7 @@ export default function AIChatInterface() {
               // returns kg in data.weight.
               weight: typeof d.weight === 'number' ? kgToLbs(d.weight) : undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
+              hasActiveMedications: hasActiveMedsUpd,
               missedMedications: pickMissedMedications(d),
               symptoms: [],
               structuredSymptoms: pickStructuredSymptoms(d),
