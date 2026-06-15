@@ -40,7 +40,24 @@ export class SessionAveragerService {
     }
 
     const siblings = await this.loadSessionSiblings(anchor)
-    return SessionAveragerService.aggregate(anchor, siblings)
+
+    // Option D (Manisha 2026-06-12 Q2) — the CONFIRMED_NORMAL physician message
+    // names BP1 (the held first-of-pair). Fetch it DIRECTLY by confirmsEntryId
+    // rather than relying on it being a session-proximity sibling: a slow retake
+    // (or measuredAt drift) can push the first reading outside the averaging
+    // window, which would otherwise render BP1 as "?/?". Tenant-scoped by userId.
+    let optionDFirst:
+      | { systolicBP: number | null; diastolicBP: number | null }
+      | undefined
+    if (anchor.emergencyConfirmation === 'CONFIRMATORY' && anchor.confirmsEntryId) {
+      const first = await this.prisma.journalEntry.findFirst({
+        where: { id: anchor.confirmsEntryId, userId: anchor.userId },
+        select: { systolicBP: true, diastolicBP: true },
+      })
+      if (first) optionDFirst = first
+    }
+
+    return SessionAveragerService.aggregate(anchor, siblings, optionDFirst)
   }
 
   private async loadSessionSiblings(anchor: {
@@ -137,6 +154,10 @@ export class SessionAveragerService {
       medicationTaken?: boolean | null
       missedMedications?: unknown
     }>,
+    /** Option D (Manisha 2026-06-12 Q2) — the held first-of-pair (BP1), fetched
+     *  directly by confirmsEntryId in averageForEntry so it's robust to the
+     *  session window. Falls back to a sibling lookup for direct test callers. */
+    explicitOptionDFirst?: { systolicBP: number | null; diastolicBP: number | null },
   ): SessionAverage | null {
     if (siblings.length === 0) return null
 
@@ -171,12 +192,14 @@ export class SessionAveragerService {
     const missedMedications = unionMissedMedications(siblings)
 
     // Option D (Manisha 2026-06-12 Q2) — on a CONFIRMATORY session, BP1 is the
-    // first-of-pair (AWAITING) reading. It always shares this session, so it's
-    // a sibling; locate it by confirmsEntryId. BP2 is the anchor (submitted*).
+    // first-of-pair (AWAITING) reading. Prefer the explicitly-fetched entry
+    // (robust to the session window); fall back to a sibling lookup for direct
+    // test callers that don't pass it. BP2 is the anchor (submitted*).
     const optionDFirst =
-      anchor.emergencyConfirmation === 'CONFIRMATORY' && anchor.confirmsEntryId
+      explicitOptionDFirst ??
+      (anchor.emergencyConfirmation === 'CONFIRMATORY' && anchor.confirmsEntryId
         ? siblings.find((s) => s.id === anchor.confirmsEntryId)
-        : undefined
+        : undefined)
 
     return {
       entryId: anchor.id,
