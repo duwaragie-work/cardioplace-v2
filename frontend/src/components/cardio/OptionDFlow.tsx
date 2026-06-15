@@ -213,6 +213,8 @@ export function OptionDFlow({
                       value={sys}
                       min={60}
                       max={250}
+                      aria-invalid={!!error}
+                      aria-describedby={error ? 'optiond-error' : undefined}
                       onChange={(e) => setSys(e.target.value)}
                       className="flex-1 h-12 px-3 rounded-xl border text-[1rem] outline-none min-w-0"
                       style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
@@ -228,6 +230,8 @@ export function OptionDFlow({
                       value={dia}
                       min={40}
                       max={150}
+                      aria-invalid={!!error}
+                      aria-describedby={error ? 'optiond-error' : undefined}
                       onChange={(e) => setDia(e.target.value)}
                       className="flex-1 h-12 px-3 rounded-xl border text-[1rem] outline-none min-w-0"
                       style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
@@ -256,7 +260,7 @@ export function OptionDFlow({
               </div>
 
               {error && (
-                <p role="alert" className="text-[0.8125rem] mt-3 w-full text-left" style={{ color: 'var(--brand-alert-red)' }}>
+                <p id="optiond-error" role="alert" className="text-[0.8125rem] mt-3 w-full text-left" style={{ color: 'var(--brand-alert-red)' }}>
                   {error}
                 </p>
               )}
