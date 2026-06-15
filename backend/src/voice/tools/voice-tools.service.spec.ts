@@ -19,7 +19,7 @@ const CTX = { userId: 'user-1', timezone: 'America/New_York' }
 
 describe('VoiceToolsService.dispatch', () => {
   let service: VoiceToolsService
-  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
+  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock; hasActiveMedications: jest.Mock }
   let gemini: { extractBpFromImage: jest.Mock }
   let alertEngine: { evaluateAdHoc: jest.Mock }
   let intakeStatus: { getStatus: jest.Mock }
