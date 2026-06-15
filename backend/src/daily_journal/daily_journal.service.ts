@@ -201,10 +201,17 @@ export class DailyJournalService {
     if (actor && dto.sessionId) {
       await this.assertSessionJoinable(userId, dto.sessionId, new Date(dto.measuredAt))
     }
+    // Option D readings must anchor their OWN session and never auto-join an
+    // open one (the Bug 4 proximity-join is for ordinary check-ins): the
+    // AWAITING first-of-pair needs a clean session that the CONFIRMATORY reading
+    // pairs into via confirmsEntryId. Without this guard a held emergency would
+    // get merged into an unrelated in-window session, breaking the pairing.
+    const isOptionDReading = !!(dto.beginEmergencyConfirmation || dto.confirmsEntryId)
     const effectiveSessionId = await this.resolveCreateSessionId(
       userId,
       dto.sessionId,
       new Date(dto.measuredAt),
+      isOptionDReading,
     )
 
     // Option D (Manisha 2026-06-12 Q2) — retake-to-confirm state from the DTO.
@@ -1876,6 +1883,11 @@ export class DailyJournalService {
     userId: string,
     sessionId: string | undefined,
     measuredAt: Date,
+    // Option D readings (AWAITING / CONFIRMATORY) must anchor their own session
+    // and never auto-join an open in-window one — the held emergency + its
+    // confirmatory reading form a dedicated session. When true, the proximity
+    // join is skipped: a supplied id is honored as-is, no id mints a fresh uuid.
+    skipOpenSessionJoin = false,
   ): Promise<string> {
     // #91 — a JournalEntry MUST always carry a sessionId. This previously
     // returned null when no id was supplied OR when the supplied id was stale
@@ -1900,6 +1912,7 @@ export class DailyJournalService {
       // boundary, the client sessionId is only a storage shortcut. Otherwise
       // honor the supplied id as a genuine new session.
       if (!newest) {
+        if (skipOpenSessionJoin) return sessionId
         const joinable = await this.findOpenInWindowSession(userId, measuredAt)
         return joinable ?? sessionId
       }

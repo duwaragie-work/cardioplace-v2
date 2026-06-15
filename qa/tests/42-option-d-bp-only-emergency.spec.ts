@@ -168,6 +168,47 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
     }
   })
 
+  test('an AWAITING reading anchors its own session, never joining an open in-window session (Bug 4 follow-up)', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      // A normal reading opens an in-window session.
+      const normal = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 122,
+          diastolicBP: 80,
+          position: 'SITTING',
+          sessionId: randomUUID(),
+        },
+      })
+      expect(normal.status()).toBe(202)
+      const normalSession = (await normal.json()).data.sessionId
+
+      // A held emergency reading within the window must NOT be merged into it —
+      // it anchors its own session so the confirmatory reading can pair into it.
+      const held = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 195,
+          diastolicBP: 120,
+          position: 'SITTING',
+          sessionId: randomUUID(),
+          beginEmergencyConfirmation: true,
+        },
+      })
+      expect(held.status()).toBe(202)
+      const heldSession = (await held.json()).data.sessionId
+
+      expect(heldSession).not.toBe(normalSession)
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
   test('Bug 13 — CONFIRMATORY entry inherits position + medication context from the held first-of-pair', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
