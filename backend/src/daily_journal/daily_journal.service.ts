@@ -17,6 +17,7 @@ import {
   EscalationLevel,
   DelayBand,
   EmergencyConfirmationState,
+  Position,
 } from '../generated/prisma/client.js'
 import {
   UserRole,
@@ -227,6 +228,35 @@ export class DailyJournalService {
         ? null
         : new Date(Date.now() + SINGLE_READING_FINALIZE_MS)
 
+    // Bug 13 (live-test 2026-06-15) — a CONFIRMATORY second-of-pair is the SAME
+    // sitting as the held first-of-pair: Option D Screen B only re-collects
+    // BP (+ optional pulse), so the second entry would otherwise lose the
+    // patient's position + medication answers, skewing session-level context.
+    // Inherit those fields from the first-of-pair when the DTO omits them.
+    // Tenant-scoped by userId. Measured vitals (pulse) are NOT inherited —
+    // they're re-measured; symptoms stay false (Option D is the no-symptom path).
+    let inherited:
+      | {
+          position: Position | null
+          medicationTaken: boolean | null
+          medicationScheduledLater: boolean
+          missedMedications: JsonValue
+          medicationStatuses: JsonValue
+        }
+      | null = null
+    if (optionDState === EmergencyConfirmationState.CONFIRMATORY && dto.confirmsEntryId) {
+      inherited = await this.prisma.journalEntry.findFirst({
+        where: { id: dto.confirmsEntryId, userId },
+        select: {
+          position: true,
+          medicationTaken: true,
+          medicationScheduledLater: true,
+          missedMedications: true,
+          medicationStatuses: true,
+        },
+      })
+    }
+
     try {
       // Chunk A — compute the measurement-lag band at persist time so the
       // patient app + admin can render the right affordance off a stored value.
@@ -246,18 +276,27 @@ export class DailyJournalService {
           pulse: dto.pulse ?? null,
           narrowPpArtifact,
           weight: dto.weight != null ? new Prisma.Decimal(dto.weight) : null,
-          position: dto.position ?? null,
+          // Bug 13 — inherit position from the first-of-pair on a CONFIRMATORY entry.
+          position: dto.position ?? inherited?.position ?? null,
           sessionId: effectiveSessionId,
           // Option D + edit window (Manisha 2026-06-12).
           emergencyConfirmation: optionDState,
           confirmsEntryId: dto.confirmsEntryId ?? null,
           engineEvaluationDeferredUntil,
           measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
-          medicationTaken: dto.medicationTaken ?? null,
-          medicationScheduledLater: dto.medicationScheduledLater ?? false,
+          // Bug 13 — inherit medication context from the first-of-pair (same sitting).
+          medicationTaken: dto.medicationTaken ?? inherited?.medicationTaken ?? null,
+          medicationScheduledLater:
+            dto.medicationScheduledLater ?? inherited?.medicationScheduledLater ?? false,
           missedDoses: dto.missedDoses ?? null,
-          missedMedications: (resolvedMissedMedications as unknown as JsonValue) ?? Prisma.JsonNull,
-          medicationStatuses: (dto.medicationStatuses as unknown as JsonValue) ?? Prisma.JsonNull,
+          missedMedications:
+            (resolvedMissedMedications as unknown as JsonValue) ??
+            (inherited?.missedMedications as JsonValue) ??
+            Prisma.JsonNull,
+          medicationStatuses:
+            (dto.medicationStatuses as unknown as JsonValue) ??
+            (inherited?.medicationStatuses as JsonValue) ??
+            Prisma.JsonNull,
           // V2 structured Level-2 symptom triggers (Flow B). Prefer the
           // explicit booleans, otherSymptoms goes to the same column. The
           // legacy `symptoms` array (v1 clients) is appended so nothing is

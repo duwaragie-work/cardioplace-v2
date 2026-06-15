@@ -168,6 +168,57 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
     }
   })
 
+  test('Bug 13 — CONFIRMATORY entry inherits position + medication context from the held first-of-pair', async () => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      const sessionId = randomUUID()
+      // First-of-pair carries the full sitting context.
+      const first = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 195,
+          diastolicBP: 120,
+          position: 'SITTING',
+          medicationTaken: true,
+          sessionId,
+          beginEmergencyConfirmation: true,
+        },
+      })
+      expect(first.status()).toBe(202)
+      const firstId = (await first.json()).data.id
+
+      // Screen B only re-collects BP — no position, no medication answers.
+      const second = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 135,
+          diastolicBP: 85,
+          sessionId,
+          confirmsEntryId: firstId,
+        },
+      })
+      expect(second.status()).toBe(202)
+
+      const list = await api.get('daily-journal')
+      const entries = ((await list.json()).data ?? []) as Array<{
+        emergencyConfirmation?: string | null
+        position?: string | null
+        medicationTaken?: boolean | null
+      }>
+      const confirmatory = entries.find((e) => e.emergencyConfirmation === 'CONFIRMATORY')
+      expect(confirmatory, 'confirmatory entry exists').toBeTruthy()
+      // Inherited from the first-of-pair (same sitting).
+      expect(confirmatory!.position).toBe('SITTING')
+      expect(confirmatory!.medicationTaken).toBe(true)
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
   test('patient declines → RULE_UNCONFIRMED_EMERGENCY (Tier 1, provider-only) with locked wording', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
