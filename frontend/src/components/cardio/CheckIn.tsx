@@ -57,9 +57,10 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
-import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, declineEmergencyConfirmation, getActiveSession, getAwaitingEmergency, type ActiveSessionDto, type JournalEntryPayload } from '@/lib/services/journal.service';
+import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, declineEmergencyConfirmation, getActiveSession, getAwaitingEmergency, getAlerts, type ActiveSessionDto, type AlertTier, type JournalEntryPayload } from '@/lib/services/journal.service';
 import { OptionDFlow, type OptionDSecondReading } from '@/components/cardio/OptionDFlow';
 import { isNowish, resolveMeasuredAtIso } from '@/lib/measuredAt';
+import { applyBulkMedicationStatus } from '@/lib/medicationBulk';
 import { delayBandFor, showsSuppressedBanner, type DelayBand } from '@/lib/delayBand';
 import { selectReadingPrompt } from '@/lib/sessionPrompt';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
@@ -961,6 +962,29 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
     });
   };
 
+  // Bug 17 — bulk-answer every med the patient HASN'T yet touched (FE-only; no
+  // backend round-trip). Explicit per-med answers are preserved. The patient can
+  // still flip any individual med afterward.
+  const bulkSet = (value: 'yes' | 'no') => {
+    setField(
+      'medicationStatus',
+      applyBulkMedicationStatus(
+        form.medicationStatus,
+        medications.map((m) => m.id),
+        value,
+        (prev, v): MedicationEntry =>
+          v === 'no'
+            ? { ...(prev ?? DEFAULT_MED_ENTRY), taken: 'no' }
+            : { taken: 'yes', reason: null, missedDoses: 1 },
+      ),
+    );
+  };
+
+  // Live tally so the patient sees a bulk action landed.
+  const takenCount = medications.filter((m) => getEntry(m.id).taken === 'yes').length;
+  const missedCount = medications.filter((m) => getEntry(m.id).taken === 'no').length;
+  const answeredCount = medications.filter((m) => getEntry(m.id).taken != null).length;
+
   return (
     <div data-testid="checkin-step-4" className="space-y-6">
       <StepHeader
@@ -970,6 +994,43 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
         step={4}
         total={5}
       />
+
+      {/* Bug 17 — bulk shortcuts for patients with several meds. Only shown when
+          there's more than one (no point for a single med). FE-only state. */}
+      {!medsLoading && medications.length > 1 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            data-testid="checkin-meds-mark-all-taken"
+            onClick={() => bulkSet('yes')}
+            className="h-11 px-4 rounded-full border-2 text-[0.8125rem] font-semibold cursor-pointer transition hover:opacity-80"
+            style={{ borderColor: 'var(--brand-success-green)', color: 'var(--brand-success-green)' }}
+          >
+            {t('checkin.b4.markAllTaken')}
+          </button>
+          <button
+            type="button"
+            data-testid="checkin-meds-mark-all-not-taken"
+            onClick={() => bulkSet('no')}
+            className="h-11 px-4 rounded-full border-2 text-[0.8125rem] font-semibold cursor-pointer transition hover:opacity-80"
+            style={{ borderColor: 'var(--brand-warning-amber)', color: 'var(--brand-warning-amber-text)' }}
+          >
+            {t('checkin.b4.markAllNotTaken')}
+          </button>
+          {answeredCount > 0 && (
+            <span
+              data-testid="checkin-meds-tally"
+              aria-live="polite"
+              className="text-[0.75rem] font-medium"
+              style={{ color: 'var(--brand-text-muted)' }}
+            >
+              {t('checkin.b4.bulkTally')
+                .replace('{taken}', String(takenCount))
+                .replace('{missed}', String(missedCount))}
+            </span>
+          )}
+        </div>
+      )}
 
       {medsLoading && (
         <div className="space-y-3 animate-pulse">
@@ -2082,6 +2143,10 @@ export default function CheckIn() {
   // emergency) rather than reached by submitting a fresh reading. Drives the
   // "Let's finish your reading from a moment ago" resume intro.
   const [optionDResumed, setOptionDResumed] = useState(false);
+  // Bug 16 — when the Option D confirmatory reading was ALSO emergency-range we
+  // route the patient to the full-screen 911 alert; this stops OptionDFlow's
+  // onDone from then bouncing them to the dashboard over that screen.
+  const optionDRoutedToEmergencyRef = useRef(false);
   // Bug 8 — true when the just-submitted reading triggered an emergency-class
   // rule; suppresses the Q3 / AFib reading-prompt on the confirmation screen.
   const [confirmationIsEmergency, setConfirmationIsEmergency] = useState(false);
@@ -2488,6 +2553,7 @@ export default function CheckIn() {
         return;
       }
 
+      const submitStartedAt = Date.now();
       const created = await createJournalEntry(basePayload);
 
       // Reading saved — drop the draft so the patient isn't prompted to resume
@@ -2495,6 +2561,15 @@ export default function CheckIn() {
       // streak (the 2× escalation only counts CONSECUTIVE rejections).
       if (user?.id) clearCheckInDraft(user.id);
       setImplausibleCount(0);
+
+      // Bug 16 — a symptom-override emergency (e.g. 195/120 + chest pain) must
+      // take the patient straight to the full-screen "CALL 911" alert instead of
+      // the generic "Reading sent" confirmation. Only poll on emergency-shaped
+      // submits so ordinary readings pay no cost.
+      if (isEmergencyBP || hasAnySymptom) {
+        const routed = await routeToFiredEmergencyAlert(created.entry.id, submitStartedAt);
+        if (routed) return;
+      }
 
       const reading: SessionReading = {
         measuredAt: measuredAtIso,
@@ -2550,11 +2625,45 @@ export default function CheckIn() {
     }
   }
 
+  // Bug 16 — a just-committed emergency-class reading must land the patient on
+  // the full-screen "CALL 911" alert, not the generic "Reading sent" screen. The
+  // rule engine fires asynchronously after create, so poll the patient alerts
+  // briefly for a patient-facing emergency tier tied to this reading (or freshly
+  // created), then deep-link to /alerts/[id]. Returns true if it routed.
+  const EMERGENCY_ALERT_TIERS = new Set<AlertTier>([
+    'BP_LEVEL_2',
+    'BP_LEVEL_2_SYMPTOM_OVERRIDE',
+    'TIER_1_ANGIOEDEMA',
+  ]);
+  async function routeToFiredEmergencyAlert(
+    entryId: string,
+    sinceMs: number,
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const alerts = await getAlerts().catch(() => []);
+      const emergency = alerts.find(
+        (a) =>
+          a.status === 'OPEN' &&
+          a.tier != null &&
+          EMERGENCY_ALERT_TIERS.has(a.tier) &&
+          (a.journalEntryId === entryId ||
+            new Date(a.createdAt).getTime() >= sinceMs - 2000),
+      );
+      if (emergency) {
+        router.push(`/alerts/${emergency.id}`);
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return false;
+  }
+
   // Option D (Manisha 2026-06-12 Q2) — the confirmatory second reading. Same
   // session, linked to the held first-of-pair via confirmsEntryId; the engine
   // resolves ABSOLUTE_EMERGENCY (still ≥180/120) vs EMERGENCY_RANGE_CONFIRMED_NORMAL.
   async function submitOptionDSecond(reading: OptionDSecondReading) {
-    await createJournalEntry({
+    const startedAt = Date.now();
+    const created = await createJournalEntry({
       measuredAt: new Date().toISOString(),
       systolicBP: reading.systolicBP,
       diastolicBP: reading.diastolicBP,
@@ -2563,6 +2672,13 @@ export default function CheckIn() {
       sessionId: sessionId ?? undefined,
       confirmsEntryId: optionDFirstId ?? undefined,
     });
+    // Bug 16 — if the confirmatory reading was itself emergency-range, the engine
+    // fires RULE_ABSOLUTE_EMERGENCY (BP Level 2); route to the 911 screen rather
+    // than letting onDone bounce to the dashboard.
+    if (reading.systolicBP >= 180 || reading.diastolicBP >= 120) {
+      const routed = await routeToFiredEmergencyAlert(created.entry.id, startedAt);
+      if (routed) optionDRoutedToEmergencyRef.current = true;
+    }
   }
 
   // Option D — patient declined / couldn't retake. Flag the held first-of-pair
@@ -2887,7 +3003,12 @@ export default function CheckIn() {
         resumed={optionDResumed}
         onSubmitSecond={submitOptionDSecond}
         onDecline={handleOptionDDecline}
-        onDone={() => router.push('/dashboard')}
+        onDone={() => {
+          // Bug 16 — if the confirmatory was emergency-range we already routed to
+          // the 911 alert; don't bounce over it to the dashboard.
+          if (optionDRoutedToEmergencyRef.current) return;
+          router.push('/dashboard');
+        }}
       />
     );
   }
