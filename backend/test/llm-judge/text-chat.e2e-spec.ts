@@ -19,6 +19,15 @@ const skip = !process.env.GOOGLE_API_KEY
 const descr = skip ? describe.skip : describe
 
 descr('Text Chat — Real E2E + LLM-as-Judge', () => {
+  // Per-test Jest retry. Even with the in-helper retry/backoff loop, CI has
+  // observed Gemini's generateContentWithTools return parts=[] (no text,
+  // no functionCall) for the same prompt across 3 fresh sessions in a row
+  // — a stable Gemini-side flake, not a code path bug (other tests in the
+  // same run pass against the same chat service). Retrying the WHOLE it()
+  // creates a fresh session and a fresh Gemini draw, which has reliably
+  // succeeded on the next run.
+  jest.retryTimes(2, { logErrorsBeforeRetry: true })
+
   let judge: JudgeService
   let ctx: TestContext | undefined
   const results: EvalResult[] = []
