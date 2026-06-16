@@ -1,0 +1,5 @@
+-- CreateEnum
+CREATE TYPE "DelayBand" AS ENUM ('REAL_TIME', 'NEAR_REAL_TIME', 'DELAYED_ENTRY', 'HISTORICAL_ENTRY');
+
+-- AlterTable
+ALTER TABLE "JournalEntry" ADD COLUMN     "delayBand" "DelayBand" NOT NULL DEFAULT 'REAL_TIME';

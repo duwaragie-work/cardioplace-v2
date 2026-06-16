@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus,
@@ -14,6 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
+  Clock,
+  ArrowRight,
 } from 'lucide-react';
 import {
   getJournalEntries,
@@ -26,6 +29,7 @@ import {
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
 import { getBMI, JOURNAL_NOTE_MAX_LENGTH } from '@cardioplace/shared';
+import { bucketReadingsBySession, sameMinuteCollisionIds } from '@/lib/readingsSession';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import AudioButton from '@/components/intake/AudioButton';
@@ -94,6 +98,13 @@ type Entry = {
   symptoms?: string[];
   otherSymptoms?: string[];
   notes?: string;
+  /** Option D + edit window (Manisha 2026-06-12 Q1+Q4) — ISO deadline before the
+   *  engine commits this reading. While now < this, the card shows an "editable /
+   *  not yet sent to your care team" hint (edit/delete stay available either way). */
+  engineEvaluationDeferredUntil?: string | null;
+  /** Option D retake-confirm state. 'AWAITING' rows are held and read-only on
+   *  the readings tab (Bug 10+11). */
+  emergencyConfirmation?: 'AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED' | null;
 };
 
 type SymptomKey =
@@ -466,6 +477,7 @@ function EntryCard({
   entry,
   heightCm,
   hasActiveMedications,
+  showSeconds = false,
   onView,
   onEdit,
   onDelete,
@@ -482,12 +494,18 @@ function EntryCard({
    * so rendering "Meds: Taken" for them is misleading.
    */
   hasActiveMedications: boolean;
+  /** Bug 15 — render HH:MM:SS instead of HH:MM when this reading shares its
+   *  minute with another on the same day (disambiguates rapid same-minute
+   *  submissions that would otherwise both show e.g. "15:11"). */
+  showSeconds?: boolean;
   /** Tapping the card body (not an action button) opens the read-only detail. */
   onView: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const { t } = useLanguage();
+  const router = useRouter();
+  const isAwaitingConfirmation = entry.emergencyConfirmation === 'AWAITING';
   const hasBP = entry.systolicBP && entry.diastolicBP;
   // Bug 37 — chat's log_symptom_quick funnels symptom-only logs through
   // journal.create (so the rule engine sees the symptom boolean). Those
@@ -568,18 +586,40 @@ function EntryCard({
             if (isNaN(dt.getTime())) return null;
             const hh = String(dt.getHours()).padStart(2, '0');
             const mi = String(dt.getMinutes()).padStart(2, '0');
+            // Bug 15 — append seconds only when another reading shares this
+            // minute, so rapid same-minute submissions are distinguishable.
+            const ss = String(dt.getSeconds()).padStart(2, '0');
+            const timeLabel = showSeconds ? `${hh}:${mi}:${ss}` : `${hh}:${mi}`;
             return (
               <span
+                data-testid={`reading-time-${entry.id}`}
                 className="text-[0.625rem] px-1.5 py-0.5 rounded font-semibold"
                 style={{
                   backgroundColor: 'var(--brand-primary-purple-light)',
                   color: 'var(--brand-primary-purple)',
                 }}
               >
-                {`${hh}:${mi}`}
+                {timeLabel}
               </span>
             );
           })()}
+          {/* Option D + edit window (Manisha 2026-06-12 Q1+Q4) — within the 5-min
+              grace period this reading hasn't been committed to the engine yet,
+              so edits/deletes are "free". Informational only; edit/delete stay
+              available after the window too. */}
+          {entry.engineEvaluationDeferredUntil &&
+            new Date(entry.engineEvaluationDeferredUntil).getTime() > Date.now() && (
+              <span
+                data-testid={`reading-editable-${entry.id}`}
+                className="text-[0.625rem] px-1.5 py-0.5 rounded-full font-semibold"
+                style={{
+                  backgroundColor: 'var(--brand-info-bg, #EEF2FF)',
+                  color: 'var(--brand-primary-purple)',
+                }}
+              >
+                {t('readings.editableWindow')}
+              </span>
+            )}
         </div>
 
         {/* Actions — stop click bubbling so tapping these doesn't also open
@@ -589,23 +629,46 @@ function EntryCard({
           onClick={(e) => e.stopPropagation()}
         >
           <AudioButton size="sm" text={audioSummary} />
-          <button
-            onClick={onEdit}
-            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
-            style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
-            aria-label={t('accessibility.editReading')}
-          >
-            <Pencil className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
-          </button>
-          <button
-            data-testid={`readings-delete-button-${entry.id}`}
-            onClick={onDelete}
-            className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
-            style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
-            aria-label={t('accessibility.deleteReading')}
-          >
-            <Trash2 className="w-3.5 h-3.5" style={{ color: 'var(--brand-alert-red)' }} />
-          </button>
+          {/* Option D AWAITING UX revision (2026-06-16) — a HELD emergency reading
+              (AWAITING confirmation) still suppresses edit/delete (mutating it
+              mid-flow would point the confirmatory reading / cron safety-net at a
+              changed row), but instead of an opaque "locked" badge it now shows a
+              clear "you haven't finished yet" status + a recovery CTA below, so
+              the patient understands the reading saved and how to complete it. */}
+          {isAwaitingConfirmation ? (
+            <span
+              data-testid={`reading-awaiting-${entry.id}`}
+              className="text-[0.6875rem] px-2.5 py-1 rounded-full font-semibold flex items-center gap-1"
+              style={{
+                backgroundColor: 'var(--brand-warning-amber-light)',
+                color: 'var(--brand-warning-amber-text)',
+              }}
+              aria-label={t('readings.awaitingSecondReading')}
+            >
+              <Clock className="w-3 h-3" aria-hidden="true" />
+              {t('readings.awaitingSecondReading')}
+            </span>
+          ) : (
+            <>
+              <button
+                onClick={onEdit}
+                className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
+                style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
+                aria-label={t('accessibility.editReading')}
+              >
+                <Pencil className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary-purple)' }} />
+              </button>
+              <button
+                data-testid={`readings-delete-button-${entry.id}`}
+                onClick={onDelete}
+                className="w-11 h-11 rounded-full flex items-center justify-center transition hover:opacity-75"
+                style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
+                aria-label={t('accessibility.deleteReading')}
+              >
+                <Trash2 className="w-3.5 h-3.5" style={{ color: 'var(--brand-alert-red)' }} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -794,6 +857,28 @@ function EntryCard({
               &ldquo;{entry.notes}&rdquo;
             </p>
           )}
+
+          {/* Option D AWAITING UX revision (2026-06-16) — recovery CTA. A held
+              emergency reading isn't finished until the patient takes the
+              confirmatory second reading; this routes them straight back into
+              the check-in (which auto-resumes Screen A). stopPropagation so the
+              tap doesn't also open the read-only detail view. ≥44px tall, real
+              <button> with a visible focus ring (a11y — ACCESSIBILITY_CHECK_GUIDE). */}
+          {isAwaitingConfirmation && (
+            <button
+              type="button"
+              data-testid={`reading-continue-confirmation-${entry.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                router.push('/check-in');
+              }}
+              className="mt-3 w-full h-11 rounded-full font-bold text-white text-[0.875rem] flex items-center justify-center gap-1.5 cursor-pointer transition hover:opacity-90 outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)]"
+              style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+            >
+              {t('readings.continueConfirmation')}
+              <ArrowRight className="w-4 h-4" aria-hidden="true" />
+            </button>
+          )}
     </motion.div>
   );
 }
@@ -807,6 +892,7 @@ function SessionCard({
   entries,
   heightCm,
   hasActiveMedications,
+  secondsIds,
   onView,
   onEdit,
   onDelete,
@@ -816,6 +902,9 @@ function SessionCard({
   /** Bug 60 — passed through to each EntryCard so 0-meds patients don't
    *  see the misleading "Meds: Taken" chip. */
   hasActiveMedications: boolean;
+  /** Bug 15 — ids whose minute collides with another reading the same day,
+   *  so the inner cards render HH:MM:SS. */
+  secondsIds?: Set<string>;
   onView: (e: Entry) => void;
   onEdit: (e: Entry) => void;
   onDelete: (id: string) => void;
@@ -909,6 +998,7 @@ function SessionCard({
                   entry={e}
                   heightCm={heightCm}
                   hasActiveMedications={hasActiveMedications}
+                  showSeconds={secondsIds?.has(e.id) ?? false}
                   onView={() => onView(e)}
                   onEdit={() => onEdit(e)}
                   onDelete={() => onDelete(e.id)}
@@ -1895,16 +1985,23 @@ function ReadingDetailModal({
             >
               {t('common.close')}
             </button>
-            <button
-              type="button"
-              data-testid="reading-detail-edit-btn"
-              onClick={onEdit}
-              className="flex-1 h-11 rounded-full text-white text-sm font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
-              style={{ backgroundColor: 'var(--brand-primary-purple)' }}
-            >
-              <Pencil className="w-4 h-4" />
-              {t('readings.editReading')}
-            </button>
+            {/* Bugs 10+11 Part 2 (live-test 2026-06-16) — a HELD Option D emergency
+                reading (AWAITING confirmation) is read-only everywhere: the card
+                suppresses inline edit/delete, and this modal must NOT offer an
+                "Edit Reading" bypass. Render Close-only until the reading resolves
+                (confirm / decline / cron). */}
+            {entry.emergencyConfirmation !== 'AWAITING' && (
+              <button
+                type="button"
+                data-testid="reading-detail-edit-btn"
+                onClick={onEdit}
+                className="flex-1 h-11 rounded-full text-white text-sm font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
+                style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+              >
+                <Pencil className="w-4 h-4" />
+                {t('readings.editReading')}
+              </button>
+            )}
           </div>
         </div>
       </motion.div>
@@ -2388,41 +2485,19 @@ export default function ReadingsPage() {
             return (
               <AnimatePresence mode="popLayout">
                 {grouped.map((group) => {
-                  // Bug 43 — within each date, bucket consecutive entries that
-                  // are either (a) sharing the SAME non-null sessionId OR
-                  // (b) within 5 minutes of the bucket's most recent
-                  // measuredAt. The time-proximity branch fixes cases where
-                  // entries should clinically group but ended up with
-                  // different sessionIds — legacy null-id rows pre-#91,
-                  // backend's defensive stale-id reset minting a fresh UUID,
-                  // or a chat tool call that didn't thread session_id. Per
-                  // CLINICAL_SPEC §5.2 the 5-minute clock is the canonical
-                  // session-grouping rule; sessionId is just the storage
-                  // shortcut. Multi-item buckets render as SessionCard
-                  // regardless of whether they share an id.
-                  const FIVE_MIN_MS = 5 * 60 * 1000;
-                  type Bucket = { sessionId: string | null; items: Entry[]; lastMs: number };
-                  const buckets: Bucket[] = [];
-                  for (const e of group.items) {
-                    const sid = e.sessionId ?? null;
-                    const eMs = new Date(e.measuredAt).getTime();
-                    const last = buckets[buckets.length - 1];
-                    const sameSession =
-                      sid && last && last.sessionId === sid;
-                    const withinWindow =
-                      last && Number.isFinite(eMs) && Number.isFinite(last.lastMs) &&
-                      Math.abs(eMs - last.lastMs) <= FIVE_MIN_MS;
-                    if (last && (sameSession || withinWindow)) {
-                      last.items.push(e);
-                      last.lastMs = eMs;
-                      // Promote the bucket to the first non-null sessionId we
-                      // see, so the React key + SessionCard caption pick up a
-                      // stable id when at least one entry in the bucket has one.
-                      if (!last.sessionId && sid) last.sessionId = sid;
-                    } else {
-                      buckets.push({ sessionId: sid, items: [e], lastMs: eMs });
-                    }
-                  }
+                  // Bug 43 + Bug 14 — bucket each date's readings into session
+                  // groups. Two readings group only when they share a non-null
+                  // sessionId, or both have a null sessionId within the 5-min
+                  // window (legacy null-id fallback). Proximity never bridges
+                  // two different non-null sessionIds — distinct clinical
+                  // episodes (e.g. a declined Option D emergency vs. a fresh
+                  // reading minutes later) stay separate, matching the admin
+                  // ReadingsTab (Bug 5). See lib/readingsSession.ts.
+                  const buckets = bucketReadingsBySession(group.items);
+                  // Bug 15 — ids that share a minute with another reading this
+                  // day get HH:MM:SS so rapid same-minute submissions are
+                  // distinguishable instead of both reading as "15:11".
+                  const secondsIds = sameMinuteCollisionIds(group.items);
                   return (
                     <div key={group.date} data-testid="reading-group" className="space-y-2">
                       <p
@@ -2442,6 +2517,7 @@ export default function ReadingsPage() {
                             entries={bucket.items}
                             heightCm={heightCm}
                             hasActiveMedications={medications.length > 0}
+                            secondsIds={secondsIds}
                             onView={(e) => setDetailEntry(e)}
                             onEdit={openEdit}
                             onDelete={(id) => setDeleteId(id)}
@@ -2452,6 +2528,7 @@ export default function ReadingsPage() {
                             entry={bucket.items[0]}
                             heightCm={heightCm}
                             hasActiveMedications={medications.length > 0}
+                            showSeconds={secondsIds.has(bucket.items[0].id)}
                             onView={() => setDetailEntry(bucket.items[0])}
                             onEdit={() => openEdit(bucket.items[0])}
                             onDelete={() => setDeleteId(bucket.items[0].id)}

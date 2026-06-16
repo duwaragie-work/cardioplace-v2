@@ -42,7 +42,29 @@ function isPatientOrCaregiverFacing(key: string): boolean {
     key.startsWith('checkin.b3.symptom') ||
     key.startsWith('checkin.b3.otherLabel') ||
     key.startsWith('notification.angioedema') ||
-    key.startsWith('notification.adherence')
+    key.startsWith('notification.adherence') ||
+    // Bug 2b (live-test 2026-06-15) — these patient-facing post-submit / modal
+    // surfaces shipped untranslated (English passthrough) because the gate
+    // didn't scan them. Widen to the confirmation, backdating-delay, historical
+    // note, AFib state cards + leave modal, and Option D retake screens. These
+    // are all read by the patient, so compliance signs off on their translation.
+    key.startsWith('checkin.confirm.') ||
+    key.startsWith('checkin.delay.') ||
+    key.startsWith('checkin.historical.') ||
+    key.startsWith('checkin.afib.') ||
+    key.startsWith('checkin.optionD.') ||
+    // Part 1 (2026-06-16) — FE buffer review screen (countdown, "I'm good",
+    // take-another, per-reading edit/remove). All patient-facing.
+    key.startsWith('checkin.buffer.') ||
+    // Bug 18 (live-test 2026-06-16) — the B2 "Taken just now" summary + "Change"
+    // link shipped English-only in es/de/fr/am. Scoped to these two keys (not all
+    // of checkin.b2) to avoid sweeping in unrelated step-2 labels.
+    key === 'checkin.b2.takenNow' ||
+    key === 'checkin.b2.changeTime' ||
+    // Bug 17 — bulk medication shortcuts are patient-facing.
+    key === 'checkin.b4.markAllTaken' ||
+    key === 'checkin.b4.markAllNotTaken' ||
+    key === 'checkin.b4.bulkTally'
   )
 }
 
@@ -51,7 +73,11 @@ function isPatientOrCaregiverFacing(key: string): boolean {
  * nouns, medical abbreviations, etc. Each entry MUST cite why.
  */
 const KNOWN_IDENTICAL_OK: Record<string, string> = {
-  // Add entries here as needed. Each must include locale + reason.
+  // 'bpm' (beats per minute) is the same abbreviation in English + French.
+  'fr:checkin.buffer.bpm': '"bpm" is a unit abbreviation, identical in en + fr',
+  // 'mmHg' is the universal blood-pressure unit symbol — identical across locales.
+  'es:checkin.confirm.unit': '"mmHg" is a unit symbol, identical across locales',
+  'am:checkin.confirm.unit': '"mmHg" is a unit symbol, identical across locales',
 }
 
 function loadLocaleFile(locale: 'en' | Locale): Map<string, string> {
@@ -174,7 +200,15 @@ describe('Cluster 8 §F.3 — i18n completeness gate', () => {
         if (KNOWN_IDENTICAL_OK[`${locale}:${key}`] != null) continue
         const enValue = en.get(key)
         if (enValue == null) continue
-        if (enValue.trim() === value.trim()) {
+        // Bug 20b — normalize smart quotes/apostrophes so an English string can't
+        // hide behind a curly ' vs straight ' (that's how `subtitleUnenrolled`
+        // slipped through untranslated).
+        const norm = (s: string) =>
+          s
+            .trim()
+            .replace(/[‘’ʼ]/g, "'")
+            .replace(/[“”]/g, '"')
+        if (norm(enValue) === norm(value)) {
           copies.push(`${locale}: ${key}`)
         }
       }

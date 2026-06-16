@@ -7,6 +7,21 @@ model JournalEntry {
   // removal (the ProfileVerificationLog audit row keeps the actor id).
   addedByUserId            String?
   measuredAt               DateTime
+  // Manisha Backdated Readings sign-off 2026-06-06 — chunk A of backdating
+  // implementation. Bucketed window between when the patient says they
+  // measured (measuredAt) and when the system received the row (createdAt):
+  //
+  //   REAL_TIME         (<5 min)        normal current-session entry
+  //   NEAR_REAL_TIME    (5 min - <1 h)  acceptable lag (e.g. forgot to log)
+  //   DELAYED_ENTRY     (1 h - <24 h)   L2 911 CTA suppressed (provider-only flag)
+  //   HISTORICAL_ENTRY  (>=24 h)        L2 not fired (stale data can't confirm
+  //                                     active target-organ damage); CMS 99454
+  //                                     billing excludes these from 16-day count
+  //
+  // Default REAL_TIME so existing rows (pre-migration) get a sensible value
+  // without backfill. New rows are computed server-side in
+  // DailyJournalService.create() from (now - measuredAt).
+  delayBand                DelayBand @default(REAL_TIME)
   systolicBP               Int?
   diastolicBP              Int?
   pulse                    Int?
@@ -77,6 +92,35 @@ model JournalEntry {
   // single-reading sessions.
   singleReadingFinalized Boolean @default(false)
 
+  // Bug 19 (2026-06-17) — when the patient EXPLICITLY closes the session ("I'm
+  // good" buffer commit, or Option D confirm/decline), every entry in the
+  // session is stamped here. "I'm good" is a deliberate session boundary
+  // (CTO 2026-06-09 + Manisha 2026-06-12), so the active-session "add to this
+  // session?" prompt must exclude closed sessions. Null = still open.
+  sessionClosedAt DateTime?
+
+  // Option D + Edit-Window (Manisha 2026-06-12 Edit-Window + Session Policy
+  // sign-off). Server-authoritative deadline before this entry's engine
+  // evaluation commits — while now() < this, the patient may edit/delete and no
+  // alert fires (Q1 + Q4, 5-min window). Null = evaluate immediately (legacy
+  // rows + emergencies that bypass the window). Stamped at create =
+  // createdAt + FIVE_MIN; cleared (set to a past instant / now) on "I'm done".
+  engineEvaluationDeferredUntil DateTime?
+
+  // Option D retake-to-confirm (Manisha 2026-06-12 Q2). Null for every
+  // non-Option-D entry. AWAITING = first emergency-range, no-symptom reading,
+  // held (engine NOT run) pending a confirmatory reading; CONFIRMATORY = the
+  // second reading that confirms/clears the first; UNCONFIRMED = resolved by
+  // decline / 5-min expiry → fires RULE_UNCONFIRMED_EMERGENCY (Tier 1
+  // provider-only). See docs/design/OPTION_D_AND_EDIT_WINDOW_DESIGN.md.
+  emergencyConfirmation EmergencyConfirmationState?
+
+  // On a CONFIRMATORY entry, the first-of-pair (AWAITING) entry id. Lets the
+  // engine read BP1 for the RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL physician
+  // message (→ AlertContext.initialSystolicBP/initialDiastolicBP). The pair
+  // always shares a sessionId, so BP1 is also reachable as a session sibling.
+  confirmsEntryId String?
+
   // Manisha 5/24 Q1 Tier 2 — narrow pulse pressure (SBP−DBP < 15) on this
   // INDIVIDUAL reading at entry. Physician-only artifact flag (no alert tier,
   // no patient message); the reading still enters the session average, where
@@ -111,6 +155,31 @@ enum Position {
   SITTING
   STANDING
   LYING
+}
+
+// Option D retake-to-confirm state (Manisha 2026-06-12 Q2). See JournalEntry
+// .emergencyConfirmation + docs/design/OPTION_D_AND_EDIT_WINDOW_DESIGN.md.
+enum EmergencyConfirmationState {
+  AWAITING // first-of-pair emergency reading; held, awaiting confirmation
+  CONFIRMATORY // second-of-pair reading submitted to confirm/clear the first
+  UNCONFIRMED // resolved: patient declined / window expired → Tier 1 flag
+}
+
+// Manisha Backdated Readings sign-off 2026-06-06 — bucketed lag between when
+// the patient says they measured (measuredAt) and when the system received
+// the row (createdAt). Drives:
+//   • engine: L2 911 CTA suppression on DELAYED_ENTRY (provider-only flag);
+//             L2 not fired on HISTORICAL_ENTRY (stale data can't confirm
+//             active target-organ damage).
+//   • billing: CMS 99454 16-day count excludes HISTORICAL_ENTRY rows.
+//   • admin: DELAYED badge + symptom-assessment prompt on physician message.
+//   • patient: informational "recorded but won't trigger a real-time alert"
+//              note on HISTORICAL_ENTRY (Option B per the policy doc).
+enum DelayBand {
+  REAL_TIME // < 5 min — normal current-session entry
+  NEAR_REAL_TIME // 5 min - < 1 h — acceptable lag (forgot to log)
+  DELAYED_ENTRY // 1 h - < 24 h — L2 911 CTA suppressed; provider-only flag
+  HISTORICAL_ENTRY // >= 24 h — L2 not fired; excluded from CMS 99454 count
 }
 
 enum DeviationType {
