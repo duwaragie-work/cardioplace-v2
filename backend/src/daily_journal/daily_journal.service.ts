@@ -1938,9 +1938,11 @@ export class DailyJournalService {
   /**
    * The most-recent OPEN, in-window, non-finalized ORDINARY session for the
    * patient, or null. Used to group readings within CLINICAL_SPEC §5.2's 5-min
-   * window regardless of the client's sessionId (Bug 4). Held Option D sessions
-   * (emergencyConfirmation set, e.g. AWAITING) are EXCLUDED — a fresh reading
-   * must never auto-join a held emergency-confirmation session.
+   * window regardless of the client's sessionId (Bug 4). ANY Option D session
+   * (emergencyConfirmation non-null — AWAITING, CONFIRMATORY, or UNCONFIRMED) is
+   * EXCLUDED via `emergencyConfirmation: null` below (Bug 14): each Option D
+   * reading is its own clinical episode, so a fresh reading must never auto-join
+   * it — confirmed or not.
    */
   private async findOpenInWindowSession(
     userId: string,
