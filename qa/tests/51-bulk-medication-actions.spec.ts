@@ -74,6 +74,16 @@ test.describe('Bug 17 — bulk medication actions', () => {
       await expect(tally).toHaveText(/[1-9]\d* taken/)
       // No meds left "not taken" after Mark all taken.
       await expect(tally).toHaveText(/·\s*0 not taken/)
+
+      // Bug 21b — absolute setters: "Mark all not taken" flips EVERY row even
+      // after "Mark all taken" (the old "fill empties only" guard no-op'd here).
+      await page.locator(byTestId('checkin-meds-mark-all-not-taken')).click()
+      await expect(tally).toHaveText(/0 taken/)
+      await expect(tally).toHaveText(/·\s*[1-9]\d* not taken/)
+
+      // Back to all taken — re-applies to every row (an absolute setter, not a toggle).
+      await page.locator(byTestId('checkin-meds-mark-all-taken')).click()
+      await expect(tally).toHaveText(/·\s*0 not taken/)
     } finally {
       await tc.dispose()
     }

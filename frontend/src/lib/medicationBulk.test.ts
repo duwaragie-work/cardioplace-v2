@@ -22,23 +22,24 @@ describe('applyBulkMedicationStatus (Bug 17)', () => {
     expect(out.b.taken).toBe('no')
   })
 
-  it('does NOT overwrite an answer the patient already gave', () => {
+  it('Bug 21b — absolute setter: OVERWRITES an answer the patient already gave', () => {
     const current: Record<string, E> = {
       a: { taken: 'no', reason: 'FORGOT', missedDoses: 2 },
       b: DEFAULT,
     }
     const out = applyBulkMedicationStatus<E>(current, ['a', 'b'], 'yes', makeAnswered)
-    // 'a' keeps its explicit miss + reason; only 'b' flips.
-    expect(out.a).toEqual({ taken: 'no', reason: 'FORGOT', missedDoses: 2 })
+    // Both flip to yes — the bulk button is unconditional, not "fill empties".
+    expect(out.a.taken).toBe('yes')
     expect(out.b.taken).toBe('yes')
   })
 
-  it('is a no-op when every med is already answered', () => {
-    const current: Record<string, E> = {
+  it('Bug 21b — "not taken" flips everything even after "all taken"', () => {
+    const allTaken: Record<string, E> = {
       a: { taken: 'yes', reason: null, missedDoses: 1 },
-      b: { taken: 'scheduledLater', reason: null, missedDoses: 1 },
+      b: { taken: 'yes', reason: null, missedDoses: 1 },
     }
-    const out = applyBulkMedicationStatus<E>(current, ['a', 'b'], 'no', makeAnswered)
-    expect(out).toEqual(current)
+    const out = applyBulkMedicationStatus<E>(allTaken, ['a', 'b'], 'no', makeAnswered)
+    expect(out.a.taken).toBe('no')
+    expect(out.b.taken).toBe('no')
   })
 })

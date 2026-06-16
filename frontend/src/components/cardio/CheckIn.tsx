@@ -974,9 +974,9 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
     });
   };
 
-  // Bug 17 — bulk-answer every med the patient HASN'T yet touched (FE-only; no
-  // backend round-trip). Explicit per-med answers are preserved. The patient can
-  // still flip any individual med afterward.
+  // Bug 17 / Bug 21b — absolute setter: bulk-answer EVERY med to `value` (FE-only;
+  // no backend round-trip), regardless of current state, so "Mark all not taken"
+  // works after "Mark all taken". The patient can still flip any individual med.
   const bulkSet = (value: 'yes' | 'no') => {
     setField(
       'medicationStatus',
@@ -1007,28 +1007,35 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
         total={5}
       />
 
-      {/* Bug 17 — bulk shortcuts for patients with several meds. Only shown when
-          there's more than one (no point for a single med). FE-only state. */}
+      {/* Bug 17 / Bug 21a — bulk shortcuts for patients with several meds, styled
+          as one segmented control (tertiary, above the list). Only shown when
+          there's more than one med. Each button is an absolute setter (Bug 21b).
+          44px tall (a11y C3); smaller than the primary CTA (48px). */}
       {!medsLoading && medications.length > 1 && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            data-testid="checkin-meds-mark-all-taken"
-            onClick={() => bulkSet('yes')}
-            className="h-11 px-4 rounded-full border-2 text-[0.8125rem] font-semibold cursor-pointer transition hover:opacity-80"
-            style={{ borderColor: 'var(--brand-success-green)', color: 'var(--brand-success-green)' }}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div
+            className="inline-flex rounded-full overflow-hidden"
+            style={{ border: '1.5px solid var(--brand-border)' }}
           >
-            {t('checkin.b4.markAllTaken')}
-          </button>
-          <button
-            type="button"
-            data-testid="checkin-meds-mark-all-not-taken"
-            onClick={() => bulkSet('no')}
-            className="h-11 px-4 rounded-full border-2 text-[0.8125rem] font-semibold cursor-pointer transition hover:opacity-80"
-            style={{ borderColor: 'var(--brand-warning-amber)', color: 'var(--brand-warning-amber-text)' }}
-          >
-            {t('checkin.b4.markAllNotTaken')}
-          </button>
+            <button
+              type="button"
+              data-testid="checkin-meds-mark-all-taken"
+              onClick={() => bulkSet('yes')}
+              className="h-11 px-4 text-[0.8125rem] font-semibold cursor-pointer transition hover:bg-[#f5f3ff]"
+              style={{ color: 'var(--brand-primary-purple)' }}
+            >
+              {t('checkin.b4.markAllTaken')}
+            </button>
+            <button
+              type="button"
+              data-testid="checkin-meds-mark-all-not-taken"
+              onClick={() => bulkSet('no')}
+              className="h-11 px-4 text-[0.8125rem] font-semibold cursor-pointer transition hover:bg-[#f5f3ff]"
+              style={{ color: 'var(--brand-primary-purple)', borderLeft: '1.5px solid var(--brand-border)' }}
+            >
+              {t('checkin.b4.markAllNotTaken')}
+            </button>
+          </div>
           {answeredCount > 0 && (
             <span
               data-testid="checkin-meds-tally"
