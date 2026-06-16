@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus,
@@ -14,7 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
-  Lock,
+  Clock,
+  ArrowRight,
 } from 'lucide-react';
 import {
   getJournalEntries,
@@ -477,6 +479,8 @@ function EntryCard({
   onDelete: () => void;
 }) {
   const { t } = useLanguage();
+  const router = useRouter();
+  const isAwaitingConfirmation = entry.emergencyConfirmation === 'AWAITING';
   const hasBP = entry.systolicBP && entry.diastolicBP;
   // Bug 37 — chat's log_symptom_quick funnels symptom-only logs through
   // journal.create (so the rule engine sees the symptom boolean). Those
@@ -595,23 +599,24 @@ function EntryCard({
           onClick={(e) => e.stopPropagation()}
         >
           <AudioButton size="sm" text={audioSummary} />
-          {/* Bug 10+11 (live-test 2026-06-15) — a HELD Option D emergency reading
-              (AWAITING confirmation) is read-only on the readings tab: editing or
-              deleting it mid-flow would point the confirmatory reading (or the
-              cron safety-net) at a changed/missing row. Show a lock badge instead;
-              the patient resolves it in the check-in confirmation flow. */}
-          {entry.emergencyConfirmation === 'AWAITING' ? (
+          {/* Option D AWAITING UX revision (2026-06-16) — a HELD emergency reading
+              (AWAITING confirmation) still suppresses edit/delete (mutating it
+              mid-flow would point the confirmatory reading / cron safety-net at a
+              changed row), but instead of an opaque "locked" badge it now shows a
+              clear "you haven't finished yet" status + a recovery CTA below, so
+              the patient understands the reading saved and how to complete it. */}
+          {isAwaitingConfirmation ? (
             <span
-              data-testid={`reading-held-${entry.id}`}
+              data-testid={`reading-awaiting-${entry.id}`}
               className="text-[0.6875rem] px-2.5 py-1 rounded-full font-semibold flex items-center gap-1"
               style={{
                 backgroundColor: 'var(--brand-warning-amber-light)',
                 color: 'var(--brand-warning-amber-text)',
               }}
-              title={t('readings.heldAwaitingConfirmation')}
+              aria-label={t('readings.awaitingSecondReading')}
             >
-              <Lock className="w-3 h-3" aria-hidden="true" />
-              {t('readings.held')}
+              <Clock className="w-3 h-3" aria-hidden="true" />
+              {t('readings.awaitingSecondReading')}
             </span>
           ) : (
             <>
@@ -816,6 +821,28 @@ function EntryCard({
             >
               &ldquo;{entry.notes}&rdquo;
             </p>
+          )}
+
+          {/* Option D AWAITING UX revision (2026-06-16) — recovery CTA. A held
+              emergency reading isn't finished until the patient takes the
+              confirmatory second reading; this routes them straight back into
+              the check-in (which auto-resumes Screen A). stopPropagation so the
+              tap doesn't also open the read-only detail view. ≥44px tall, real
+              <button> with a visible focus ring (a11y — ACCESSIBILITY_CHECK_GUIDE). */}
+          {isAwaitingConfirmation && (
+            <button
+              type="button"
+              data-testid={`reading-continue-confirmation-${entry.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                router.push('/check-in');
+              }}
+              className="mt-3 w-full h-11 rounded-full font-bold text-white text-[0.875rem] flex items-center justify-center gap-1.5 cursor-pointer transition hover:opacity-90 outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--brand-primary-purple)]"
+              style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+            >
+              {t('readings.continueConfirmation')}
+              <ArrowRight className="w-4 h-4" aria-hidden="true" />
+            </button>
           )}
     </motion.div>
   );
