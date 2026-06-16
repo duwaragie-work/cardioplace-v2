@@ -250,6 +250,8 @@ const am: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': 'ንባብዎን አስቀምጠናል እና የእንክብካቤ ቡድንዎ እንዲያገኝዎት አሳውቀናል።',
   'checkin.optionD.screenC.safetyFooter': 'አሁን ጤናዎ ካልተሰማዎት፣ እባክዎ ሐኪምዎን ወይም 911 ይደውሉ።',
   'checkin.optionD.screenC.done': 'ወደ ዳሽቦርድ ተመለስ',
+  // Resume intro — Screen A ራስ-ሰር መቀጠያ (2026-06-16)። ጊዜያዊ (ማኒሻ በመጠባበቅ ላይ)።
+  'checkin.optionD.resumeIntro': 'ከአሁን ቀደም የጀመሩትን ንባብ እንጨርስ',
   'checkin.b3.otherLabel': 'ሌላ ነገር? (አማራጭ)',
   'checkin.b3.otherPlaceholder': 'በራስዎ ቃላት…',
   'checkin.b3.otherSymptomsLabel': 'ሌላ ምልክት አለ? (አማራጭ)',
@@ -610,6 +612,9 @@ const am: Record<TranslationKey, string> = {
   'readings.held': 'ተይዟል',
   'readings.heldAwaitingConfirmation':
     'ይህ ንባብ እየተረጋገጠ ነው። ለማጠናቀቅ በቼክ-ኢንዎ ላይ ያሉትን ደረጃዎች ይጨርሱ — እዚህ መለወጥ አይችሉም።',
+  // Option D AWAITING UX ማሻሻያ (2026-06-16)። ጊዜያዊ (ማኒሻ በመጠባበቅ ላይ)።
+  'readings.awaitingSecondReading': 'ሁለተኛ ንባብዎን በመጠባበቅ ላይ',
+  'readings.continueConfirmation': 'ማረጋገጫን ይቀጥሉ',
   'readings.meds': 'መድሃኒቶች',
   'readings.taken': 'ተወስዷል',
   'readings.missed': 'ተዘልሏል',

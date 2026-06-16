@@ -248,6 +248,8 @@ const fr: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': "Nous avons enregistré votre mesure et informé votre équipe soignante qu'elle doit prendre de vos nouvelles.",
   'checkin.optionD.screenC.safetyFooter': 'Si vous vous sentez mal en ce moment, veuillez appeler votre médecin ou le 911.',
   'checkin.optionD.screenC.done': 'Retour au tableau de bord',
+  // Resume intro — reprise auto de l'écran A (2026-06-16). PROVISOIRE (en attente de Manisha).
+  'checkin.optionD.resumeIntro': "Terminons votre mesure de tout à l'heure",
   'checkin.b3.otherLabel': 'Autre chose ? (optionnel)',
   'checkin.b3.otherPlaceholder': 'Dans vos propres mots…',
   'checkin.b3.otherSymptomsLabel': "D'autres symptômes ? (optionnel)",
@@ -607,6 +609,9 @@ const fr: Record<TranslationKey, string> = {
   'readings.held': 'En attente',
   'readings.heldAwaitingConfirmation':
     "Cette mesure est en cours de confirmation. Terminez les étapes de votre suivi pour la valider — vous ne pouvez pas la modifier ici.",
+  // Refonte UX Option D AWAITING (2026-06-16). PROVISOIRE (en attente de Manisha).
+  'readings.awaitingSecondReading': 'En attente de votre deuxième mesure',
+  'readings.continueConfirmation': 'Continuer la confirmation',
   'readings.meds': 'Méds',
   'readings.taken': 'Prise',
   'readings.missed': 'Manquée',

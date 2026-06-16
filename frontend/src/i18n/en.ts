@@ -252,6 +252,9 @@ const en = {
   'checkin.optionD.screenC.body': 'We saved your reading and let your care team know they should check in with you.',
   'checkin.optionD.screenC.safetyFooter': "If you're feeling unwell right now, please call your doctor or 911.",
   'checkin.optionD.screenC.done': 'Back to dashboard',
+  // Resume intro — shown above Screen A when the patient returns to an
+  // unfinished held emergency (auto-resume). PLACEHOLDER (pending Manisha).
+  'checkin.optionD.resumeIntro': "Let's finish your reading from a moment ago",
   'checkin.b3.otherLabel': 'Anything else? (optional)',
   'checkin.b3.otherPlaceholder': 'In your own words…',
   'checkin.b3.otherSymptomsLabel': 'Any other symptoms? (optional)',
@@ -618,6 +621,10 @@ const en = {
   'readings.held': 'Held',
   'readings.heldAwaitingConfirmation':
     "This reading is being confirmed. Finish the steps on your check-in to complete it — you can't change it here.",
+  // Option D AWAITING UX revision (2026-06-16) — action-oriented status + CTA
+  // that replace the old "Held" lock badge. PLACEHOLDER (pending Manisha).
+  'readings.awaitingSecondReading': 'Awaiting your second reading',
+  'readings.continueConfirmation': 'Continue confirmation',
   'readings.meds': 'Meds',
   'readings.taken': 'Taken',
   'readings.missed': 'Missed',

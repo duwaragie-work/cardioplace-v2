@@ -248,6 +248,8 @@ const de: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': 'Wir haben Ihren Messwert gespeichert und Ihr Behandlungsteam informiert, dass es sich bei Ihnen melden soll.',
   'checkin.optionD.screenC.safetyFooter': 'Wenn Sie sich gerade unwohl fühlen, rufen Sie bitte Ihren Arzt oder den Notruf 911 an.',
   'checkin.optionD.screenC.done': 'Zurück zur Übersicht',
+  // Resume intro — Screen A auto-resume (2026-06-16). PLATZHALTER (Manisha ausstehend).
+  'checkin.optionD.resumeIntro': 'Lassen Sie uns Ihre Messung von vorhin abschließen',
   'checkin.b3.otherLabel': 'Noch etwas? (optional)',
   'checkin.b3.otherPlaceholder': 'In Ihren eigenen Worten…',
   'checkin.b3.otherSymptomsLabel': 'Weitere Symptome? (optional)',
@@ -607,6 +609,9 @@ const de: Record<TranslationKey, string> = {
   'readings.held': 'Zurückgehalten',
   'readings.heldAwaitingConfirmation':
     'Diese Messung wird bestätigt. Schließen Sie die Schritte in Ihrem Check-in ab — hier können Sie sie nicht ändern.',
+  // Option D AWAITING UX-Überarbeitung (2026-06-16). PLATZHALTER (Manisha ausstehend).
+  'readings.awaitingSecondReading': 'Warten auf Ihre zweite Messung',
+  'readings.continueConfirmation': 'Bestätigung fortsetzen',
   'readings.meds': 'Meds',
   'readings.taken': 'Genommen',
   'readings.missed': 'Versäumt',

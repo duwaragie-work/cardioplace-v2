@@ -248,6 +248,8 @@ const es: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': 'Guardamos su lectura e informamos a su equipo de atención para que se comunique con usted.',
   'checkin.optionD.screenC.safetyFooter': 'Si se siente mal en este momento, llame a su médico o al 911.',
   'checkin.optionD.screenC.done': 'Volver al panel',
+  // Resume intro — Screen A auto-resume (2026-06-16). PLACEHOLDER (pendiente Manisha).
+  'checkin.optionD.resumeIntro': 'Terminemos su lectura de hace un momento',
   'checkin.b3.otherLabel': '¿Algo más? (opcional)',
   'checkin.b3.otherPlaceholder': 'En sus propias palabras…',
   'checkin.b3.otherSymptomsLabel': '¿Algún otro síntoma? (opcional)',
@@ -607,6 +609,9 @@ const es: Record<TranslationKey, string> = {
   'readings.held': 'En espera',
   'readings.heldAwaitingConfirmation':
     'Esta lectura se está confirmando. Termine los pasos en su control para completarla — no puede cambiarla aquí.',
+  // Option D AWAITING UX revision (2026-06-16). PLACEHOLDER (pendiente Manisha).
+  'readings.awaitingSecondReading': 'Esperando su segunda lectura',
+  'readings.continueConfirmation': 'Continuar la confirmación',
   'readings.meds': 'Medicamentos',
   'readings.taken': 'Tomada',
   'readings.missed': 'Omitida',
