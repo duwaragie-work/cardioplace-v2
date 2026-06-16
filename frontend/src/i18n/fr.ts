@@ -250,6 +250,18 @@ const fr: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.done': 'Retour au tableau de bord',
   // Resume intro — reprise auto de l'écran A (2026-06-16). PROVISOIRE (en attente de Manisha).
   'checkin.optionD.resumeIntro': "Terminons votre mesure de tout à l'heure",
+  // Part 1 — FE buffer review screen. PROVISOIRE (en attente de Manisha).
+  'checkin.buffer.title': "Vérifier avant d'envoyer",
+  'checkin.buffer.subtitle': "Ceci n'a pas encore été envoyé. Prenez un moment pour le vérifier — ou ajoutez une autre mesure.",
+  'checkin.buffer.reading': 'Mesure {n}',
+  'checkin.buffer.countdown': 'Envoi automatique dans {time}',
+  'checkin.buffer.imGood': "C'est bon — envoyer à mon équipe de soins",
+  'checkin.buffer.takeAnother': 'Prendre une autre mesure',
+  'checkin.buffer.takeAnotherAfib': 'Votre équipe demande 3 mesures — prenez-en une autre',
+  'checkin.buffer.edit': 'Modifier',
+  'checkin.buffer.remove': 'Retirer',
+  'checkin.buffer.sending': 'Envoi…',
+  'checkin.buffer.bpm': 'bpm',
   'checkin.b3.otherLabel': 'Autre chose ? (optionnel)',
   'checkin.b3.otherPlaceholder': 'Dans vos propres mots…',
   'checkin.b3.otherSymptomsLabel': "D'autres symptômes ? (optionnel)",

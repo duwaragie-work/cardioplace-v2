@@ -250,6 +250,18 @@ const es: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.done': 'Volver al panel',
   // Resume intro — Screen A auto-resume (2026-06-16). PLACEHOLDER (pendiente Manisha).
   'checkin.optionD.resumeIntro': 'Terminemos su lectura de hace un momento',
+  // Part 1 — FE buffer review screen. PLACEHOLDER (pendiente Manisha).
+  'checkin.buffer.title': 'Revisar antes de enviar',
+  'checkin.buffer.subtitle': 'Esto aún no se ha enviado. Tómese un momento para revisarlo, o añada otra lectura.',
+  'checkin.buffer.reading': 'Lectura {n}',
+  'checkin.buffer.countdown': 'Se envía automáticamente en {time}',
+  'checkin.buffer.imGood': 'Estoy bien — enviar a mi equipo de atención',
+  'checkin.buffer.takeAnother': 'Tomar otra lectura',
+  'checkin.buffer.takeAnotherAfib': 'Su equipo pide 3 lecturas — tome otra',
+  'checkin.buffer.edit': 'Editar',
+  'checkin.buffer.remove': 'Quitar',
+  'checkin.buffer.sending': 'Enviando…',
+  'checkin.buffer.bpm': 'lpm',
   'checkin.b3.otherLabel': '¿Algo más? (opcional)',
   'checkin.b3.otherPlaceholder': 'En sus propias palabras…',
   'checkin.b3.otherSymptomsLabel': '¿Algún otro síntoma? (opcional)',

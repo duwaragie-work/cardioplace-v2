@@ -250,6 +250,18 @@ const de: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.done': 'Zurück zur Übersicht',
   // Resume intro — Screen A auto-resume (2026-06-16). PLATZHALTER (Manisha ausstehend).
   'checkin.optionD.resumeIntro': 'Lassen Sie uns Ihre Messung von vorhin abschließen',
+  // Part 1 — FE buffer review screen. PLATZHALTER (Manisha ausstehend).
+  'checkin.buffer.title': 'Vor dem Senden prüfen',
+  'checkin.buffer.subtitle': 'Dies wurde noch nicht gesendet. Nehmen Sie sich einen Moment zum Prüfen — oder fügen Sie eine weitere Messung hinzu.',
+  'checkin.buffer.reading': 'Messung {n}',
+  'checkin.buffer.countdown': 'Wird automatisch gesendet in {time}',
+  'checkin.buffer.imGood': 'Alles gut — an mein Behandlungsteam senden',
+  'checkin.buffer.takeAnother': 'Weitere Messung vornehmen',
+  'checkin.buffer.takeAnotherAfib': 'Ihr Team bittet um 3 Messungen — nehmen Sie eine weitere vor',
+  'checkin.buffer.edit': 'Bearbeiten',
+  'checkin.buffer.remove': 'Entfernen',
+  'checkin.buffer.sending': 'Wird gesendet…',
+  'checkin.buffer.bpm': 'S/min',
   'checkin.b3.otherLabel': 'Noch etwas? (optional)',
   'checkin.b3.otherPlaceholder': 'In Ihren eigenen Worten…',
   'checkin.b3.otherSymptomsLabel': 'Weitere Symptome? (optional)',

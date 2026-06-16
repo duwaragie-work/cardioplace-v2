@@ -252,6 +252,18 @@ const am: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.done': 'ወደ ዳሽቦርድ ተመለስ',
   // Resume intro — Screen A ራስ-ሰር መቀጠያ (2026-06-16)። ጊዜያዊ (ማኒሻ በመጠባበቅ ላይ)።
   'checkin.optionD.resumeIntro': 'ከአሁን ቀደም የጀመሩትን ንባብ እንጨርስ',
+  // Part 1 — FE buffer review screen. ጊዜያዊ (ማኒሻ በመጠባበቅ ላይ)።
+  'checkin.buffer.title': 'ከመላክዎ በፊት ይገምግሙ',
+  'checkin.buffer.subtitle': 'ይህ ገና አልተላከም። ለመፈተሽ ጥቂት ጊዜ ይውሰዱ — ወይም ሌላ ንባብ ይጨምሩ።',
+  'checkin.buffer.reading': 'ንባብ {n}',
+  'checkin.buffer.countdown': 'በ{time} ውስጥ በራስ-ሰር ይላካል',
+  'checkin.buffer.imGood': 'ደህና ነኝ — ለእንክብካቤ ቡድኔ ላክ',
+  'checkin.buffer.takeAnother': 'ሌላ ንባብ ይውሰዱ',
+  'checkin.buffer.takeAnotherAfib': 'ቡድንዎ 3 ንባቦች ይጠይቃል — ሌላ ይውሰዱ',
+  'checkin.buffer.edit': 'አርትዕ',
+  'checkin.buffer.remove': 'አስወግድ',
+  'checkin.buffer.sending': 'በመላክ ላይ…',
+  'checkin.buffer.bpm': 'ምት/ደቂቃ',
   'checkin.b3.otherLabel': 'ሌላ ነገር? (አማራጭ)',
   'checkin.b3.otherPlaceholder': 'በራስዎ ቃላት…',
   'checkin.b3.otherSymptomsLabel': 'ሌላ ምልክት አለ? (አማራጭ)',

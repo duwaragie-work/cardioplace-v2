@@ -255,6 +255,19 @@ const en = {
   // Resume intro — shown above Screen A when the patient returns to an
   // unfinished held emergency (auto-resume). PLACEHOLDER (pending Manisha).
   'checkin.optionD.resumeIntro': "Let's finish your reading from a moment ago",
+  // Part 1 — FE buffer review screen (non-emergency readings held on-device for
+  // the 5-min window). PLACEHOLDER wording (pending Manisha sign-off).
+  'checkin.buffer.title': 'Review before sending',
+  'checkin.buffer.subtitle': "This hasn't been sent yet. Take a moment to check it — or add another reading.",
+  'checkin.buffer.reading': 'Reading {n}',
+  'checkin.buffer.countdown': 'Sends automatically in {time}',
+  'checkin.buffer.imGood': "I'm good — send to my care team",
+  'checkin.buffer.takeAnother': 'Take another reading',
+  'checkin.buffer.takeAnotherAfib': 'Your care team asks for 3 readings — take another',
+  'checkin.buffer.edit': 'Edit',
+  'checkin.buffer.remove': 'Remove',
+  'checkin.buffer.sending': 'Sending…',
+  'checkin.buffer.bpm': 'bpm',
   'checkin.b3.otherLabel': 'Anything else? (optional)',
   'checkin.b3.otherPlaceholder': 'In your own words…',
   'checkin.b3.otherSymptomsLabel': 'Any other symptoms? (optional)',
