@@ -314,4 +314,13 @@ export class CreateJournalEntryDto {
   @IsOptional()
   @IsUUID()
   confirmsEntryId?: string
+
+  // Bug 19 (2026-06-17) — the patient explicitly closed this session ("I'm good"
+  // buffer commit, or Option D confirmatory). Stamps `sessionClosedAt` on this
+  // entry + every prior entry sharing its session, so the active-session prompt
+  // never re-offers a session the patient already declared done. Default false
+  // for chat-tool / legacy creates.
+  @IsOptional()
+  @IsBoolean()
+  closeSession?: boolean
 }

@@ -95,6 +95,10 @@ export interface JournalEntryPayload {
   beginEmergencyConfirmation?: boolean
   /** Second-of-pair: the AWAITING first-of-pair id this reading confirms/clears. */
   confirmsEntryId?: string
+  /** Bug 19 — the patient explicitly closed this session ("I'm good" buffer
+   *  commit / Option D confirmatory). The backend stamps `sessionClosedAt` on the
+   *  whole session so the active-session prompt won't re-offer it. */
+  closeSession?: boolean
 }
 
 export interface JournalEntryDto extends JournalEntryPayload {

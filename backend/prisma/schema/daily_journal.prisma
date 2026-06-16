@@ -92,6 +92,13 @@ model JournalEntry {
   // single-reading sessions.
   singleReadingFinalized Boolean @default(false)
 
+  // Bug 19 (2026-06-17) — when the patient EXPLICITLY closes the session ("I'm
+  // good" buffer commit, or Option D confirm/decline), every entry in the
+  // session is stamped here. "I'm good" is a deliberate session boundary
+  // (CTO 2026-06-09 + Manisha 2026-06-12), so the active-session "add to this
+  // session?" prompt must exclude closed sessions. Null = still open.
+  sessionClosedAt DateTime?
+
   // Option D + Edit-Window (Manisha 2026-06-12 Edit-Window + Session Policy
   // sign-off). Server-authoritative deadline before this entry's engine
   // evaluation commits — while now() < this, the patient may edit/delete and no

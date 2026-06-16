@@ -2745,6 +2745,8 @@ export default function CheckIn() {
       position: form.position ?? undefined,
       sessionId: sessionId ?? undefined,
       confirmsEntryId: optionDFirstId ?? undefined,
+      // Bug 19 — the confirmatory reading closes the Option D session.
+      closeSession: true,
     });
     // Bug 16 — if the confirmatory reading was itself emergency-range, the engine
     // fires RULE_ABSOLUTE_EMERGENCY (BP Level 2); route to the 911 screen rather
@@ -2871,7 +2873,9 @@ export default function CheckIn() {
     try {
       const created = [] as Awaited<ReturnType<typeof createJournalEntry>>[];
       for (const payload of commitPayloads(draft)) {
-        created.push(await createJournalEntry(payload));
+        // Bug 19 — "I'm good" is an explicit session boundary; close it so the
+        // active-session prompt won't re-offer this sitting on the next check-in.
+        created.push(await createJournalEntry({ ...payload, closeSession: true }));
       }
       if (user?.id) {
         clearBufferDraft(user.id);

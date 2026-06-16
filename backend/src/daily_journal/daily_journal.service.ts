@@ -391,6 +391,17 @@ export class DailyJournalService {
         })
       }
 
+      // Bug 19 — the patient explicitly closed the session ("I'm good" buffer
+      // commit, or an Option D confirmatory). Stamp every entry in the session so
+      // the active-session "add to this session?" prompt won't re-offer a session
+      // the patient already declared done.
+      if (dto.closeSession && effectiveSessionId) {
+        await this.prisma.journalEntry.updateMany({
+          where: { userId, sessionId: effectiveSessionId },
+          data: { sessionClosedAt: new Date() },
+        })
+      }
+
       // Engine evaluation runs for BOTH patient and admin creates — a new
       // reading is a new clinical datapoint regardless of who keyed it in.
       // EXCEPTION: an Option D AWAITING first-of-pair is HELD — the engine must
@@ -1253,6 +1264,15 @@ export class DailyJournalService {
     })
     if (claim.count === 0) {
       return { statusCode: 200, message: 'Already resolved — no-op.' }
+    }
+
+    // Bug 19 — declining (or the cron expiry) explicitly closes the session, so
+    // the active-session prompt won't re-offer the resolved emergency's session.
+    if (entry.sessionId) {
+      await this.prisma.journalEntry.updateMany({
+        where: { userId, sessionId: entry.sessionId },
+        data: { sessionClosedAt: new Date() },
+      })
     }
 
     // FIRST evaluation of the held reading (not a re-trigger). runPipeline sees
@@ -2245,9 +2265,13 @@ export class DailyJournalService {
         measuredAt: true,
         singleReadingFinalized: true,
         emergencyConfirmation: true,
+        sessionClosedAt: true,
       },
     })
     if (!latest) return null
+    // Bug 19 — the patient explicitly closed this session ("I'm good" / Option D
+    // confirm-decline). "I'm good" is a deliberate boundary, so never re-offer it.
+    if (latest.sessionClosedAt != null) return null
     // Option D (Manisha 2026-06-12 Q2) — a held emergency awaiting its
     // confirmatory reading anchors its own session and must NOT surface the
     // "add to this session?" prompt. The dedicated awaiting-emergency resume
