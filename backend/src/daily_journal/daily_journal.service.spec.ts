@@ -85,6 +85,20 @@ describe('DailyJournalService', () => {
       expect(await service.getActiveSession('u1', now)).toBeNull()
     })
 
+    // Option D AWAITING UX revision (2026-06-16) — a held emergency awaiting its
+    // confirmatory reading must NOT surface the "add to this session?" prompt;
+    // the dedicated awaiting-emergency resume flow owns it instead.
+    it('returns null when the latest reading is a held AWAITING emergency', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({
+        id: 'e1',
+        sessionId: 's1',
+        measuredAt: new Date(now.getTime() - 60_000),
+        singleReadingFinalized: false,
+        emergencyConfirmation: 'AWAITING',
+      })
+      expect(await service.getActiveSession('u1', now)).toBeNull()
+    })
+
     it('returns the open session; non-AFib with 2 readings → requiresMoreReadings=false', async () => {
       const last = new Date(now.getTime() - 2 * 60_000)
       const first = new Date(now.getTime() - 8 * 60_000)
@@ -162,6 +176,39 @@ describe('DailyJournalService', () => {
 
       const res = await service.getActiveSession('u1', now)
       expect(res?.requiresMoreReadings).toBe(false)
+    })
+  })
+
+  // Option D AWAITING UX revision (2026-06-16) — drives the /check-in Screen A
+  // auto-resume + the /readings "Continue confirmation" CTA.
+  describe('getAwaitingEmergency', () => {
+    it('returns null when the patient has no held emergency awaiting confirmation', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null)
+      expect(await service.getAwaitingEmergency('u1')).toBeNull()
+      // Scoped to the user's AWAITING readings only.
+      expect(mockPrisma.journalEntry.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: 'u1', emergencyConfirmation: 'AWAITING' },
+        }),
+      )
+    })
+
+    it('returns the held first-of-pair (id, session, BP, measuredAt) when one exists', async () => {
+      const measuredAt = new Date('2026-05-22T09:58:00Z')
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({
+        id: 'held-1',
+        sessionId: 's-held',
+        systolicBP: 195,
+        diastolicBP: 120,
+        measuredAt,
+      })
+      expect(await service.getAwaitingEmergency('u1')).toEqual({
+        id: 'held-1',
+        sessionId: 's-held',
+        systolicBP: 195,
+        diastolicBP: 120,
+        measuredAt: measuredAt.toISOString(),
+      })
     })
   })
 

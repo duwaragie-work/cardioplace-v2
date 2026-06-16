@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { authedApi } from '../helpers/auth.js'
+import { authedApi, signInPatient } from '../helpers/auth.js'
 import { PATIENTS } from '../helpers/accounts.js'
+import { byTestId, T } from '../helpers/selectors.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
@@ -326,6 +327,118 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
         patientAlerts.some((x) => x.ruleId === 'RULE_UNCONFIRMED_EMERGENCY'),
         'provider-only RULE_UNCONFIRMED_EMERGENCY must not leak into the patient alerts feed',
       ).toBeFalsy()
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
+  // ── AWAITING UX revision (2026-06-16) — patient-facing /readings + /check-in ──
+  // The held emergency is no longer an opaque "Held" lock: /readings shows a
+  // clear "Awaiting your second reading" status + a "Continue confirmation" CTA,
+  // and the CTA (or a direct /check-in visit) auto-resumes Screen A so the
+  // patient can finish. Edit/delete stay suppressed while AWAITING.
+  test('readings shows the AWAITING status + Continue CTA (no Held lock, no edit/delete); CTA resumes Screen A; confirming clears it', async ({
+    page,
+  }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      // Held first-of-pair (195/120, no symptoms) → AWAITING.
+      const first = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 195,
+          diastolicBP: 120,
+          pulse: 88,
+          position: 'SITTING',
+          sessionId: randomUUID(),
+          beginEmergencyConfirmation: true,
+        },
+      })
+      expect(first.status()).toBe(202)
+      const firstId = (await first.json()).data.id
+
+      await signInPatient(page, PATIENTS.aisha.email)
+      await page.goto('/readings')
+
+      // The AWAITING reading shows the action-oriented status + recovery CTA…
+      await expect(
+        page.locator(byTestId(T.readings.rowAwaiting(firstId))),
+      ).toBeVisible({ timeout: 15_000 })
+      await expect(
+        page.locator(byTestId(T.readings.rowContinueConfirmation(firstId))),
+      ).toBeVisible()
+      // …and NOT the old "Held" lock label, nor edit/delete affordances.
+      await expect(page.getByText('Held', { exact: true })).toHaveCount(0)
+      await expect(
+        page.locator(byTestId(T.readings.rowDelete(firstId))),
+      ).toHaveCount(0)
+
+      // Tapping the CTA resumes Screen A on /check-in with the held BP shown.
+      await page.locator(byTestId(T.readings.rowContinueConfirmation(firstId))).click()
+      await expect(page).toHaveURL(/\/check-in/, { timeout: 15_000 })
+      await expect(page.locator(byTestId(T.optionD.resumeIntro))).toBeVisible({
+        timeout: 15_000,
+      })
+      await expect(page.locator(byTestId(T.optionD.retake))).toBeVisible()
+      await expect(page.getByText(/195\s*\/\s*120/)).toBeVisible()
+
+      // Take a (normal) confirmatory reading → flow finishes to the dashboard.
+      await page.locator(byTestId(T.optionD.retake)).click()
+      await page.locator(byTestId(T.optionD.systolic)).fill('128')
+      await page.locator(byTestId(T.optionD.diastolic)).fill('82')
+      await page.locator(byTestId(T.optionD.submitSecond)).click()
+      await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
+
+      // Back on /readings the original entry is released from AWAITING: the
+      // status badge + CTA are gone and it's an ordinary editable reading again.
+      await page.goto('/readings')
+      await expect(
+        page.locator(byTestId(T.readings.rowAwaiting(firstId))),
+      ).toHaveCount(0, { timeout: 15_000 })
+      await expect(
+        page.locator(byTestId(T.readings.rowContinueConfirmation(firstId))),
+      ).toHaveCount(0)
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
+  test('navigating directly to /check-in auto-resumes Screen A when a held emergency is awaiting', async ({
+    page,
+  }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      const first = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 195,
+          diastolicBP: 120,
+          position: 'SITTING',
+          sessionId: randomUUID(),
+          beginEmergencyConfirmation: true,
+        },
+      })
+      expect(first.status()).toBe(202)
+
+      await signInPatient(page, PATIENTS.aisha.email)
+      // Straight to /check-in (not via the CTA) — Screen A auto-renders with the
+      // resume intro instead of the normal wizard form.
+      await page.goto('/check-in')
+      await expect(page.locator(byTestId(T.optionD.resumeIntro))).toBeVisible({
+        timeout: 15_000,
+      })
+      await expect(page.locator(byTestId(T.optionD.retake))).toBeVisible()
+      await expect(page.getByText(/195\s*\/\s*120/)).toBeVisible()
+      // The wizard's BP step must NOT be what rendered.
+      await expect(page.locator(byTestId(T.checkin.systolic))).toHaveCount(0)
     } finally {
       await api.dispose()
       await tc.dispose()
