@@ -110,6 +110,20 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
       const l2 = alerts.filter((a) => a.status === 'OPEN' && a.tier === 'BP_LEVEL_2')
       expect(l2.length, `expected a confirmed BP Level 2 emergency`).toBeGreaterThan(0)
       expect(l2[0]!.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+
+      // Once confirmed, the first-of-pair must NOT stay AWAITING — otherwise the
+      // readings tab would show the read-only "Held" badge on it forever.
+      const list = await api.get('daily-journal')
+      const entries = ((await list.json()).data ?? []) as Array<{
+        id: string
+        emergencyConfirmation?: string | null
+      }>
+      const firstOfPair = entries.find((e) => e.id === firstId)
+      expect(firstOfPair, 'first-of-pair still present').toBeTruthy()
+      expect(
+        firstOfPair!.emergencyConfirmation,
+        'confirmed first-of-pair must be released from AWAITING',
+      ).not.toBe('AWAITING')
     } finally {
       await api.dispose()
       await tc.dispose()

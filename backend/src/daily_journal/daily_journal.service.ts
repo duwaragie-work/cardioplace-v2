@@ -360,8 +360,13 @@ export class DailyJournalService {
       })
 
       // Option D (Manisha 2026-06-12 Q2) — when this reading CONFIRMS a held
-      // first-of-pair, release that first-of-pair's hold so the session-finalize
-      // cron won't ALSO fire RULE_UNCONFIRMED_EMERGENCY on it. The atomic
+      // first-of-pair: (1) release the hold so the session-finalize cron won't
+      // ALSO fire RULE_UNCONFIRMED_EMERGENCY on it, and (2) clear its AWAITING
+      // state — the pair is now resolved, so it becomes an ordinary historical
+      // reading. Without (2) the first-of-pair would show the read-only "Held"
+      // badge on the readings tab FOREVER (the cron skips it once finalized).
+      // BP1 for the CONFIRMED_NORMAL message is still fetched by confirmsEntryId,
+      // not by this row's state, so clearing it here is safe. The atomic
       // updateMany guard mirrors finalizeSingleReadingSession.
       if (
         optionDState === EmergencyConfirmationState.CONFIRMATORY &&
@@ -369,7 +374,7 @@ export class DailyJournalService {
       ) {
         await this.prisma.journalEntry.updateMany({
           where: { id: dto.confirmsEntryId, userId, singleReadingFinalized: false },
-          data: { singleReadingFinalized: true },
+          data: { singleReadingFinalized: true, emergencyConfirmation: null },
         })
       }
 
