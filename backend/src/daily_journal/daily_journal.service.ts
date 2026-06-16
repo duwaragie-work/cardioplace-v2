@@ -245,6 +245,8 @@ export class DailyJournalService {
     let inherited:
       | {
           position: Position | null
+          weight: Prisma.Decimal | null
+          pulse: number | null
           medicationTaken: boolean | null
           medicationScheduledLater: boolean
           missedMedications: JsonValue
@@ -256,6 +258,12 @@ export class DailyJournalService {
         where: { id: dto.confirmsEntryId, userId },
         select: {
           position: true,
+          // Bug 13 Part 2 — weight is the same-sitting body weight; the Option D
+          // Screen B only re-collects BP (+ optional pulse), so inherit it too.
+          weight: true,
+          // Pulse IS re-measured, but if the patient left it blank on the second
+          // reading, fall back to the first-of-pair rather than dropping it.
+          pulse: true,
           medicationTaken: true,
           medicationScheduledLater: true,
           missedMedications: true,
@@ -280,9 +288,17 @@ export class DailyJournalService {
           delayBand,
           systolicBP: dto.systolicBP ?? null,
           diastolicBP: dto.diastolicBP ?? null,
-          pulse: dto.pulse ?? null,
+          // Bug 13 Part 2 — inherit pulse from the first-of-pair when the
+          // CONFIRMATORY reading didn't re-enter one.
+          pulse: dto.pulse ?? inherited?.pulse ?? null,
           narrowPpArtifact,
-          weight: dto.weight != null ? new Prisma.Decimal(dto.weight) : null,
+          // Bug 13 Part 2 — inherit the first-of-pair's weight on a CONFIRMATORY
+          // entry (Screen B doesn't re-collect it), so the reading detail isn't
+          // missing the weight the patient already gave moments earlier.
+          weight:
+            dto.weight != null
+              ? new Prisma.Decimal(dto.weight)
+              : (inherited?.weight ?? null),
           // Bug 13 — inherit position from the first-of-pair on a CONFIRMATORY entry.
           position: dto.position ?? inherited?.position ?? null,
           sessionId: effectiveSessionId,
