@@ -99,6 +99,18 @@ describe('DailyJournalService', () => {
       expect(await service.getActiveSession('u1', now)).toBeNull()
     })
 
+    it('Bug 19 — returns null when the latest reading\'s session was explicitly closed', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({
+        id: 'e1',
+        sessionId: 's1',
+        measuredAt: new Date(now.getTime() - 60_000), // within window
+        singleReadingFinalized: false,
+        emergencyConfirmation: null,
+        sessionClosedAt: new Date(now.getTime() - 30_000), // "I'm good" closed it
+      })
+      expect(await service.getActiveSession('u1', now)).toBeNull()
+    })
+
     it('returns the open session; non-AFib with 2 readings → requiresMoreReadings=false', async () => {
       const last = new Date(now.getTime() - 2 * 60_000)
       const first = new Date(now.getTime() - 8 * 60_000)
