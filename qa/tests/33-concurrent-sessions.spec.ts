@@ -68,7 +68,7 @@ async function signInWithDevice(
 
 /**
  * Attempt to rotate the session's refresh token. Returns the response
- * status — 200 means the session is still alive; 401 means it was evicted
+ * status — 201 (NestJS @Post success) means the session is still alive; 401 means it was evicted
  * (either by the session-cap or by an idle-timeout, the latter is Phase 2).
  */
 async function tryRefresh(session: Session): Promise<number> {
@@ -92,7 +92,7 @@ test.describe('33 — concurrent session cap (Manisha 2026-06-12)', () => {
     // Cap=1 — signing in as B must have evicted A. A's refresh now 401s.
     expect(await tryRefresh(a)).toBe(401)
     // B is the live session.
-    expect(await tryRefresh(b)).toBe(200)
+    expect(await tryRefresh(b)).toBe(201)
 
     await a.ctx.dispose()
     await b.ctx.dispose()
@@ -112,9 +112,9 @@ test.describe('33 — concurrent session cap (Manisha 2026-06-12)', () => {
     // A is the eviction target — its refresh token is now revoked.
     expect(await tryRefresh(a)).toBe(401)
     // B/C/D remain live.
-    expect(await tryRefresh(b)).toBe(200)
-    expect(await tryRefresh(c)).toBe(200)
-    expect(await tryRefresh(d)).toBe(200)
+    expect(await tryRefresh(b)).toBe(201)
+    expect(await tryRefresh(c)).toBe(201)
+    expect(await tryRefresh(d)).toBe(201)
 
     await a.ctx.dispose()
     await b.ctx.dispose()
@@ -140,7 +140,7 @@ test.describe('33 — concurrent session cap (Manisha 2026-06-12)', () => {
         await ctx.dispose()
         return res
       })
-    expect(aRefreshRes.status()).toBe(200)
+    expect(aRefreshRes.status()).toBe(201)
     const aNew = (await aRefreshRes.json()) as { refreshToken: string }
     a.refreshToken = aNew.refreshToken
 
@@ -148,9 +148,9 @@ test.describe('33 — concurrent session cap (Manisha 2026-06-12)', () => {
     const d = await signInWithDevice(email, 'qa-conc-admin-act-D', 'admin')
 
     expect(await tryRefresh(b)).toBe(401)
-    expect(await tryRefresh(a)).toBe(200)
-    expect(await tryRefresh(c)).toBe(200)
-    expect(await tryRefresh(d)).toBe(200)
+    expect(await tryRefresh(a)).toBe(201)
+    expect(await tryRefresh(c)).toBe(201)
+    expect(await tryRefresh(d)).toBe(201)
 
     await a.ctx.dispose()
     await b.ctx.dispose()

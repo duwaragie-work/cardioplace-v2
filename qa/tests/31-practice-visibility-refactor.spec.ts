@@ -80,12 +80,17 @@ test.describe('31 — practice-wide PROVIDER visibility (Manisha 2026-06-12)', (
   // a practice member, this test is a positive smoke — the list comes back
   // populated, no 500, no empty-state. A true "routing ≠ visibility" diff
   // needs the seed expansion described above.
-  test('API: primaryProvider /admin/alerts returns assigned-patient alerts (smoke)', async () => {
+  test('API: primaryProvider /provider/alerts returns assigned-patient alerts (smoke)', async () => {
+    // GET /api/provider/alerts is the admin-side list endpoint
+    // (provider.controller.ts:132). /admin/alerts is reserved for the
+    // alert-resolution mutation routes (:id/acknowledge, :id/resolve,
+    // :id/audit) and has no list handler — earlier draft of this spec
+    // hit it and 404'd.
     const api = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
-    const res = await api.get('admin/alerts')
+    const res = await api.get('provider/alerts')
     expect(
       res.status(),
-      `expected 200 from /admin/alerts, got ${res.status()}: ${await res.text()}`,
+      `expected 200 from /provider/alerts, got ${res.status()}: ${await res.text()}`,
     ).toBe(200)
     await api.dispose()
   })

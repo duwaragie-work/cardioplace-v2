@@ -73,7 +73,7 @@ test.describe('32 — idle session timeout (Manisha 2026-06-12)', () => {
     )
     await tc.backdateAuthSessions(userId, 14 * 60)
     await tc.dispose()
-    expect(await refresh(refreshToken)).toBe(200)
+    expect(await refresh(refreshToken)).toBe(201)
   })
 
   test('WEB: refresh past 15-min window is rejected (16 min idle)', async () => {
@@ -105,7 +105,7 @@ test.describe('32 — idle session timeout (Manisha 2026-06-12)', () => {
     )
     await tc.backdateAuthSessions(userId, 4 * 60)
     await tc.dispose()
-    expect(await refresh(refreshToken)).toBe(200)
+    expect(await refresh(refreshToken)).toBe(201)
   })
 
   test('MOBILE: refresh past 5-min window is rejected (6 min idle)', async () => {
@@ -155,13 +155,13 @@ test.describe('32 — idle session timeout (Manisha 2026-06-12)', () => {
     const r1 = await ctx.post('/api/v2/auth/refresh', {
       data: { refreshToken: token1 },
     })
-    expect(r1.status()).toBe(200)
+    expect(r1.status()).toBe(201)
     const r1Body = (await r1.json()) as { refreshToken: string }
     await ctx.dispose()
     // Now the session's lastActivityAt is fresh — a 14-min backdate
     // should still be inside the window.
     await tc.backdateAuthSessions(userId, 14 * 60)
     await tc.dispose()
-    expect(await refresh(r1Body.refreshToken)).toBe(200)
+    expect(await refresh(r1Body.refreshToken)).toBe(201)
   })
 })
