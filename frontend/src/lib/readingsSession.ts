@@ -22,6 +22,36 @@ export type SessionGroupable = {
   measuredAt: string
 }
 
+export type TimedReading = {
+  id: string
+  measuredAt: string
+}
+
+// Bug 15 — the set of entry ids that share their local HH:MM with at least one
+// OTHER entry in the same list. Those entries render with seconds (HH:MM:SS) so
+// two readings submitted moments apart don't both display "15:11" and read like
+// an accidental duplicate. Adaptive: only the colliding entries get seconds;
+// everything else stays minute-only. Same rule on patient /readings and the
+// admin Readings tab (cross-app parity).
+export function sameMinuteCollisionIds(
+  items: ReadonlyArray<TimedReading>,
+): Set<string> {
+  const byMinute = new Map<string, string[]>()
+  for (const e of items) {
+    const d = new Date(e.measuredAt)
+    if (Number.isNaN(d.getTime())) continue
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}-${d.getMinutes()}`
+    const arr = byMinute.get(key)
+    if (arr) arr.push(e.id)
+    else byMinute.set(key, [e.id])
+  }
+  const colliding = new Set<string>()
+  for (const arr of byMinute.values()) {
+    if (arr.length >= 2) for (const id of arr) colliding.add(id)
+  }
+  return colliding
+}
+
 export type ReadingBucket<T extends SessionGroupable> = {
   sessionId: string | null
   items: T[]

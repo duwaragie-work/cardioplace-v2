@@ -1,5 +1,9 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import ReadingsTab, { groupReadingsBySession, type ReadingGroup } from './ReadingsTab'
+import ReadingsTab, {
+  groupReadingsBySession,
+  sameMinuteCollisionIds,
+  type ReadingGroup,
+} from './ReadingsTab'
 import type { PatientJournalEntry } from '@/lib/services/provider.service'
 import * as providerService from '@/lib/services/provider.service'
 
@@ -291,5 +295,36 @@ describe('ReadingsTab — role-gated CRUD affordances', () => {
 
     const pill = await screen.findByTestId('admin-readings-staff-pill')
     expect(pill).toHaveTextContent(/staff · manisha patel/i)
+  })
+})
+
+// Bug 15 — adaptive HH:MM:SS: only entries sharing a minute get flagged for seconds.
+describe('sameMinuteCollisionIds (Bug 15)', () => {
+  const at = (m: string) => `2026-06-16T${m}`
+
+  it('no shared minute → empty set', () => {
+    const ids = sameMinuteCollisionIds([
+      { id: 'a', measuredAt: at('14:05:00') },
+      { id: 'b', measuredAt: at('14:10:00') },
+    ])
+    expect(ids.size).toBe(0)
+  })
+
+  it('two readings in the same minute → both flagged', () => {
+    const ids = sameMinuteCollisionIds([
+      { id: 'a', measuredAt: at('14:10:23') },
+      { id: 'b', measuredAt: at('14:10:47') },
+    ])
+    expect(ids).toEqual(new Set(['a', 'b']))
+  })
+
+  it('mixed: only the colliding pair is flagged', () => {
+    const ids = sameMinuteCollisionIds([
+      { id: 'a', measuredAt: at('14:05:00') },
+      { id: 'b', measuredAt: at('14:10:23') },
+      { id: 'c', measuredAt: at('14:10:47') },
+      { id: 'd', measuredAt: at('14:15:00') },
+    ])
+    expect(ids).toEqual(new Set(['b', 'c']))
   })
 })

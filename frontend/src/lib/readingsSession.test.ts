@@ -1,4 +1,7 @@
-import { bucketReadingsBySession } from './readingsSession'
+import {
+  bucketReadingsBySession,
+  sameMinuteCollisionIds,
+} from './readingsSession'
 
 // Bug 14 — the patient /readings grouping must mirror the admin ReadingsTab's
 // strictness: proximity only ever groups two NULL-session rows; it must never
@@ -61,5 +64,45 @@ describe('bucketReadingsBySession (Bug 14)', () => {
       { sessionId: 'ccb7a0fa', measuredAt: T0 }, // declined 195/120 (UNCONFIRMED)
     ])
     expect(buckets).toHaveLength(2)
+  })
+})
+
+// Bug 15 — adaptive HH:MM:SS: only the entries that share a minute get flagged.
+describe('sameMinuteCollisionIds (Bug 15)', () => {
+  const at = (m: string) => `2026-06-16T${m}`
+
+  it('no two entries share a minute → empty set (stay HH:MM)', () => {
+    const ids = sameMinuteCollisionIds([
+      { id: 'a', measuredAt: at('14:05:00') },
+      { id: 'b', measuredAt: at('14:10:00') },
+      { id: 'c', measuredAt: at('14:11:00') },
+    ])
+    expect(ids.size).toBe(0)
+  })
+
+  it('two entries in the same minute → both flagged', () => {
+    const ids = sameMinuteCollisionIds([
+      { id: 'a', measuredAt: at('14:10:23') },
+      { id: 'b', measuredAt: at('14:10:47') },
+    ])
+    expect(ids).toEqual(new Set(['a', 'b']))
+  })
+
+  it('mixed: only the colliding pair is flagged, the rest stay minute-only', () => {
+    const ids = sameMinuteCollisionIds([
+      { id: 'a', measuredAt: at('14:05:00') },
+      { id: 'b', measuredAt: at('14:10:23') },
+      { id: 'c', measuredAt: at('14:10:47') },
+      { id: 'd', measuredAt: at('14:15:00') },
+    ])
+    expect(ids).toEqual(new Set(['b', 'c']))
+  })
+
+  it('same HH:MM but different hours do NOT collide', () => {
+    const ids = sameMinuteCollisionIds([
+      { id: 'a', measuredAt: at('14:10:00') },
+      { id: 'b', measuredAt: at('15:10:00') },
+    ])
+    expect(ids.size).toBe(0)
   })
 })

@@ -121,8 +121,35 @@ function formatDate(iso: string): string {
   });
 }
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+function formatTime(iso: string, withSeconds = false): string {
+  return new Date(iso).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(withSeconds ? { second: '2-digit' } : {}),
+  });
+}
+
+// Bug 15 — entry ids that share their local HH:MM with another entry in the
+// list. Those render with seconds so two readings submitted moments apart (now
+// stored at full-ms precision, no DB collision) don't both show "03:11 PM" and
+// read like a duplicate. Mirrors the patient /readings rule (cross-app parity).
+export function sameMinuteCollisionIds(
+  entries: ReadonlyArray<{ id: string; measuredAt: string }>,
+): Set<string> {
+  const byMinute = new Map<string, string[]>();
+  for (const e of entries) {
+    const d = new Date(e.measuredAt);
+    if (Number.isNaN(d.getTime())) continue;
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}-${d.getMinutes()}`;
+    const arr = byMinute.get(key);
+    if (arr) arr.push(e.id);
+    else byMinute.set(key, [e.id]);
+  }
+  const colliding = new Set<string>();
+  for (const arr of byMinute.values()) {
+    if (arr.length >= 2) for (const id of arr) colliding.add(id);
+  }
+  return colliding;
 }
 
 function dateFilterCutoff(filter: DateFilter): Date | null {
@@ -415,25 +442,31 @@ export default function ReadingsTab({ patientId }: Props) {
         <EmptyCard hasReadings={entries.length > 0} />
       ) : (
         <div className="space-y-2" data-testid="admin-readings-list">
-          {groupReadingsBySession(filtered).map((g) =>
-            g.kind === 'session' ? (
-              <SessionGroupCard
-                key={`session-${g.sessionId}`}
-                group={g}
-                onView={(e) => setModal({ type: 'view', entry: e })}
-                onEdit={canManage ? (e) => setModal({ type: 'edit', entry: e }) : undefined}
-                onDelete={canManage ? (e) => setModal({ type: 'delete', entry: e }) : undefined}
-              />
-            ) : (
-              <ReadingCard
-                key={g.entry.id}
-                entry={g.entry}
-                onView={(e) => setModal({ type: 'view', entry: e })}
-                onEdit={canManage ? (e) => setModal({ type: 'edit', entry: e }) : undefined}
-                onDelete={canManage ? (e) => setModal({ type: 'delete', entry: e }) : undefined}
-              />
-            ),
-          )}
+          {(() => {
+            // Bug 15 — flag entries that share a minute so they render HH:MM:SS.
+            const secondsIds = sameMinuteCollisionIds(filtered);
+            return groupReadingsBySession(filtered).map((g) =>
+              g.kind === 'session' ? (
+                <SessionGroupCard
+                  key={`session-${g.sessionId}`}
+                  group={g}
+                  secondsIds={secondsIds}
+                  onView={(e) => setModal({ type: 'view', entry: e })}
+                  onEdit={canManage ? (e) => setModal({ type: 'edit', entry: e }) : undefined}
+                  onDelete={canManage ? (e) => setModal({ type: 'delete', entry: e }) : undefined}
+                />
+              ) : (
+                <ReadingCard
+                  key={g.entry.id}
+                  entry={g.entry}
+                  showSeconds={secondsIds.has(g.entry.id)}
+                  onView={(e) => setModal({ type: 'view', entry: e })}
+                  onEdit={canManage ? (e) => setModal({ type: 'edit', entry: e }) : undefined}
+                  onDelete={canManage ? (e) => setModal({ type: 'delete', entry: e }) : undefined}
+                />
+              ),
+            );
+          })()}
         </div>
       )}
 
@@ -465,11 +498,15 @@ export default function ReadingsTab({ patientId }: Props) {
 
 function SessionGroupCard({
   group,
+  secondsIds,
   onView,
   onEdit,
   onDelete,
 }: {
   group: Extract<ReadingGroup, { kind: 'session' }>;
+  /** Bug 15 — ids whose minute collides with another reading, so the inner
+   *  cards render HH:MM:SS. */
+  secondsIds?: Set<string>;
   onView?: (entry: PatientJournalEntry) => void;
   onEdit?: (entry: PatientJournalEntry) => void;
   onDelete?: (entry: PatientJournalEntry) => void;
@@ -496,7 +533,14 @@ function SessionGroupCard({
       </div>
       <div className="px-2 pb-2 space-y-2">
         {group.entries.map((e) => (
-          <ReadingCard key={e.id} entry={e} onView={onView} onEdit={onEdit} onDelete={onDelete} />
+          <ReadingCard
+            key={e.id}
+            entry={e}
+            showSeconds={secondsIds?.has(e.id) ?? false}
+            onView={onView}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
         ))}
       </div>
     </div>
@@ -574,11 +618,14 @@ function ReadingActionsMenu({
 
 function ReadingCard({
   entry,
+  showSeconds = false,
   onView,
   onEdit,
   onDelete,
 }: {
   entry: PatientJournalEntry;
+  /** Bug 15 — render HH:MM:SS when this reading shares its minute with another. */
+  showSeconds?: boolean;
   onView?: (entry: PatientJournalEntry) => void;
   onEdit?: (entry: PatientJournalEntry) => void;
   onDelete?: (entry: PatientJournalEntry) => void;
@@ -611,9 +658,13 @@ function ReadingCard({
             <Calendar className="w-3.5 h-3.5" style={{ color: 'var(--brand-text-muted)' }} />
             {formatDate(entry.measuredAt)}
           </span>
-          <span className="inline-flex items-center gap-1 text-[12px]" style={{ color: 'var(--brand-text-secondary)' }}>
+          <span
+            data-testid={`admin-reading-time-${entry.id}`}
+            className="inline-flex items-center gap-1 text-[12px]"
+            style={{ color: 'var(--brand-text-secondary)' }}
+          >
             <Clock className="w-3 h-3" />
-            {formatTime(entry.measuredAt)}
+            {formatTime(entry.measuredAt, showSeconds)}
           </span>
           <SourcePill source={entry.source} addedByName={entry.addedByName} />
           {entry.suboptimalMeasurement && (

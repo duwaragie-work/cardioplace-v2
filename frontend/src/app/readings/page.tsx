@@ -29,7 +29,7 @@ import {
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
 import { getBMI, JOURNAL_NOTE_MAX_LENGTH } from '@cardioplace/shared';
-import { bucketReadingsBySession } from '@/lib/readingsSession';
+import { bucketReadingsBySession, sameMinuteCollisionIds } from '@/lib/readingsSession';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import AudioButton from '@/components/intake/AudioButton';
@@ -466,6 +466,7 @@ function EntrySkeleton() {
 function EntryCard({
   entry,
   heightCm,
+  showSeconds = false,
   onView,
   onEdit,
   onDelete,
@@ -474,6 +475,10 @@ function EntryCard({
   /** From PatientProfile.heightCm — fixed at intake. Used to compute BMI
    *  next to the weight chip. Optional — when missing, BMI is hidden. */
   heightCm: number | null;
+  /** Bug 15 — render HH:MM:SS instead of HH:MM when this reading shares its
+   *  minute with another on the same day (disambiguates rapid same-minute
+   *  submissions that would otherwise both show e.g. "15:11"). */
+  showSeconds?: boolean;
   /** Tapping the card body (not an action button) opens the read-only detail. */
   onView: () => void;
   onEdit: () => void;
@@ -562,15 +567,20 @@ function EntryCard({
             if (isNaN(dt.getTime())) return null;
             const hh = String(dt.getHours()).padStart(2, '0');
             const mi = String(dt.getMinutes()).padStart(2, '0');
+            // Bug 15 — append seconds only when another reading shares this
+            // minute, so rapid same-minute submissions are distinguishable.
+            const ss = String(dt.getSeconds()).padStart(2, '0');
+            const timeLabel = showSeconds ? `${hh}:${mi}:${ss}` : `${hh}:${mi}`;
             return (
               <span
+                data-testid={`reading-time-${entry.id}`}
                 className="text-[0.625rem] px-1.5 py-0.5 rounded font-semibold"
                 style={{
                   backgroundColor: 'var(--brand-primary-purple-light)',
                   color: 'var(--brand-primary-purple)',
                 }}
               >
-                {`${hh}:${mi}`}
+                {timeLabel}
               </span>
             );
           })()}
@@ -857,12 +867,16 @@ function EntryCard({
 function SessionCard({
   entries,
   heightCm,
+  secondsIds,
   onView,
   onEdit,
   onDelete,
 }: {
   entries: Entry[];
   heightCm: number | null;
+  /** Bug 15 — ids whose minute collides with another reading the same day,
+   *  so the inner cards render HH:MM:SS. */
+  secondsIds?: Set<string>;
   onView: (e: Entry) => void;
   onEdit: (e: Entry) => void;
   onDelete: (id: string) => void;
@@ -955,6 +969,7 @@ function SessionCard({
                   key={e.id}
                   entry={e}
                   heightCm={heightCm}
+                  showSeconds={secondsIds?.has(e.id) ?? false}
                   onView={() => onView(e)}
                   onEdit={() => onEdit(e)}
                   onDelete={() => onDelete(e.id)}
@@ -2443,6 +2458,10 @@ export default function ReadingsPage() {
                   // reading minutes later) stay separate, matching the admin
                   // ReadingsTab (Bug 5). See lib/readingsSession.ts.
                   const buckets = bucketReadingsBySession(group.items);
+                  // Bug 15 — ids that share a minute with another reading this
+                  // day get HH:MM:SS so rapid same-minute submissions are
+                  // distinguishable instead of both reading as "15:11".
+                  const secondsIds = sameMinuteCollisionIds(group.items);
                   return (
                     <div key={group.date} data-testid="reading-group" className="space-y-2">
                       <p
@@ -2461,6 +2480,7 @@ export default function ReadingsPage() {
                             key={bucket.sessionId ?? `proximity-${group.date}-${i}`}
                             entries={bucket.items}
                             heightCm={heightCm}
+                            secondsIds={secondsIds}
                             onView={(e) => setDetailEntry(e)}
                             onEdit={openEdit}
                             onDelete={(id) => setDeleteId(id)}
@@ -2470,6 +2490,7 @@ export default function ReadingsPage() {
                             key={bucket.items[0].id + (bucket.sessionId ?? `solo-${i}`)}
                             entry={bucket.items[0]}
                             heightCm={heightCm}
+                            showSeconds={secondsIds.has(bucket.items[0].id)}
                             onView={() => setDetailEntry(bucket.items[0])}
                             onEdit={() => openEdit(bucket.items[0])}
                             onDelete={() => setDeleteId(bucket.items[0].id)}
