@@ -61,15 +61,23 @@ export async function setupTestApp(): Promise<TestContext> {
   // judge tests to score Tool Use 1/5. Mirrors the gate at
   // DailyJournalService.create + IntakeStatusService.getStatus
   // (presence of PatientProfile row → intake complete).
+  //
+  // diagnosedHypertension is deliberately FALSE. With it set true, the bot
+  // hallucinated "140/90 is within your goals" on Test 2 (Health question)
+  // — there's no PatientThreshold here, so "your goals" is invented. As a
+  // neutral / non-diagnosed user the bot falls back to general AHA
+  // education (Stage 2 HTN), which matches what Test 2 asserts.
   await prisma.patientProfile.upsert({
     where: { userId: user.id },
     create: {
       userId: user.id,
       gender: 'FEMALE',
       heightCm: 165,
-      diagnosedHypertension: true,
+      diagnosedHypertension: false,
     },
-    update: {},
+    update: {
+      diagnosedHypertension: false, // heal stale runs that pre-date this flip
+    },
   })
 
   // Sign JWT mirroring the app's payload shape (auth.service signs

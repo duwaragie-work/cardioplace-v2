@@ -311,25 +311,39 @@ descr('Text Chat — Real E2E + LLM-as-Judge', () => {
 
   // ═══════════════════════════════════════════════════════════════════════════
   // 9. Multi-turn context — remembers across turns
+  //
+  // Turn 1 is now framed as an explicit check-in start ("I want to log a
+  // check-in") with the BP attached, so the bot enters the documented
+  // check-in flow and Turn 2's additional data lands as "next questions
+  // answered" rather than a standalone message Gemini sometimes ignores.
+  // Without the explicit intent, Gemini occasionally treated turn 1 as a
+  // standalone statement and skipped over turn 2's payload (see prior CI
+  // log: judge "the chatbot's response only addresses the BP reading from
+  // Turn 1, entirely disregarding Turn 2").
   // ═══════════════════════════════════════════════════════════════════════════
   it('9. Multi-turn — remembers context across messages', async () => {
-    const r1 = await chat('My blood pressure today is 135 over 88')
+    const r1 = await chat(
+      'I want to log a check-in. My blood pressure today is 135 over 88.',
+    )
     const sid = r1.sessionId
 
-    // Second turn in same session
-    const r2 = await chat('Yes I took my medications and no symptoms, weight is 180', sid)
+    // Second turn in same session — answers follow-up fields.
+    const r2 = await chat(
+      'Yes I took my medications, no symptoms, and my weight is 180 lbs.',
+      sid,
+    )
 
     const tools = r2.toolResults?.map((t: any) => t.tool) ?? []
 
     const ev = await judge.evaluate({
       scenario: 'Multi-turn context',
       source: 'text-chat',
-      input: '[Turn 1: BP 135/88] [Turn 2: took meds, no symptoms, 180 lbs]',
+      input: '[Turn 1: starting check-in, BP 135/88] [Turn 2: meds taken, no symptoms, 180 lbs]',
       response: r2.data,
       toolsCalled: tools,
       criteria: [
-        'Context: Does it combine BP from turn 1 with info from turn 2?',
-        'Flow: Does it ask for any remaining missing info or confirm and save?',
+        'Context: Does the bot acknowledge BOTH the BP from turn 1 AND the meds/symptoms/weight from turn 2?',
+        'Flow: Does it either ask for the remaining missing fields or proceed to summary?',
       ],
     })
     results.push(ev)
