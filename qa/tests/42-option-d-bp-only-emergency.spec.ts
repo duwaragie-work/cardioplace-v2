@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { authedApi, signInPatient } from '../helpers/auth.js'
-import { PATIENTS } from '../helpers/accounts.js'
+import { authedApi, signInPatient, signInAdmin } from '../helpers/auth.js'
+import { PATIENTS, ADMINS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
-import { API_BASE_URL } from '../playwright.config.js'
+import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 
 /**
  * Option D — retake-to-confirm for BP-only emergencies (Manisha 2026-06-12 Q2).
@@ -439,6 +439,174 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
       await expect(page.getByText(/195\s*\/\s*120/)).toBeVisible()
       // The wizard's BP step must NOT be what rendered.
       await expect(page.locator(byTestId(T.checkin.systolic))).toHaveCount(0)
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
+  // ── Bug 14 (2026-06-16) — Option D entries must not trap unrelated readings ──
+  // A declined emergency (its own UNCONFIRMED session) + a fresh reading minutes
+  // later must render as TWO separate sessions on BOTH apps. Pre-fix the patient
+  // app proximity-grouped them into one "Avg 170/103" card while admin (strict
+  // by sessionId) correctly showed two — the apps disagreed.
+  test('Bug 14 — a declined emergency + a fresh reading 3 min later are TWO sessions on patient AND admin', async ({
+    page,
+  }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      // Held emergency → decline → UNCONFIRMED (its own session).
+      const first = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 195,
+          diastolicBP: 120,
+          position: 'SITTING',
+          sessionId: randomUUID(),
+          beginEmergencyConfirmation: true,
+        },
+      })
+      expect(first.status()).toBe(202)
+      const declinedId = (await first.json()).data.id
+      const decline = await api.post(`daily-journal/${declinedId}/decline-confirmation`)
+      expect(decline.status()).toBeGreaterThanOrEqual(200)
+      expect(decline.status()).toBeLessThan(300)
+
+      // Fresh ordinary reading ~now (well within the 5-min proximity window).
+      const second = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 145,
+          diastolicBP: 85,
+          position: 'SITTING',
+          sessionId: randomUUID(),
+        },
+      })
+      expect(second.status()).toBe(202)
+      const freshId = (await second.json()).data.id
+
+      // Part A — the backend anchors them in DIFFERENT non-null sessions.
+      const list = await api.get('daily-journal')
+      const entries = ((await list.json()).data ?? []) as Array<{
+        id: string
+        sessionId?: string | null
+      }>
+      const declined = entries.find((e) => e.id === declinedId)
+      const fresh = entries.find((e) => e.id === freshId)
+      expect(declined?.sessionId, 'declined has a session').toBeTruthy()
+      expect(fresh?.sessionId, 'fresh has a session').toBeTruthy()
+      expect(
+        declined?.sessionId,
+        'declined emergency + fresh reading must be different sessions',
+      ).not.toBe(fresh?.sessionId)
+
+      // Part B — patient /readings shows TWO standalone cards (a collapsed
+      // SessionCard would hide its children, so both rows being directly
+      // visible proves they were NOT proximity-merged into one session).
+      await signInPatient(page, PATIENTS.aisha.email)
+      await page.goto('/readings')
+      await expect(
+        page.locator(byTestId(`readings-row-${declinedId}`)),
+      ).toBeVisible({ timeout: 15_000 })
+      await expect(
+        page.locator(byTestId(`readings-row-${freshId}`)),
+      ).toBeVisible()
+
+      // Regression guard — admin Readings tab also shows two separate cards
+      // (its strict-by-sessionId grouping was already correct; confirm unbroken).
+      await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
+      await page.goto(`${ADMIN_BASE_URL}/patients/${u.id}`)
+      await page.locator(byTestId(T.admin.detailTab('readings'))).click()
+      await expect(page.locator(byTestId(T.admin.readingsList))).toBeVisible({
+        timeout: 25_000,
+      })
+      await expect(
+        page.locator(byTestId(T.admin.readingsCard(declinedId))),
+      ).toBeVisible()
+      await expect(
+        page.locator(byTestId(T.admin.readingsCard(freshId))),
+      ).toBeVisible()
+    } finally {
+      await api.dispose()
+      await tc.dispose()
+    }
+  })
+
+  test('Bug 14 — a confirmed-normal Option D pair groups together; a fresh reading stays a separate session', async ({
+    page,
+  }) => {
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const u = await tc.findUser(PATIENTS.aisha.email)
+    await tc.resetUser(u.id)
+    const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
+    try {
+      const pairSession = randomUUID()
+      // Held emergency → confirmatory sub-threshold (CONFIRMED_NORMAL), same session.
+      const held = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 195,
+          diastolicBP: 120,
+          position: 'SITTING',
+          sessionId: pairSession,
+          beginEmergencyConfirmation: true,
+        },
+      })
+      expect(held.status()).toBe(202)
+      const heldId = (await held.json()).data.id
+      const confirm = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 135,
+          diastolicBP: 85,
+          position: 'SITTING',
+          sessionId: pairSession,
+          confirmsEntryId: heldId,
+        },
+      })
+      expect(confirm.status()).toBe(202)
+      const confirmId = (await confirm.json()).data.id
+
+      // Fresh ordinary reading within 5 min — must NOT join the confirmed pair.
+      const freshRes = await api.post('daily-journal', {
+        data: {
+          measuredAt: new Date().toISOString(),
+          systolicBP: 140,
+          diastolicBP: 85,
+          position: 'SITTING',
+          sessionId: randomUUID(),
+        },
+      })
+      expect(freshRes.status()).toBe(202)
+      const freshId = (await freshRes.json()).data.id
+
+      // Part A — the pair shares a session; the fresh reading is separate.
+      const list = await api.get('daily-journal')
+      const entries = ((await list.json()).data ?? []) as Array<{
+        id: string
+        sessionId?: string | null
+      }>
+      const heldE = entries.find((e) => e.id === heldId)
+      const confE = entries.find((e) => e.id === confirmId)
+      const freshE = entries.find((e) => e.id === freshId)
+      expect(heldE?.sessionId).toBe(confE?.sessionId)
+      expect(freshE?.sessionId).not.toBe(heldE?.sessionId)
+
+      // Part B — patient /readings: the pair collapses into ONE SessionCard (so
+      // their individual rows are NOT directly visible), while the fresh reading
+      // renders as its own standalone card.
+      await signInPatient(page, PATIENTS.aisha.email)
+      await page.goto('/readings')
+      await expect(
+        page.locator(byTestId(`readings-row-${freshId}`)),
+      ).toBeVisible({ timeout: 15_000 })
+      await expect(page.locator(byTestId(`readings-row-${heldId}`))).toHaveCount(0)
+      await expect(
+        page.locator(byTestId(`readings-row-${confirmId}`)),
+      ).toHaveCount(0)
     } finally {
       await api.dispose()
       await tc.dispose()
