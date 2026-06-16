@@ -150,7 +150,11 @@ descr('Text Chat — Real E2E + LLM-as-Judge', () => {
       input: 'Is 140/90 blood pressure bad?',
       response: r.data,
       criteria: [
-        'Accuracy: Does it correctly identify 140/90 as high/Stage 1 hypertension?',
+        // 140/90 is Stage 2 by AHA/ACC 2017 and Stage 1 by older JNC 7;
+        // both are clinically defensible. Don't fail the bot for picking
+        // either label — only fail if it understates the reading (e.g.
+        // calls it "normal" or "borderline").
+        'Accuracy: Does the bot correctly flag 140/90 as high/elevated/hypertensive (accept any of: "high BP", "Stage 1", "Stage 2", "hypertension")? Do NOT downgrade for picking a different staging system than yours.',
         'Tone: Is it educational, warm, and non-alarmist?',
       ],
     })
