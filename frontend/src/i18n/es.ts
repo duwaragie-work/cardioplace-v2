@@ -159,8 +159,8 @@ const es: Record<TranslationKey, string> = {
   'checkin.b2.dateAria': 'Fecha',
   'checkin.b2.timeAria': 'Hora',
   // Chunk C — English fallback pending ES sign-off. Wording PENDING-MANISHA-WORDING 2026-06-09 (see en.ts).
-  'checkin.b2.takenNow': 'Taken just now',
-  'checkin.b2.changeTime': 'Change',
+  'checkin.b2.takenNow': 'Tomada ahora mismo',
+  'checkin.b2.changeTime': 'Cambiar',
   'checkin.delay.title': 'Solo comprobando la hora',
   'checkin.delay.body': "Aviso — esto es de hace unas horas. Lo guardaremos y su equipo de atención lo verá, pero el sistema no lo tratará como una emergencia activa.",
   'checkin.delay.confirm': 'Guardar de todos modos',
@@ -262,6 +262,10 @@ const es: Record<TranslationKey, string> = {
   'checkin.b4.subtitle': 'Toca cada uno para decirnos si lo tomaste.',
   'checkin.b4.audio': 'Medicamentos de hoy. Toca cada uno para decirnos si lo tomaste.',
   'checkin.b4.noMeds': 'Aún no tenemos medicamentos registrados para ti. Agrégalos en ajustes para un mejor seguimiento.',
+  // Bug 17 — bulk medication shortcuts.
+  'checkin.b4.markAllTaken': 'Marcar todos como tomados',
+  'checkin.b4.markAllNotTaken': 'Marcar todos como no tomados',
+  'checkin.b4.bulkTally': '{taken} tomados · {missed} no tomados',
   'checkin.b4.onHoldBadge': 'En pausa',
   'checkin.b4.onHoldDoNotTake': 'EN PAUSA — tu equipo de atención ha pausado este medicamento. No lo tomes a menos que te lo indiquen.',
   'checkin.b4.onHoldUnderReview': 'Tu equipo de atención está revisando este medicamento. Sigue tomándolo como de costumbre a menos que te indiquen lo contrario.',

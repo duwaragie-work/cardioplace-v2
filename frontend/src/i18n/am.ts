@@ -161,8 +161,8 @@ const am: Record<TranslationKey, string> = {
   'checkin.b2.dateAria': 'ቀን',
   'checkin.b2.timeAria': 'ሰዓት',
   // Chunk C — English fallback pending AM sign-off. Wording PENDING-MANISHA-WORDING 2026-06-09 (see en.ts).
-  'checkin.b2.takenNow': 'Taken just now',
-  'checkin.b2.changeTime': 'Change',
+  'checkin.b2.takenNow': 'አሁን የተወሰደ',
+  'checkin.b2.changeTime': 'ቀይር',
   'checkin.delay.title': 'ሰዓቱን በማረጋገጥ ላይ',
   'checkin.delay.body': "ማስታወሻ — ይህ ከጥቂት ሰዓታት በፊት ነው። እናስቀምጠዋለን እና የእንክብካቤ ቡድንዎ ያየዋል፣ ነገር ግን ስርዓቱ እንደ ንቁ የአደጋ ጊዜ አይቆጥረውም።",
   'checkin.delay.confirm': 'ለማንኛውም አስቀምጥ',
@@ -264,6 +264,10 @@ const am: Record<TranslationKey, string> = {
   'checkin.b4.subtitle': 'ሁሉንም ነክተው ወሰዱት ወይም አለመውሰዱን ይንገሩን።',
   'checkin.b4.audio': 'ዛሬ የወሰዷቸው መድሃኒቶች። ሁሉንም ነክተው ወሰዱት ወይም አለመውሰዱን ይንገሩን።',
   'checkin.b4.noMeds': 'ለእርስዎ የተመዘገቡ መድሃኒቶች የሉም። ለተሻለ ክትትል በቅንብሮች ውስጥ መድሃኒቶችዎን ይጨምሩ።',
+  // Bug 17 — bulk medication shortcuts.
+  'checkin.b4.markAllTaken': 'ሁሉንም እንደተወሰዱ ምልክት አድርግ',
+  'checkin.b4.markAllNotTaken': 'ሁሉንም እንዳልተወሰዱ ምልክት አድርግ',
+  'checkin.b4.bulkTally': '{taken} ተወስደዋል · {missed} አልተወሰዱም',
   'checkin.b4.onHoldBadge': 'ለጊዜው ቆሟል',
   'checkin.b4.onHoldDoNotTake': 'ለጊዜው ቆሟል — የእንክብካቤ ቡድንዎ ይህን መድኃኒት አቁሟል። እስኪነግሩዎት ድረስ አይውሰዱት።',
   'checkin.b4.onHoldUnderReview': 'የእንክብካቤ ቡድንዎ ይህን መድኃኒት እየገመገመ ነው። ሌላ እስኪነግሩዎት ድረስ እንደተለመደው መውሰድዎን ይቀጥሉ።',

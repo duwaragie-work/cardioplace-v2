@@ -159,8 +159,8 @@ const de: Record<TranslationKey, string> = {
   'checkin.b2.dateAria': 'Datum',
   'checkin.b2.timeAria': 'Uhrzeit',
   // Chunk C — English fallback pending DE sign-off. Wording PENDING-MANISHA-WORDING 2026-06-09 (see en.ts).
-  'checkin.b2.takenNow': 'Taken just now',
-  'checkin.b2.changeTime': 'Change',
+  'checkin.b2.takenNow': 'Gerade eben gemessen',
+  'checkin.b2.changeTime': 'Ändern',
   'checkin.delay.title': 'Nur die Zeit prüfen',
   'checkin.delay.body': "Hinweis — dies ist von vor ein paar Stunden. Wir speichern es und Ihr Behandlungsteam wird es sehen, aber das System behandelt es nicht als aktiven Notfall.",
   'checkin.delay.confirm': 'Trotzdem speichern',
@@ -262,6 +262,10 @@ const de: Record<TranslationKey, string> = {
   'checkin.b4.subtitle': 'Tippen Sie auf jedes, um uns mitzuteilen, ob Sie es eingenommen haben.',
   'checkin.b4.audio': 'Medikamente heute. Tippen Sie auf jedes, um uns mitzuteilen, ob Sie es eingenommen haben.',
   'checkin.b4.noMeds': 'Wir haben noch keine Medikamente für Sie hinterlegt. Fügen Sie Ihre Medikamente in den Einstellungen hinzu, damit wir Sie besser begleiten können.',
+  // Bug 17 — bulk medication shortcuts.
+  'checkin.b4.markAllTaken': 'Alle als genommen markieren',
+  'checkin.b4.markAllNotTaken': 'Alle als nicht genommen markieren',
+  'checkin.b4.bulkTally': '{taken} genommen · {missed} nicht genommen',
   'checkin.b4.onHoldBadge': 'Pausiert',
   'checkin.b4.onHoldDoNotTake': 'PAUSIERT — Ihr Behandlungsteam hat dieses Medikament pausiert. Nehmen Sie es nicht ein, sofern nicht anders angewiesen.',
   'checkin.b4.onHoldUnderReview': 'Ihr Behandlungsteam überprüft dieses Medikament. Nehmen Sie es wie gewohnt weiter ein, sofern nicht anders angewiesen.',

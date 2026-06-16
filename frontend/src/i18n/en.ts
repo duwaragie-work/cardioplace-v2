@@ -267,6 +267,10 @@ const en = {
   'checkin.b4.subtitle': 'Tap each one to tell us if you took it.',
   'checkin.b4.audio': 'Medications today. Tap each one to tell us if you took it.',
   'checkin.b4.noMeds': "We don't have any medications on file for you yet. Add your medications in settings for better follow-up.",
+  // Bug 17 — bulk medication shortcuts.
+  'checkin.b4.markAllTaken': 'Mark all taken',
+  'checkin.b4.markAllNotTaken': 'Mark all not taken',
+  'checkin.b4.bulkTally': '{taken} taken · {missed} not taken',
   'checkin.b4.onHoldBadge': 'On hold',
   'checkin.b4.onHoldDoNotTake': 'ON HOLD — your care team has paused this medication. Do not take it unless they tell you to.',
   'checkin.b4.onHoldUnderReview': 'Your care team is reviewing this medication. Keep taking it as usual unless they tell you otherwise.',

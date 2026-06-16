@@ -52,7 +52,16 @@ function isPatientOrCaregiverFacing(key: string): boolean {
     key.startsWith('checkin.delay.') ||
     key.startsWith('checkin.historical.') ||
     key.startsWith('checkin.afib.') ||
-    key.startsWith('checkin.optionD.')
+    key.startsWith('checkin.optionD.') ||
+    // Bug 18 (live-test 2026-06-16) — the B2 "Taken just now" summary + "Change"
+    // link shipped English-only in es/de/fr/am. Scoped to these two keys (not all
+    // of checkin.b2) to avoid sweeping in unrelated step-2 labels.
+    key === 'checkin.b2.takenNow' ||
+    key === 'checkin.b2.changeTime' ||
+    // Bug 17 — bulk medication shortcuts are patient-facing.
+    key === 'checkin.b4.markAllTaken' ||
+    key === 'checkin.b4.markAllNotTaken' ||
+    key === 'checkin.b4.bulkTally'
   )
 }
 
