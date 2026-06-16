@@ -57,7 +57,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
-import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, declineEmergencyConfirmation, getActiveSession, type ActiveSessionDto, type JournalEntryPayload } from '@/lib/services/journal.service';
+import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, declineEmergencyConfirmation, getActiveSession, getAwaitingEmergency, type ActiveSessionDto, type JournalEntryPayload } from '@/lib/services/journal.service';
 import { OptionDFlow, type OptionDSecondReading } from '@/components/cardio/OptionDFlow';
 import { delayBandFor, showsSuppressedBanner, type DelayBand } from '@/lib/delayBand';
 import { selectReadingPrompt } from '@/lib/sessionPrompt';
@@ -2086,6 +2086,11 @@ export default function CheckIn() {
   const [optionDActive, setOptionDActive] = useState(false);
   const [optionDFirstId, setOptionDFirstId] = useState<string | null>(null);
   const [optionDFirstBp, setOptionDFirstBp] = useState<{ sys: number; dia: number } | null>(null);
+  // Option D AWAITING UX revision (2026-06-16) — true when Screen A was
+  // auto-resumed on mount (the patient returned to an unfinished held
+  // emergency) rather than reached by submitting a fresh reading. Drives the
+  // "Let's finish your reading from a moment ago" resume intro.
+  const [optionDResumed, setOptionDResumed] = useState(false);
   // Bug 8 — true when the just-submitted reading triggered an emergency-class
   // rule; suppresses the Q3 / AFib reading-prompt on the confirmation screen.
   const [confirmationIsEmergency, setConfirmationIsEmergency] = useState(false);
@@ -2173,11 +2178,27 @@ export default function CheckIn() {
     if (isLoading || !isAuthenticated) return;
     let cancelled = false;
     (async () => {
-      const s = await getActiveSession().catch(() => null);
-      if (!cancelled) {
-        setActiveSession(s);
-        setActiveSessionLoading(false);
+      const [s, awaiting] = await Promise.all([
+        getActiveSession().catch(() => null),
+        getAwaitingEmergency().catch(() => null),
+      ]);
+      if (cancelled) return;
+      // Option D AWAITING UX revision (2026-06-16) — a held emergency awaiting
+      // its confirmatory reading auto-resumes Screen A so the patient lands back
+      // where they left off, whether they tapped the /readings "Continue
+      // confirmation" CTA or navigated to /check-in directly. The held reading
+      // is excluded from getActiveSession, so this takes precedence cleanly.
+      if (awaiting && awaiting.systolicBP != null && awaiting.diastolicBP != null) {
+        setOptionDFirstId(awaiting.id);
+        setOptionDFirstBp({ sys: awaiting.systolicBP, dia: awaiting.diastolicBP });
+        // Reuse the held first-of-pair's session so the resumed confirmatory
+        // reading pairs into the same session card.
+        setSessionId(awaiting.sessionId);
+        setOptionDResumed(true);
+        setOptionDActive(true);
       }
+      setActiveSession(s);
+      setActiveSessionLoading(false);
     })();
     return () => { cancelled = true; };
   }, [isAuthenticated, isLoading]);
@@ -2869,6 +2890,7 @@ export default function CheckIn() {
       <OptionDFlow
         firstSystolic={optionDFirstBp.sys}
         firstDiastolic={optionDFirstBp.dia}
+        resumed={optionDResumed}
         onSubmitSecond={submitOptionDSecond}
         onDecline={handleOptionDDecline}
         onDone={() => router.push('/dashboard')}

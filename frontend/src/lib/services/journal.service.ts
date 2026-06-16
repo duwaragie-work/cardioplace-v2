@@ -229,6 +229,32 @@ export async function getActiveSession(): Promise<ActiveSessionDto | null> {
 }
 
 /**
+ * GET /daily-journal/awaiting-emergency — the patient's most recent held
+ * emergency reading (Option D, Manisha 2026-06-12 Q2) awaiting its confirmatory
+ * second reading, or null when none. Drives the /check-in Screen A auto-resume
+ * and the /readings "Continue confirmation" CTA.
+ */
+export interface AwaitingEmergencyDto {
+  id: string
+  sessionId: string | null // the held first-of-pair's session (resume reuses it)
+  systolicBP: number | null
+  diastolicBP: number | null
+  measuredAt: string // ISO — when the held first-of-pair was taken
+}
+
+export async function getAwaitingEmergency(): Promise<AwaitingEmergencyDto | null> {
+  const res = await fetchWithAuth(`${API}/api/daily-journal/awaiting-emergency`)
+  if (res.status === 204) return null
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json().catch(() => null)
+  const data = (json?.data ?? json) as AwaitingEmergencyDto | null
+  return data ?? null
+}
+
+/**
  * Cluster 6 Q2 — fires after the patient's 5-min "take a second reading"
  * window times out without a second reading. Flips
  * JournalEntry.singleReadingFinalized = true server-side; engine then fires

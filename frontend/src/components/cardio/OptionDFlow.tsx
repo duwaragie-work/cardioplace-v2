@@ -36,6 +36,7 @@ type Phase = 'screenA' | 'screenB' | 'screenC';
 export function OptionDFlow({
   firstSystolic,
   firstDiastolic,
+  resumed = false,
   onSubmitSecond,
   onDecline,
   onDone,
@@ -43,6 +44,10 @@ export function OptionDFlow({
   /** The held first-of-pair reading, shown on Screen A. */
   firstSystolic: number;
   firstDiastolic: number;
+  /** Option D AWAITING UX revision (2026-06-16) — true when Screen A was
+   *  auto-resumed because the patient returned to an unfinished held emergency
+   *  (vs. reached by submitting a fresh reading). Shows the resume intro. */
+  resumed?: boolean;
   /** Submit the confirmatory second reading. CheckIn builds the payload
    *  (same session + confirmsEntryId) and persists it. */
   onSubmitSecond: (reading: OptionDSecondReading) => Promise<void>;
@@ -135,6 +140,18 @@ export function OptionDFlow({
         >
           {phase === 'screenA' && (
             <>
+              {/* Resume intro — only when the patient returned to an unfinished
+                  held emergency (auto-resumed Screen A), so they understand
+                  why they're back here rather than in the normal check-in. */}
+              {resumed && (
+                <p
+                  data-testid="optiond-resume-intro"
+                  className="text-[0.8125rem] font-semibold mb-3"
+                  style={{ color: 'var(--brand-warning-amber-text)' }}
+                >
+                  {t('checkin.optionD.resumeIntro')}
+                </p>
+              )}
               <div
                 className="rounded-full flex items-center justify-center mb-4"
                 style={{ width: 64, height: 64, backgroundColor: 'var(--brand-warning-amber-light)' }}
