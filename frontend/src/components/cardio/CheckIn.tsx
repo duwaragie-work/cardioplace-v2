@@ -59,8 +59,20 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, declineEmergencyConfirmation, getActiveSession, getAwaitingEmergency, getAlerts, type ActiveSessionDto, type AlertTier, type JournalEntryPayload } from '@/lib/services/journal.service';
 import { OptionDFlow, type OptionDSecondReading } from '@/components/cardio/OptionDFlow';
+import { BufferReviewScreen } from '@/components/cardio/BufferReviewScreen';
 import { isNowish, resolveMeasuredAtIso } from '@/lib/measuredAt';
 import { applyBulkMedicationStatus } from '@/lib/medicationBulk';
+import {
+  createDraft,
+  addReading,
+  removeReading,
+  commitPayloads,
+  loadDraft as loadBufferDraft,
+  saveDraft as saveBufferDraft,
+  clearDraft as clearBufferDraft,
+  type JournalDraft,
+  type BufferedReading,
+} from '@/lib/journalDraft';
 import { delayBandFor, showsSuppressedBanner, type DelayBand } from '@/lib/delayBand';
 import { selectReadingPrompt } from '@/lib/sessionPrompt';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
@@ -2147,6 +2159,17 @@ export default function CheckIn() {
   // route the patient to the full-screen 911 alert; this stops OptionDFlow's
   // onDone from then bouncing them to the dashboard over that screen.
   const optionDRoutedToEmergencyRef = useRef(false);
+
+  // Part 1 — FE buffer (CTO 2026-06-09 + Manisha Q1). A non-emergency reading is
+  // held on-device for the 5-min window; the backend only sees it on "I'm good"
+  // or expiry. The buffer holds the whole 1–3 reading sitting (Q3).
+  const [bufferDraft, setBufferDraft] = useState<JournalDraft | null>(null);
+  // True when the review screen should take over (vs. the wizard re-opened to
+  // add / edit a reading inside the buffer).
+  const [bufferReviewing, setBufferReviewing] = useState(false);
+  // Set while editing a buffered reading — on submit we replace it in place.
+  const [editingBufferLocalId, setEditingBufferLocalId] = useState<string | null>(null);
+  const [committingBuffer, setCommittingBuffer] = useState(false);
   // Bug 8 — true when the just-submitted reading triggered an emergency-class
   // rule; suppresses the Q3 / AFib reading-prompt on the confirmation screen.
   const [confirmationIsEmergency, setConfirmationIsEmergency] = useState(false);
@@ -2297,6 +2320,20 @@ export default function CheckIn() {
   useEffect(() => {
     if (user?.enrollmentStatus === 'ENROLLED') setEnrolledSnapshot(true);
   }, [user?.enrollmentStatus]);
+
+  // Part 1 — rehydrate a buffered draft on mount (tab refresh, or navigating to
+  // /check-in while a sitting is still in review). sessionStorage survives a
+  // refresh but not a tab close. An already-expired draft renders the review
+  // screen briefly, whose countdown is at 0 and fires onExpire → auto-commit.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || !user?.id) return;
+    const existing = loadBufferDraft(user.id);
+    if (existing) {
+      setBufferDraft(existing);
+      setBufferReviewing(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, isLoading, user?.id]);
 
   // Snap the page to the top whenever the wizard advances (or goes back) to
   // a different step — otherwise the user lands wherever the previous step's
@@ -2553,6 +2590,43 @@ export default function CheckIn() {
         return;
       }
 
+      // Part 1 — non-emergency readings BUFFER on-device (no backend POST) for
+      // the 5-min review window. Emergencies bypass: Option D handled above; any
+      // emergency-range BP or emergency-class symptom (target-organ-damage /
+      // airway) posts immediately so the engine can page right away.
+      const hasEmergencySymptom =
+        form.severeHeadache || form.visualChanges || form.alteredMentalStatus ||
+        form.chestPainOrDyspnea || form.focalNeuroDeficit || form.severeEpigastricPain ||
+        form.faceSwelling || form.throatTightness;
+      if (!isEmergencyBP && !hasEmergencySymptom) {
+        const localId = editingBufferLocalId ?? uuid();
+        const buffered: BufferedReading = { localId, payload: basePayload, form };
+        let nextDraft: JournalDraft;
+        if (bufferDraft && editingBufferLocalId) {
+          // Replace the edited reading in place (payload + form snapshot).
+          nextDraft = {
+            ...bufferDraft,
+            readings: bufferDraft.readings.map((r) =>
+              r.localId === editingBufferLocalId ? buffered : r,
+            ),
+          };
+        } else if (bufferDraft) {
+          nextDraft = addReading(bufferDraft, buffered);
+        } else {
+          // First reading anchors the session + the countdown.
+          nextDraft = createDraft(sessionId ?? uuid(), Date.now(), buffered);
+        }
+        setBufferDraft(nextDraft);
+        if (user?.id) {
+          saveBufferDraft(user.id, nextDraft);
+          clearCheckInDraft(user.id); // drop the wizard auto-save resume draft
+        }
+        setImplausibleCount(0);
+        setEditingBufferLocalId(null);
+        setBufferReviewing(true);
+        return; // do NOT post — finally still resets submitting
+      }
+
       const submitStartedAt = Date.now();
       const created = await createJournalEntry(basePayload);
 
@@ -2786,6 +2860,103 @@ export default function CheckIn() {
     setDirection(1);
   }
 
+  // ── Part 1 — FE buffer handlers ──────────────────────────────────────────
+  // Commit the whole buffered sitting in one shot. Every reading carries the
+  // draft's shared sessionId so the engine groups + averages them as one
+  // session. Triggered by "I'm good" or the countdown expiring.
+  async function commitBuffer() {
+    if (!bufferDraft || committingBuffer) return;
+    const draft = bufferDraft;
+    setCommittingBuffer(true);
+    try {
+      const created = [] as Awaited<ReturnType<typeof createJournalEntry>>[];
+      for (const payload of commitPayloads(draft)) {
+        created.push(await createJournalEntry(payload));
+      }
+      if (user?.id) {
+        clearBufferDraft(user.id);
+        clearCheckInDraft(user.id);
+      }
+      // Feed the confirmation screen from the committed readings.
+      const readings: SessionReading[] = draft.readings.map((r, i) => ({
+        measuredAt: r.payload.measuredAt,
+        systolicBP: r.payload.systolicBP,
+        diastolicBP: r.payload.diastolicBP,
+        pulse: r.payload.pulse,
+        weightKg: r.payload.weight,
+        delayBand: created[i]?.entry.delayBand,
+        alertsSuppressedReason: created[i]?.entry.alertsSuppressedReason,
+      }));
+      setSessionReadings(readings);
+      setReadingNumber(readings.length);
+      setBufferDraft(null);
+      setBufferReviewing(false);
+      setEditingBufferLocalId(null);
+      // The second-reading opportunity already passed in the buffer (Q3 lived on
+      // the review screen), so don't arm the post-submit single-reading prompt.
+      setPendingFinalizeEntryId(null);
+      setConfirmationIsEmergency(false);
+      setShowConfirmation(true);
+    } catch (e) {
+      // Keep the buffer intact so the patient can retry.
+      setError(e instanceof Error ? e.message : t('checkin.err.submit'));
+    } finally {
+      setCommittingBuffer(false);
+    }
+  }
+
+  // "Take another reading" from the review screen — re-enter the wizard for a
+  // FRESH reading (it lands back in the buffer on submit, Q3). The countdown is
+  // NOT reset (draft.createdAt is untouched).
+  function takeAnotherFromBuffer() {
+    setEditingBufferLocalId(null);
+    setForm((prev) => ({
+      ...emptyForm(),
+      measuredDate: nowDate(),
+      measuredTime: nowTime(),
+      noCaffeine: prev.noCaffeine,
+      noSmoking: prev.noSmoking,
+      noExercise: prev.noExercise,
+      bladderEmpty: prev.bladderEmpty,
+      seatedQuietly: prev.seatedQuietly,
+      posturalSupport: prev.posturalSupport,
+      notTalking: prev.notTalking,
+      cuffOnBareArm: prev.cuffOnBareArm,
+      weightUnit: prev.weightUnit,
+    }));
+    setBufferReviewing(false);
+    setStep('B2');
+    setDirection(1);
+  }
+
+  // Edit a buffered reading — re-open the wizard pre-filled from its form
+  // snapshot; on submit it replaces that reading in place.
+  function editBufferReading(localId: string) {
+    if (!bufferDraft) return;
+    const r = bufferDraft.readings.find((x) => x.localId === localId);
+    if (!r) return;
+    setEditingBufferLocalId(localId);
+    if (r.form) setForm({ ...emptyForm(), ...(r.form as FormData) });
+    setBufferReviewing(false);
+    setStep('B2');
+    setDirection(1);
+  }
+
+  // Remove a buffered reading; if it was the last, discard the buffer entirely.
+  function deleteBufferReading(localId: string) {
+    if (!bufferDraft) return;
+    const next = removeReading(bufferDraft, localId);
+    if (next.readings.length === 0) {
+      if (user?.id) clearBufferDraft(user.id);
+      setBufferDraft(null);
+      setBufferReviewing(false);
+      router.push('/dashboard');
+      return;
+    }
+    setBufferDraft(next);
+    if (user?.id) saveBufferDraft(user.id, next);
+  }
+
   // Authed loading state — skeleton mirroring the wizard chrome (top bar +
   // step header + a few content rows + sticky CTA placeholder) so the page
   // doesn't flash a generic spinner before the first step renders.
@@ -2916,6 +3087,24 @@ export default function CheckIn() {
           </div>
         </main>
       </div>
+    );
+  }
+
+  // Part 1 — FE buffer review screen. Takes over whenever a non-emergency sitting
+  // is buffered and we're not currently in the wizard adding/editing a reading.
+  // Tab refresh / re-navigation rehydrates here too (the mount effect above).
+  if (bufferDraft && bufferReviewing) {
+    return (
+      <BufferReviewScreen
+        draft={bufferDraft}
+        hasAFib={hasAFib}
+        committing={committingBuffer}
+        onTakeAnother={takeAnotherFromBuffer}
+        onCommit={commitBuffer}
+        onExpire={commitBuffer}
+        onEditReading={editBufferReading}
+        onDeleteReading={deleteBufferReading}
+      />
     );
   }
 
