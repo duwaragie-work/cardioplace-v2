@@ -21,6 +21,10 @@ export interface BufferedReading {
   /** The fully-composed payload as it will be POSTed. `sessionId` is (re)applied
    *  from the draft at commit time so every reading shares one sitting. */
   payload: JournalEntryPayload
+  /** Opaque wizard form snapshot (FormData) so "Edit" can re-open the wizard
+   *  pre-filled without reverse-mapping the payload. The lib never inspects it;
+   *  only the commit `payload` matters. Optional — survives sessionStorage. */
+  form?: unknown
 }
 
 export interface JournalDraft {
