@@ -1,6 +1,18 @@
 export const JOURNAL_EVENTS = {
   ENTRY_CREATED: 'journal.entry.created',
+  // Patient/admin EDIT or DELETE of an existing reading. Per the signed CTO
+  // 2026-06-09 "no re-trigger" policy (Manisha 2026-06-12 Q2 "we cannot
+  // un-page"), the rule engine MUST NOT re-evaluate on this event — edits are
+  // audit-log only and the corrected value rides into the NEXT new entry's
+  // batch. This event is consumed ONLY by context-refresh listeners (chat /
+  // voice). The engine deliberately does NOT subscribe to it.
   ENTRY_UPDATED: 'journal.entry.updated',
+  // FIRST evaluation of a HELD reading (not a re-trigger): the Cluster 6 Q2
+  // single-reading finalize + the Option D UNCONFIRMED finalize emit this so
+  // the engine fires the previously-held alert. The engine subscribes to this
+  // (and ENTRY_CREATED) — never to ENTRY_UPDATED — so a patient edit can never
+  // re-fire while a legitimate held-alert release still does.
+  ENTRY_FINALIZED: 'journal.entry.finalized',
   DEVIATION_DETECTED: 'journal.deviation.detected',
   // Phase/7 — renamed from v1 'ANOMALY_TRACKED'. Fires after the rule engine
   // persists a DeviationAlert row; carries the alert id so escalation +

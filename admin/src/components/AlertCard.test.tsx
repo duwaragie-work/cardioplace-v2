@@ -133,6 +133,20 @@ describe('AlertCard — mode badge (B3)', () => {
   })
 })
 
+describe('AlertCard — Bug 7 unconfirmed trigger badge', () => {
+  it('renders an "Unconfirmed" badge for RULE_UNCONFIRMED_EMERGENCY', () => {
+    renderCard(makeAlert({ ruleId: 'RULE_UNCONFIRMED_EMERGENCY', tier: 'TIER_1_CONTRAINDICATION' }))
+    const badge = screen.getByTestId('admin-alert-unconfirmed-badge-alert-1')
+    expect(badge).toBeInTheDocument()
+    expect(badge).toHaveTextContent(/unconfirmed/i)
+  })
+
+  it('does NOT render the unconfirmed badge for other rules', () => {
+    renderCard(makeAlert({ ruleId: 'RULE_STANDARD_L1_HIGH' }))
+    expect(screen.queryByTestId('admin-alert-unconfirmed-badge-alert-1')).not.toBeInTheDocument()
+  })
+})
+
 // F22 — the "Personalized" badge is semantically ambiguous: it reflects the
 // patient's monitoring stage, not which rule's threshold fired. A hover tooltip
 // disambiguates it so a clinician doesn't read it as "personalized threshold

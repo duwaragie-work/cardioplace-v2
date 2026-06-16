@@ -57,7 +57,24 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
-import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, getActiveSession, type ActiveSessionDto } from '@/lib/services/journal.service';
+import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, declineEmergencyConfirmation, getActiveSession, getAwaitingEmergency, getAlerts, type ActiveSessionDto, type AlertTier, type JournalEntryPayload } from '@/lib/services/journal.service';
+import { OptionDFlow, type OptionDSecondReading } from '@/components/cardio/OptionDFlow';
+import { BufferReviewScreen } from '@/components/cardio/BufferReviewScreen';
+import { isNowish, resolveMeasuredAtIso } from '@/lib/measuredAt';
+import { applyBulkMedicationStatus } from '@/lib/medicationBulk';
+import {
+  createDraft,
+  addReading,
+  removeReading,
+  commitPayloads,
+  loadDraft as loadBufferDraft,
+  saveDraft as saveBufferDraft,
+  clearDraft as clearBufferDraft,
+  type JournalDraft,
+  type BufferedReading,
+} from '@/lib/journalDraft';
+import { delayBandFor, showsSuppressedBanner, type DelayBand } from '@/lib/delayBand';
+import { selectReadingPrompt } from '@/lib/sessionPrompt';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import { hasDraft, loadDraft } from '@/lib/intake/draft';
 import {
@@ -168,6 +185,13 @@ interface SessionReading {
    *  to compute BMI for the confirmation screen — patients never enter BMI
    *  themselves per Niva's spec sign-off. */
   weightKg?: number;
+  /** Chunk C — measurement-lag band from the POST response (server truth).
+   *  Drives the HISTORICAL_ENTRY / DELAYED_ENTRY note on the success screen. */
+  delayBand?: DelayBand;
+  /** Chunk B fix-up — Gate A ("is new latest?") suppression signal from the
+   *  POST response. 'GATE_A' renders the same banner as HISTORICAL_ENTRY:
+   *  recorded, but no real-time alerts. */
+  alertsSuppressedReason?: 'GATE_A' | 'HISTORICAL_ENTRY' | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -507,6 +531,15 @@ function B2Reading({ form, setField }: StepProps) {
   // full-width below the button (above the reading inputs) instead of being
   // squeezed in beside the camera icon inside the label row.
   const [bpPhotoError, setBpPhotoError] = useState<string | null>(null);
+  // Chunk C — collapse the date/time behind a disclosure so the real-time 95%
+  // path is one tap. Auto-expanded when the stored time isn't ~now.
+  const [editingTime, setEditingTime] = useState(() => !isNowish(form.measuredDate, form.measuredTime));
+  const measuredIsNow = isNowish(form.measuredDate, form.measuredTime);
+  const whenSummary = measuredIsNow
+    ? t('checkin.b2.takenNow')
+    : new Date(`${form.measuredDate}T${form.measuredTime}`).toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      });
 
   return (
     <div data-testid="checkin-step-2" className="space-y-6">
@@ -525,6 +558,23 @@ function B2Reading({ form, setField }: StepProps) {
           <CalendarClock className="w-4 h-4" />
           {t('checkin.b2.whenLabel')}
         </label>
+        {!editingTime ? (
+          <button
+            type="button"
+            data-testid="checkin-when-summary"
+            onClick={() => setEditingTime(true)}
+            className="w-full h-12 px-3 rounded-xl flex items-center justify-between gap-2 text-[14px] cursor-pointer"
+            style={{ border: '2px solid var(--brand-border)', backgroundColor: 'white', color: 'var(--brand-text-primary)' }}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <CalendarClock className="w-4 h-4 shrink-0" style={{ color: 'var(--brand-text-muted)' }} />
+              <span className="truncate">{whenSummary}</span>
+            </span>
+            <span className="text-[13px] font-semibold shrink-0" style={{ color: 'var(--brand-primary-purple)' }}>
+              {t('checkin.b2.changeTime')}
+            </span>
+          </button>
+        ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           <input
             type="date"
@@ -557,6 +607,7 @@ function B2Reading({ form, setField }: StepProps) {
             onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
           />
         </div>
+        )}
       </div>
 
       {/* Position */}
@@ -923,6 +974,29 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
     });
   };
 
+  // Bug 17 / Bug 21b — absolute setter: bulk-answer EVERY med to `value` (FE-only;
+  // no backend round-trip), regardless of current state, so "Mark all not taken"
+  // works after "Mark all taken". The patient can still flip any individual med.
+  const bulkSet = (value: 'yes' | 'no') => {
+    setField(
+      'medicationStatus',
+      applyBulkMedicationStatus(
+        form.medicationStatus,
+        medications.map((m) => m.id),
+        value,
+        (prev, v): MedicationEntry =>
+          v === 'no'
+            ? { ...(prev ?? DEFAULT_MED_ENTRY), taken: 'no' }
+            : { taken: 'yes', reason: null, missedDoses: 1 },
+      ),
+    );
+  };
+
+  // Live tally so the patient sees a bulk action landed.
+  const takenCount = medications.filter((m) => getEntry(m.id).taken === 'yes').length;
+  const missedCount = medications.filter((m) => getEntry(m.id).taken === 'no').length;
+  const answeredCount = medications.filter((m) => getEntry(m.id).taken != null).length;
+
   return (
     <div data-testid="checkin-step-4" className="space-y-6">
       <StepHeader
@@ -932,6 +1006,50 @@ function StepMedication({ form, setField, medications, heldMeds, medsLoading }: 
         step={4}
         total={5}
       />
+
+      {/* Bug 17 / Bug 21a — bulk shortcuts for patients with several meds, styled
+          as one segmented control (tertiary, above the list). Only shown when
+          there's more than one med. Each button is an absolute setter (Bug 21b).
+          44px tall (a11y C3); smaller than the primary CTA (48px). */}
+      {!medsLoading && medications.length > 1 && (
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div
+            className="inline-flex rounded-full overflow-hidden"
+            style={{ border: '1.5px solid var(--brand-border)' }}
+          >
+            <button
+              type="button"
+              data-testid="checkin-meds-mark-all-taken"
+              onClick={() => bulkSet('yes')}
+              className="h-11 px-4 text-[0.8125rem] font-semibold cursor-pointer transition hover:bg-[#f5f3ff]"
+              style={{ color: 'var(--brand-primary-purple)' }}
+            >
+              {t('checkin.b4.markAllTaken')}
+            </button>
+            <button
+              type="button"
+              data-testid="checkin-meds-mark-all-not-taken"
+              onClick={() => bulkSet('no')}
+              className="h-11 px-4 text-[0.8125rem] font-semibold cursor-pointer transition hover:bg-[#f5f3ff]"
+              style={{ color: 'var(--brand-primary-purple)', borderLeft: '1.5px solid var(--brand-border)' }}
+            >
+              {t('checkin.b4.markAllNotTaken')}
+            </button>
+          </div>
+          {answeredCount > 0 && (
+            <span
+              data-testid="checkin-meds-tally"
+              aria-live="polite"
+              className="text-[0.75rem] font-medium"
+              style={{ color: 'var(--brand-text-muted)' }}
+            >
+              {t('checkin.b4.bulkTally')
+                .replace('{taken}', String(takenCount))
+                .replace('{missed}', String(missedCount))}
+            </span>
+          )}
+        </div>
+      )}
 
       {medsLoading && (
         <div className="space-y-3 animate-pulse">
@@ -1596,12 +1714,16 @@ function ConfirmationScreen({
   heightCm,
   missedMedNames,
   isEnrolled,
+  isEmergency,
   onAddAnother,
   onDone,
   pendingFinalizeEntryId,
   onFinalized,
 }: {
   lastReading: SessionReading;
+  /** Bug 8 — the just-submitted reading triggered an emergency-class rule.
+   *  Suppresses the Q3 / AFib reading-prompt (show the emergency CTA instead). */
+  isEmergency: boolean;
   /** #88 — true once the patient is ENROLLED (clinical dispatch gate). When
    *  false, the engine never ran and no care team was notified, so the
    *  post-submit copy must not claim otherwise. */
@@ -1628,14 +1750,19 @@ function ConfirmationScreen({
 }) {
   const { t } = useLanguage();
   const total = sessionTotal;
-  const aFibSatisfied = !hasAFib || total >= 3;
+  // Q3 hybrid prompt-selection (Manisha 2026-06-12 Q3 — Option C). Single
+  // source of truth for the AFib 3-reading variant vs the non-AFib
+  // single→second-reading nudge, extracted to a pure helper so the branch is
+  // unit-tested (lib/sessionPrompt.test.ts) and the two cohorts can't cross.
   // #90 — AFib check-in state machine. AFib patients need three readings taken
   // close together (5-min session) for the engine's beat-to-beat averaging.
   // The copy teaches that without clinical jargon, and tapping "Back to
   // dashboard" before the 3rd reading prompts a confirm (going to the
   // dashboard ends the session).
-  const afibStateKey = total >= 3 ? 'state3' : total === 2 ? 'state2' : 'state1';
-  const needsMoreReadings = hasAFib && total < 3;
+  const readingPrompt = selectReadingPrompt({ hasAFib, sessionTotal: total, pendingFinalizeEntryId, isEmergency });
+  const aFibSatisfied = readingPrompt.kind === 'afib' ? readingPrompt.satisfied : true;
+  const afibStateKey = readingPrompt.kind === 'afib' ? readingPrompt.stateKey : 'state1';
+  const needsMoreReadings = readingPrompt.kind === 'afib' ? readingPrompt.needsMoreReadings : false;
   const [showLeaveAfibModal, setShowLeaveAfibModal] = useState(false);
   const handleBackToDashboard = () => {
     if (needsMoreReadings) setShowLeaveAfibModal(true);
@@ -1780,6 +1907,34 @@ function ConfirmationScreen({
         )}
       </div>
 
+      {/* Chunk C — backdated-readings post-save note. HISTORICAL_ENTRY (>24h)
+          gets the "won't trigger real-time alerts" note; DELAYED_ENTRY (1-24h)
+          gets a quieter "recorded" confirmation. Server-truth band from the POST
+          response. PENDING-MANISHA-WORDING 2026-06-09. */}
+      {showsSuppressedBanner(lastReading?.delayBand, lastReading?.alertsSuppressedReason) && (
+        <div
+          data-testid="checkin-historical-note"
+          className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
+          style={{ backgroundColor: 'var(--brand-info-bg, #EEF2FF)' }}
+        >
+          <CalendarClock className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-primary-purple)' }} />
+          <p className="text-[12px] leading-snug" style={{ color: 'var(--brand-text-primary)' }}>
+            {t('checkin.historical.note')}
+          </p>
+        </div>
+      )}
+      {lastReading?.delayBand === 'DELAYED_ENTRY' && (
+        <div
+          data-testid="checkin-delayed-note"
+          className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
+          style={{ backgroundColor: 'var(--brand-info-bg, #EEF2FF)' }}
+        >
+          <CalendarClock className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-text-muted)' }} />
+          <p className="text-[12px] leading-snug" style={{ color: 'var(--brand-text-secondary)' }}>
+            {t('checkin.delayed.note')}
+          </p>
+        </div>
+      )}
       {/* Missed-medication acknowledgement — visible confirmation so the
           patient knows their answer was captured and will reach the care team.
           #88 — only when ENROLLED: an un-enrolled patient's miss fires no alert
@@ -1834,7 +1989,7 @@ function ConfirmationScreen({
          them to take a second one. Helps the engine fire on an averaged
          BP instead of a one-off. 5-min timer (above) finalizes the
          session as single-reading if they don't. */}
-      {pendingFinalizeEntryId && (
+      {readingPrompt.kind === 'takeSecond' && (
         <div
           data-testid="pending-second-reading"
           className="w-full mb-3 rounded-2xl border-2 px-4 py-3 text-[0.8125rem] leading-snug"
@@ -1989,11 +2144,49 @@ export default function CheckIn() {
   const [sessionId, setSessionId] = useState<string | null>(() => uuid());
   const [sessionReadings, setSessionReadings] = useState<SessionReading[]>([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  // Chunk C — DELAYED_ENTRY soft-warning modal gate (shown at submit when 1-24h old).
+  const [showDelayWarning, setShowDelayWarning] = useState(false);
   const [readingNumber, setReadingNumber] = useState(0); // count of submitted readings in session
   // Cluster 6 Q2 — set to the entry id of a first-in-session non-AFib
   // non-preDay3 reading. Drives the "Take a second reading" prompt + 5-min
   // finalize timer in <ConfirmationScreen>. Null otherwise.
   const [pendingFinalizeEntryId, setPendingFinalizeEntryId] = useState<string | null>(null);
+  // Option D (Manisha 2026-06-12 Q2) — when a BP-only emergency (≥180/120, no
+  // symptoms) is submitted, the first reading is persisted held (AWAITING) and
+  // this activates the retake-to-confirm flow (<OptionDFlow>).
+  const [optionDActive, setOptionDActive] = useState(false);
+  const [optionDFirstId, setOptionDFirstId] = useState<string | null>(null);
+  const [optionDFirstBp, setOptionDFirstBp] = useState<{ sys: number; dia: number } | null>(null);
+  // Option D AWAITING UX revision (2026-06-16) — true when Screen A was
+  // auto-resumed on mount (the patient returned to an unfinished held
+  // emergency) rather than reached by submitting a fresh reading. Drives the
+  // "Let's finish your reading from a moment ago" resume intro.
+  const [optionDResumed, setOptionDResumed] = useState(false);
+  // Bug 16 — when the Option D confirmatory reading was ALSO emergency-range we
+  // route the patient to the full-screen 911 alert; this stops OptionDFlow's
+  // onDone from then bouncing them to the dashboard over that screen.
+  const optionDRoutedToEmergencyRef = useRef(false);
+
+  // Part 1 — FE buffer (CTO 2026-06-09 + Manisha Q1). A non-emergency reading is
+  // held on-device for the 5-min window; the backend only sees it on "I'm good"
+  // or expiry. The buffer holds the whole 1–3 reading sitting (Q3).
+  const [bufferDraft, setBufferDraft] = useState<JournalDraft | null>(null);
+  // True when the review screen should take over (vs. the wizard re-opened to
+  // add / edit a reading inside the buffer).
+  const [bufferReviewing, setBufferReviewing] = useState(false);
+  // Set while editing a buffered reading — on submit we replace it in place.
+  const [editingBufferLocalId, setEditingBufferLocalId] = useState<string | null>(null);
+  const [committingBuffer, setCommittingBuffer] = useState(false);
+  // Bug 8 — true when the just-submitted reading triggered an emergency-class
+  // rule; suppresses the Q3 / AFib reading-prompt on the confirmation screen.
+  const [confirmationIsEmergency, setConfirmationIsEmergency] = useState(false);
+  // Bug 20a (live-test 2026-06-17) — the confirmation screen's "We're setting up
+  // your care team" copy is for NOT_ENROLLED patients ONLY. Read the enrollment
+  // field DIRECTLY and show it only when explicitly NOT_ENROLLED. Defaulting to
+  // "enrolled" for any other value (incl. undefined while `user` is loading or
+  // momentarily re-renders without it) fixes both Bug 20 (an enrolled patient
+  // like Iris saw the message) AND the old Bug 3 flicker — no snapshot needed.
+  const isEnrolled = user?.enrollmentStatus !== 'NOT_ENROLLED';
 
   // Cross-visit session continuity — the patient's currently OPEN session (if
   // any) fetched on mount. While set + unresolved + not expired, the "add to
@@ -2071,11 +2264,27 @@ export default function CheckIn() {
     if (isLoading || !isAuthenticated) return;
     let cancelled = false;
     (async () => {
-      const s = await getActiveSession().catch(() => null);
-      if (!cancelled) {
-        setActiveSession(s);
-        setActiveSessionLoading(false);
+      const [s, awaiting] = await Promise.all([
+        getActiveSession().catch(() => null),
+        getAwaitingEmergency().catch(() => null),
+      ]);
+      if (cancelled) return;
+      // Option D AWAITING UX revision (2026-06-16) — a held emergency awaiting
+      // its confirmatory reading auto-resumes Screen A so the patient lands back
+      // where they left off, whether they tapped the /readings "Continue
+      // confirmation" CTA or navigated to /check-in directly. The held reading
+      // is excluded from getActiveSession, so this takes precedence cleanly.
+      if (awaiting && awaiting.systolicBP != null && awaiting.diastolicBP != null) {
+        setOptionDFirstId(awaiting.id);
+        setOptionDFirstBp({ sys: awaiting.systolicBP, dia: awaiting.diastolicBP });
+        // Reuse the held first-of-pair's session so the resumed confirmatory
+        // reading pairs into the same session card.
+        setSessionId(awaiting.sessionId);
+        setOptionDResumed(true);
+        setOptionDActive(true);
       }
+      setActiveSession(s);
+      setActiveSessionLoading(false);
     })();
     return () => { cancelled = true; };
   }, [isAuthenticated, isLoading]);
@@ -2098,6 +2307,33 @@ export default function CheckIn() {
     const id = setInterval(() => setNowTick((n) => n + 1), 30_000);
     return () => clearInterval(id);
   }, [activeSession, sessionPromptResolved]);
+
+  // Bug 6 (live-test 2026-06-15) — an open session that has aged past the 5-min
+  // window must not keep showing the "Reading session in progress" resume
+  // prompt. The 30s nowTick above flips `sessionExpired`; the moment it does,
+  // drop the stale session so the wizard silently continues with its own fresh
+  // sessionId (CLINICAL_SPEC §5.2 — sessions expire at 5 min). Without this the
+  // prompt could linger on a stale mount-time fetch until a full page reload.
+  useEffect(() => {
+    if (activeSession && sessionExpired && !sessionPromptResolved) {
+      setActiveSession(null);
+      setSessionPromptResolved(true);
+    }
+  }, [activeSession, sessionExpired, sessionPromptResolved]);
+
+  // Part 1 — rehydrate a buffered draft on mount (tab refresh, or navigating to
+  // /check-in while a sitting is still in review). sessionStorage survives a
+  // refresh but not a tab close. An already-expired draft renders the review
+  // screen briefly, whose countdown is at 0 and fires onExpire → auto-commit.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || !user?.id) return;
+    const existing = loadBufferDraft(user.id);
+    if (existing) {
+      setBufferDraft(existing);
+      setBufferReviewing(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, isLoading, user?.id]);
 
   // Snap the page to the top whenever the wizard advances (or goes back) to
   // a different step — otherwise the user lands wherever the previous step's
@@ -2186,9 +2422,19 @@ export default function CheckIn() {
     return null;
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(confirmedDelayed = false) {
     if (submitting) return;
     setError('');
+
+    // Chunk C — DELAYED_ENTRY (1-24h) soft pre-submit warning. The reading still
+    // saves + the care team still sees it, but the engine won't treat stale data
+    // as an active emergency (Manisha 2026-06-06 backdated-readings sign-off).
+    // PENDING-MANISHA-WORDING 2026-06-09 (copy in i18n: checkin.delay.*).
+    const measuredMs = new Date(`${form.measuredDate}T${form.measuredTime}`).getTime();
+    if (!confirmedDelayed && delayBandFor(measuredMs, Date.now()) === 'DELAYED_ENTRY') {
+      setShowDelayWarning(true);
+      return;
+    }
 
     // Build payload
     const measurementConditions = {
@@ -2202,7 +2448,10 @@ export default function CheckIn() {
       cuffOnBareArm: form.cuffOnBareArm,
     };
 
-    const measuredAtIso = new Date(`${form.measuredDate}T${form.measuredTime}`).toISOString();
+    // Bug 15 — for a "just now" submission use real now() (full ms) so two
+    // same-minute resubmits can't collide on the DB unique(userId, measuredAt);
+    // a backdated time keeps the minute-precision the patient chose.
+    const measuredAtIso = resolveMeasuredAtIso(form.measuredDate, form.measuredTime);
     const sys = form.systolicBP ? parseInt(form.systolicBP, 10) : undefined;
     const dia = form.diastolicBP ? parseInt(form.diastolicBP, 10) : undefined;
     const pul = form.pulse ? parseInt(form.pulse, 10) : undefined;
@@ -2260,9 +2509,7 @@ export default function CheckIn() {
         ...(e.state.taken === 'no' ? { missedDoses: e.state.missedDoses } : {}),
       }));
 
-    setSubmitting(true);
-    try {
-      const created = await createJournalEntry({
+    const basePayload: JournalEntryPayload = {
         measuredAt: measuredAtIso,
         systolicBP: sys,
         diastolicBP: dia,
@@ -2301,7 +2548,87 @@ export default function CheckIn() {
         // Patient-typed custom symptom chips → otherSymptoms; free-text → notes.
         otherSymptoms: form.otherSymptomsList.length ? form.otherSymptomsList : undefined,
         notes: form.notes.trim() ? form.notes.trim() : undefined,
-      });
+    };
+
+    // Option D (Manisha 2026-06-12 Q2) — a BP-only emergency (≥180/120) with NO
+    // co-occurring symptoms enters the retake-to-confirm flow rather than firing
+    // immediately. ANY reported symptom (target-organ-damage or otherwise) is a
+    // co-occurring symptom → fall through to immediate submit (Option A), so a
+    // symptomatic emergency is never asked to "sit calmly and retake". Backdated
+    // readings (DELAYED/HISTORICAL) skip Option D — the engine's own suppression
+    // gates handle stale data; only current/near-real-time readings retake.
+    const optionDBand = delayBandFor(
+      new Date(`${form.measuredDate}T${form.measuredTime}`).getTime(),
+      Date.now(),
+    );
+    const isEmergencyBP = (sys != null && sys >= 180) || (dia != null && dia >= 120);
+    const hasAnySymptom =
+      form.severeHeadache || form.visualChanges || form.alteredMentalStatus ||
+      form.chestPainOrDyspnea || form.focalNeuroDeficit || form.severeEpigastricPain ||
+      form.newOnsetHeadache || form.ruqPain || form.edema ||
+      form.dizziness || form.syncope || form.palpitations || form.legSwelling ||
+      form.fatigue || form.shortnessOfBreath || form.dryCough ||
+      form.faceSwelling || form.throatTightness ||
+      form.otherSymptomsList.length > 0;
+    const optionDEligible =
+      isEmergencyBP &&
+      !hasAnySymptom &&
+      (optionDBand === 'REAL_TIME' || optionDBand === 'NEAR_REAL_TIME');
+
+    setSubmitting(true);
+    try {
+      if (optionDEligible && sys != null && dia != null) {
+        // Persist the first reading HELD (AWAITING) so the server-side safety
+        // net (cron) can flag it UNCONFIRMED if the patient abandons the flow;
+        // no alert pages anyone until the patient confirms or declines.
+        const held = await createJournalEntry({ ...basePayload, beginEmergencyConfirmation: true });
+        if (user?.id) clearCheckInDraft(user.id);
+        setImplausibleCount(0);
+        setOptionDFirstId(held.entry.id);
+        setOptionDFirstBp({ sys, dia });
+        setOptionDActive(true);
+        return;
+      }
+
+      // Part 1 — non-emergency readings BUFFER on-device (no backend POST) for
+      // the 5-min review window. Emergencies bypass: Option D handled above; any
+      // emergency-range BP or emergency-class symptom (target-organ-damage /
+      // airway) posts immediately so the engine can page right away.
+      const hasEmergencySymptom =
+        form.severeHeadache || form.visualChanges || form.alteredMentalStatus ||
+        form.chestPainOrDyspnea || form.focalNeuroDeficit || form.severeEpigastricPain ||
+        form.faceSwelling || form.throatTightness;
+      if (!isEmergencyBP && !hasEmergencySymptom) {
+        const localId = editingBufferLocalId ?? uuid();
+        const buffered: BufferedReading = { localId, payload: basePayload, form };
+        let nextDraft: JournalDraft;
+        if (bufferDraft && editingBufferLocalId) {
+          // Replace the edited reading in place (payload + form snapshot).
+          nextDraft = {
+            ...bufferDraft,
+            readings: bufferDraft.readings.map((r) =>
+              r.localId === editingBufferLocalId ? buffered : r,
+            ),
+          };
+        } else if (bufferDraft) {
+          nextDraft = addReading(bufferDraft, buffered);
+        } else {
+          // First reading anchors the session + the countdown.
+          nextDraft = createDraft(sessionId ?? uuid(), Date.now(), buffered);
+        }
+        setBufferDraft(nextDraft);
+        if (user?.id) {
+          saveBufferDraft(user.id, nextDraft);
+          clearCheckInDraft(user.id); // drop the wizard auto-save resume draft
+        }
+        setImplausibleCount(0);
+        setEditingBufferLocalId(null);
+        setBufferReviewing(true);
+        return; // do NOT post — finally still resets submitting
+      }
+
+      const submitStartedAt = Date.now();
+      const created = await createJournalEntry(basePayload);
 
       // Reading saved — drop the draft so the patient isn't prompted to resume
       // a check-in they already submitted. Also reset the impossible-reading
@@ -2309,23 +2636,43 @@ export default function CheckIn() {
       if (user?.id) clearCheckInDraft(user.id);
       setImplausibleCount(0);
 
+      // Bug 16 — a symptom-override emergency (e.g. 195/120 + chest pain) must
+      // take the patient straight to the full-screen "CALL 911" alert instead of
+      // the generic "Reading sent" confirmation. Only poll on emergency-shaped
+      // submits so ordinary readings pay no cost.
+      if (isEmergencyBP || hasAnySymptom) {
+        const routed = await routeToFiredEmergencyAlert(created.entry.id, submitStartedAt);
+        if (routed) return;
+      }
+
       const reading: SessionReading = {
         measuredAt: measuredAtIso,
         systolicBP: sys,
         diastolicBP: dia,
         pulse: pul,
         weightKg,
+        // Chunk C — server-truth band from the POST response (Chunk A serializeEntry).
+        delayBand: created.entry.delayBand,
+        // Chunk B fix-up — Gate A suppression signal (POST-response-only).
+        alertsSuppressedReason: created.entry.alertsSuppressedReason,
       };
       setSessionReadings((prev) => [...prev, reading]);
       setReadingNumber((n) => n + 1);
       setShowConfirmation(true);
+      // Bug 8 (live-test 2026-06-15) — this non-Option-D path is reached by
+      // symptom-bearing emergencies (e.g. 195/120 + chest pain → immediate
+      // symptom-override). On an emergency, the confirmation screen must show
+      // the emergency CTA, NOT the Q3 "take a second reading" / AFib nudge.
+      const submittedEmergency = isEmergencyBP || hasAnySymptom;
+      setConfirmationIsEmergency(submittedEmergency);
       // Cluster 6 Q2 (Manisha 5/9/26) — backend tells us this is a first-
       // in-session non-AFib non-preDay3 reading. Frontend shows "Take a
       // second reading in about 1 minute" prompt + arms a 5-min timer
       // that POSTs the finalize endpoint when it elapses without a 2nd
       // reading. The actual UI lives in <ConfirmationScreen>; pass the
-      // entryId + flag down so it can manage the timer.
-      if (created.pendingSecondReading) {
+      // entryId + flag down so it can manage the timer. Suppressed on an
+      // emergency (Bug 8).
+      if (created.pendingSecondReading && !submittedEmergency) {
         setPendingFinalizeEntryId(created.entry.id);
       } else {
         setPendingFinalizeEntryId(null);
@@ -2350,6 +2697,70 @@ export default function CheckIn() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Bug 16 — a just-committed emergency-class reading must land the patient on
+  // the full-screen "CALL 911" alert, not the generic "Reading sent" screen. The
+  // rule engine fires asynchronously after create, so poll the patient alerts
+  // briefly for a patient-facing emergency tier tied to this reading (or freshly
+  // created), then deep-link to /alerts/[id]. Returns true if it routed.
+  const EMERGENCY_ALERT_TIERS = new Set<AlertTier>([
+    'BP_LEVEL_2',
+    'BP_LEVEL_2_SYMPTOM_OVERRIDE',
+    'TIER_1_ANGIOEDEMA',
+  ]);
+  async function routeToFiredEmergencyAlert(
+    entryId: string,
+    sinceMs: number,
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const alerts = await getAlerts().catch(() => []);
+      const emergency = alerts.find(
+        (a) =>
+          a.status === 'OPEN' &&
+          a.tier != null &&
+          EMERGENCY_ALERT_TIERS.has(a.tier) &&
+          (a.journalEntryId === entryId ||
+            new Date(a.createdAt).getTime() >= sinceMs - 2000),
+      );
+      if (emergency) {
+        router.push(`/alerts/${emergency.id}`);
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return false;
+  }
+
+  // Option D (Manisha 2026-06-12 Q2) — the confirmatory second reading. Same
+  // session, linked to the held first-of-pair via confirmsEntryId; the engine
+  // resolves ABSOLUTE_EMERGENCY (still ≥180/120) vs EMERGENCY_RANGE_CONFIRMED_NORMAL.
+  async function submitOptionDSecond(reading: OptionDSecondReading) {
+    const startedAt = Date.now();
+    const created = await createJournalEntry({
+      measuredAt: new Date().toISOString(),
+      systolicBP: reading.systolicBP,
+      diastolicBP: reading.diastolicBP,
+      pulse: reading.pulse,
+      position: form.position ?? undefined,
+      sessionId: sessionId ?? undefined,
+      confirmsEntryId: optionDFirstId ?? undefined,
+      // Bug 19 — the confirmatory reading closes the Option D session.
+      closeSession: true,
+    });
+    // Bug 16 — if the confirmatory reading was itself emergency-range, the engine
+    // fires RULE_ABSOLUTE_EMERGENCY (BP Level 2); route to the 911 screen rather
+    // than letting onDone bounce to the dashboard.
+    if (reading.systolicBP >= 180 || reading.diastolicBP >= 120) {
+      const routed = await routeToFiredEmergencyAlert(created.entry.id, startedAt);
+      if (routed) optionDRoutedToEmergencyRef.current = true;
+    }
+  }
+
+  // Option D — patient declined / couldn't retake. Flag the held first-of-pair
+  // UNCONFIRMED (Tier 1 provider-only). Best-effort: the cron is the backstop.
+  async function handleOptionDDecline() {
+    if (optionDFirstId) await declineEmergencyConfirmation(optionDFirstId);
   }
 
   // Resume prompt — load the saved draft into the wizard. Merge over a fresh
@@ -2449,6 +2860,105 @@ export default function CheckIn() {
     setPendingFinalizeEntryId(null);
     setStep('B2');
     setDirection(1);
+  }
+
+  // ── Part 1 — FE buffer handlers ──────────────────────────────────────────
+  // Commit the whole buffered sitting in one shot. Every reading carries the
+  // draft's shared sessionId so the engine groups + averages them as one
+  // session. Triggered by "I'm good" or the countdown expiring.
+  async function commitBuffer() {
+    if (!bufferDraft || committingBuffer) return;
+    const draft = bufferDraft;
+    setCommittingBuffer(true);
+    try {
+      const created = [] as Awaited<ReturnType<typeof createJournalEntry>>[];
+      for (const payload of commitPayloads(draft)) {
+        // Bug 19 — "I'm good" is an explicit session boundary; close it so the
+        // active-session prompt won't re-offer this sitting on the next check-in.
+        created.push(await createJournalEntry({ ...payload, closeSession: true }));
+      }
+      if (user?.id) {
+        clearBufferDraft(user.id);
+        clearCheckInDraft(user.id);
+      }
+      // Feed the confirmation screen from the committed readings.
+      const readings: SessionReading[] = draft.readings.map((r, i) => ({
+        measuredAt: r.payload.measuredAt,
+        systolicBP: r.payload.systolicBP,
+        diastolicBP: r.payload.diastolicBP,
+        pulse: r.payload.pulse,
+        weightKg: r.payload.weight,
+        delayBand: created[i]?.entry.delayBand,
+        alertsSuppressedReason: created[i]?.entry.alertsSuppressedReason,
+      }));
+      setSessionReadings(readings);
+      setReadingNumber(readings.length);
+      setBufferDraft(null);
+      setBufferReviewing(false);
+      setEditingBufferLocalId(null);
+      // The second-reading opportunity already passed in the buffer (Q3 lived on
+      // the review screen), so don't arm the post-submit single-reading prompt.
+      setPendingFinalizeEntryId(null);
+      setConfirmationIsEmergency(false);
+      setShowConfirmation(true);
+    } catch (e) {
+      // Keep the buffer intact so the patient can retry.
+      setError(e instanceof Error ? e.message : t('checkin.err.submit'));
+    } finally {
+      setCommittingBuffer(false);
+    }
+  }
+
+  // "Take another reading" from the review screen — re-enter the wizard for a
+  // FRESH reading (it lands back in the buffer on submit, Q3). The countdown is
+  // NOT reset (draft.createdAt is untouched).
+  function takeAnotherFromBuffer() {
+    setEditingBufferLocalId(null);
+    setForm((prev) => ({
+      ...emptyForm(),
+      measuredDate: nowDate(),
+      measuredTime: nowTime(),
+      noCaffeine: prev.noCaffeine,
+      noSmoking: prev.noSmoking,
+      noExercise: prev.noExercise,
+      bladderEmpty: prev.bladderEmpty,
+      seatedQuietly: prev.seatedQuietly,
+      posturalSupport: prev.posturalSupport,
+      notTalking: prev.notTalking,
+      cuffOnBareArm: prev.cuffOnBareArm,
+      weightUnit: prev.weightUnit,
+    }));
+    setBufferReviewing(false);
+    setStep('B2');
+    setDirection(1);
+  }
+
+  // Edit a buffered reading — re-open the wizard pre-filled from its form
+  // snapshot; on submit it replaces that reading in place.
+  function editBufferReading(localId: string) {
+    if (!bufferDraft) return;
+    const r = bufferDraft.readings.find((x) => x.localId === localId);
+    if (!r) return;
+    setEditingBufferLocalId(localId);
+    if (r.form) setForm({ ...emptyForm(), ...(r.form as FormData) });
+    setBufferReviewing(false);
+    setStep('B2');
+    setDirection(1);
+  }
+
+  // Remove a buffered reading; if it was the last, discard the buffer entirely.
+  function deleteBufferReading(localId: string) {
+    if (!bufferDraft) return;
+    const next = removeReading(bufferDraft, localId);
+    if (next.readings.length === 0) {
+      if (user?.id) clearBufferDraft(user.id);
+      setBufferDraft(null);
+      setBufferReviewing(false);
+      router.push('/dashboard');
+      return;
+    }
+    setBufferDraft(next);
+    if (user?.id) saveBufferDraft(user.id, next);
   }
 
   // Authed loading state — skeleton mirroring the wizard chrome (top bar +
@@ -2584,6 +3094,24 @@ export default function CheckIn() {
     );
   }
 
+  // Part 1 — FE buffer review screen. Takes over whenever a non-emergency sitting
+  // is buffered and we're not currently in the wizard adding/editing a reading.
+  // Tab refresh / re-navigation rehydrates here too (the mount effect above).
+  if (bufferDraft && bufferReviewing) {
+    return (
+      <BufferReviewScreen
+        draft={bufferDraft}
+        hasAFib={hasAFib}
+        committing={committingBuffer}
+        onTakeAnother={takeAnotherFromBuffer}
+        onCommit={commitBuffer}
+        onExpire={commitBuffer}
+        onEditReading={editBufferReading}
+        onDeleteReading={deleteBufferReading}
+      />
+    );
+  }
+
   // Open-session prompt — a non-expired session is in progress and the patient
   // hasn't decided yet. Shown AFTER the resume gate (resumeDraft is null here),
   // so in the rare both-exist case resume is decided first, then this.
@@ -2658,6 +3186,26 @@ export default function CheckIn() {
   }
 
   // Confirmation overlays the whole flow
+  // Option D (Manisha 2026-06-12 Q2) — retake-to-confirm takes over the screen
+  // once a BP-only emergency reading has been held.
+  if (optionDActive && optionDFirstId && optionDFirstBp) {
+    return (
+      <OptionDFlow
+        firstSystolic={optionDFirstBp.sys}
+        firstDiastolic={optionDFirstBp.dia}
+        resumed={optionDResumed}
+        onSubmitSecond={submitOptionDSecond}
+        onDecline={handleOptionDDecline}
+        onDone={() => {
+          // Bug 16 — if the confirmatory was emergency-range we already routed to
+          // the 911 alert; don't bounce over it to the dashboard.
+          if (optionDRoutedToEmergencyRef.current) return;
+          router.push('/dashboard');
+        }}
+      />
+    );
+  }
+
   if (showConfirmation) {
     const last = sessionReadings[sessionReadings.length - 1];
     return (
@@ -2670,7 +3218,8 @@ export default function CheckIn() {
             lastReading={last}
             sessionTotal={readingNumber}
             hasAFib={hasAFib}
-            isEnrolled={user?.enrollmentStatus === 'ENROLLED'}
+            isEnrolled={isEnrolled}
+            isEmergency={confirmationIsEmergency}
             heightCm={profile?.heightCm ?? null}
             missedMedNames={medications
               .filter((m) => form.medicationStatus[m.id]?.taken === 'no')
@@ -2800,6 +3349,59 @@ export default function CheckIn() {
           modal. The reading is already auto-saved to this device; this just
           confirms leaving for the dashboard. */}
       <AnimatePresence>
+        {showDelayWarning && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}
+          >
+            <div className="absolute inset-0" onClick={() => setShowDelayWarning(false)} aria-hidden />
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              data-testid="checkin-delay-warning"
+              initial={{ scale: 0.92, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.92, y: 12 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 26 }}
+              className="relative bg-white rounded-3xl p-6 max-w-sm w-full text-center"
+              style={{ boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}
+            >
+              <div
+                className="rounded-full mx-auto mb-4 flex items-center justify-center"
+                style={{ width: 64, height: 64, backgroundColor: 'var(--brand-warning-amber-light)' }}
+              >
+                <CalendarClock className="w-7 h-7" style={{ color: 'var(--brand-warning-amber-text)' }} />
+              </div>
+              <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+                {t('checkin.delay.title')}
+              </h3>
+              <p className="text-[13px] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+                {t('checkin.delay.body')}
+              </p>
+              <button
+                type="button"
+                data-testid="checkin-delay-confirm"
+                onClick={() => { setShowDelayWarning(false); void handleSubmit(true); }}
+                className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer"
+                style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+              >
+                {t('checkin.delay.confirm')}
+              </button>
+              <button
+                type="button"
+                data-testid="checkin-delay-back"
+                onClick={() => { setShowDelayWarning(false); setDirection(-1); setStep('B2'); }}
+                className="w-full mt-2 text-[12px] font-semibold cursor-pointer"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('checkin.delay.back')}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
         {showSaveConfirm && (
           <motion.div
             initial={{ opacity: 0 }}

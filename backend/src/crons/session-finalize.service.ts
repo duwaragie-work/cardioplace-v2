@@ -54,11 +54,38 @@ export class SessionFinalizeService {
         // single-reading alert.
         OR: [{ systolicBP: { not: null } }, { pulse: { not: null } }],
       },
-      select: { id: true, userId: true, sessionId: true, measuredAt: true },
+      select: {
+        id: true,
+        userId: true,
+        sessionId: true,
+        measuredAt: true,
+        // Option D (Manisha 2026-06-12 Q2) — distinguishes a held AWAITING
+        // first-of-pair (→ UNCONFIRMED) from an ordinary non-emergency single
+        // reading (→ existing single-reading finalize).
+        emergencyConfirmation: true,
+      },
     })
 
     let finalized = 0
     for (const entry of candidates) {
+      // Option D app-closed safety net: a held emergency reading whose 5-min
+      // confirmation window elapsed with no confirmatory reading resolves to
+      // RULE_UNCONFIRMED_EMERGENCY (Tier 1 provider-only). finalizeUnconfirmed-
+      // Emergency is idempotent (a CONFIRMATORY resolution already released the
+      // hold, so this no-ops in that race).
+      if (entry.emergencyConfirmation === 'AWAITING') {
+        try {
+          await this.dailyJournal.finalizeUnconfirmedEmergency(entry.userId, entry.id)
+          finalized++
+        } catch (err) {
+          this.logger.error(
+            `Failed to finalize unconfirmed emergency for entry ${entry.id}`,
+            err instanceof Error ? err.stack : undefined,
+          )
+        }
+        continue
+      }
+
       const shouldFinalize = await this.dailyJournal.shouldFinalizeAsSingleReading(
         entry.userId,
         entry,

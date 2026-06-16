@@ -196,25 +196,25 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_SURVEILLA
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_SURVEILLANCE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `""`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_SURVEILLANCE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Sustained asymptomatic bradycardia: mean resting HR ≤45 bpm on 4 consecutive sessions (current 72 bpm). Patient is on Lisinopril (ACE_INHIBITOR). ECG and medication-dose review recommended. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_SURVEILLANCE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 2 — Sustained asymptomatic bradycardia: mean resting HR ≤45 bpm on 4 consecutive sessions (current 72 bpm) (age 67). Patient is on Lisinopril (ACE_INHIBITOR). ECG and medication-dose review recommended. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_SURVEILLANCE STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_SURVEILLANCE STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `""`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_SURVEILLANCE STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Tier 3 — Surveillance: resting HR 72 bpm (asymptomatic). Patient is on Lisinopril (ACE_INHIBITOR). Consider: is this the therapeutic target? Trend review recommended. If HR persists ≤45 on multiple sessions, consider ECG and medication-dose review."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_SURVEILLANCE STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Tier 3 — Surveillance: resting HR 72 bpm (age 67) (asymptomatic). Patient is on Lisinopril (ACE_INHIBITOR). Consider: is this the therapeutic target? Trend review recommended. If HR persists ≤45 on multiple sessions, consider ECG and medication-dose review."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_CAD_DBP_CRITICAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"Aisha's diastolic blood pressure is critically low (85 mmHg). If they have chest pain or feel faint, help them call 911."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_CAD_DBP_CRITICAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your bottom blood pressure number is lower than expected. If you feel dizzy, have chest pain, or feel faint, please sit down and call your care team. If symptoms are severe, call 911. Please retake the reading following the measurement checklist."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_CAD_DBP_CRITICAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"CAD DBP CRITICAL — DBP < 140: 145/85 mmHg. Low DBP may compromise coronary perfusion (J-curve). Assess for symptomatic hypotension. Consider dose reduction of antihypertensives, particularly vasodilators. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_CAD_DBP_CRITICAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"CAD DBP CRITICAL — DBP < 140: 145/85 mmHg (age 67). Low DBP may compromise coronary perfusion (J-curve). Assess for symptomatic hypotension. Consider dose reduction of antihypertensives, particularly vasodilators. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_CAD_DBP_CRITICAL STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha's diastolic blood pressure is critically low (85 mmHg). If they have chest pain or feel faint, help them call 911."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_CAD_DBP_CRITICAL STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"Your bottom blood pressure number is lower than expected. If you feel dizzy, have chest pain, or feel faint, please sit down and call your care team. If symptoms are severe, call 911."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_CAD_DBP_CRITICAL STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"CAD DBP CRITICAL — DBP < 140: 145/85 mmHg. Low DBP may compromise coronary perfusion (J-curve). Assess for symptomatic hypotension. Consider dose reduction of antihypertensives, particularly vasodilators."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_CAD_DBP_CRITICAL STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"CAD DBP CRITICAL — DBP < 140: 145/85 mmHg (age 67). Low DBP may compromise coronary perfusion (J-curve). Assess for symptomatic hypotension. Consider dose reduction of antihypertensives, particularly vasodilators."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_CAD_DBP_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"Aisha's blood pressure is above their target (145/85 mmHg). Your care team has been notified."`;
 
@@ -275,6 +275,18 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_DHP_CCB_LEG_SWE
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_DHP_CCB_LEG_SWELLING STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"You reported swelling in your ankles or legs. This can sometimes happen with your blood-pressure medicine. It is usually not dangerous, but your care team should know — they may want to adjust your medicine."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_DHP_CCB_LEG_SWELLING STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Tier 3 — Possible DHP-CCB peripheral edema. Patient on dihydropyridine CCB reports leg swelling without HF flag. Consider dose reduction or non-DHP alternative."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Patient's initial reading was 185/122 mmHg (emergency range); confirmatory reading was 145/85 mmHg (below emergency threshold). No emergency alert fired. Review at next encounter."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Patient's initial reading was 185/122 mmHg (emergency range); confirmatory reading was 145/85 mmHg (below emergency threshold). No emergency alert fired. Review at next encounter."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_FIRST_MONTH_ADHERENCE_NUDGE ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `""`;
 
@@ -436,25 +448,25 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF ANNO
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"One of your medications (Lisinopril) may need to be reviewed because of your heart condition. Your care team has been notified. Please do not stop taking it on your own."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"CONTRAINDICATION — HFrEF patient on non-dihydropyridine CCB: Lisinopril (diltiazem/verapamil). NDHP-CCBs are potentially harmful in HFrEF (negative inotropy) per 2022 AHA/ACC/HFSA HF guideline. Recommend review and substitution. | Annotation A | Annotation B"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"CONTRAINDICATION — HFrEF patient on non-dihydropyridine CCB: Lisinopril (diltiazem/verapamil). Currently also taking: Atenolol and HCTZ. NDHP-CCBs are potentially harmful in HFrEF (negative inotropy) per 2022 AHA/ACC/HFSA HF guideline. Recommend review and substitution. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha is taking a medication (Lisinopril) that may need to be reviewed given their heart failure diagnosis. Your care team has been notified."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"One of your medications (Lisinopril) may need to be reviewed because of your heart condition. Your care team has been notified. Please do not stop taking it on your own."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"CONTRAINDICATION — HFrEF patient on non-dihydropyridine CCB: Lisinopril (diltiazem/verapamil). NDHP-CCBs are potentially harmful in HFrEF (negative inotropy) per 2022 AHA/ACC/HFSA HF guideline. Recommend review and substitution."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NDHP_HFREF STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"CONTRAINDICATION — HFrEF patient on non-dihydropyridine CCB: Lisinopril (diltiazem/verapamil). Currently also taking: Atenolol and HCTZ. NDHP-CCBs are potentially harmful in HFrEF (negative inotropy) per 2022 AHA/ACC/HFSA HF guideline. Recommend review and substitution."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `""`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"You told us you've taken a pain reliever like ibuprofen, Advil, Aleve, or naproxen. These can raise your blood pressure and make your blood-pressure medicine work less well, especially if you take them often. If your pain needs a few days of relief, acetaminophen (Tylenol) is usually a safer choice — please check with your care team."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — NSAID use reported alongside antihypertensive therapy. Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend. | Annotation A | Annotation B"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Tier 3 — NSAID use reported alongside antihypertensive therapy. Currently also taking: Atenolol and HCTZ. Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"You told us you've taken a pain reliever like ibuprofen, Advil, Aleve, or naproxen. These can raise your blood pressure and make your blood-pressure medicine work less well, especially if you take them often. If your pain needs a few days of relief, acetaminophen (Tylenol) is usually a safer choice — please check with your care team."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Tier 3 — NSAID use reported alongside antihypertensive therapy. Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_NSAID_ANTIHTN_INTERACTION STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Tier 3 — NSAID use reported alongside antihypertensive therapy. Currently also taking: Atenolol and HCTZ. Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_ORTHOSTATIC_HYPOTENSION ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"Aisha reported dizziness with a drop in blood pressure from the prior reading. Watch for unsteadiness when they stand up and let their care team know if it continues."`;
 
@@ -508,13 +520,13 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_A
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_ARB ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"One of your medications (Lisinopril) is not recommended during pregnancy. Please do not stop taking it on your own — your care team has been notified and will contact you to discuss a safe alternative."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_ARB ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"CONTRAINDICATION — Pregnant patient on ACE_INHIBITOR: Lisinopril. ACE/ARBs are contraindicated in pregnancy (FDA Category D/X). Recommend immediate substitution (CHAP-protocol alternative — labetalol or long-acting nifedipine). Patient has been advised not to self-discontinue. | Annotation A | Annotation B"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_ARB ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"CONTRAINDICATION — Pregnant patient on ACE_INHIBITOR: Lisinopril. Currently also taking: Atenolol and HCTZ. ACE/ARBs are contraindicated in pregnancy (FDA Category D/X). Recommend immediate substitution (CHAP-protocol alternative — labetalol or long-acting nifedipine). Patient has been advised not to self-discontinue. | Annotation A | Annotation B"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_ARB STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha is taking a medication (Lisinopril) that is not recommended during pregnancy. Their care team has been notified and will follow up."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_ARB STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"One of your medications (Lisinopril) is not recommended during pregnancy. Please do not stop taking it on your own — your care team has been notified and will contact you to discuss a safe alternative."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_ARB STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"CONTRAINDICATION — Pregnant patient on ACE_INHIBITOR: Lisinopril. ACE/ARBs are contraindicated in pregnancy (FDA Category D/X). Recommend immediate substitution (CHAP-protocol alternative — labetalol or long-acting nifedipine). Patient has been advised not to self-discontinue."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_ACE_ARB STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"CONTRAINDICATION — Pregnant patient on ACE_INHIBITOR: Lisinopril. Currently also taking: Atenolol and HCTZ. ACE/ARBs are contraindicated in pregnancy (FDA Category D/X). Recommend immediate substitution (CHAP-protocol alternative — labetalol or long-acting nifedipine). Patient has been advised not to self-discontinue."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_PREGNANCY_L1_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"Aisha's blood pressure is elevated (145/85 mmHg) during pregnancy. Your care team has been notified. Watch for severe headache, vision changes, or upper belly pain — if these occur, help them contact their doctor immediately."`;
 
@@ -568,13 +580,13 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIG
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your blood pressure is quite high. Your care team has been notified and will follow up with you. Please retake the reading following the measurement checklist."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"BP Level 1 High — severe Stage 2 (≥160/100) at 145/85 mmHg. (Standard threshold — personalization begins after 7 readings.) | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIGH ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"BP Level 1 High — severe Stage 2 (≥160/100) at 145/85 mmHg (age 67). (Standard threshold — personalization begins after 7 readings.) | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIGH STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"Aisha's blood pressure is significantly elevated (145/85 mmHg). Your care team has been notified."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIGH STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"Your blood pressure is quite high. Your care team has been notified and will follow up with you."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIGH STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"BP Level 1 High — severe Stage 2 (≥160/100) at 145/85 mmHg."`;
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_HIGH STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"BP Level 1 High — severe Stage 2 (≥160/100) at 145/85 mmHg (age 67)."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_STANDARD_L1_LOW ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"Aisha's blood pressure is low (145/85 mmHg). If they feel dizzy, help them sit or lie down. Your care team has been notified."`;
 
@@ -647,3 +659,15 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_TACHY_WITH_PALP
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_TACHY_WITH_PALPITATIONS STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"You reported your heart racing, and your pulse is higher than usual. Please rest, drink water, and let your care team know if it doesn't settle in the next hour."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_TACHY_WITH_PALPITATIONS STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Tier 2 — Symptomatic tachycardia: HR 72 bpm with palpitations reported. Rule out causes; consider Holter / event monitor."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"Single unconfirmed emergency-range reading: 145/85 mmHg. Patient did not complete confirmatory measurement. Recommend phone outreach to verify current status."`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `""`;
+
+exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_UNCONFIRMED_EMERGENCY STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Single unconfirmed emergency-range reading: 145/85 mmHg. Patient did not complete confirmatory measurement. Recommend phone outreach to verify current status."`;

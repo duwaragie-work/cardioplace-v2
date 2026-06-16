@@ -232,9 +232,28 @@ export const T = {
     rowBp: 'reading-row-bp',
     rowPulse: 'reading-row-pulse',
     rowEdit: (id: string) => `reading-row-edit-${id}`,
-    rowDelete: (id: string) => `reading-row-delete-${id}`,
+    rowDelete: (id: string) => `readings-delete-button-${id}`,
     rowSpeaker: (id: string) => `reading-row-speaker-${id}`,
     newCheckinCta: 'new-checkin-cta',
+    // Option D AWAITING UX revision (2026-06-16) — a held emergency reading
+    // shows a "you haven't finished yet" status + a recovery CTA instead of
+    // the old "Held" lock badge.
+    rowAwaiting: (id: string) => `reading-awaiting-${id}`,
+    rowContinueConfirmation: (id: string) => `reading-continue-confirmation-${id}`,
+  },
+
+  // ─── Patient: Option D retake-to-confirm (Manisha 2026-06-12 Q2) ─────────
+  optionD: {
+    resumeIntro: 'optiond-resume-intro',
+    retake: 'optiond-retake',
+    decline: 'optiond-decline',
+    systolic: 'optiond-systolic',
+    diastolic: 'optiond-diastolic',
+    pulse: 'optiond-pulse',
+    submitSecond: 'optiond-submit-second',
+    declineB: 'optiond-decline-b',
+    safetyFooter: 'optiond-safety-footer',
+    done: 'optiond-done',
   },
 
   // ─── Patient: notifications ─────────────────────────────────────────────

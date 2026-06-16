@@ -56,6 +56,23 @@ function baseCtx(): AlertContext {
     angioedemaFace: true,
     angioedemaThroat: false,
     bradySustainedSessions: 0,
+    // D4 #1 + #2 (Manisha 2026-06-09) — populate the age + active-med fields
+    // so the snapshot gate actually captures agePhrase / medicationListPhrase
+    // rendering. With these undefined the helpers return '' and the signed
+    // wording would be invisible to the gate (a future splice deletion would
+    // pass CI green). age 67 sits in the MESA J-curve cohort; the two meds
+    // exercise medicationListPhrase without overloading the snapshot output.
+    patientAgeYears: 67,
+    activeMedications: [
+      { drugName: 'Atenolol', drugClass: 'BETA_BLOCKER' },
+      { drugName: 'HCTZ', drugClass: 'THIAZIDE' },
+    ],
+    // Option D (Manisha 2026-06-12 Q2) — initial emergency-range reading (BP1)
+    // for RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL. Deterministic so the
+    // two-reading physician message snapshots stably as "185/122 mmHg" (BP1)
+    // vs the confirmatory "145/85 mmHg" (BP2 = systolicBP/diastolicBP above).
+    initialSystolicBP: 185,
+    initialDiastolicBP: 122,
   }
 }
 
@@ -153,6 +170,39 @@ describe('Cluster 8 §F.2 — message-registry snapshot gate', () => {
     const ctx = baseCtx()
     expect(alertMessageRegistry.RULE_FIRST_MONTH_ADHERENCE_NUDGE.caregiverMessage(ctx)).toBe('')
     expect(alertMessageRegistry.RULE_FIRST_MONTH_ADHERENCE_NUDGE.physicianMessage(ctx)).toBe('')
+  })
+
+  // ── Option D — RULE_UNCONFIRMED_EMERGENCY / RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL
+  // (Manisha 2026-06-12 Q2). Both provider-only; the physician wording is
+  // LOCKED to the sign-off doc. These assertions fail loudly if a future
+  // --updateSnapshot softens or reroutes the locked strings.
+
+  it('UNCONFIRMED_EMERGENCY patient + caregiver messages are EMPTY (provider-only)', () => {
+    const ctx = baseCtx()
+    expect(alertMessageRegistry.RULE_UNCONFIRMED_EMERGENCY.patientMessage(ctx)).toBe('')
+    expect(alertMessageRegistry.RULE_UNCONFIRMED_EMERGENCY.caregiverMessage(ctx)).toBe('')
+  })
+
+  it('UNCONFIRMED_EMERGENCY physician message matches Manisha 2026-06-12 locked wording', () => {
+    const ctx = baseCtx()
+    const msg = alertMessageRegistry.RULE_UNCONFIRMED_EMERGENCY.physicianMessage(ctx)
+    expect(msg).toBe(
+      'Single unconfirmed emergency-range reading: 145/85 mmHg. Patient did not complete confirmatory measurement. Recommend phone outreach to verify current status.',
+    )
+  })
+
+  it('EMERGENCY_RANGE_CONFIRMED_NORMAL patient + caregiver messages are EMPTY (provider-only)', () => {
+    const ctx = baseCtx()
+    expect(alertMessageRegistry.RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL.patientMessage(ctx)).toBe('')
+    expect(alertMessageRegistry.RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL.caregiverMessage(ctx)).toBe('')
+  })
+
+  it('EMERGENCY_RANGE_CONFIRMED_NORMAL physician message spells out BP1 (emergency) + BP2 (confirmatory)', () => {
+    const ctx = baseCtx()
+    const msg = alertMessageRegistry.RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL.physicianMessage(ctx)
+    expect(msg).toBe(
+      "Patient's initial reading was 185/122 mmHg (emergency range); confirmatory reading was 145/85 mmHg (below emergency threshold). No emergency alert fired. Review at next encounter.",
+    )
   })
 
   it('ACE_ANGIOEDEMA physician message includes the bradykinin framing', () => {

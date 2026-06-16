@@ -4,6 +4,7 @@
 // booleans were added in phase/15 alongside Flow B.
 
 import { fetchWithAuth } from './token'
+import type { DelayBand } from '../delayBand'
 
 const API = process.env.NEXT_PUBLIC_API_URL
 
@@ -87,6 +88,17 @@ export interface JournalEntryPayload {
   otherSymptoms?: string[]
   notes?: string
   source?: 'manual' | 'healthkit'
+  // ── Option D — retake-to-confirm (Manisha 2026-06-12 Q2) ──────────────────
+  /** First-of-pair: persist this emergency reading as held (AWAITING) and
+   *  prompt for a confirmatory second reading. The 202 response carries
+   *  `pendingEmergencyConfirmation: true` + the entry id (data.id). */
+  beginEmergencyConfirmation?: boolean
+  /** Second-of-pair: the AWAITING first-of-pair id this reading confirms/clears. */
+  confirmsEntryId?: string
+  /** Bug 19 — the patient explicitly closed this session ("I'm good" buffer
+   *  commit / Option D confirmatory). The backend stamps `sessionClosedAt` on the
+   *  whole session so the active-session prompt won't re-offer it. */
+  closeSession?: boolean
 }
 
 export interface JournalEntryDto extends JournalEntryPayload {
@@ -94,6 +106,23 @@ export interface JournalEntryDto extends JournalEntryPayload {
   userId: string
   createdAt: string
   updatedAt: string
+  /** Chunk A backend (serializeEntry) surfaces the measurement-lag band on the
+   *  journal-entry POST response; Chunk C reads it to render the
+   *  HISTORICAL_ENTRY informational note. Defaults to 'REAL_TIME' server-side. */
+  delayBand?: DelayBand
+  /** Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) — why
+   *  real-time alerts were suppressed for this entry, if at all. 'GATE_A'
+   *  (a later-measured reading already exists) is POST-response-only;
+   *  'HISTORICAL_ENTRY' also appears on GETs (derived from delayBand). Both
+   *  render the same "recorded but won't trigger real-time alerts" banner. */
+  alertsSuppressedReason?: 'GATE_A' | 'HISTORICAL_ENTRY' | null
+  /** Option D + edit window (Manisha 2026-06-12) — ISO deadline before the
+   *  engine commits; while now < this, the readings page shows the "editable /
+   *  not yet sent" affordance. Null for admin / Option D AWAITING readings. */
+  engineEvaluationDeferredUntil?: string | null
+  /** Option D retake-confirm state: 'AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED'
+   *  or null for ordinary readings. */
+  emergencyConfirmation?: 'AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED' | null
 }
 
 /**
@@ -144,6 +173,10 @@ async function unwrap<T>(res: Response): Promise<T> {
 export interface JournalEntryCreated {
   entry: JournalEntryDto
   pendingSecondReading: boolean
+  /** Option D (Manisha 2026-06-12 Q2) — true when this was a BP-only emergency
+   *  submitted with `beginEmergencyConfirmation`: the reading is held and the
+   *  app should show the confirmatory second-reading screen (Screen B). */
+  pendingEmergencyConfirmation: boolean
 }
 
 export async function createJournalEntry(
@@ -168,6 +201,7 @@ export async function createJournalEntry(
   return {
     entry: (json.data ?? json) as JournalEntryDto,
     pendingSecondReading: Boolean(json.pendingSecondReading),
+    pendingEmergencyConfirmation: Boolean(json.pendingEmergencyConfirmation),
   }
 }
 
@@ -199,6 +233,32 @@ export async function getActiveSession(): Promise<ActiveSessionDto | null> {
 }
 
 /**
+ * GET /daily-journal/awaiting-emergency — the patient's most recent held
+ * emergency reading (Option D, Manisha 2026-06-12 Q2) awaiting its confirmatory
+ * second reading, or null when none. Drives the /check-in Screen A auto-resume
+ * and the /readings "Continue confirmation" CTA.
+ */
+export interface AwaitingEmergencyDto {
+  id: string
+  sessionId: string | null // the held first-of-pair's session (resume reuses it)
+  systolicBP: number | null
+  diastolicBP: number | null
+  measuredAt: string // ISO — when the held first-of-pair was taken
+}
+
+export async function getAwaitingEmergency(): Promise<AwaitingEmergencyDto | null> {
+  const res = await fetchWithAuth(`${API}/api/daily-journal/awaiting-emergency`)
+  if (res.status === 204) return null
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json().catch(() => null)
+  const data = (json?.data ?? json) as AwaitingEmergencyDto | null
+  return data ?? null
+}
+
+/**
  * Cluster 6 Q2 — fires after the patient's 5-min "take a second reading"
  * window times out without a second reading. Flips
  * JournalEntry.singleReadingFinalized = true server-side; engine then fires
@@ -212,6 +272,25 @@ export async function finalizeSingleReadingSession(entryId: string): Promise<voi
   if (!res.ok && res.status !== 200 && res.status !== 202) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.message || `Finalize failed: ${res.status}`)
+  }
+}
+
+/**
+ * Option D (Manisha 2026-06-12 Q2) — patient declined / closed the
+ * confirmatory retake (Screen C) or the 5-min window elapsed client-side.
+ * Resolves the held AWAITING first-of-pair as UNCONFIRMED (fires
+ * RULE_UNCONFIRMED_EMERGENCY, Tier 1 provider-only). Idempotent; the cron is
+ * the app-closed safety net. Best-effort — a failure is non-fatal (the cron
+ * still finalizes), so callers swallow errors.
+ */
+export async function declineEmergencyConfirmation(entryId: string): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/daily-journal/${entryId}/decline-confirmation`,
+    { method: 'POST' },
+  )
+  if (!res.ok && res.status !== 200 && res.status !== 202) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Decline failed: ${res.status}`)
   }
 }
 
@@ -320,15 +399,15 @@ export interface DeviationAlertDto {
 export async function getAlerts(): Promise<DeviationAlertDto[]> {
   const res = await fetchWithAuth(`${API}/api/daily-journal/alerts`)
   const all = await unwrap<DeviationAlertDto[]>(res)
-  // Manual-test round 2 — Group C frontend safety net. The backend already
-  // filters Tier-3 caregiver/physician-only alerts (empty patientMessage) out
-  // of the patient surface; this guard is defense-in-depth so a backend
-  // regression can't leak a "FOR YOUR INFORMATION" green card or an empty
-  // notification row onto the patient.
-  return all.filter((a) => {
-    if (a.tier !== 'TIER_3_INFO') return true
-    return typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0
-  })
+  // Bug 12 (live-test 2026-06-15) — defense-in-depth. The backend now filters
+  // EVERY provider-only alert (empty patientMessage, any tier) out of the
+  // patient surface; this mirrors that universally so a backend regression
+  // can't leak a tier-generic "Important medication alert" card (e.g. the
+  // Tier-1 RULE_UNCONFIRMED_EMERGENCY) onto the patient. Only alerts with a
+  // real patient message render.
+  return all.filter(
+    (a) => typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0,
+  )
 }
 
 export async function acknowledgeAlert(alertId: string) {

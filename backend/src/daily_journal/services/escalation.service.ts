@@ -5,6 +5,7 @@ import {
   EMERGENCY_EVENTS,
   type EmergencyFlaggedPayload,
 } from '../../chat/emergency-events.js'
+import { RULE_IDS } from '@cardioplace/shared'
 import { Cron } from '@nestjs/schedule'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
@@ -588,7 +589,15 @@ export class EscalationService {
     // before opening the app. Email body reuses the registry patientMessage
     // (already worded to discourage panic-driven self-discontinuation:
     // "please don't stop any medicine without talking to your doctor").
-    if (alert.tier === 'TIER_1_CONTRAINDICATION') {
+    // Option D (Manisha 2026-06-12 Q2) — RULE_UNCONFIRMED_EMERGENCY reuses the
+    // TIER_1_CONTRAINDICATION ladder + resolution catalog, but is PROVIDER-ONLY
+    // (Implementation Note 5: no patient, no caregiver — the reading is
+    // unconfirmed and may be artifactual). Suppress the contraindication
+    // patient-EMAIL dispatch for it; the provider ladder still fires.
+    if (
+      alert.tier === 'TIER_1_CONTRAINDICATION' &&
+      alert.ruleId !== RULE_IDS.UNCONFIRMED_EMERGENCY
+    ) {
       await this.dispatchStep({
         alert,
         step: TIER_1_CONTRAINDICATION_PATIENT_T0,

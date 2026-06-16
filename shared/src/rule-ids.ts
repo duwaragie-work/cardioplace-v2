@@ -113,6 +113,24 @@ export const RULE_IDS = {
   // Second independent BP-Level-1-High trigger at DBP ≥80 for CAD patients
   // (no prior DBP-high rule existed); co-fires with RULE_CAD_HIGH.
   CAD_DBP_HIGH: 'RULE_CAD_DBP_HIGH',
+
+  // Option D — retake-to-confirm for BP-only emergencies (Manisha 2026-06-12
+  // Edit-Window + Session Policy sign-off, Q2). Two outcomes of the
+  // confirmatory-measurement flow when a BP ≥180/120 reading has NO
+  // co-occurring symptoms (symptom-override emergencies still fire immediately
+  // via RULE_ABSOLUTE_EMERGENCY / the symptom-override rules — Option A):
+  //   • UNCONFIRMED_EMERGENCY — patient declined / closed the app / the 5-min
+  //     window expired before a second reading. Tier 1 PROVIDER-ONLY (the
+  //     reading is unconfirmed and may be artifactual — Implementation Note 5
+  //     classes it Tier 1, NOT a Tier 2 emergency). Standard Tier 1 ladder.
+  //   • EMERGENCY_RANGE_CONFIRMED_NORMAL — second reading came back below the
+  //     emergency threshold. Tier 3 informational; no emergency alert fires,
+  //     no ladder. Physician sees a "review at next encounter" note.
+  // The engine wiring that FIRES these (the Option D state machine) is Step 3
+  // of the build; this registers the IDs + three-tier messages so the registry
+  // contract + escalation routing are in place first.
+  UNCONFIRMED_EMERGENCY: 'RULE_UNCONFIRMED_EMERGENCY',
+  EMERGENCY_RANGE_CONFIRMED_NORMAL: 'RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL',
 } as const
 
 export type RuleId = (typeof RULE_IDS)[keyof typeof RULE_IDS]
@@ -212,6 +230,12 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
   [RULE_IDS.LOOP_DIURETIC_HYPOTENSION]: 'systolic',
   [RULE_IDS.PULSE_PRESSURE_WIDE]: 'systolic',
   [RULE_IDS.PULSE_PRESSURE_NARROW]: 'systolic',
+  // Option D (Manisha 2026-06-12 Q2) — both are BP-reading rules; the
+  // triggering value axis is systolic. UNCONFIRMED_EMERGENCY's actualValue is
+  // the unconfirmed SBP; CONFIRMED_NORMAL carries the confirmatory SBP (both
+  // readings are spelled out in the physician message regardless).
+  [RULE_IDS.UNCONFIRMED_EMERGENCY]: 'systolic',
+  [RULE_IDS.EMERGENCY_RANGE_CONFIRMED_NORMAL]: 'systolic',
 
   // Profile / medication / symptom-driven rules (actualValue is null)
   [RULE_IDS.NDHP_HFREF]: 'profile',
