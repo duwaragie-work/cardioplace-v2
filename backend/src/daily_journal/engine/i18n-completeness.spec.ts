@@ -53,6 +53,9 @@ function isPatientOrCaregiverFacing(key: string): boolean {
     key.startsWith('checkin.historical.') ||
     key.startsWith('checkin.afib.') ||
     key.startsWith('checkin.optionD.') ||
+    // Part 1 (2026-06-16) — FE buffer review screen (countdown, "I'm good",
+    // take-another, per-reading edit/remove). All patient-facing.
+    key.startsWith('checkin.buffer.') ||
     // Bug 18 (live-test 2026-06-16) — the B2 "Taken just now" summary + "Change"
     // link shipped English-only in es/de/fr/am. Scoped to these two keys (not all
     // of checkin.b2) to avoid sweeping in unrelated step-2 labels.
@@ -70,6 +73,8 @@ function isPatientOrCaregiverFacing(key: string): boolean {
  * nouns, medical abbreviations, etc. Each entry MUST cite why.
  */
 const KNOWN_IDENTICAL_OK: Record<string, string> = {
+  // 'bpm' (beats per minute) is the same abbreviation in English + French.
+  'fr:checkin.buffer.bpm': '"bpm" is a unit abbreviation, identical in en + fr',
   // 'mmHg' is the universal blood-pressure unit symbol — identical across locales.
   'es:checkin.confirm.unit': '"mmHg" is a unit symbol, identical across locales',
   'am:checkin.confirm.unit': '"mmHg" is a unit symbol, identical across locales',
