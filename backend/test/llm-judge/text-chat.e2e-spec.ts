@@ -169,20 +169,30 @@ descr('Text Chat — Real E2E + LLM-as-Judge', () => {
   // 4. Full check-in — bot summarises, patient confirms, bot saves
   //
   // 2-turn flow matches the documented chatbot design at
-  // system-prompt.service.ts:287-290: "NEVER call submit_checkin before
-  // step 7 (summary + confirm)" + "At step 8, on save-trigger phrase, the
-  // NEXT response MUST be the submit_checkin tool call." A single-message
-  // input that combined data + "save it" never triggered the tool call
-  // because the bot waits for step 7's confirmation turn by design.
+  // system-prompt.service.ts:285-290: "Follow steps 1→2→3→3a→3b→3c→4→4b→5
+  // →6→6b→6c→6d→7→8" + "NEVER call submit_checkin before step 7 (summary
+  // + confirm)" + "At step 8, on save-trigger phrase, the NEXT response
+  // MUST be the submit_checkin tool call."
+  //
+  // Turn 1 must satisfy the FULL compulsory-field set so the bot can
+  // skip ahead to step 7 summary in a single response. Missing any of
+  // {date, time, sbp, dbp, pulse, position, medication_taken, symptoms,
+  // weight, B1 checklist (noCaffeine + cuffOnBareArm + seatedQuietly)}
+  // sends the bot back to interrogating one-at-a-time per the gate at
+  // step 6d, and turn-2's "yes save it" never triggers because the bot
+  // never reached step 7.
   // ═══════════════════════════════════════════════════════════════════════════
   it('4. Full check-in — saves with all data provided', async () => {
-    // Turn 1: provide all data; bot is expected to summarise + ask to confirm.
+    // Turn 1: all compulsory fields in one message — bot should jump to step 7.
     const r1 = await chat(
-      'Record my BP please. Today at 2pm, 128/82, took my meds, no symptoms, weight 175 lbs.'
+      'Record my BP please. Today at 2pm, 128 over 82, pulse 72, sitting up. ' +
+      'I took my medications, no symptoms, weight 175 lbs. ' +
+      'No caffeine in the last 30 minutes, the cuff was on my bare arm, ' +
+      'and I sat quietly for 5 minutes before measuring.'
     )
     expect(r1.data).toBeTruthy()
 
-    // Turn 2: explicit save trigger. Bot must call submit_checkin now.
+    // Turn 2: explicit save trigger — bot at step 8 must call submit_checkin.
     const r2 = await chat('Yes, save it', r1.sessionId)
     expect(r2.data).toBeTruthy()
 
@@ -191,7 +201,7 @@ descr('Text Chat — Real E2E + LLM-as-Judge', () => {
     const ev = await judge.evaluate({
       scenario: 'Full check-in',
       source: 'text-chat',
-      input: '[Turn 1: BP 128/82, took meds, no symptoms, 175 lbs] [Turn 2: yes, save it]',
+      input: '[Turn 1: BP 128/82, pulse 72, sitting, meds taken, no symptoms, 175 lbs, B1 all true] [Turn 2: yes, save it]',
       response: r2.data,
       toolsCalled: tools,
       criteria: [
