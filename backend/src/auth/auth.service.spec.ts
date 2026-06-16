@@ -19,6 +19,7 @@ import { EmailService } from '../email/email.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { AuthService } from './auth.service.js'
 import { BcryptService } from './bcrypt.service.js'
+import { GeolocationService } from './geolocation.service.js'
 import { ProfileDto } from './dto/profile.dto.js'
 
 // Type for spying on private methods in tests
@@ -166,6 +167,19 @@ describe('AuthService', () => {
           provide: EmailService,
           useValue: {
             sendOtp: jest.fn(),
+          },
+        },
+        {
+          provide: GeolocationService,
+          useValue: {
+            // Defaults: same geohash + UNKNOWN country → no anomaly.
+            // Individual tests override via jest.spyOn(geo, ...).
+            computeGeohash: jest.fn((ip: string | null) => (ip ? `gh-${ip}` : null)),
+            lookupCountry: jest.fn(() => 'UNKNOWN'),
+            isAnomaly: jest.fn(
+              (stored: string | null, current: string | null) =>
+                !!stored && !!current && stored !== current,
+            ),
           },
         },
       ],
@@ -1278,6 +1292,132 @@ describe('AuthService', () => {
 
       const result = await service.rotateRefreshToken('raw-token', {})
       expect(result.refreshToken).toBeDefined()
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Phase 3 — Geolocation anomaly logging (Manisha 2026-06-12 Doc 2 Q1)
+  // ────────────────────────────────────────────────────────────────────────
+  describe('rotateRefreshToken: geolocation anomaly audit (audit-only, no block)', () => {
+    let geo: GeolocationService
+
+    beforeEach(() => {
+      geo = service['geolocation'] as GeolocationService
+    })
+
+    const buildFixture = (storedGeohash: string | null, storedCountry: string | null) => ({
+      id: 'token-1',
+      userId: mockUser.id,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 86_400_000),
+      user: mockUser,
+      authSession: {
+        id: 'session-1',
+        deviceType: 'web',
+        userAgent: 'ua',
+        ipAddress: '1.2.3.4',
+        deviceId: 'd1',
+        lastActivityAt: new Date(),
+        geohash: storedGeohash,
+        ipCountry: storedCountry,
+      },
+    })
+
+    it('same geohash on rotation → no anomaly logged, rotation succeeds', async () => {
+      ;(geo.computeGeohash as jest.Mock).mockReturnValue('gh-same')
+      ;(geo.lookupCountry as jest.Mock).mockReturnValue('US')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildFixture('gh-same', 'US'),
+      )
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({ id: 'new-token' })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      const result = await service.rotateRefreshToken('raw-token', {
+        ipAddress: '1.2.3.4',
+      })
+      expect(result.refreshToken).toBeDefined()
+      expect(prisma.authLog.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ event: 'geolocation_anomaly' }),
+        }),
+      )
+    })
+
+    it('different geohash on rotation → geolocation_anomaly logged, rotation succeeds', async () => {
+      ;(geo.computeGeohash as jest.Mock).mockReturnValue('gh-NEW')
+      ;(geo.lookupCountry as jest.Mock).mockReturnValue('GB')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildFixture('gh-OLD', 'US'),
+      )
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({ id: 'new-token' })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      const result = await service.rotateRefreshToken('raw-token', {
+        ipAddress: '5.6.7.8',
+      })
+      // Rotation still proceeds — anomaly is audit-only.
+      expect(result.refreshToken).toBeDefined()
+      // Anomaly event logged with both geohashes in metadata.
+      expect(prisma.authLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            event: 'geolocation_anomaly',
+            userId: mockUser.id,
+            metadata: expect.objectContaining({
+              storedGeohash: 'gh-OLD',
+              currentGeohash: 'gh-NEW',
+              storedCountry: 'US',
+              currentCountry: 'GB',
+            }),
+          }),
+        }),
+      )
+    })
+
+    it('first rotation (stored geohash null) → no anomaly logged, geohash backfills', async () => {
+      ;(geo.computeGeohash as jest.Mock).mockReturnValue('gh-FIRST')
+      ;(geo.lookupCountry as jest.Mock).mockReturnValue('UNKNOWN')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildFixture(null, null),
+      )
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({ id: 'new-token' })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      await service.rotateRefreshToken('raw-token', { ipAddress: '1.2.3.4' })
+
+      expect(prisma.authLog.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ event: 'geolocation_anomaly' }),
+        }),
+      )
+      // The new geohash is written to the session for the next rotation to compare.
+      expect(prisma.authSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ geohash: 'gh-FIRST' }),
+        }),
+      )
+    })
+
+    it('IP missing on rotation (currentGeohash null) → no anomaly logged', async () => {
+      ;(geo.computeGeohash as jest.Mock).mockReturnValue(null)
+      ;(geo.lookupCountry as jest.Mock).mockReturnValue('UNKNOWN')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildFixture('gh-OLD', 'US'),
+      )
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({ id: 'new-token' })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      await service.rotateRefreshToken('raw-token', {})
+
+      expect(prisma.authLog.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ event: 'geolocation_anomaly' }),
+        }),
+      )
     })
   })
 

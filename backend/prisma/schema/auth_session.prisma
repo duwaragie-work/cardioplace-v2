@@ -14,6 +14,16 @@ model AuthSession {
   deviceName     String?
   userAgent      String?
   ipAddress      String?
+  // June 2026 — geolocation anomaly audit (Manisha 2026-06-12 Doc 2 Q1).
+  // `geohash` is a privacy-preserving hash of the IP's /24 subnet (IPv4)
+  // or /48 prefix (IPv6) + a server-side salt, NOT a true geo-grid hash.
+  // Sufficient for "did the IP region change?" without storing raw IP
+  // beyond ipAddress. `ipCountry` is an ISO-3166 alpha-2 code when known
+  // ('UNKNOWN' otherwise — wire a real GeoIP DB later without a schema
+  // change). Anomaly = the rotating session's new geohash differs from
+  // the stored value AND both are non-null. Audit-only, never blocks.
+  geohash        String?
+  ipCountry      String?
   createdAt      DateTime     @default(now())
   lastActivityAt DateTime     @updatedAt
   expiresAt      DateTime

@@ -19,6 +19,7 @@ import {
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { BcryptService } from './bcrypt.service.js'
+import { GeolocationService } from './geolocation.service.js'
 import type { ProfileDto } from './dto/profile.dto.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -112,6 +113,7 @@ export class AuthService {
     private config: ConfigService,
     private bcryptService: BcryptService,
     private emailService: EmailService,
+    private geolocation: GeolocationService,
   ) {}
 
   // ─── Token Issuance ─────────────────────────────────────────────────────────
@@ -156,6 +158,8 @@ export class AuthService {
           deviceId: context?.deviceId ?? null,
           userAgent: context?.userAgent ?? null,
           ipAddress: context?.ipAddress ?? null,
+          geohash: this.geolocation.computeGeohash(context?.ipAddress ?? null),
+          ipCountry: this.geolocation.lookupCountry(context?.ipAddress ?? null),
           expiresAt,
         },
       })
@@ -244,6 +248,16 @@ export class AuthService {
     const newRawToken = randomBytes(40).toString('hex')
     const newTokenHash = sha256(newRawToken)
 
+    // Manisha 2026-06-12 Doc 2 Q1 — geolocation anomaly check. Compare the
+    // request's current geohash against the stored value; if both are
+    // non-null and differ, write a `geolocation_anomaly` audit row to
+    // AuthLog. Audit-only — the rotation always proceeds.
+    const currentGeohash = this.geolocation.computeGeohash(context?.ipAddress ?? null)
+    const currentCountry = this.geolocation.lookupCountry(context?.ipAddress ?? null)
+    const storedGeohash = existing.authSession?.geohash ?? null
+    const storedCountry = existing.authSession?.ipCountry ?? null
+    const anomaly = this.geolocation.isAnomaly(storedGeohash, currentGeohash)
+
     await this.prisma.$transaction(async (tx) => {
       await tx.refreshToken.update({
         where: { id: existing.id },
@@ -266,6 +280,8 @@ export class AuthService {
             userAgent: context?.userAgent ?? existing.authSession.userAgent,
             ipAddress: context?.ipAddress ?? existing.authSession.ipAddress,
             deviceId: context?.deviceId ?? existing.authSession.deviceId,
+            geohash: currentGeohash ?? existing.authSession.geohash,
+            ipCountry: currentCountry ?? existing.authSession.ipCountry,
           },
         })
       } else {
@@ -280,11 +296,31 @@ export class AuthService {
             deviceId: context?.deviceId ?? null,
             userAgent: context?.userAgent ?? null,
             ipAddress: context?.ipAddress ?? null,
+            geohash: currentGeohash,
+            ipCountry: currentCountry,
             expiresAt: newExpiresAt,
           },
         })
       }
     })
+
+    if (anomaly) {
+      await this.logAuthEvent({
+        event: 'geolocation_anomaly',
+        userId: existing.user.id,
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        metadata: {
+          authSessionId: existing.authSession?.id,
+          storedGeohash,
+          currentGeohash,
+          storedCountry,
+          currentCountry,
+        },
+        success: true,
+      })
+    }
 
     const accessToken = await this.issueAccessToken(existing.user)
 
