@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { authedApi, signInPatient } from '../helpers/auth.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
+import { commitBuffer } from '../helpers/buffer.js'
 import { newTestControl } from '../helpers/test-control.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
@@ -100,15 +101,28 @@ test.describe('Bug 15 — FE form measuredAt precision', () => {
       await signInPatient(page, PATIENTS.aisha.email)
       await submitReadingViaForm(page, { systolic: 130, diastolic: 85, heartRate: 72 })
 
-      const list = await api.get('daily-journal')
-      expect(list.status()).toBe(200)
-      const entries = ((await list.json()).data ?? []) as Array<{
-        id: string
-        systolicBP?: number
-        measuredAt: string
-      }>
-      const created = entries.find((e) => e.systolicBP === 130)
-      expect(created, 'the form reading persisted').toBeTruthy()
+      // Part 1 — the wizard submit now BUFFERS on-device; nothing reaches the
+      // backend until "I'm good". Commit the buffer, then the API has the entry.
+      await expect(page.locator(byTestId('checkin-buffer-title'))).toBeVisible({ timeout: 15_000 })
+      await commitBuffer(page)
+
+      // The commit POSTs asynchronously — poll until the reading lands.
+      let created: { id: string; systolicBP?: number; measuredAt: string } | undefined
+      await expect
+        .poll(
+          async () => {
+            const list = await api.get('daily-journal')
+            const entries = ((await list.json()).data ?? []) as Array<{
+              id: string
+              systolicBP?: number
+              measuredAt: string
+            }>
+            created = entries.find((e) => e.systolicBP === 130)
+            return !!created
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(true)
 
       // Pre-fix, the FE truncated to the minute → measuredAt always ended in
       // `:00.000`. The fix uses real now() → seconds and/or millis are non-zero,
