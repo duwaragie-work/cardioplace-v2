@@ -191,6 +191,16 @@ export class DailyJournalController {
     return this.dailyJournalService.getActiveSession(userId)
   }
 
+  // Option D (Manisha 2026-06-12 Q2) — the patient's most recent held emergency
+  // reading awaiting its confirmatory second reading (or null). Drives the
+  // /check-in Screen A auto-resume + the /readings "Continue confirmation" CTA.
+  // Declared BEFORE the `:id` catch-all so Express matches the literal path.
+  @Get('awaiting-emergency')
+  getAwaitingEmergency(@Req() req: Request) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.getAwaitingEmergency(userId)
+  }
+
   @Get(':id')
   findOne(@Req() req: Request, @Param('id') id: string) {
     const { id: userId } = req.user as { id: string }

@@ -2235,9 +2235,15 @@ export class DailyJournalService {
         sessionId: true,
         measuredAt: true,
         singleReadingFinalized: true,
+        emergencyConfirmation: true,
       },
     })
     if (!latest) return null
+    // Option D (Manisha 2026-06-12 Q2) — a held emergency awaiting its
+    // confirmatory reading anchors its own session and must NOT surface the
+    // "add to this session?" prompt. The dedicated awaiting-emergency resume
+    // flow (Screen A auto-resume + the /readings CTA) takes over instead.
+    if (latest.emergencyConfirmation === EmergencyConfirmationState.AWAITING) return null
     // Expired — last reading older than the window.
     if (now.getTime() - latest.measuredAt.getTime() > SESSION_WINDOW_MS) return null
     // Closed — single-reading already finalized; its alert has fired.
@@ -2283,6 +2289,47 @@ export class DailyJournalService {
       readingCount,
       expiresAt: expiresAt.toISOString(),
       requiresMoreReadings,
+    }
+  }
+
+  /**
+   * Option D (Manisha 2026-06-12 Q2) — the patient's most recent held emergency
+   * reading awaiting its confirmatory second reading, or null when none. Drives
+   * the /check-in auto-resume (Screen A) and the /readings "Continue
+   * confirmation" CTA. Deliberately independent of the session window so a
+   * patient who returns a little late still lands back in Screen A; the
+   * SessionFinalizeService cron is the backstop that resolves it as UNCONFIRMED
+   * if they never do.
+   */
+  async getAwaitingEmergency(
+    userId: string,
+  ): Promise<{
+    id: string
+    sessionId: string | null
+    systolicBP: number | null
+    diastolicBP: number | null
+    measuredAt: string
+  } | null> {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { userId, emergencyConfirmation: EmergencyConfirmationState.AWAITING },
+      orderBy: { measuredAt: 'desc' },
+      select: {
+        id: true,
+        sessionId: true,
+        systolicBP: true,
+        diastolicBP: true,
+        measuredAt: true,
+      },
+    })
+    if (!entry) return null
+    return {
+      id: entry.id,
+      // The held first-of-pair's session — the resumed confirmatory reuses it
+      // so both readings group together in the session card.
+      sessionId: entry.sessionId,
+      systolicBP: entry.systolicBP,
+      diastolicBP: entry.diastolicBP,
+      measuredAt: entry.measuredAt.toISOString(),
     }
   }
 
