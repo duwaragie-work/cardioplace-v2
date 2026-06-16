@@ -224,7 +224,7 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
     }
   })
 
-  test('Bug 13 — CONFIRMATORY entry inherits position + medication context from the held first-of-pair', async () => {
+  test('Bug 13 (+ Part 2) — CONFIRMATORY inherits position, medication, weight + pulse from the held first-of-pair', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
@@ -239,6 +239,8 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
           diastolicBP: 120,
           position: 'SITTING',
           medicationTaken: true,
+          weight: 90.7,
+          pulse: 88,
           sessionId,
           beginEmergencyConfirmation: true,
         },
@@ -246,7 +248,7 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
       expect(first.status()).toBe(202)
       const firstId = (await first.json()).data.id
 
-      // Screen B only re-collects BP — no position, no medication answers.
+      // Screen B only re-collects BP — no position, meds, weight, or pulse.
       const second = await api.post('daily-journal', {
         data: {
           measuredAt: new Date().toISOString(),
@@ -263,12 +265,17 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
         emergencyConfirmation?: string | null
         position?: string | null
         medicationTaken?: boolean | null
+        weight?: number | null
+        pulse?: number | null
       }>
       const confirmatory = entries.find((e) => e.emergencyConfirmation === 'CONFIRMATORY')
       expect(confirmatory, 'confirmatory entry exists').toBeTruthy()
       // Inherited from the first-of-pair (same sitting).
       expect(confirmatory!.position).toBe('SITTING')
       expect(confirmatory!.medicationTaken).toBe(true)
+      // Bug 13 Part 2 — weight + pulse also inherited when Screen B omits them.
+      expect(confirmatory!.weight).toBe(90.7)
+      expect(confirmatory!.pulse).toBe(88)
     } finally {
       await api.dispose()
       await tc.dispose()
@@ -376,6 +383,21 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
       await expect(
         page.locator(byTestId(T.readings.rowDelete(firstId))),
       ).toHaveCount(0)
+
+      // Bugs 10+11 Part 2 — tapping the AWAITING card opens the read-only detail
+      // modal, which must NOT offer an "Edit Reading" bypass of the card-level
+      // suppression. Click the card header (top-left), away from the CTA button.
+      await page
+        .locator(byTestId(`readings-row-${firstId}`))
+        .click({ position: { x: 40, y: 16 } })
+      await expect(page.locator(byTestId('reading-detail-modal'))).toBeVisible({
+        timeout: 10_000,
+      })
+      await expect(
+        page.locator(byTestId('reading-detail-edit-btn')),
+      ).toHaveCount(0)
+      await page.keyboard.press('Escape')
+      await expect(page.locator(byTestId('reading-detail-modal'))).toHaveCount(0)
 
       // Tapping the CTA resumes Screen A on /check-in with the held BP shown.
       await page.locator(byTestId(T.readings.rowContinueConfirmation(firstId))).click()
