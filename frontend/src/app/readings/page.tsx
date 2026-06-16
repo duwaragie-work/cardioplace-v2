@@ -1956,16 +1956,23 @@ function ReadingDetailModal({
             >
               {t('common.close')}
             </button>
-            <button
-              type="button"
-              data-testid="reading-detail-edit-btn"
-              onClick={onEdit}
-              className="flex-1 h-11 rounded-full text-white text-sm font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
-              style={{ backgroundColor: 'var(--brand-primary-purple)' }}
-            >
-              <Pencil className="w-4 h-4" />
-              {t('readings.editReading')}
-            </button>
+            {/* Bugs 10+11 Part 2 (live-test 2026-06-16) — a HELD Option D emergency
+                reading (AWAITING confirmation) is read-only everywhere: the card
+                suppresses inline edit/delete, and this modal must NOT offer an
+                "Edit Reading" bypass. Render Close-only until the reading resolves
+                (confirm / decline / cron). */}
+            {entry.emergencyConfirmation !== 'AWAITING' && (
+              <button
+                type="button"
+                data-testid="reading-detail-edit-btn"
+                onClick={onEdit}
+                className="flex-1 h-11 rounded-full text-white text-sm font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
+                style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+              >
+                <Pencil className="w-4 h-4" />
+                {t('readings.editReading')}
+              </button>
+            )}
           </div>
         </div>
       </motion.div>
