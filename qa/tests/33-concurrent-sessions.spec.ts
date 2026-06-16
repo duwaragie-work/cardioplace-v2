@@ -130,18 +130,16 @@ test.describe('33 — concurrent session cap (Manisha 2026-06-12)', () => {
 
     // Refresh A — bumps its lastActivityAt past B's. So B is now the
     // most-idle of the three. The refresh returns a NEW refresh token;
-    // we don't reuse the old one.
-    const aRefreshRes = await pwRequest
-      .newContext({ baseURL: API_ROOT })
-      .then(async (ctx) => {
-        const res = await ctx.post('/api/v2/auth/refresh', {
-          data: { refreshToken: a.refreshToken },
-        })
-        await ctx.dispose()
-        return res
-      })
+    // we don't reuse the old one. NOTE: extract status + json BEFORE
+    // disposing the context — Playwright invalidates the response handle
+    // when its owning context disposes ("Response has been disposed").
+    const refreshCtx = await pwRequest.newContext({ baseURL: API_ROOT })
+    const aRefreshRes = await refreshCtx.post('/api/v2/auth/refresh', {
+      data: { refreshToken: a.refreshToken },
+    })
     expect(aRefreshRes.status()).toBe(201)
     const aNew = (await aRefreshRes.json()) as { refreshToken: string }
+    await refreshCtx.dispose()
     a.refreshToken = aNew.refreshToken
 
     // 4th sign-in — B should be the eviction target (oldest by activity).
