@@ -200,7 +200,15 @@ describe('Cluster 8 §F.3 — i18n completeness gate', () => {
         if (KNOWN_IDENTICAL_OK[`${locale}:${key}`] != null) continue
         const enValue = en.get(key)
         if (enValue == null) continue
-        if (enValue.trim() === value.trim()) {
+        // Bug 20b — normalize smart quotes/apostrophes so an English string can't
+        // hide behind a curly ' vs straight ' (that's how `subtitleUnenrolled`
+        // slipped through untranslated).
+        const norm = (s: string) =>
+          s
+            .trim()
+            .replace(/[‘’ʼ]/g, "'")
+            .replace(/[“”]/g, '"')
+        if (norm(enValue) === norm(value)) {
           copies.push(`${locale}: ${key}`)
         }
       }

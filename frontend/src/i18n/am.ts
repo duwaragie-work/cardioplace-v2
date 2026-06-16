@@ -304,7 +304,7 @@ const am: Record<TranslationKey, string> = {
   'checkin.confirm.titleMulti': 'ንባብ {n} ተልኳል',
   'checkin.confirm.subtitle': 'የተንከባካቢ ቡድንዎ ወዲያውኑ ይቀበላል።',
   // #88 — English placeholder; flagged for Niva translation pass.
-  'checkin.confirm.subtitleUnenrolled': 'We’re setting up your care team. They’ll start reviewing your readings once your enrollment is complete.',
+  'checkin.confirm.subtitleUnenrolled': 'የእንክብካቤ ቡድንዎን እያዘጋጀን ነው። ምዝገባዎ ከተጠናቀቀ በኋላ ንባቦችዎን መገምገም ይጀምራሉ።',
   'checkin.confirm.nonAfibUnenrolled': 'ስለ ጀመሩ እናመሰግናለን።',
   'checkin.confirm.thisReading': 'ይህ ንባብ',
   'checkin.confirm.readingAudio': 'ንባብ {sys} በ {dia}',
@@ -317,13 +317,13 @@ const am: Record<TranslationKey, string> = {
   'checkin.confirm.backToDashboard': 'ወደ ዳሽቦርድ ተመለስ',
   // #90 — English placeholder; flagged for Niva translation pass.
   'checkin.afib.state1.heading': 'ሁለት ተጨማሪ ንባቦች',
-  'checkin.afib.state1.body': 'Take another reading in about a minute, while you’re still seated. Three readings in a row helps us understand your blood pressure with an irregular heartbeat.',
+  'checkin.afib.state1.body': 'በግምት በአንድ ደቂቃ ውስጥ፣ አሁንም ተቀምጠው ሳሉ፣ ሌላ ንባብ ይውሰዱ። በተከታታይ ሦስት ንባቦች ያልተስተካከለ የልብ ምት ሲኖር የደም ግፊትዎን ለመረዳት ይረዱናል።',
   'checkin.afib.state2.heading': 'አንድ ተጨማሪ ንባብ',
-  'checkin.afib.state2.body': 'One more and you’re done. Take it now, while you’re still seated.',
+  'checkin.afib.state2.body': 'አንድ ተጨማሪ እና ጨርሰዋል። አሁን፣ አሁንም ተቀምጠው ሳሉ ይውሰዱት።',
   'checkin.afib.state3.heading': 'ሦስቱም ንባቦች ተጠናቅቀዋል',
   'checkin.afib.state3.body': 'የእንክብካቤ ቡድንዎ የሚያስፈልገውን አግኝቷል። ትክክለኛ ንባብ ለማግኘት ጊዜ ስለወሰዱ በጣም ጥሩ ነው።',
   'checkin.afib.modal.heading': 'ሌሎች ንባቦችዎን ይውሰዱ?',
-  'checkin.afib.modal.body': 'You’ve taken {n} of 3 readings. For an accurate read with your heart rhythm, your care team needs three readings taken close together. Going to the dashboard ends this session፣ you can come back later for a fresh set of three.',
+  'checkin.afib.modal.body': 'ከ3 ንባቦች {n}ቱን ወስደዋል። ከልብ ምትዎ ጋር ትክክለኛ ንባብ ለማግኘት የእንክብካቤ ቡድንዎ በተቀራረበ ጊዜ የተወሰዱ ሦስት ንባቦች ይፈልጋል። ወደ ዳሽቦርድ መሄድ ይህን ክፍለ ጊዜ ያቆመዋል፣ በኋላ ለአዲስ ሦስት ስብስብ መመለስ ይችላሉ።',
   'checkin.afib.modal.stay': 'ይቆዩና ሌላ ይጨምሩ',
   'checkin.afib.modal.leave': 'ይህን ክፍለ ጊዜ ጨርስ',
 

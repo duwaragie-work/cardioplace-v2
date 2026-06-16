@@ -302,7 +302,7 @@ const fr: Record<TranslationKey, string> = {
   'checkin.confirm.titleMulti': 'Lecture {n} envoyée',
   'checkin.confirm.subtitle': 'Votre équipe soignante la reçoit immédiatement.',
   // #88 — English placeholder; flagged for Niva translation pass.
-  'checkin.confirm.subtitleUnenrolled': 'We’re setting up your care team. They’ll start reviewing your readings once your enrollment is complete.',
+  'checkin.confirm.subtitleUnenrolled': 'Nous constituons votre équipe de soins. Ils commenceront à examiner vos mesures une fois votre inscription terminée.',
   'checkin.confirm.nonAfibUnenrolled': 'Merci d’avoir commencé.',
   'checkin.confirm.thisReading': 'Cette lecture',
   'checkin.confirm.readingAudio': 'Lecture {sys} sur {dia}',
@@ -315,13 +315,13 @@ const fr: Record<TranslationKey, string> = {
   'checkin.confirm.backToDashboard': 'Retour au tableau de bord',
   // #90 — English placeholder; flagged for Niva translation pass.
   'checkin.afib.state1.heading': 'Deux mesures de plus',
-  'checkin.afib.state1.body': 'Take another reading in about a minute, while you’re still seated. Three readings in a row helps us understand your blood pressure with an irregular heartbeat.',
+  'checkin.afib.state1.body': "Prenez une autre mesure dans environ une minute, pendant que vous êtes encore assis. Trois mesures d'affilée nous aident à comprendre votre tension avec un rythme cardiaque irrégulier.",
   'checkin.afib.state2.heading': 'Une mesure de plus',
-  'checkin.afib.state2.body': 'One more and you’re done. Take it now, while you’re still seated.',
+  'checkin.afib.state2.body': "Encore une et c'est terminé. Prenez-la maintenant, pendant que vous êtes encore assis.",
   'checkin.afib.state3.heading': 'Les trois mesures terminées',
   'checkin.afib.state3.body': 'Votre équipe soignante a ce qu’il lui faut. Bravo d’avoir pris le temps d’obtenir une mesure précise.',
   'checkin.afib.modal.heading': 'Prendre vos autres mesures ?',
-  'checkin.afib.modal.body': 'You’ve taken {n} of 3 readings. For an accurate read with your heart rhythm, your care team needs three readings taken close together. Going to the dashboard ends this session, you can come back later for a fresh set of three.',
+  'checkin.afib.modal.body': 'Vous avez pris {n} mesures sur 3. Pour une mesure précise avec votre rythme cardiaque, votre équipe de soins a besoin de trois mesures prises rapprochées. Aller au tableau de bord met fin à cette session, vous pouvez revenir plus tard pour une nouvelle série de trois.',
   'checkin.afib.modal.stay': 'Rester et en ajouter une',
   'checkin.afib.modal.leave': 'Terminer cette session',
 
