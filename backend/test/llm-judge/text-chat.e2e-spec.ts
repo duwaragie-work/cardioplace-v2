@@ -11,6 +11,7 @@
  * Run: npm run test:e2e -- --testPathPattern=llm-judge/text
  */
 
+import { jest } from '@jest/globals'
 import request from 'supertest'
 import { JudgeService, EvalResult } from './judge.service.js'
 import { setupTestApp, teardownTestApp, TestContext } from './test-helpers.js'
