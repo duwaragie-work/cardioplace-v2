@@ -201,17 +201,14 @@ export class DailyJournalService {
     if (actor && dto.sessionId) {
       await this.assertSessionJoinable(userId, dto.sessionId, new Date(dto.measuredAt))
     }
-    // Option D readings must anchor their OWN session and never auto-join an
-    // open one (the Bug 4 proximity-join is for ordinary check-ins): the
-    // AWAITING first-of-pair needs a clean session that the CONFIRMATORY reading
-    // pairs into via confirmsEntryId. Without this guard a held emergency would
-    // get merged into an unrelated in-window session, breaking the pairing.
-    const isOptionDReading = !!(dto.beginEmergencyConfirmation || dto.confirmsEntryId)
+    // resolveCreateSessionId honors any non-null supplied sessionId as a
+    // deliberate boundary (Bug 14 deprecation), so Option D readings — which
+    // always supply their own id — anchor their own session without a special
+    // guard, and the confirmatory pairs in via that same id + confirmsEntryId.
     const effectiveSessionId = await this.resolveCreateSessionId(
       userId,
       dto.sessionId,
       new Date(dto.measuredAt),
-      isOptionDReading,
     )
 
     // Option D (Manisha 2026-06-12 Q2) — retake-to-confirm state from the DTO.
@@ -1904,49 +1901,43 @@ export class DailyJournalService {
     userId: string,
     sessionId: string | undefined,
     measuredAt: Date,
-    // Option D readings (AWAITING / CONFIRMATORY) must anchor their own session
-    // and never auto-join an open in-window one — the held emergency + its
-    // confirmatory reading form a dedicated session. When true, the proximity
-    // join is skipped: a supplied id is honored as-is, no id mints a fresh uuid.
-    skipOpenSessionJoin = false,
   ): Promise<string> {
-    // #91 — a JournalEntry MUST always carry a sessionId. This previously
-    // returned null when no id was supplied OR when the supplied id was stale
-    // (window elapsed), leaving orphaned null-session readings that the
-    // SessionAverager / AFib ≥3-reading gate couldn't group reliably. Now it
-    // resolves to a usable session in every case (never null):
-    //   • valid client id still inside the window → keep it (join the session)
-    //   • no id / stale id → JOIN the patient's open in-window session if one
-    //     exists (preserves proximity averaging for clients that don't pass an
-    //     id), else MINT a fresh UUID so the reading anchors its own session.
+    // #91 — a JournalEntry MUST always carry a sessionId (never null). Rules:
+    //   • non-null client id → HONOR it as a deliberate session boundary. Since
+    //     the FE buffer (2026-06-16) every check-in threads one sessionId per
+    //     sitting and commits it on "I'm good", a supplied id is an explicit
+    //     boundary we must never silently merge across.
+    //   • STALE id (its members are older than the window) → mint a FRESH
+    //     session rather than reviving an hours-old one.
+    //   • no id (legacy null-session rows, chat tool calls that never threaded
+    //     an id) → JOIN the patient's open in-window session if one exists
+    //     (preserves proximity averaging for those clients), else mint a UUID.
+    //
+    // Bug 14 deprecation: this used to join a FRESH supplied id into an open
+    // in-window session (the Bug 4 cross-id workaround for clients that forgot
+    // to thread an id). The buffer threads ids natively, so that workaround is
+    // obsolete AND clinically wrong — it averaged two separate "I'm good"
+    // sittings into one meaningless number. Cross-id joining is removed; the
+    // proximity join now applies ONLY to the no-id path. This also naturally
+    // anchors Option D readings to their own session (they always supply an id),
+    // so the previous `skipOpenSessionJoin` guard is no longer needed.
     if (sessionId) {
       const newest = await this.prisma.journalEntry.findFirst({
         where: { userId, sessionId },
         orderBy: { measuredAt: 'desc' },
         select: { measuredAt: true },
       })
-      // Bug 4 (live-test 2026-06-15) — fresh supplied id (no members yet). If
-      // the patient already has an OPEN in-window session (e.g. they started a
-      // brand-new check-in within 5 min of their last reading, so the wizard
-      // minted a fresh uuid), JOIN that session rather than anchoring a separate
-      // one — CLINICAL_SPEC §5.2: the 5-min window is the authoritative session
-      // boundary, the client sessionId is only a storage shortcut. Otherwise
-      // honor the supplied id as a genuine new session.
-      if (!newest) {
-        if (skipOpenSessionJoin) return sessionId
-        const joinable = await this.findOpenInWindowSession(userId, measuredAt)
-        return joinable ?? sessionId
-      }
+      if (!newest) return sessionId // fresh, deliberate id — honor it
       const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
       if (gapMs <= SESSION_WINDOW_MS) return sessionId
-      // Window elapsed → don't smuggle this reading into the stale session.
       this.logger.warn(
         `create: supplied sessionId ${sessionId} is stale for user ${userId} ` +
           `(gap ${Math.round(gapMs / 60000)}min exceeds session window); starting a new session`,
       )
+      return randomUUID()
     }
-    // No usable client id — join an open, non-finalized session within the
-    // window if the patient has one, else mint a fresh UUID. Never null.
+    // No client id — join an open, non-finalized in-window session if any, else
+    // mint a fresh UUID. Never null.
     const joinable = await this.findOpenInWindowSession(userId, measuredAt)
     return joinable ?? randomUUID()
   }

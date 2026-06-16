@@ -313,23 +313,25 @@ describe('DailyJournalService', () => {
       expect(createArg.data.sessionId).toBe('s-fresh')
     })
 
-    it('Bug 4 — a FRESH sessionId joins an open in-window session instead of anchoring a new one', async () => {
+    it('Bug 14 deprecation — a FRESH supplied sessionId is HONORED (own session), never merged into an open in-window one', async () => {
       const measuredAt = '2026-05-22T10:00:00Z'
       mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' })
-      // findFirst #1 (members of the supplied id) → none (fresh id)…
-      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null)
-      // …findFirst #2 (findOpenInWindowSession) → an existing open session.
-      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({ sessionId: 's-open' })
-      mockPrisma.journalEntry.create.mockResolvedValueOnce(builtEntry('s-open'))
-      mockPrisma.journalEntry.count.mockResolvedValueOnce(0)
+      // findFirst (members of the supplied id) → none (fresh id). With the
+      // cross-id join removed, findOpenInWindowSession is NOT consulted for a
+      // supplied id — the deliberate client boundary stands. (Pre-buffer this
+      // joined an open session as the Bug 4 workaround; the FE buffer now threads
+      // one id per "I'm good" sitting, so merging across that boundary averaged
+      // two separate sittings — a clinically meaningless number.)
+      mockPrisma.journalEntry.findFirst.mockResolvedValue(null)
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(builtEntry('s-brand-new'))
+      mockPrisma.journalEntry.count.mockResolvedValue(0)
       mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ hasAFib: false })
-      mockPrisma.journalEntry.count.mockResolvedValueOnce(20)
 
       await service.create('u1', { measuredAt, systolicBP: 130, diastolicBP: 80, sessionId: 's-brand-new' } as any)
 
       const createArg = mockPrisma.journalEntry.create.mock.calls[0][0]
-      // Joined the open session, NOT the brand-new client id.
-      expect(createArg.data.sessionId).toBe('s-open')
+      // Honored the deliberate client id — did NOT merge into the open session.
+      expect(createArg.data.sessionId).toBe('s-brand-new')
     })
 
     it('keeps a sessionId whose newest member is within the window', async () => {
