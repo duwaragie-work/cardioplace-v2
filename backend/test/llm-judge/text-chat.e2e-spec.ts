@@ -45,15 +45,17 @@ descr('Text Chat — Real E2E + LLM-as-Judge', () => {
 
   /** Helper: send a message and return response + latency.
    *
-   * Retries up to TWICE on empty data (3 attempts total) — chat.service.ts
-   * has fallback text for write-tool successes (submit/update/delete_checkin)
-   * but not for read-tool calls (get_recent_readings, evaluate_reading) and
-   * not for the "Gemini returned empty + called no tool" edge case (typical
-   * latency ~1s, way below normal ~5s round-trips). Single retry handled
-   * most flakes; bumped to 2 after a CI run saw both first attempt AND the
-   * single retry come back empty for the same prompt.
+   * Retries up to FOUR TIMES on empty data (5 attempts total) with a short
+   * backoff between attempts. chat.service.ts has fallback text for
+   * write-tool successes (submit/update/delete_checkin) but not for
+   * read-tool calls (get_recent_readings, evaluate_reading) and not for
+   * the "Gemini returned empty + called no tool" edge case (typical
+   * latency ~1s, way below normal ~5s round-trips). Earlier passes used
+   * 1, then 2 retries; CI saw 3-empty-in-a-row, so bumped to 4 retries
+   * with backoff to space requests out and let Gemini's per-request flake
+   * state clear.
    *
-   * Final fallback: if all 3 attempts produce empty data, synthesize text
+   * Final fallback: if all attempts produce empty data, synthesize text
    * from toolResults so a successful tool call (e.g. get_recent_readings
    * returned readings) doesn't fail the test on `.toBeTruthy()`. */
   async function chat(prompt: string, sessionId?: string) {
@@ -75,12 +77,14 @@ descr('Text Chat — Real E2E + LLM-as-Judge', () => {
       return { body, latency }
     }
 
-    const MAX_RETRIES = 2
+    const MAX_RETRIES = 4
     let { body, latency } = await sendOnce()
     let attempt = 0
     while ((!body.data || body.data.trim().length === 0) && attempt < MAX_RETRIES) {
       attempt++
       console.log(`[chat retry] empty data on attempt ${attempt} (${latency}ms) — retrying`)
+      // Linear backoff so Gemini's per-request state has a moment to clear.
+      await new Promise((r) => setTimeout(r, 400 * attempt))
       const next = await sendOnce()
       body = next.body
       latency = next.latency
