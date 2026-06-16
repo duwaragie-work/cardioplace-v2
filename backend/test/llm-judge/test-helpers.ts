@@ -53,6 +53,25 @@ export async function setupTestApp(): Promise<TestContext> {
     })
   }
 
+  // Create a minimal PatientProfile so the chat's intake gate is "complete".
+  // Without this, IntakeStatusService.getStatus → {completed:false}, and
+  // SystemPromptService.appendIntakeStatus injects the "Do NOT call
+  // submit_checkin / update_checkin / log_*" prohibition block — which is
+  // exactly what the chatbot was doing, causing "Full check-in" + "Multi-turn"
+  // judge tests to score Tool Use 1/5. Mirrors the gate at
+  // DailyJournalService.create + IntakeStatusService.getStatus
+  // (presence of PatientProfile row → intake complete).
+  await prisma.patientProfile.upsert({
+    where: { userId: user.id },
+    create: {
+      userId: user.id,
+      gender: 'FEMALE',
+      heightCm: 165,
+      diagnosedHypertension: true,
+    },
+    update: {},
+  })
+
   // Sign JWT mirroring the app's payload shape (auth.service signs
   // { sub, email, roles }; jwt.strategy reads roles straight off the token).
   const jwt = jwtService.sign({
