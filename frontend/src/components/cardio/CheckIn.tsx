@@ -59,6 +59,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, declineEmergencyConfirmation, getActiveSession, getAwaitingEmergency, type ActiveSessionDto, type JournalEntryPayload } from '@/lib/services/journal.service';
 import { OptionDFlow, type OptionDSecondReading } from '@/components/cardio/OptionDFlow';
+import { isNowish, resolveMeasuredAtIso } from '@/lib/measuredAt';
 import { delayBandFor, showsSuppressedBanner, type DelayBand } from '@/lib/delayBand';
 import { selectReadingPrompt } from '@/lib/sessionPrompt';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
@@ -192,16 +193,6 @@ function nowDate(): string {
 function nowTime(): string {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-// Chunk C — treat a stored measured datetime within ~10 min of now as "just now"
-// so the B2 time-picker stays collapsed for the real-time 95% case. A backdated
-// time (or one the DELAYED modal sent the patient back to fix) reads as not-now,
-// so the editor auto-expands.
-function isNowish(measuredDate: string, measuredTime: string): boolean {
-  const ms = new Date(`${measuredDate}T${measuredTime}`).getTime();
-  if (Number.isNaN(ms)) return false;
-  return Math.abs(Date.now() - ms) < 10 * 60 * 1000;
 }
 
 function emptyForm(): FormData {
@@ -2355,7 +2346,10 @@ export default function CheckIn() {
       cuffOnBareArm: form.cuffOnBareArm,
     };
 
-    const measuredAtIso = new Date(`${form.measuredDate}T${form.measuredTime}`).toISOString();
+    // Bug 15 — for a "just now" submission use real now() (full ms) so two
+    // same-minute resubmits can't collide on the DB unique(userId, measuredAt);
+    // a backdated time keeps the minute-precision the patient chose.
+    const measuredAtIso = resolveMeasuredAtIso(form.measuredDate, form.measuredTime);
     const sys = form.systolicBP ? parseInt(form.systolicBP, 10) : undefined;
     const dia = form.diastolicBP ? parseInt(form.diastolicBP, 10) : undefined;
     const pul = form.pulse ? parseInt(form.pulse, 10) : undefined;
