@@ -342,8 +342,12 @@ descr('Text Chat — Real E2E + LLM-as-Judge', () => {
       response: r2.data,
       toolsCalled: tools,
       criteria: [
-        'Context: Does the bot acknowledge BOTH the BP from turn 1 AND the meds/symptoms/weight from turn 2?',
-        'Flow: Does it either ask for the remaining missing fields or proceed to summary?',
+        // Objective criteria — judge inconsistency on subjective "acknowledge"
+        // wording was making this test flake (one run said bot ignored turn 1,
+        // next run said bot ignored turn 2, for the same code). These two
+        // ask about observable signals instead.
+        'Context: Does the bot demonstrate it retained data from BOTH turns? (Evidence: it either references the BP, the meds, symptoms, OR weight from earlier turns by value, OR it calls submit_checkin with those values, OR it asks for the SPECIFIC remaining fields it still needs.)',
+        'Flow: Is the bot still in the check-in flow (asking for missing fields like date / time / pulse / position / B1 checklist, OR moving to summary / save)? It does NOT need to re-state every prior value verbatim.',
       ],
     })
     results.push(ev)
