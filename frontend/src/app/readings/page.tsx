@@ -29,6 +29,7 @@ import {
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
 import { getBMI, JOURNAL_NOTE_MAX_LENGTH } from '@cardioplace/shared';
+import { bucketReadingsBySession } from '@/lib/readingsSession';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import AudioButton from '@/components/intake/AudioButton';
@@ -2433,41 +2434,15 @@ export default function ReadingsPage() {
             return (
               <AnimatePresence mode="popLayout">
                 {grouped.map((group) => {
-                  // Bug 43 — within each date, bucket consecutive entries that
-                  // are either (a) sharing the SAME non-null sessionId OR
-                  // (b) within 5 minutes of the bucket's most recent
-                  // measuredAt. The time-proximity branch fixes cases where
-                  // entries should clinically group but ended up with
-                  // different sessionIds — legacy null-id rows pre-#91,
-                  // backend's defensive stale-id reset minting a fresh UUID,
-                  // or a chat tool call that didn't thread session_id. Per
-                  // CLINICAL_SPEC §5.2 the 5-minute clock is the canonical
-                  // session-grouping rule; sessionId is just the storage
-                  // shortcut. Multi-item buckets render as SessionCard
-                  // regardless of whether they share an id.
-                  const FIVE_MIN_MS = 5 * 60 * 1000;
-                  type Bucket = { sessionId: string | null; items: Entry[]; lastMs: number };
-                  const buckets: Bucket[] = [];
-                  for (const e of group.items) {
-                    const sid = e.sessionId ?? null;
-                    const eMs = new Date(e.measuredAt).getTime();
-                    const last = buckets[buckets.length - 1];
-                    const sameSession =
-                      sid && last && last.sessionId === sid;
-                    const withinWindow =
-                      last && Number.isFinite(eMs) && Number.isFinite(last.lastMs) &&
-                      Math.abs(eMs - last.lastMs) <= FIVE_MIN_MS;
-                    if (last && (sameSession || withinWindow)) {
-                      last.items.push(e);
-                      last.lastMs = eMs;
-                      // Promote the bucket to the first non-null sessionId we
-                      // see, so the React key + SessionCard caption pick up a
-                      // stable id when at least one entry in the bucket has one.
-                      if (!last.sessionId && sid) last.sessionId = sid;
-                    } else {
-                      buckets.push({ sessionId: sid, items: [e], lastMs: eMs });
-                    }
-                  }
+                  // Bug 43 + Bug 14 — bucket each date's readings into session
+                  // groups. Two readings group only when they share a non-null
+                  // sessionId, or both have a null sessionId within the 5-min
+                  // window (legacy null-id fallback). Proximity never bridges
+                  // two different non-null sessionIds — distinct clinical
+                  // episodes (e.g. a declined Option D emergency vs. a fresh
+                  // reading minutes later) stay separate, matching the admin
+                  // ReadingsTab (Bug 5). See lib/readingsSession.ts.
+                  const buckets = bucketReadingsBySession(group.items);
                   return (
                     <div key={group.date} data-testid="reading-group" className="space-y-2">
                       <p
