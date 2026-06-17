@@ -221,14 +221,42 @@ export class DailyJournalService {
           ? EmergencyConfirmationState.CONFIRMATORY
           : null
 
+    // Bug 23 (2026-06-17) — per-pathway latency. The non-emergency single-
+    // reading hold (alert-engine: gate non-emergency rules until
+    // singleReadingFinalized) + the 2-min session-finalize cron add a SECOND
+    // 5-min window on top of the FE buffer's pre-commit 5-min window, so a
+    // buffer-committed reading's alert fired 5-10 min after "I'm good". When
+    // the patient explicitly closes the session (`closeSession` — the buffer
+    // already gave them their 5-min edit window on-device), that second window
+    // is pure redundant latency. Flag-gated (BUFFER_SKIPS_DEFER, default off,
+    // on in dev) for instant rollback pending Manisha + CTO sign-off, since it
+    // removes the post-commit edit window the CTO 2026-06-09 policy added.
+    //
+    // Scope: ONLY ordinary buffer commits (closeSession, patient, non-Option-D).
+    // Admin entries, Option D AWAITING/CONFIRMATORY (own retake semantics), and
+    // chat/voice tool creates (no buffer step — they keep the 5-min defer as
+    // their only edit window) are unchanged.
+    // Read per-request so dev/prod (and unit tests) can flip it without a
+    // rebuild. Default off — prod keeps the conservative 5-min post-commit
+    // window until Manisha + CTO sign off; dev sets BUFFER_SKIPS_DEFER=true.
+    const bufferSkipsDefer = process.env.BUFFER_SKIPS_DEFER === 'true'
+    const bufferCommitFastFire =
+      bufferSkipsDefer &&
+      dto.closeSession === true &&
+      !actor &&
+      optionDState === null
+
     // Step 2 edit window (Manisha 2026-06-12 Q1+Q4) — patient (non-admin)
     // readings are editable/deletable for 5 min before the engine commits. The
     // readings page reads this to surface the edit/delete affordance; the engine
     // firing itself is still gated by the existing single-reading hold. Admin
     // entries and Option D AWAITING readings (held under their own retake
-    // semantics) get no window.
+    // semantics) get no window. Bug 23 — a buffer fast-fire commit also gets no
+    // window: it fires now, so there's nothing to be "editable before".
     const engineEvaluationDeferredUntil =
-      actor || optionDState === EmergencyConfirmationState.AWAITING
+      actor ||
+      optionDState === EmergencyConfirmationState.AWAITING ||
+      bufferCommitFastFire
         ? null
         : new Date(Date.now() + SINGLE_READING_FINALIZE_MS)
 
@@ -303,6 +331,12 @@ export class DailyJournalService {
           emergencyConfirmation: optionDState,
           confirmsEntryId: dto.confirmsEntryId ?? null,
           engineEvaluationDeferredUntil,
+          // Bug 23 — a buffer fast-fire commit is finalized at create so the
+          // immediate ENTRY_CREATED evaluation isn't suppressed by the single-
+          // reading hold (alert-engine gate). For a multi-reading sitting the
+          // earlier readings are finalized by the closeSession updateMany below
+          // when the LAST reading (the only one carrying closeSession) lands.
+          singleReadingFinalized: bufferCommitFastFire,
           measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
           // Bug 13 — inherit medication context from the first-of-pair (same sitting).
           medicationTaken: dto.medicationTaken ?? inherited?.medicationTaken ?? null,
@@ -398,7 +432,19 @@ export class DailyJournalService {
       if (dto.closeSession && effectiveSessionId) {
         await this.prisma.journalEntry.updateMany({
           where: { userId, sessionId: effectiveSessionId },
-          data: { sessionClosedAt: new Date() },
+          data: {
+            sessionClosedAt: new Date(),
+            // Bug 23 — when the buffer-skip flag is on, "I'm good" also finalizes
+            // the whole sitting (every reading shares this sessionId) so the
+            // engine fires the averaged result now instead of waiting out the
+            // 5-min single-reading hold + cron. Also clears the FE edit badge on
+            // the earlier (held) readings of a multi-reading sitting. Scoped to
+            // the buffer pathway via bufferCommitFastFire — Option D confirmatory
+            // closes its session here too but keeps its own retake semantics.
+            ...(bufferCommitFastFire
+              ? { singleReadingFinalized: true, engineEvaluationDeferredUntil: null }
+              : {}),
+          },
         })
       }
 
