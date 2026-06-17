@@ -641,6 +641,34 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
       },
     },
     {
+      // Phase/16 Item 5 — out-of-window reading flag. The patient can edit
+      // entries within the 5-min window via update_checkin / delete_checkin;
+      // outside the window the entry is locked. This tool is the documented
+      // escape: write a non-blocking, non-emergency audit row so the care
+      // team can review the flagged reading on its own schedule.
+      name: 'flag_reading_error',
+      description:
+        "Flag a past reading as possibly wrong when the patient asks to correct it but it's outside the 5-minute edit window. " +
+        'This is NOT an emergency — it writes a non-blocking audit note for the care team to review on their next chart visit. ' +
+        'DO NOT call for: in-window edits (use update_checkin), real emergencies (use flag_emergency), or routine questions.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          entry_id: {
+            type: Type.STRING,
+            description:
+              'The id of the entry the patient wants flagged. Get it from a get_recent_readings call FIRST so you have the right row.',
+          },
+          reason: {
+            type: Type.STRING,
+            description:
+              "Brief note in the patient's own words explaining what they think the correct value should be (e.g. 'typo — actual was 132/85, not 232/85').",
+          },
+        },
+        required: ['entry_id', 'reason'],
+      },
+    },
+    {
       name: 'evaluate_reading',
       description:
         "Ask the patient's personalised rule engine what a BP / HR reading means FOR THIS PATIENT. " +
@@ -1505,6 +1533,37 @@ export async function executeJournalTool(
         emergency_situation: args.emergency_situation ?? 'Emergency detected',
         message: 'Emergency flagged. Continue responding to the patient with 911 guidance.',
       })
+    }
+
+    case 'flag_reading_error': {
+      // Phase/16 Item 5 — out-of-window reading flag (Nivakaran chat-v2
+      // handoff 2026-06-17). NOT a clinical emergency; writes a
+      // PATIENT_REPORT row on ProfileVerificationLog so the care team can
+      // review the flagged reading on their next chart visit. No
+      // escalation, no dispatch.
+      const entryId = typeof args.entry_id === 'string' ? args.entry_id.trim() : ''
+      const reason = typeof args.reason === 'string' ? args.reason : ''
+      if (!entryId) {
+        return JSON.stringify({
+          flagged: false,
+          reason: 'MISSING_ENTRY_ID',
+          message: 'entry_id is required — call get_recent_readings first to look up the entry.',
+        })
+      }
+      try {
+        const result = await journalService.flagReadingError(userId, entryId, reason)
+        return JSON.stringify({
+          flagged: true,
+          entry_id: result.entryId,
+          message:
+            'Flagged for care-team review. Tell the patient their care team will look at the flagged reading on their next chart review.',
+        })
+      } catch (err: any) {
+        return JSON.stringify({
+          flagged: false,
+          message: err?.message ?? 'Failed to flag reading.',
+        })
+      }
     }
 
     case 'evaluate_reading': {

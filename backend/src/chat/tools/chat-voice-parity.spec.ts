@@ -39,6 +39,11 @@ const TEXT_TOOLS_EXPECTED = [
   'log_symptom_quick',
   'submit_bp_from_photo',
   'flag_emergency',
+  // Phase/16 Item 5 — out-of-window edit fallback. Not a clinical emergency;
+  // writes a non-blocking PATIENT_REPORT row on ProfileVerificationLog.
+  // Text-only — voice doesn't need it (voice patients won't ask for a
+  // historical edit through speech).
+  'flag_reading_error',
   'evaluate_reading',
   'finalize_checkin',
   'check_intake_status',
@@ -93,7 +98,7 @@ function snakeOf(camel: string): string {
 // ─── 1. Catalog parity ────────────────────────────────────────────────────────
 
 describe('Chat ↔ Voice tool catalog parity', () => {
-  it('text-chat exposes the canonical 11-tool catalog', () => {
+  it('text-chat exposes the canonical 12-tool catalog', () => {
     const decls = getJournalToolDeclarations()
     const names = decls.map((d) => d.name).sort()
     expect(names).toEqual([...TEXT_TOOLS_EXPECTED].sort())
@@ -138,8 +143,10 @@ describe('Chat ↔ Voice tool catalog parity', () => {
     for (const t of TEXT_TOOLS_EXPECTED) {
       if (!voiceNames.has(t)) textOnly.push(t)
     }
+    // Phase/16 Item 5 adds flag_reading_error to the text-only set — voice
+    // patients won't ask the bot to flag a historical reading via speech.
     expect(textOnly.sort()).toEqual(
-      ['log_medication_adherence', 'log_symptom_quick'].sort(),
+      ['flag_reading_error', 'log_medication_adherence', 'log_symptom_quick'].sort(),
     )
   })
 })

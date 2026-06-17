@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PassportStrategy } from '@nestjs/passport'
 import type { Request } from 'express'
 import { ExtractJwt, Strategy } from 'passport-jwt'
 import { UserRole } from '../../generated/prisma/enums.js'
+import { PrismaService } from '../../prisma/prisma.service.js'
 import {
   LEGACY_ACCESS_COOKIE,
   cookieName,
@@ -51,7 +52,10 @@ function fromAccessCookie(req: Request): string | null {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     super({
       // Accept BOTH the Authorization: Bearer header AND the HttpOnly cookie.
       // Bearer takes precedence so existing API clients that send the header
@@ -66,12 +70,42 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     })
   }
 
-  validate(payload: JwtPayload) {
+  /**
+   * Phase/practice-identity (Manisha 2026-06-12 §1, Edge Case 1) — if the
+   * access token carries an `activePracticeId` claim but the user is no
+   * longer a member of that practice (admin removed them after sign-in),
+   * the request must NOT silently succeed under the stale context. Throw
+   * a 401 with a discriminated `errorCode` the FE catches on the
+   * 401-refresh-retry path to bounce the user to /sign-in/select-practice
+   * with a "your practice membership has changed" banner. One indexed
+   * PracticeProvider lookup per request when the claim is set — skipped
+   * entirely for SUPER_ADMIN / HEALPLACE_OPS / PATIENT sessions (their
+   * claim is null).
+   */
+  async validate(payload: JwtPayload) {
+    const activePracticeId = payload.activePracticeId ?? null
+    if (activePracticeId) {
+      const membership = await this.prisma.practiceProvider.findUnique({
+        where: {
+          practiceId_userId: {
+            practiceId: activePracticeId,
+            userId: payload.sub,
+          },
+        },
+        select: { id: true },
+      })
+      if (!membership) {
+        throw new UnauthorizedException({
+          message: 'Your practice membership has changed — please pick a practice again.',
+          errorCode: 'PRACTICE_MEMBERSHIP_REVOKED',
+        })
+      }
+    }
     return {
       id: payload.sub,
       email: payload.email,
       roles: payload.roles,
-      activePracticeId: payload.activePracticeId ?? null,
+      activePracticeId,
     }
   }
 }

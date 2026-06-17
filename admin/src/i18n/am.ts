@@ -827,6 +827,7 @@ const am: Record<TranslationKey, string> = {
   'topBar.actingAs.label': 'በመሆን', // EN: Acting as
   'topBar.actingAs.switchTo': 'ክሊኒክ ቀይር', // EN: Switch practice
   'topBar.actingAs.switching': 'በመቀየር ላይ…', // EN: Switching…
+  'topBar.actingAs.switched': 'አሁን በ', // EN: Now acting as
   'topBar.actingAs.current': 'አሁን', // EN: Current
 };
 

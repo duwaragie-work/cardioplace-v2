@@ -10,6 +10,7 @@ import {
   Req,
 } from '@nestjs/common'
 import type { Request } from 'express'
+import { ActiveContext } from '../auth/decorators/active-context.decorator.js'
 import { Roles } from '../auth/decorators/roles.decorator.js'
 import {
   ActorUser,
@@ -57,10 +58,11 @@ export class AdminReadingsController {
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Body() dto: CreateJournalEntryDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     const actor = this.actorOf(req)
     await this.access.assertCanAccessPatient(actor, patientUserId)
-    return this.journal.create(patientUserId, dto, actor)
+    return this.journal.create(patientUserId, dto, actor, ctx)
   }
 
   /**
@@ -73,12 +75,13 @@ export class AdminReadingsController {
     @Param('userId') patientUserId: string,
     @Param('entryId') entryId: string,
     @Body() dto: UpdateJournalEntryDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     const actor = this.actorOf(req)
     await this.access.assertCanAccessPatient(actor, patientUserId)
     // Service scopes the lookup to {entryId, patientUserId} — an entryId
     // belonging to a different patient 404s without confirming existence.
-    return this.journal.update(patientUserId, entryId, dto, actor)
+    return this.journal.update(patientUserId, entryId, dto, actor, ctx)
   }
 
   /**
@@ -91,10 +94,11 @@ export class AdminReadingsController {
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Param('entryId') entryId: string,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     const actor = this.actorOf(req)
     await this.access.assertCanAccessPatient(actor, patientUserId)
-    return this.journal.delete(patientUserId, entryId, actor)
+    return this.journal.delete(patientUserId, entryId, actor, ctx)
   }
 
   private actorOf(req: AuthedReq): ActorUser {

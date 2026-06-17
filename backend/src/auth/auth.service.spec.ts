@@ -115,6 +115,13 @@ describe('AuthService', () => {
         create: jest.fn(),
         upsert: jest.fn(),
       },
+      // June 2026 — phase/practice-identity. Mock for resolvePracticeContext +
+      // selectPractice + switchPractice membership lookups. Tests override
+      // per-case (findMany for resolve, findUnique for select/switch).
+      practiceProvider: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn(),
+      },
     }
     prismaMock.$transaction = jest
       .fn()
@@ -1462,6 +1469,139 @@ describe('AuthService', () => {
         data: { revokedAt: expect.any(Date) },
       })
       expect(prisma.authSession.delete).not.toHaveBeenCalled()
+    })
+  })
+
+  // ==========================================================================
+  // Phase/practice-identity (Manisha 2026-06-12 Access Control §1)
+  // ==========================================================================
+  describe('resolvePracticeContext', () => {
+    it('SUPER_ADMIN → kind:"none" (org-wide, bypasses selector)', async () => {
+      const result = await service.resolvePracticeContext('user-x', [
+        UserRole.SUPER_ADMIN,
+      ])
+      expect(result).toEqual({ kind: 'none' })
+      expect(prisma.practiceProvider.findMany).not.toHaveBeenCalled()
+    })
+
+    it('HEALPLACE_OPS → kind:"none" (org-wide, bypasses selector)', async () => {
+      const result = await service.resolvePracticeContext('user-x', [
+        UserRole.HEALPLACE_OPS,
+      ])
+      expect(result).toEqual({ kind: 'none' })
+    })
+
+    it('PATIENT → kind:"none" (not a multi-practice role)', async () => {
+      const result = await service.resolvePracticeContext('user-x', [
+        UserRole.PATIENT,
+      ])
+      expect(result).toEqual({ kind: 'none' })
+    })
+
+    it('PROVIDER with single membership → kind:"auto" with that practiceId', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practiceId: 'p-a', practice: { id: 'p-a', name: 'Cedar Hill' } },
+      ])
+      const result = await service.resolvePracticeContext('user-x', [
+        UserRole.PROVIDER,
+      ])
+      expect(result).toEqual({ kind: 'auto', activePracticeId: 'p-a' })
+    })
+
+    it('PROVIDER with 2+ memberships → kind:"select" with the practices', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practiceId: 'p-a', practice: { id: 'p-a', name: 'Cedar Hill' } },
+        { practiceId: 'p-b', practice: { id: 'p-b', name: 'BridgePoint' } },
+      ])
+      const result = await service.resolvePracticeContext('user-x', [
+        UserRole.PROVIDER,
+      ])
+      expect(result).toEqual({
+        kind: 'select',
+        practices: [
+          { id: 'p-a', name: 'Cedar Hill' },
+          { id: 'p-b', name: 'BridgePoint' },
+        ],
+      })
+    })
+
+    it('PROVIDER with zero memberships → kind:"blocked"', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([])
+      const result = await service.resolvePracticeContext('user-x', [
+        UserRole.PROVIDER,
+      ])
+      expect(result).toEqual({ kind: 'blocked' })
+    })
+
+    it('MEDICAL_DIRECTOR with 2+ memberships → same selector branch as PROVIDER', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practiceId: 'p-a', practice: { id: 'p-a', name: 'A' } },
+        { practiceId: 'p-b', practice: { id: 'p-b', name: 'B' } },
+      ])
+      const result = await service.resolvePracticeContext('user-x', [
+        UserRole.MEDICAL_DIRECTOR,
+      ])
+      expect(result.kind).toBe('select')
+    })
+
+    it('SUPER_ADMIN with 2+ memberships → still "none" (org-wide trumps)', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practiceId: 'p-a', practice: { id: 'p-a', name: 'A' } },
+        { practiceId: 'p-b', practice: { id: 'p-b', name: 'B' } },
+      ])
+      const result = await service.resolvePracticeContext('user-x', [
+        UserRole.SUPER_ADMIN,
+        UserRole.PROVIDER,
+      ])
+      expect(result.kind).toBe('none')
+    })
+  })
+
+  describe('switchPractice', () => {
+    const provider = {
+      id: 'user-prov',
+      email: 'p@example.com',
+      name: 'Dr. P',
+      roles: [UserRole.PROVIDER],
+      onboardingStatus: OnboardingStatus.COMPLETED,
+      accountStatus: AccountStatus.ACTIVE,
+    }
+
+    it('throws ForbiddenException when target practice is not in memberships', async () => {
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue(null)
+      await expect(
+        service.switchPractice('user-prov', 'token-1', 'p-c'),
+      ).rejects.toThrow(ForbiddenException)
+      // Defensive — should NOT touch AuthSession or AuthLog when membership check fails.
+      expect(prisma.authSession.update).not.toHaveBeenCalled()
+    })
+
+    it('updates AuthSession.activePracticeId + writes practice_switched AuthLog with practiceContext', async () => {
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue({
+        id: 'pp-1',
+      })
+      ;(prisma.authSession.findUnique as jest.Mock).mockResolvedValue({
+        activePracticeId: 'p-a',
+      })
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({
+        user: provider,
+      })
+      const result = await service.switchPractice('user-prov', 'token-1', 'p-b')
+      expect(result.activePracticeId).toBe('p-b')
+      // Fresh access token is minted carrying the new context.
+      expect(typeof result.accessToken).toBe('string')
+      expect(prisma.authSession.update).toHaveBeenCalledWith({
+        where: { refreshTokenId: 'token-1' },
+        data: { activePracticeId: 'p-b' },
+        select: expect.any(Object),
+      })
+      const authLogCall = (prisma.authLog.create as jest.Mock).mock.calls.find(
+        (c: unknown[]) =>
+          (c[0] as { data: { event: string } }).data.event === 'practice_switched',
+      )
+      expect(authLogCall).toBeTruthy()
+      const data = (authLogCall![0] as { data: { practiceContext: string } }).data
+      expect(data.practiceContext).toBe('p-b')
     })
   })
 })

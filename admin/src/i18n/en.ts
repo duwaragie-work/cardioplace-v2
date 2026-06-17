@@ -828,6 +828,7 @@ const en = {
   'topBar.actingAs.label': 'Acting as',
   'topBar.actingAs.switchTo': 'Switch practice',
   'topBar.actingAs.switching': 'Switching…',
+  'topBar.actingAs.switched': 'Now acting as',
   'topBar.actingAs.current': 'Current',
 } as const;
 

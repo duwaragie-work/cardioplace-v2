@@ -827,6 +827,7 @@ const de: Record<TranslationKey, string> = {
   'topBar.actingAs.label': 'Handeln als', // EN: Acting as
   'topBar.actingAs.switchTo': 'Praxis wechseln', // EN: Switch practice
   'topBar.actingAs.switching': 'Wechseln…', // EN: Switching…
+  'topBar.actingAs.switched': 'Jetzt handeln als', // EN: Now acting as
   'topBar.actingAs.current': 'Aktuell', // EN: Current
 };
 

@@ -14,6 +14,7 @@ import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import AdminSidebar from './AdminSidebar';
 import AdminTopBar from './AdminTopBar';
+import ZeroPracticeModal from './ZeroPracticeModal';
 
 const PUBLIC_PATHS = new Set<string>(['/', '/home', '/about', '/sign-in', '/terms', '/privacy']);
 
@@ -89,6 +90,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             "Skip to main content" link move focus here (not just scroll). */}
         <main id="main" tabIndex={-1} className="flex-1 min-h-0">{children}</main>
       </div>
+      {/* Phase/practice-identity — defensive zero-state block when a
+          practice-bound user lands without an active practice (e.g. their
+          last membership was revoked while signed in). */}
+      <ZeroPracticeModal />
     </div>
   );
 }

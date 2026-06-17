@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Building2, ChevronDown } from 'lucide-react';
+import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 
@@ -106,8 +107,17 @@ export default function PracticeContextChip() {
                   try {
                     await switchPractice(p.id);
                     setOpen(false);
+                    // Phase/practice-identity — confirmation toast so the
+                    // provider knows their audit context flipped. The chip
+                    // label updates from auth-context state on next render.
+                    toast.success(
+                      `${t('topBar.actingAs.switched') ?? 'Now acting as'}: ${p.name}`,
+                    );
                   } catch (err) {
                     console.error('[practice-switch] failed', err);
+                    toast.error(
+                      err instanceof Error ? err.message : 'Could not switch practice',
+                    );
                   } finally {
                     setSwitching(null);
                   }

@@ -841,11 +841,11 @@ describe('SystemPromptService', () => {
       expect(out).toContain('session_id')
     })
 
-    it('edit-window guidance (Item 5) appears with 5-min boundary + flag fallback', () => {
+    it('edit-window guidance (Item 5) appears with 5-min boundary + flag_reading_error fallback', () => {
       const out = service.buildSystemPrompt()
       expect(out).toContain('EDIT WINDOW')
       expect(out).toContain('5 minutes')
-      expect(out).toContain('reading_error_flag')
+      expect(out).toContain('flag_reading_error')
     })
 
     it('enrollment-aware messaging (Item 6) names both branches', () => {

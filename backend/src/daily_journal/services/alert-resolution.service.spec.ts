@@ -104,6 +104,30 @@ describe('AlertResolutionService', () => {
       })
     })
 
+    // Phase/practice-identity (Manisha 2026-06-12 §1, HIPAA 45 CFR
+    // §164.312(a)(2)(i)) — ack writes must capture WHICH practice the
+    // actor was acting under, both on the DeviationAlert row and on the
+    // EscalationEvent rows that get closed alongside.
+    it('persists actorPracticeContext on DeviationAlert + EscalationEvent when ctx provided', async () => {
+      await service.acknowledge(alertId, actor, { practiceId: 'p-bridge' })
+      expect(prisma.deviationAlert.update).toHaveBeenCalledWith({
+        where: { id: alertId },
+        data: expect.objectContaining({ actorPracticeContext: 'p-bridge' }),
+      })
+      expect(prisma.escalationEvent.updateMany).toHaveBeenCalledWith({
+        where: { alertId, acknowledgedAt: null, resolvedAt: null },
+        data: expect.objectContaining({ actorPracticeContext: 'p-bridge' }),
+      })
+    })
+
+    it('falls back to null actorPracticeContext when ctx omitted (org-wide actor)', async () => {
+      await service.acknowledge(alertId, actor)
+      expect(prisma.deviationAlert.update).toHaveBeenCalledWith({
+        where: { id: alertId },
+        data: expect.objectContaining({ actorPracticeContext: null }),
+      })
+    })
+
     it('idempotent on already-acknowledged alert', async () => {
       const prevAck = new Date('2026-04-22T11:00:00Z')
       prisma.deviationAlert.findUnique.mockResolvedValue({

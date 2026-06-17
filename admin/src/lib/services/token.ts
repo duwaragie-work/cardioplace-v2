@@ -97,6 +97,23 @@ export async function fetchWithAuth(
 
   if (response.status !== 401) return response;
 
+  // Phase/practice-identity — JwtStrategy throws PRACTICE_MEMBERSHIP_REVOKED
+  // when a signed-in user's last membership in their active practice was
+  // removed. Don't try to refresh (the refresh would either succeed with
+  // the same stale claim, or hit the same membership check). Bounce to
+  // the selector page directly so the user re-picks.
+  try {
+    const cloned = response.clone();
+    const data = (await cloned.json()) as { errorCode?: string };
+    if (data?.errorCode === 'PRACTICE_MEMBERSHIP_REVOKED') {
+      clearAuthMemory();
+      window.location.href = '/sign-in/select-practice?reason=membership-changed';
+      return response;
+    }
+  } catch {
+    // Not JSON or empty body — fall through to standard refresh path.
+  }
+
   const newToken = await attemptTokenRefresh();
 
   if (newToken) {

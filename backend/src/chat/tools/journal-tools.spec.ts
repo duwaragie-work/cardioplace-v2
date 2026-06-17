@@ -158,15 +158,16 @@ describe('journal-tools', () => {
     // evaluate_reading (chatbot can ask the rule engine what a given
     // BP/HR reading means for this patient, returning the canonical
     // patient-tier message).
-    it('should return 11 tool declarations', () => {
+    it('should return 12 tool declarations', () => {
       const declarations = getJournalToolDeclarations()
-      expect(declarations).toHaveLength(11)
+      expect(declarations).toHaveLength(12)
       expect(declarations.map((d) => d.name).sort()).toEqual([
         'check_intake_status',
         'delete_checkin',
         'evaluate_reading',
         'finalize_checkin',
         'flag_emergency',
+        'flag_reading_error',
         'get_recent_readings',
         'log_medication_adherence',
         'log_symptom_quick',
