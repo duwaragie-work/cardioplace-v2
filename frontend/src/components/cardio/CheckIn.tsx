@@ -2872,10 +2872,21 @@ export default function CheckIn() {
     setCommittingBuffer(true);
     try {
       const created = [] as Awaited<ReturnType<typeof createJournalEntry>>[];
-      for (const payload of commitPayloads(draft)) {
+      const payloads = commitPayloads(draft);
+      for (let i = 0; i < payloads.length; i++) {
         // Bug 19 — "I'm good" is an explicit session boundary; close it so the
         // active-session prompt won't re-offer this sitting on the next check-in.
-        created.push(await createJournalEntry({ ...payload, closeSession: true }));
+        // Bug 23 — closeSession ALSO triggers the backend buffer fast-fire (skip
+        // the post-commit single-reading hold). Send it ONLY on the LAST reading
+        // so a multi-reading sitting still session-averages: the earlier readings
+        // stay held until this final one closes the session, then the engine
+        // fires once on the averaged result. The backend's sessionClosedAt +
+        // finalize updateMany covers every reading in the shared session, so one
+        // closeSession on the last reading still closes the whole sitting.
+        const isLast = i === payloads.length - 1;
+        created.push(
+          await createJournalEntry({ ...payloads[i], closeSession: isLast }),
+        );
       }
       if (user?.id) {
         clearBufferDraft(user.id);
