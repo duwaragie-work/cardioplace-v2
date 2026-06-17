@@ -16,6 +16,7 @@ const mockPrisma = {
   journalEntry: {
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     delete: jest.fn(),
     findMany: jest.fn(),
     findUnique: jest.fn(),
@@ -520,6 +521,129 @@ describe('DailyJournalService', () => {
       const updateArg = mockPrisma.journalEntry.update.mock.calls[0][0]
       // sessionId NOT in the update payload — was never re-resolved.
       expect(updateArg.data.sessionId).toBeUndefined()
+    })
+  })
+
+  // Bug 23 (2026-06-17) — per-pathway engine-evaluation deferral. The buffer
+  // already gives the patient a 5-min on-device edit window, so an explicit
+  // "I'm good" close (closeSession) shouldn't ALSO wait out the single-reading
+  // hold + cron. Flag-gated by BUFFER_SKIPS_DEFER (default off).
+  describe('create — Bug 23 buffer fast-fire (BUFFER_SKIPS_DEFER)', () => {
+    function bug23Entry(sessionId: string) {
+      return {
+        id: 'e-bug23',
+        userId: 'u1',
+        measuredAt: new Date('2026-05-22T10:00:00Z'),
+        systolicBP: 145,
+        diastolicBP: 85,
+        pulse: 72,
+        weight: null,
+        position: null,
+        sessionId,
+        emergencyConfirmation: null,
+        confirmsEntryId: null,
+        engineEvaluationDeferredUntil: null,
+        singleReadingFinalized: false,
+        medicationTaken: null,
+        medicationScheduledLater: false,
+        missedDoses: null,
+        missedMedications: null,
+        otherSymptoms: [],
+        teachBackAnswer: null,
+        teachBackCorrect: null,
+        notes: null,
+        source: EntrySource.MANUAL,
+        sourceMetadata: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+    }
+
+    // Standard single-reading create mock sequence (gate → resolveSessionId →
+    // create → finalize-check → newer-outside-session). sessionId is honoured
+    // as fresh (findFirst → null).
+    function primeCreateMocks(sessionId: string) {
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' }) // gate
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // resolveCreateSessionId: fresh id
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(bug23Entry(sessionId))
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(0) // siblings
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ hasAFib: false })
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(20) // lifetime
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // newer-outside-session
+    }
+
+    const ORIG_FLAG = process.env.BUFFER_SKIPS_DEFER
+    afterEach(() => {
+      if (ORIG_FLAG === undefined) delete process.env.BUFFER_SKIPS_DEFER
+      else process.env.BUFFER_SKIPS_DEFER = ORIG_FLAG
+    })
+
+    const base = { measuredAt: '2026-05-22T10:00:00Z', systolicBP: 145, diastolicBP: 85 }
+
+    it('flag ON + closeSession → engineEvaluationDeferredUntil null + finalized at create', async () => {
+      process.env.BUFFER_SKIPS_DEFER = 'true'
+      primeCreateMocks('s-buf')
+      await service.create('u1', { ...base, sessionId: 's-buf', closeSession: true } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.engineEvaluationDeferredUntil).toBeNull()
+      expect(data.singleReadingFinalized).toBe(true)
+      // the whole sitting is finalized + un-badged so a multi-reading session
+      // averages and fires now (the last reading closes it).
+      const closeCall = mockPrisma.journalEntry.updateMany.mock.calls.find(
+        (c: any) => c[0]?.data?.singleReadingFinalized === true,
+      )
+      expect(closeCall).toBeTruthy()
+      expect(closeCall[0].where).toMatchObject({ userId: 'u1', sessionId: 's-buf' })
+      expect(closeCall[0].data.engineEvaluationDeferredUntil).toBeNull()
+    })
+
+    it('flag OFF (default) + closeSession → keeps the 5-min defer (backward compat)', async () => {
+      delete process.env.BUFFER_SKIPS_DEFER
+      primeCreateMocks('s-buf')
+      const before = Date.now()
+      await service.create('u1', { ...base, sessionId: 's-buf', closeSession: true } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.singleReadingFinalized).toBe(false)
+      expect(data.engineEvaluationDeferredUntil).toBeInstanceOf(Date)
+      const deferMs = (data.engineEvaluationDeferredUntil as Date).getTime() - before
+      expect(deferMs).toBeGreaterThan(4 * 60 * 1000) // ~5 min ahead
+      // no finalize on the close updateMany when the flag is off
+      const closeCall = mockPrisma.journalEntry.updateMany.mock.calls.find(
+        (c: any) => c[0]?.data?.sessionClosedAt,
+      )
+      expect(closeCall?.[0].data.singleReadingFinalized).toBeUndefined()
+    })
+
+    it('flag ON but NO closeSession (chat/voice pathway) → keeps the 5-min defer', async () => {
+      process.env.BUFFER_SKIPS_DEFER = 'true'
+      primeCreateMocks('s-chat')
+      await service.create('u1', { ...base, sessionId: 's-chat', source: 'manual' } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.singleReadingFinalized).toBe(false)
+      expect(data.engineEvaluationDeferredUntil).toBeInstanceOf(Date)
+    })
+
+    it('flag ON + closeSession but ADMIN actor → fast-fire scoped out (defer already null, not finalized)', async () => {
+      process.env.BUFFER_SKIPS_DEFER = 'true'
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' }) // gate
+      // actor + sessionId → assertSessionJoinable findFirst, then resolveCreateSessionId
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // assertSessionJoinable: no members
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // resolveCreateSessionId: fresh
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(bug23Entry('s-admin'))
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(0)
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ hasAFib: false })
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(20)
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null)
+      await service.create(
+        'u1',
+        { ...base, sessionId: 's-admin', closeSession: true } as any,
+        { id: 'admin-1', roles: ['PROVIDER'] } as any,
+      )
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      // admin already gets a null defer (existing policy) but is NOT fast-
+      // finalized — the buffer fast-fire is patient-only.
+      expect(data.engineEvaluationDeferredUntil).toBeNull()
+      expect(data.singleReadingFinalized).toBe(false)
     })
   })
 
