@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
@@ -31,6 +32,8 @@ describe('AuthService', () => {
   let service: AuthService
   let prisma: PrismaService
   let bcryptService: BcryptService
+  // Phase/practice-identity — selectPractice unit tests poke verifyAsync.
+  let jwtService: JwtService
 
   // Mock data
   const mockUser = {
@@ -145,6 +148,12 @@ describe('AuthService', () => {
             signAsync: jest
               .fn<() => Promise<string>>()
               .mockResolvedValue('mock.jwt.token'),
+            // Phase/practice-identity — selectPractice round-trips the
+            // challenge token via verifyAsync. Default to a happy-path
+            // PROVIDER subject; individual tests override per-case.
+            verifyAsync: jest
+              .fn<() => Promise<unknown>>()
+              .mockResolvedValue({ sub: 'user-prov', kind: 'practice_select' }),
           },
         },
         {
@@ -195,6 +204,7 @@ describe('AuthService', () => {
     service = module.get<AuthService>(AuthService)
     prisma = module.get<PrismaService>(PrismaService)
     bcryptService = module.get<BcryptService>(BcryptService)
+    jwtService = module.get<JwtService>(JwtService)
   })
 
   afterEach(() => {
@@ -1602,6 +1612,89 @@ describe('AuthService', () => {
       expect(authLogCall).toBeTruthy()
       const data = (authLogCall![0] as { data: { practiceContext: string } }).data
       expect(data.practiceContext).toBe('p-b')
+    })
+  })
+
+  describe('selectPractice', () => {
+    const provider = {
+      id: 'user-prov',
+      email: 'p@example.com',
+      name: 'Dr. P',
+      roles: [UserRole.PROVIDER],
+      isVerified: true,
+      onboardingStatus: OnboardingStatus.COMPLETED,
+      accountStatus: AccountStatus.ACTIVE,
+      dateOfBirth: null,
+      communicationPreference: null,
+      preferredLanguage: 'en',
+      timezone: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+
+    function setupHappyPath() {
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(provider)
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue({
+        id: 'pp-1',
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'token-fresh',
+      })
+      ;(prisma.authSession.create as jest.Mock).mockResolvedValue({
+        id: 'sess-fresh',
+      })
+    }
+
+    it('rejects with 401 when the challenge JWT fails to verify', async () => {
+      ;(jwtService.verifyAsync as jest.Mock).mockRejectedValueOnce(
+        new Error('jwt expired'),
+      )
+      await expect(
+        service.selectPractice('bad.jwt', 'p-a'),
+      ).rejects.toThrow(UnauthorizedException)
+      expect(prisma.user.findUnique).not.toHaveBeenCalled()
+    })
+
+    it('rejects when the challenge payload has the wrong kind (replay defense)', async () => {
+      ;(jwtService.verifyAsync as jest.Mock).mockResolvedValueOnce({
+        sub: 'user-prov',
+        kind: 'access', // not 'practice_select'
+      })
+      await expect(
+        service.selectPractice('access.jwt', 'p-a'),
+      ).rejects.toThrow(UnauthorizedException)
+    })
+
+    it('rejects with 403 when the chosen practice is not in user memberships', async () => {
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(provider)
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue(null)
+      await expect(
+        service.selectPractice('valid.jwt', 'p-other'),
+      ).rejects.toThrow(ForbiddenException)
+      // No tokens issued for a foreign practice attempt.
+      expect(prisma.refreshToken.create).not.toHaveBeenCalled()
+    })
+
+    it('issues token pair + writes practice_selected AuthLog with practiceContext on happy path', async () => {
+      setupHappyPath()
+      const result = await service.selectPractice('valid.jwt', 'p-a')
+      expect(result.accessToken).toBe('mock.jwt.token')
+      expect(typeof result.refreshToken).toBe('string')
+      expect(result.activePracticeId).toBe('p-a')
+      // AuthSession.create must persist activePracticeId so subsequent
+      // requests on this device carry the JWT claim correctly.
+      expect(prisma.authSession.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ activePracticeId: 'p-a' }),
+        }),
+      )
+      const authLogCall = (prisma.authLog.create as jest.Mock).mock.calls.find(
+        (c: unknown[]) =>
+          (c[0] as { data: { event: string } }).data.event === 'practice_selected',
+      )
+      expect(authLogCall).toBeTruthy()
+      const data = (authLogCall![0] as { data: { practiceContext: string } }).data
+      expect(data.practiceContext).toBe('p-a')
     })
   })
 })

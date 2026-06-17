@@ -1,10 +1,13 @@
 /**
- * Manual smoke driver — exercises the three Nivakaran handoff phases
- * against the backend on http://localhost:4000.
+ * Manual smoke driver — exercises the Nivakaran handoff phases against the
+ * backend on http://localhost:4000.
  *
  *   Phase 1 — Practice-wide patient visibility (RBAC)
  *   Phase 3 — Concurrent sessions (3 admin / 1 patient)
  *   Phase 2 — Idle timeout (15 min web / 5 min mobile)
+ *   Phase 4 — Practice-identity selector + switcher + audit attribution
+ *             (creates Practice B + multi-practice provider inline if
+ *             they don't already exist; verifies AuthLog persistence).
  *
  * Reads DATABASE_URL from backend/.env (currently Cloud) and acts directly
  * on the Prisma DB for setup/teardown + time-warp.
@@ -338,6 +341,191 @@ async function phase2() {
   else bad(`Mobile: refresh past 6 min returned ${staleMob.status} (expected 401)`)
 }
 
+// ─── Phase 4 — Practice-identity selector + switcher + audit attribution ───
+async function phase4() {
+  banner('Phase 4 — Practice-identity selector + switcher + audit')
+
+  const MULTI_EMAIL = 'multi-practice-provider@cardioplace.test'
+  const PRACTICE_A_ID = 'seed-cedar-hill'
+  const PRACTICE_B_ID = 'seed-bridgepoint'
+
+  // ── Setup: ensure Practice B + multi-practice provider exist ──
+  await prisma.practice.upsert({
+    where: { id: PRACTICE_B_ID },
+    update: {},
+    create: {
+      id: PRACTICE_B_ID,
+      name: 'BridgePoint Cardiology',
+      businessHoursStart: '07:30',
+      businessHoursEnd: '17:30',
+      businessHoursTimezone: 'America/New_York',
+      afterHoursProtocol: 'After-hours BP escalations route to the shared on-call rotation.',
+    },
+  })
+  info(`Practice B ensured: ${PRACTICE_B_ID}`)
+
+  // Provider — only create if missing (don't touch pwdhash on existing).
+  let provider = await prisma.user.findUnique({
+    where: { email: MULTI_EMAIL },
+    select: { id: true },
+  })
+  if (!provider) {
+    // Reuse the seed pwdhash/otp via raw upsert helpers from seed/helpers.ts
+    // by importing them dynamically — keeps this script self-contained.
+    const helpers = await import('../prisma/seed/helpers.js') as {
+      hashPassword: (s: string) => Promise<string>
+      hashOtp: (s: string) => Promise<string>
+      seedPermaOtp: (email: string, hash: string) => Promise<void>
+    }
+    const pwdhash = await helpers.hashPassword('demo-password')
+    const otpHash = await helpers.hashOtp(DEMO_OTP)
+    provider = await prisma.user.create({
+      data: {
+        email: MULTI_EMAIL,
+        pwdhash,
+        name: 'Dr. Aisha Nasser',
+        roles: ['PROVIDER'],
+        isVerified: true,
+        onboardingStatus: 'COMPLETED',
+        timezone: 'America/New_York',
+      },
+      select: { id: true },
+    })
+    await helpers.seedPermaOtp(MULTI_EMAIL, otpHash)
+    info(`Multi-practice provider CREATED: ${MULTI_EMAIL}`)
+  } else {
+    info(`Multi-practice provider found: ${MULTI_EMAIL}`)
+  }
+
+  await prisma.practiceProvider.upsert({
+    where: { practiceId_userId: { practiceId: PRACTICE_A_ID, userId: provider.id } },
+    update: {},
+    create: { practiceId: PRACTICE_A_ID, userId: provider.id },
+  })
+  await prisma.practiceProvider.upsert({
+    where: { practiceId_userId: { practiceId: PRACTICE_B_ID, userId: provider.id } },
+    update: {},
+    create: { practiceId: PRACTICE_B_ID, userId: provider.id },
+  })
+  info(`Memberships ensured: ${PRACTICE_A_ID} + ${PRACTICE_B_ID}`)
+
+  // ── STEP 1 — /otp/verify returns PRACTICE_SELECT_REQUIRED ──
+  const deviceId = `smoke-multi-${rid()}`
+  await fetch(`${API}/api/v2/auth/otp/send`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: MULTI_EMAIL, appContext: 'admin' }),
+  })
+  const verifyRes = await fetch(`${API}/api/v2/auth/otp/verify`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-device-id': deviceId,
+      'x-device-platform': 'web',
+    },
+    body: JSON.stringify({
+      email: MULTI_EMAIL,
+      otp: DEMO_OTP,
+      deviceId,
+      appContext: 'admin',
+    }),
+  })
+  const verifyBody: any = await verifyRes.json()
+  if (verifyBody.status === 'PRACTICE_SELECT_REQUIRED' && verifyBody.challengeToken) {
+    ok('Multi-practice verify returns PRACTICE_SELECT_REQUIRED with challenge')
+    const practiceIds: string[] = (verifyBody.practices ?? []).map((p: any) => p.id)
+    if (practiceIds.includes(PRACTICE_A_ID) && practiceIds.includes(PRACTICE_B_ID)) {
+      ok('Both seed-cedar-hill + seed-bridgepoint surfaced as selectable')
+    } else {
+      bad(`Practice list missing one of A/B: ${practiceIds.join(',')}`)
+    }
+  } else {
+    bad(`Expected PRACTICE_SELECT_REQUIRED, got: ${JSON.stringify(verifyBody).slice(0, 160)}`)
+    return
+  }
+
+  // ── STEP 2 — /select-practice issues tokens with activePracticeId=A ──
+  const cookies: string[] = []
+  const captureCookies = (res: Response) => {
+    const setCookie = res.headers.get('set-cookie') ?? ''
+    for (const c of setCookie.split(/,(?=[^;]+=)/)) {
+      cookies.push(c.split(';')[0].trim())
+    }
+  }
+  const selectRes = await fetch(`${API}/api/v2/auth/select-practice`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-device-id': deviceId,
+    },
+    body: JSON.stringify({
+      challengeToken: verifyBody.challengeToken,
+      practiceId: PRACTICE_A_ID,
+    }),
+  })
+  captureCookies(selectRes)
+  const selectBody: any = await selectRes.json()
+  if (selectRes.status === 201 && selectBody.activePracticeId === PRACTICE_A_ID) {
+    ok(`Select-practice issued tokens with activePracticeId=${PRACTICE_A_ID}`)
+  } else {
+    bad(`Select-practice failed: ${selectRes.status} ${JSON.stringify(selectBody).slice(0, 160)}`)
+    return
+  }
+
+  // ── STEP 3 — /switch-practice flips active context to B + mints fresh access ──
+  const switchRes = await fetch(`${API}/api/v2/auth/switch-practice`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-device-id': deviceId,
+      // Backend's deriveCookieScope reads Origin to pick cp_admin_* vs
+      // cp_patient_* cookie names. Without it, the switch handler can't
+      // find the refresh-token cookie.
+      origin: 'http://localhost:3001',
+      authorization: `Bearer ${selectBody.accessToken}`,
+      cookie: cookies.join('; '),
+    },
+    body: JSON.stringify({ practiceId: PRACTICE_B_ID }),
+  })
+  const switchBody: any = await switchRes.json()
+  if (switchRes.ok && switchBody.activePracticeId === PRACTICE_B_ID && switchBody.accessToken) {
+    if (switchBody.accessToken !== selectBody.accessToken) {
+      ok(`Switch-practice flipped to ${PRACTICE_B_ID} AND minted a fresh access token`)
+    } else {
+      bad(`Switch returned same access token — should mint a fresh one`)
+    }
+  } else {
+    bad(`Switch-practice failed: ${switchRes.status} ${JSON.stringify(switchBody).slice(0, 160)}`)
+    return
+  }
+
+  // ── STEP 4 — AuthLog rows captured practice_selected + practice_switched with correct practiceContext ──
+  const logs = await prisma.authLog.findMany({
+    where: { userId: provider.id, event: { in: ['practice_selected', 'practice_switched'] } },
+    orderBy: { createdAt: 'desc' },
+    take: 5,
+    select: { event: true, practiceContext: true, metadata: true },
+  })
+  const selectedLog = logs.find((l) => l.event === 'practice_selected')
+  const switchedLog = logs.find((l) => l.event === 'practice_switched')
+  if (selectedLog?.practiceContext === PRACTICE_A_ID) {
+    ok(`AuthLog practice_selected captured practiceContext=${PRACTICE_A_ID}`)
+  } else {
+    bad(`AuthLog practice_selected practiceContext = ${selectedLog?.practiceContext ?? 'NULL'} (expected ${PRACTICE_A_ID})`)
+  }
+  if (switchedLog?.practiceContext === PRACTICE_B_ID) {
+    ok(`AuthLog practice_switched captured practiceContext=${PRACTICE_B_ID}`)
+  } else {
+    bad(`AuthLog practice_switched practiceContext = ${switchedLog?.practiceContext ?? 'NULL'} (expected ${PRACTICE_B_ID})`)
+  }
+  const meta = switchedLog?.metadata as { fromPracticeId?: string; toPracticeId?: string } | null
+  if (meta?.fromPracticeId === PRACTICE_A_ID && meta?.toPracticeId === PRACTICE_B_ID) {
+    ok(`AuthLog metadata records fromPracticeId=${PRACTICE_A_ID} → toPracticeId=${PRACTICE_B_ID}`)
+  } else {
+    bad(`AuthLog metadata mismatch: ${JSON.stringify(meta)}`)
+  }
+}
+
 // ─── Run ───────────────────────────────────────────────────────────────────
 async function main() {
   // Quick reachability probe
@@ -347,6 +535,7 @@ async function main() {
   await phase1()
   await phase3()
   await phase2()
+  await phase4()
 
   banner('Done')
 }
