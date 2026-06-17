@@ -22,7 +22,15 @@ import {
   getJournalEntries,
   updateJournalEntry,
   deleteJournalEntry,
+  ReadingTimeConflictError,
 } from '@/lib/services/journal.service';
+import {
+  resolveEditedMeasuredAt,
+  findMeasuredAtCollision,
+  hasSubMinutePrecision,
+  localTimeWithSeconds,
+  isEditableBadgeVisible,
+} from '@/lib/readingEdit';
 import { getMyPatientProfile } from '@/lib/services/intake.service';
 import {
   listMyMedications,
@@ -588,8 +596,7 @@ function EntryCard({
               grace period this reading hasn't been committed to the engine yet,
               so edits/deletes are "free". Informational only; edit/delete stay
               available after the window too. */}
-          {entry.engineEvaluationDeferredUntil &&
-            new Date(entry.engineEvaluationDeferredUntil).getTime() > Date.now() && (
+          {isEditableBadgeVisible(entry.engineEvaluationDeferredUntil, Date.now()) && (
               <span
                 data-testid={`reading-editable-${entry.id}`}
                 className="text-[0.625rem] px-1.5 py-0.5 rounded-full font-semibold"
@@ -995,6 +1002,7 @@ function EditModal({
   heightCm,
   isPregnant,
   medications,
+  originalMeasuredAt,
   onChange,
   onSave,
   onClose,
@@ -1004,6 +1012,10 @@ function EditModal({
   error: string;
   /** True when at least one field differs from the original entry. */
   isDirty: boolean;
+  /** Bug 25 — the entry's original measuredAt ISO. Drives the "recorded at
+   *  HH:MM:SS, seconds kept unless you change the minute" hint, since the HH:MM
+   *  time picker can't render the sub-minute precision Bug 15 Part D surfaces. */
+  originalMeasuredAt: string;
   /** From PatientProfile.heightCm — used to compute BMI in the audio summary. */
   heightCm: number | null;
   /** From PatientProfile.isPregnant — gates the pregnancy-specific symptoms. */
@@ -1180,6 +1192,21 @@ function EditModal({
                     colorScheme: 'light',
                   }}
                 />
+                {/* Bug 25 — the HH:MM picker can't show seconds. When the entry
+                    carries sub-minute precision, tell the patient the seconds
+                    are kept unless they actually change the minute. */}
+                {hasSubMinutePrecision(originalMeasuredAt) && (
+                  <p
+                    data-testid="edit-original-time-hint"
+                    className="mt-1 text-[0.7rem] leading-snug"
+                    style={{ color: 'var(--brand-text-muted)' }}
+                  >
+                    {t('readings.edit.secondsHint').replace(
+                      '{time}',
+                      localTimeWithSeconds(originalMeasuredAt),
+                    )}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -2230,14 +2257,34 @@ export default function ReadingsPage() {
       setEditError(t('readings.validate.missedReason'));
       return;
     }
+    // Bug 25 — resolve the final measuredAt preserving the original seconds when
+    // the minute is unchanged (the HH:MM picker can't show seconds), then reject
+    // a collision with an existing reading inline, before the PATCH. The page
+    // already holds the recent readings in memory, so the check is free; the
+    // backend 409 (catch below) is the safety net for a reading outside that set.
+    let finalMeasuredAt: string | undefined;
+    if (editForm.measuredDate && editForm.measuredTime) {
+      finalMeasuredAt = resolveEditedMeasuredAt(
+        editEntry.measuredAt,
+        editForm.measuredDate,
+        editForm.measuredTime,
+      );
+      const collision = findMeasuredAtCollision(
+        entries,
+        finalMeasuredAt,
+        editEntry.id,
+      );
+      if (collision) {
+        setEditError(t('readings.validate.timeCollision'));
+        return;
+      }
+    }
     setEditSaving(true);
     setEditError('');
     try {
       const payload: Parameters<typeof updateJournalEntry>[1] = {};
-      if (editForm.measuredDate && editForm.measuredTime) {
-        payload.measuredAt = new Date(
-          `${editForm.measuredDate}T${editForm.measuredTime}`,
-        ).toISOString();
+      if (finalMeasuredAt) {
+        payload.measuredAt = finalMeasuredAt;
       }
       if (editForm.position) payload.position = editForm.position;
       if (editForm.systolic) payload.systolicBP = parseInt(editForm.systolic, 10);
@@ -2330,7 +2377,13 @@ export default function ReadingsPage() {
       closeEdit();
       load();
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : 'Failed to save. Please try again.');
+      // Bug 25 Part C — backend 409 safety net (a collision the in-memory check
+      // missed, e.g. a reading outside the loaded window or a concurrent add).
+      if (err instanceof ReadingTimeConflictError) {
+        setEditError(t('readings.validate.timeCollision'));
+      } else {
+        setEditError(err instanceof Error ? err.message : 'Failed to save. Please try again.');
+      }
     } finally {
       setEditSaving(false);
     }
@@ -2543,6 +2596,7 @@ export default function ReadingsPage() {
             heightCm={heightCm}
             isPregnant={isPregnant}
             medications={medications}
+            originalMeasuredAt={editEntry.measuredAt}
             // JSON.stringify is fine here — EditForm is small + flat. Returns
             // false when the user reopens the modal without touching anything.
             isDirty={

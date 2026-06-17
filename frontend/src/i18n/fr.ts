@@ -638,6 +638,8 @@ const fr: Record<TranslationKey, string> = {
   'readings.validate.bpBoth': 'Entrez les deux chiffres de tension artérielle (ou effacez les deux).',
   'readings.validate.weightRange': 'Le poids doit être entre 20 et 600.',
   'readings.validate.missedReason': 'Veuillez choisir une raison pour chaque médicament oublié.',
+  'readings.validate.timeCollision': 'Vous avez déjà une mesure à cette heure exacte. Modifiez l’heure ou la mesure existante.',
+  'readings.edit.secondsHint': 'Enregistrée à {time}. Les secondes sont conservées sauf si vous changez la minute.',
   'readings.sameMinute': 'même minute',
   'readings.sessionReadings': 'Session · {count} lectures',
   'readings.readingsCount': '{count} lectures',

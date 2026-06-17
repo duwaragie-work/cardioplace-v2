@@ -655,6 +655,8 @@ const en = {
   'readings.validate.bpBoth': 'Enter both blood pressure numbers (or clear both).',
   'readings.validate.weightRange': 'Weight should be between 20 and 600.',
   'readings.validate.missedReason': 'Please pick a reason for each medication you missed.',
+  'readings.validate.timeCollision': 'You already have a reading at this exact time. Change the time or edit the existing reading.',
+  'readings.edit.secondsHint': 'Recorded at {time}. The seconds are kept unless you change the minute.',
   'readings.sameMinute': 'same minute',
   'readings.sessionReadings': 'Session · {count} readings',
   'readings.readingsCount': '{count} readings',
