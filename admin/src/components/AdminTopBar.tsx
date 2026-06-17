@@ -9,6 +9,7 @@
 import { usePathname } from 'next/navigation';
 import { Menu, Search } from 'lucide-react';
 import NotificationBell from './NotificationBell';
+import PracticeContextChip from './PracticeContextChip';
 
 const ROUTE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -89,6 +90,7 @@ export default function AdminTopBar({ onOpenMobileNav }: Props) {
               ⌘K
             </span>
           </button>
+          <PracticeContextChip />
           <NotificationBell />
         </div>
       </div>

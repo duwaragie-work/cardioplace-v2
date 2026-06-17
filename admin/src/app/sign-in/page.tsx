@@ -209,6 +209,26 @@ export default function RegisterPage() {
         setErrorKey(backendMsgToKey(data.message) ?? 'register.verificationFailed');
         throw new Error(data.message || "Verification failed.");
       }
+      // Phase/practice-identity (Manisha 2026-06-12 §1) — multi-practice
+      // provider must pick which practice they're acting as before tokens
+      // are issued. Stash the challenge + the choices in sessionStorage
+      // (survives a refresh; tab-scoped) and route to the selector page.
+      if (data && data.status === 'PRACTICE_SELECT_REQUIRED') {
+        try {
+          sessionStorage.setItem(
+            'cp_admin_practice_challenge',
+            JSON.stringify({
+              challengeToken: data.challengeToken,
+              practices: data.practices,
+            }),
+          );
+        } catch {
+          // sessionStorage unavailable (private mode etc.) — fall back to
+          // URL params; the selector page reads both.
+        }
+        router.push('/sign-in/select-practice');
+        return;
+      }
       login(data as AdminAuthResponse);
       router.push("/dashboard");
     } catch (err) {
