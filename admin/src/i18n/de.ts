@@ -808,6 +808,26 @@ const de: Record<TranslationKey, string> = {
   'timeline.filter.readings': 'Messwerte', // EN: Readings
   'alerts.badge.thresholdPending':
     'Patientenschwelle ausstehend — personalisierten Schwellenwert festlegen und Warnung prüfen', // EN: Patient threshold pending — set personalized threshold and review alert
+  // --- Phase/practice-identity — sign-in selector + top-bar switcher chip ---
+  'signIn.selectPractice.title': 'Als welche Praxis handeln Sie?', // EN: Which practice are you acting as?
+  'signIn.selectPractice.intro':
+    'Sie sind Mitglied in mehr als einer Praxis. Wählen Sie die Praxis, in der Sie für diese Sitzung arbeiten — jede Aktion wird unter der gewählten Praxis protokolliert. Sie können später über die obere Leiste wechseln.', // EN: You're a member of more than one practice...
+  'signIn.selectPractice.continue': 'Weiter', // EN: Continue
+  'signIn.selectPractice.signingIn': 'Anmeldung läuft…', // EN: Signing in…
+  'signIn.selectPractice.contactAdmin':
+    'Ihre Praxis fehlt? Melden Sie sich ab und wenden Sie sich an Ihre Administration.', // EN: Not seeing the right practice?...
+  'signIn.selectPractice.error': 'Praxis konnte nicht ausgewählt werden', // EN: Unable to select practice
+  'signIn.selectPractice.expired.title': 'Anmeldesitzung abgelaufen', // EN: Sign-in session expired
+  'signIn.selectPractice.expired.body':
+    'Aus Sicherheitsgründen hat die Praxisauswahl ein 5-Minuten-Fenster. Bitte melden Sie sich erneut an.', // EN: For your security...5-minute window.
+  'signIn.selectPractice.expired.back': 'Zurück zur Anmeldung', // EN: Back to sign in
+  'signIn.zeroPractice.title': 'Keine Praxis-Mitgliedschaft', // EN: No practice membership
+  'signIn.zeroPractice.body':
+    'Sie sind noch keiner Praxis zugeordnet. Wenden Sie sich an Ihre Administration, um hinzugefügt zu werden, bevor Sie sich anmelden.', // EN: You aren't a member of any practice yet...
+  'topBar.actingAs.label': 'Handeln als', // EN: Acting as
+  'topBar.actingAs.switchTo': 'Praxis wechseln', // EN: Switch practice
+  'topBar.actingAs.switching': 'Wechseln…', // EN: Switching…
+  'topBar.actingAs.current': 'Aktuell', // EN: Current
 };
 
 export default de;

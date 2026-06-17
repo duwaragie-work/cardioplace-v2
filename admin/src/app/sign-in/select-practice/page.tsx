@@ -17,6 +17,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, type AdminAuthResponse } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -54,6 +55,7 @@ function readChallenge(): Challenge | null {
 export default function SelectPracticePage() {
   const router = useRouter();
   const { login } = useAuth();
+  const { t } = useLanguage();
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,16 +73,17 @@ export default function SelectPracticePage() {
     return (
       <main className="min-h-screen flex items-center justify-center px-4">
         <div className="max-w-md text-center">
-          <h1 className="text-2xl font-semibold mb-3">Sign-in session expired</h1>
+          <h1 className="text-2xl font-semibold mb-3">
+            {t('signIn.selectPractice.expired.title')}
+          </h1>
           <p className="text-gray-600 mb-6">
-            For your security, the practice-selection step has a 5-minute window.
-            Please sign in again to continue.
+            {t('signIn.selectPractice.expired.body')}
           </p>
           <a
             href="/sign-in"
             className="inline-block rounded-lg bg-purple-600 px-5 py-2.5 text-white"
           >
-            Back to sign in
+            {t('signIn.selectPractice.expired.back')}
           </a>
         </div>
       </main>
@@ -105,7 +108,7 @@ export default function SelectPracticePage() {
         message?: string;
       };
       if (!res.ok) {
-        throw new Error(data?.message ?? `Practice selection failed (${res.status})`);
+        throw new Error(data?.message ?? t('signIn.selectPractice.error'));
       }
       try {
         sessionStorage.removeItem('cp_admin_practice_challenge');
@@ -115,7 +118,9 @@ export default function SelectPracticePage() {
       login(data);
       router.push('/dashboard');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to select practice');
+      setError(
+        err instanceof Error ? err.message : t('signIn.selectPractice.error'),
+      );
       setSubmitting(null);
     }
   }
@@ -128,13 +133,9 @@ export default function SelectPracticePage() {
     >
       <div className="w-full max-w-xl">
         <h1 className="text-3xl font-semibold text-gray-900 mb-2">
-          Which practice are you acting as?
+          {t('signIn.selectPractice.title')}
         </h1>
-        <p className="text-gray-600 mb-8">
-          You&apos;re a member of more than one practice. Pick the one you&apos;ll be
-          working in for this session — every action you take will be audited under
-          the practice you choose. You can switch later from the top bar.
-        </p>
+        <p className="text-gray-600 mb-8">{t('signIn.selectPractice.intro')}</p>
 
         {error && (
           <div
@@ -159,7 +160,9 @@ export default function SelectPracticePage() {
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-gray-900">{p.name}</span>
                     <span className="text-sm text-gray-500">
-                      {isSubmitting ? 'Signing in…' : 'Continue →'}
+                      {isSubmitting
+                        ? t('signIn.selectPractice.signingIn')
+                        : `${t('signIn.selectPractice.continue')} →`}
                     </span>
                   </div>
                 </button>
@@ -169,9 +172,8 @@ export default function SelectPracticePage() {
         </ul>
 
         <p className="mt-8 text-sm text-gray-500">
-          Not seeing the right practice?{' '}
           <a href="/sign-in" className="text-purple-700 underline">
-            Sign out and contact your admin.
+            {t('signIn.selectPractice.contactAdmin')}
           </a>
         </p>
       </div>

@@ -808,6 +808,26 @@ const am: Record<TranslationKey, string> = {
   'timeline.filter.readings': 'ንባቦች', // EN: Readings
   'alerts.badge.thresholdPending':
     'የታካሚ ገደብ በመጠባበቅ ላይ — ብጁ ገደብ ያዘጋጁ እና ማንቂያውን ይገምግሙ', // EN: Patient threshold pending — set personalized threshold and review alert
+  // --- Phase/practice-identity — sign-in selector + top-bar switcher chip ---
+  'signIn.selectPractice.title': 'በየትኛው ክሊኒክ በመሆን ይሰራሉ?', // EN: Which practice are you acting as?
+  'signIn.selectPractice.intro':
+    'ከአንድ በላይ ክሊኒኮች አባል ነዎት። ለዚህ ክፍለ ጊዜ የሚሰሩበት ክሊኒክ ይምረጡ — እያንዳንዱ እርምጃ በተመረጠው ክሊኒክ ስም ይመዘገባል። ቆይተው ከላይ ካለው ባር ላይ መቀየር ይችላሉ።', // EN: You're a member of more than one practice...
+  'signIn.selectPractice.continue': 'ቀጥል', // EN: Continue
+  'signIn.selectPractice.signingIn': 'በመመዝገብ ላይ…', // EN: Signing in…
+  'signIn.selectPractice.contactAdmin':
+    'ትክክለኛውን ክሊኒክ ካላገኙ? ይውጡና ስራ አስኪያጅዎን ያነጋግሩ።', // EN: Not seeing the right practice?...
+  'signIn.selectPractice.error': 'ክሊኒክ መምረጥ አልተቻለም', // EN: Unable to select practice
+  'signIn.selectPractice.expired.title': 'የመግቢያ ክፍለ ጊዜ አብቅቷል', // EN: Sign-in session expired
+  'signIn.selectPractice.expired.body':
+    'ለደህንነት ሲባል የክሊኒክ ምርጫ 5 ደቂቃ ብቻ ይቆያል። እባክዎ መልሰው ይመዝገቡ።', // EN: For your security...5-minute window.
+  'signIn.selectPractice.expired.back': 'ወደ መግቢያ ይመለሱ', // EN: Back to sign in
+  'signIn.zeroPractice.title': 'ምንም የክሊኒክ አባልነት የለም', // EN: No practice membership
+  'signIn.zeroPractice.body':
+    'እስካሁን የየትኛውም ክሊኒክ አባል አይደሉም። ከመመዝገብዎ በፊት እንዲጨመሩ ስራ አስኪያጅዎን ያነጋግሩ።', // EN: You aren't a member of any practice yet...
+  'topBar.actingAs.label': 'በመሆን', // EN: Acting as
+  'topBar.actingAs.switchTo': 'ክሊኒክ ቀይር', // EN: Switch practice
+  'topBar.actingAs.switching': 'በመቀየር ላይ…', // EN: Switching…
+  'topBar.actingAs.current': 'አሁን', // EN: Current
 };
 
 export default am;

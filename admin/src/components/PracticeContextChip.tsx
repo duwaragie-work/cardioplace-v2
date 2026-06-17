@@ -18,9 +18,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Building2, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 export default function PracticeContextChip() {
   const { activePractice, availablePractices, switchPractice } = useAuth();
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const [switching, setSwitching] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -52,10 +54,12 @@ export default function PracticeContextChip() {
           color: 'var(--brand-text-secondary)',
           border: '1px solid var(--brand-border)',
         }}
-        title={`Acting as: ${label}`}
+        title={`${t('topBar.actingAs.label')}: ${label}`}
       >
         <Building2 className="w-3.5 h-3.5" aria-hidden="true" />
-        <span className="truncate max-w-[12rem]">Acting as: {label}</span>
+        <span className="truncate max-w-[12rem]">
+          {t('topBar.actingAs.label')}: {label}
+        </span>
       </div>
     );
   }
@@ -73,7 +77,7 @@ export default function PracticeContextChip() {
         }}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Active practice: ${label}. Click to switch.`}
+        aria-label={`${t('topBar.actingAs.label')}: ${label}`}
       >
         <Building2 className="w-3.5 h-3.5" aria-hidden="true" />
         <span className="truncate max-w-[10rem]">{label}</span>
@@ -86,7 +90,7 @@ export default function PracticeContextChip() {
           className="absolute right-0 mt-2 w-64 rounded-lg bg-white shadow-lg ring-1 ring-black/5 py-1 z-50"
         >
           <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-gray-500">
-            Switch practice
+            {t('topBar.actingAs.switchTo')}
           </div>
           {availablePractices.map((p) => {
             const isCurrent = p.id === activePractice.id;
@@ -112,7 +116,11 @@ export default function PracticeContextChip() {
               >
                 <span className="truncate">{p.name}</span>
                 <span className="text-xs text-gray-500">
-                  {isCurrent ? 'Current' : isSwitching ? 'Switching…' : ''}
+                  {isCurrent
+                    ? t('topBar.actingAs.current')
+                    : isSwitching
+                      ? t('topBar.actingAs.switching')
+                      : ''}
                 </span>
               </button>
             );
