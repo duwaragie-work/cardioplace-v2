@@ -6,14 +6,14 @@
 // (Phase 3) and idle-timeout enforcement (Phase 2: 15 min web / 5 min
 // mobile, Manisha 2026-06-12 Doc 3 Q7).
 model AuthSession {
-  id             String       @id @default(ulid())
-  userId         String
-  refreshTokenId String       @unique
-  deviceType     String? // 'web' | 'mobile' | null
-  deviceId       String?
-  deviceName     String?
-  userAgent      String?
-  ipAddress      String?
+  id               String       @id @default(ulid())
+  userId           String
+  refreshTokenId   String       @unique
+  deviceType       String? // 'web' | 'mobile' | null
+  deviceId         String?
+  deviceName       String?
+  userAgent        String?
+  ipAddress        String?
   // June 2026 — geolocation anomaly audit (Manisha 2026-06-12 Doc 2 Q1).
   // `geohash` is a privacy-preserving hash of the IP's /24 subnet (IPv4)
   // or /48 prefix (IPv6) + a server-side salt, NOT a true geo-grid hash.
@@ -22,13 +22,25 @@ model AuthSession {
   // ('UNKNOWN' otherwise — wire a real GeoIP DB later without a schema
   // change). Anomaly = the rotating session's new geohash differs from
   // the stored value AND both are non-null. Audit-only, never blocks.
-  geohash        String?
-  ipCountry      String?
-  createdAt      DateTime     @default(now())
-  lastActivityAt DateTime     @updatedAt
-  expiresAt      DateTime
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  refreshToken   RefreshToken @relation(fields: [refreshTokenId], references: [id], onDelete: Cascade)
+  geohash          String?
+  ipCountry        String?
+  // June 2026 — practice-context attribution (Manisha 2026-06-12 Access
+  // Control §1, HIPAA 45 CFR §164.312(a)(2)(i)). Set at sign-in:
+  //   • Single-practice provider → auto-set to that practice.
+  //   • Multi-practice provider → set via /auth/select-practice.
+  //   • SUPER_ADMIN / HEALPLACE_OPS / PATIENT → null.
+  // Drives the practiceContext audit field on every actor-attributed write
+  // (AuthLog, EscalationEvent, DeviationAlert, ProfileVerificationLog).
+  // onDelete: SetNull so deleting a Practice doesn't cascade-delete user
+  // sessions — the next request just routes the user to /sign-in/select-
+  // practice with a banner.
+  activePracticeId String?
+  createdAt        DateTime     @default(now())
+  lastActivityAt   DateTime     @updatedAt
+  expiresAt        DateTime
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken     RefreshToken @relation(fields: [refreshTokenId], references: [id], onDelete: Cascade)
+  practice         Practice?    @relation("AuthSessionActivePractice", fields: [activePracticeId], references: [id], onDelete: SetNull)
 
   @@index([userId, lastActivityAt])
   @@index([userId, createdAt])

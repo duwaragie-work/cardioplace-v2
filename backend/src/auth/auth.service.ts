@@ -30,13 +30,36 @@ export interface TokenPair {
 }
 
 export interface AuthResponse extends TokenPair {
+  /** Discriminator for AuthVerifyResult. AUTHENTICATED = real token pair
+   *  in the response; the FE routes to the dashboard. The selector branch
+   *  uses 'PRACTICE_SELECT_REQUIRED' instead — see PracticeSelectRequired. */
+  status?: 'AUTHENTICATED'
   userId: string
   email: string | null
   onboarding_required: boolean
   roles: UserRole[]
   login_method: 'otp' | 'magic_link' | 'google' | 'apple'
   name: string | null
+  /** Phase/practice-identity — the practice the session is acting as. NULL
+   *  for SUPER_ADMIN / HEALPLACE_OPS / PATIENT (audit captures null). */
+  activePracticeId?: string | null
 }
+
+/**
+ * Phase/practice-identity (Manisha 2026-06-12 Access Control §1) — when a
+ * multi-practice provider signs in, we don't issue tokens yet; instead the
+ * verify endpoint returns this shape so the FE routes to the selector page.
+ * The challenge token is a short-lived signed JWT carrying the verified
+ * userId; the selector POST exchanges it for the real token pair plus the
+ * chosen practice.
+ */
+export interface PracticeSelectRequired {
+  status: 'PRACTICE_SELECT_REQUIRED'
+  challengeToken: string
+  practices: Array<{ id: string; name: string }>
+}
+
+export type AuthVerifyResult = AuthResponse | PracticeSelectRequired
 
 // June 2026 — session context piped from controller → service to populate
 // AuthSession (concurrent-session limit + idle tracking). All optional —
@@ -47,6 +70,11 @@ export interface SessionContext {
   ipAddress?: string
   /** 'web' | 'mobile' — resolved by controller (x-device-platform → UA fallback). */
   deviceType?: string
+  /** Phase/practice-identity — the practice the session is acting as.
+   *  Single-practice users auto-set on sign-in; multi-practice users get a
+   *  selector challenge before tokens are issued. SUPER_ADMIN /
+   *  HEALPLACE_OPS / PATIENT sessions leave this null. */
+  activePracticeId?: string | null
 }
 
 interface MinimalUser {
@@ -105,6 +133,27 @@ const ADMIN_ROLES: readonly UserRole[] = [
 const IDLE_TIMEOUT_WEB_MS = 15 * 60_000
 const IDLE_TIMEOUT_MOBILE_MS = 5 * 60_000
 
+// Phase/practice-identity (Manisha 2026-06-12 Access Control §1) — roles
+// for which a practice context is REQUIRED. A user with one of these roles
+// who has zero PracticeProvider memberships cannot sign in (Forbidden). A
+// user with two or more memberships gets the selector challenge.
+// SUPER_ADMIN and HEALPLACE_OPS act org-wide and bypass the selector.
+const MULTI_PRACTICE_ROLES: readonly UserRole[] = [
+  UserRole.PROVIDER,
+  UserRole.MEDICAL_DIRECTOR,
+  UserRole.COORDINATOR,
+]
+
+// 5-min challenge token TTL — long enough for the patient to walk through
+// the selector page, short enough to bound replay risk if the token leaks.
+const PRACTICE_SELECT_CHALLENGE_TTL = '5m'
+
+type PracticeResolution =
+  | { kind: 'auto'; activePracticeId: string }
+  | { kind: 'select'; practices: Array<{ id: string; name: string }> }
+  | { kind: 'none' }
+  | { kind: 'blocked' }
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -118,11 +167,22 @@ export class AuthService {
 
   // ─── Token Issuance ─────────────────────────────────────────────────────────
 
-  async issueAccessToken(user: MinimalUser): Promise<string> {
+  async issueAccessToken(
+    user: MinimalUser,
+    activePracticeId?: string | null,
+  ): Promise<string> {
     const expiresIn = this.config.get<string>('JWT_ACCESS_EXPIRES_IN', '15m')
     // @ts-expect-error - NestJS JWT accepts string for expiresIn despite type definition
     return await this.jwtService.signAsync(
-      { sub: user.id, email: user.email, roles: user.roles },
+      {
+        sub: user.id,
+        email: user.email,
+        roles: user.roles,
+        // Phase/practice-identity — null for SUPER_ADMIN / HEALPLACE_OPS /
+        // PATIENT / no-practice users. Switching mints a fresh access
+        // token so the FE picks up the new context immediately.
+        activePracticeId: activePracticeId ?? null,
+      },
       { expiresIn },
     )
   }
@@ -160,6 +220,10 @@ export class AuthService {
           ipAddress: context?.ipAddress ?? null,
           geohash: this.geolocation.computeGeohash(context?.ipAddress ?? null),
           ipCountry: this.geolocation.lookupCountry(context?.ipAddress ?? null),
+          // Phase/practice-identity — set on sign-in for single-/auto-set
+          // and multi-practice (post-selector) paths; null for
+          // SUPER_ADMIN / HEALPLACE_OPS / PATIENT.
+          activePracticeId: context?.activePracticeId ?? null,
           expiresAt,
         },
       })
@@ -431,9 +495,195 @@ export class AuthService {
     context?: SessionContext,
   ): Promise<TokenPair> {
     await this.enforceSessionLimit(user.id, user.roles)
-    const accessToken = await this.issueAccessToken(user)
+    const accessToken = await this.issueAccessToken(user, context?.activePracticeId ?? null)
     const refreshToken = await this.issueRefreshToken(user.id, context)
     return { accessToken, refreshToken }
+  }
+
+  /**
+   * Phase/practice-identity — determines what to do about the active
+   * practice context at sign-in time:
+   *   • 'auto'    — single PracticeProvider membership; auto-set that id.
+   *   • 'select'  — multiple memberships AND the user has at least one of
+   *                 the MULTI_PRACTICE_ROLES; caller must return a
+   *                 PRACTICE_SELECT_REQUIRED challenge.
+   *   • 'blocked' — has a MULTI_PRACTICE_ROLE but zero memberships; refuse
+   *                 sign-in (Forbidden).
+   *   • 'none'    — SUPER_ADMIN / HEALPLACE_OPS / PATIENT or any non-multi
+   *                 role; AuthSession.activePracticeId stays null.
+   * Reuses the same `prisma.practiceProvider.findMany` shape the prior
+   * RBAC work uses in patient-access.service.ts (Phase 1 commit a8111d6).
+   */
+  async resolvePracticeContext(
+    userId: string,
+    roles: UserRole[],
+  ): Promise<PracticeResolution> {
+    const isMultiPracticeRole = roles.some((r) =>
+      MULTI_PRACTICE_ROLES.includes(r),
+    )
+    const isOrgWide =
+      roles.includes(UserRole.SUPER_ADMIN) || roles.includes(UserRole.HEALPLACE_OPS)
+    // Org-wide roles bypass selector even if they happen to have PracticeProvider
+    // memberships — they act across the whole org. Patients + any non-multi
+    // role also bypass.
+    if (isOrgWide || !isMultiPracticeRole) return { kind: 'none' }
+
+    const memberships = await this.prisma.practiceProvider.findMany({
+      where: { userId },
+      select: { practiceId: true, practice: { select: { id: true, name: true } } },
+    })
+    if (memberships.length === 0) return { kind: 'blocked' }
+    if (memberships.length === 1) {
+      return { kind: 'auto', activePracticeId: memberships[0].practiceId }
+    }
+    return {
+      kind: 'select',
+      practices: memberships.map((m) => ({ id: m.practice.id, name: m.practice.name })),
+    }
+  }
+
+  /**
+   * Sign a short-lived JWT carrying the verified userId so the FE selector
+   * page can echo it back without re-doing OTP verification. The `kind`
+   * claim narrows accepted tokens to ones we issued for THIS flow — a
+   * regular access token can't be replayed as a challenge.
+   */
+  private async signPracticeSelectChallenge(userId: string): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: userId, kind: 'practice_select' },
+      { expiresIn: PRACTICE_SELECT_CHALLENGE_TTL },
+    )
+  }
+
+  /**
+   * Exchange a practice-select challenge for the real token pair. Verifies
+   * the challenge JWT (TTL + kind), confirms the chosen practiceId is in
+   * the user's memberships, then issues tokens with `activePracticeId` set
+   * on the new AuthSession row.
+   */
+  async selectPractice(
+    challengeToken: string,
+    practiceId: string,
+    context?: SessionContext,
+  ): Promise<AuthResponse> {
+    let payload: { sub: string; kind: string }
+    try {
+      payload = await this.jwtService.verifyAsync(challengeToken)
+    } catch {
+      throw new UnauthorizedException('Practice-select challenge invalid or expired')
+    }
+    if (payload.kind !== 'practice_select') {
+      throw new UnauthorizedException('Practice-select challenge invalid or expired')
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: {
+        id: true, email: true, name: true, roles: true,
+        onboardingStatus: true, accountStatus: true,
+      },
+    })
+    if (!user) throw new UnauthorizedException('User not found')
+    this.assertAccountActive(user)
+    const membership = await this.prisma.practiceProvider.findUnique({
+      where: { practiceId_userId: { practiceId, userId: user.id } },
+      select: { id: true },
+    })
+    if (!membership) {
+      throw new ForbiddenException('Not a member of that practice')
+    }
+    const tokens = await this.issueTokenPair(user, {
+      ...context,
+      activePracticeId: practiceId,
+    })
+    await this.logAuthEvent({
+      event: 'practice_selected',
+      userId: user.id,
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: { practiceId },
+      practiceContext: practiceId,
+      success: true,
+    })
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    return { ...resp, activePracticeId: practiceId }
+  }
+
+  /**
+   * Mid-session practice switch. Updates the active AuthSession's
+   * `activePracticeId` (no new tokens issued — refresh-token stays the
+   * same; new context takes effect on the next request via the JWT
+   * strategy's per-request AuthSession lookup). Writes an AuthLog row.
+   */
+  /**
+   * Controller-friendly wrapper around `switchPractice`. Resolves the raw
+   * refresh-token cookie value to its RefreshToken row (and thereby to the
+   * paired AuthSession), then delegates. Throws Unauthorized if the cookie
+   * doesn't match an active refresh-token for `userId` (defends against a
+   * stale cookie left over from a revoked session).
+   */
+  async switchPracticeByRefreshToken(
+    userId: string,
+    rawRefreshToken: string,
+    practiceId: string,
+    context?: SessionContext,
+  ): Promise<{ activePracticeId: string; accessToken: string }> {
+    const tokenHash = sha256(rawRefreshToken)
+    const existing = await this.prisma.refreshToken.findFirst({
+      where: { tokenHash, userId, revokedAt: null },
+      select: { id: true },
+    })
+    if (!existing) {
+      throw new UnauthorizedException('Refresh token invalid or revoked')
+    }
+    return this.switchPractice(userId, existing.id, practiceId, context)
+  }
+
+  async switchPractice(
+    userId: string,
+    refreshTokenId: string,
+    practiceId: string,
+    context?: SessionContext,
+  ): Promise<{ activePracticeId: string; accessToken: string }> {
+    const membership = await this.prisma.practiceProvider.findUnique({
+      where: { practiceId_userId: { practiceId, userId } },
+      select: { id: true },
+    })
+    if (!membership) {
+      throw new ForbiddenException('Not a member of that practice')
+    }
+    const prior = await this.prisma.authSession.findUnique({
+      where: { refreshTokenId },
+      select: { activePracticeId: true },
+    })
+    const session = await this.prisma.authSession.update({
+      where: { refreshTokenId },
+      data: { activePracticeId: practiceId },
+      select: {
+        user: {
+          select: {
+            id: true, email: true, name: true, roles: true,
+            onboardingStatus: true, accountStatus: true,
+          },
+        },
+      },
+    })
+    // Mint a fresh access token carrying the new activePracticeId claim
+    // so the FE sees the new context on its very next request — no need
+    // to wait for the next refresh. Refresh token itself doesn't rotate
+    // (the user is still in the same session, just acting differently).
+    const accessToken = await this.issueAccessToken(session.user, practiceId)
+    await this.logAuthEvent({
+      event: 'practice_switched',
+      userId,
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: { fromPracticeId: prior?.activePracticeId ?? null, toPracticeId: practiceId },
+      practiceContext: practiceId,
+      success: true,
+    })
+    return { activePracticeId: practiceId, accessToken }
   }
 
   private buildAuthResponse(
@@ -478,6 +728,10 @@ export class AuthService {
     metadata?: Record<string, unknown>
     success: boolean
     errorCode?: string
+    /** Phase/practice-identity — the activePracticeId on the actor's
+     *  AuthSession at event time. NULL for org-wide roles and pre-policy
+     *  events. */
+    practiceContext?: string | null
   }): Promise<void> {
     try {
       await this.prisma.authLog.create({
@@ -494,6 +748,7 @@ export class AuthService {
             : null,
           success: params.success,
           errorCode: params.errorCode ?? null,
+          practiceContext: params.practiceContext ?? null,
         },
       })
     } catch (error) {
@@ -1034,7 +1289,7 @@ export class AuthService {
       appContext?: 'admin' | 'patient'
       deviceType?: string
     },
-  ): Promise<AuthResponse> {
+  ): Promise<AuthVerifyResult> {
     if (!email?.trim()) {
       throw new BadRequestException('Email is required')
     }
@@ -1183,13 +1438,36 @@ export class AuthService {
       success: true,
     })
 
+    // Phase/practice-identity — resolve practice context BEFORE issuing
+    // tokens. A multi-practice provider gets a challenge token, not the
+    // real token pair; they must POST /auth/select-practice to choose
+    // which one they're acting as.
+    const resolution = await this.resolvePracticeContext(user.id, user.roles)
+    if (resolution.kind === 'blocked') {
+      throw new ForbiddenException(
+        'No practice membership — contact your admin to be added to a practice before signing in.',
+      )
+    }
+    if (resolution.kind === 'select') {
+      const challengeToken = await this.signPracticeSelectChallenge(user.id)
+      return {
+        status: 'PRACTICE_SELECT_REQUIRED',
+        challengeToken,
+        practices: resolution.practices,
+      }
+    }
+    const activePracticeId =
+      resolution.kind === 'auto' ? resolution.activePracticeId : null
+
     const tokens = await this.issueTokenPair(user, {
       userAgent: context?.userAgent,
       deviceId: context?.deviceId,
       ipAddress: context?.ipAddress,
       deviceType: context?.deviceType,
+      activePracticeId,
     })
-    return this.buildAuthResponse(tokens, user, 'otp')
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    return { ...resp, activePracticeId }
   }
 
   // ─── Device Tracking ────────────────────────────────────────────────────────
@@ -1439,7 +1717,7 @@ export class AuthService {
       timezone?: string
       deviceType?: string
     },
-  ): Promise<AuthResponse> {
+  ): Promise<AuthVerifyResult> {
     if (!token?.trim()) {
       throw new BadRequestException('Token is required')
     }
@@ -1523,13 +1801,33 @@ export class AuthService {
       success: true,
     })
 
+    // Phase/practice-identity — same selector branch as verifyOtp.
+    const resolution = await this.resolvePracticeContext(user.id, user.roles)
+    if (resolution.kind === 'blocked') {
+      throw new ForbiddenException(
+        'No practice membership — contact your admin to be added to a practice before signing in.',
+      )
+    }
+    if (resolution.kind === 'select') {
+      const challengeToken = await this.signPracticeSelectChallenge(user.id)
+      return {
+        status: 'PRACTICE_SELECT_REQUIRED',
+        challengeToken,
+        practices: resolution.practices,
+      }
+    }
+    const activePracticeId =
+      resolution.kind === 'auto' ? resolution.activePracticeId : null
+
     const tokens = await this.issueTokenPair(user, {
       userAgent: context?.userAgent,
       deviceId: context?.deviceId,
       ipAddress: context?.ipAddress,
       deviceType: context?.deviceType,
+      activePracticeId,
     })
-    return this.buildAuthResponse(tokens, user, 'magic_link')
+    const resp = this.buildAuthResponse(tokens, user, 'magic_link')
+    return { ...resp, activePracticeId }
   }
 
   // ─── Admin-app role gate ────────────────────────────────────────────────────

@@ -241,6 +241,7 @@ describe('AuthService', () => {
           metadata: { attempts: 1 },
           success: true,
           errorCode: null,
+          practiceContext: null,
         },
       })
     })
@@ -269,6 +270,7 @@ describe('AuthService', () => {
           metadata: null,
           success: true,
           errorCode: null,
+          practiceContext: null,
         },
       })
     })
@@ -300,6 +302,7 @@ describe('AuthService', () => {
           metadata: null,
           success: false,
           errorCode: 'invalid_code',
+          practiceContext: null,
         },
       })
     })

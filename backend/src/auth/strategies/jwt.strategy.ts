@@ -14,6 +14,11 @@ export interface JwtPayload {
   sub: string
   email: string | null
   roles: UserRole[]
+  /** Phase/practice-identity — the practice the session is acting as.
+   *  Signed at issue time (sign-in / select-practice / switch-practice).
+   *  Switching mints a fresh access token so the FE sees the new context
+   *  on its next request without a DB hit on the auth path. */
+  activePracticeId?: string | null
   iat?: number
   exp?: number
 }
@@ -62,6 +67,11 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   validate(payload: JwtPayload) {
-    return { id: payload.sub, email: payload.email, roles: payload.roles }
+    return {
+      id: payload.sub,
+      email: payload.email,
+      roles: payload.roles,
+      activePracticeId: payload.activePracticeId ?? null,
+    }
   }
 }

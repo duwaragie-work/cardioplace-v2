@@ -28,6 +28,7 @@ import { Public } from './decorators/public.decorator.js'
 import { ConsentDto } from './dto/consent.dto.js'
 import { ProfileDto } from './dto/profile.dto.js'
 import { RefreshDto } from './dto/refresh.dto.js'
+import { SelectPracticeDto, SwitchPracticeDto } from './dto/select-practice.dto.js'
 import { SendOtpDto } from './dto/send-otp.dto.js'
 import { VerifyOtpDto } from './dto/verify-otp.dto.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
@@ -131,6 +132,12 @@ export class AuthController {
     }
     const context = { ...baseContext, deviceId, appContext: dto.appContext }
     const result = await this.authService.verifyOtp(dto.email, dto.otp, context)
+    // Phase/practice-identity — multi-practice provider gets a challenge
+    // token instead of the real token pair. Return the discriminator shape
+    // verbatim; the FE selector page POSTs /select-practice next.
+    if ('status' in result && result.status === 'PRACTICE_SELECT_REQUIRED') {
+      return result
+    }
     // Scope cookies to the destination app (admin-role users land on the
     // admin app — including via the patient→admin sign-in bridge, where
     // this POST's Origin is the patient origin but the session is admin's).
@@ -147,6 +154,67 @@ export class AuthController {
         userAgent: context.userAgent,
       })
     }
+    return result
+  }
+
+  // ─── Practice Selector + Switcher ──────────────────────────────────────────
+  // Phase/practice-identity (Manisha 2026-06-12 Access Control §1).
+  //
+  // select-practice  — exchange a practice-select challenge token (issued by
+  //                    /otp/verify or /magic-link/verify when the user has
+  //                    2+ memberships) for the real token pair, with the
+  //                    chosen practice persisted on the new AuthSession.
+  // switch-practice  — mid-session active-practice swap. No new tokens.
+
+  @Public()
+  @Post('select-practice')
+  async selectPractice(
+    @Body() dto: SelectPracticeDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.selectPractice(
+      dto.challengeToken,
+      dto.practiceId,
+      context,
+    )
+    const scope = scopeForRoles(result.roles)
+    this.setAccessCookie(res, result.accessToken, scope)
+    this.setRefreshCookie(res, result.refreshToken, scope)
+    return result
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('switch-practice')
+  async switchPractice(
+    @Body() dto: SwitchPracticeDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { id } = req.user as { id: string }
+    // Identify WHICH AuthSession on this device the user is acting on.
+    // Read the refresh-token cookie (same shape as the /refresh handler);
+    // service-side resolves it to the AuthSession.refreshTokenId.
+    const scope = deriveCookieScope(req)
+    const cookies = (req.cookies as Record<string, string>) ?? {}
+    const rawRefreshToken =
+      cookies[cookieName(scope, 'refresh')] ?? cookies[LEGACY_REFRESH_COOKIE]
+    if (!rawRefreshToken) {
+      throw new BadRequestException(
+        'No active session — sign in again to switch practices.',
+      )
+    }
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.switchPracticeByRefreshToken(
+      id,
+      rawRefreshToken,
+      dto.practiceId,
+      context,
+    )
+    // Mint replaces the access cookie so the next request carries the new
+    // activePracticeId JWT claim immediately.
+    this.setAccessCookie(res, result.accessToken, scope)
     return result
   }
 
@@ -174,6 +242,17 @@ export class AuthController {
     try {
       const context = this.buildAuthContext(req)
       const result = await this.authService.verifyMagicLink(token, context)
+      // Phase/practice-identity — magic-link can also surface the selector
+      // requirement when the recipient is a multi-practice provider. Redirect
+      // to the FE selector page carrying the short-lived challenge token.
+      if ('status' in result && result.status === 'PRACTICE_SELECT_REQUIRED') {
+        const sp = new URLSearchParams({
+          challengeToken: result.challengeToken,
+          practices: JSON.stringify(result.practices),
+        })
+        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/select-practice?${sp.toString()}`)
+        return
+      }
       // Magic-link verify is a top-level GET (clicked from an email) so the
       // browser sends no Origin — derive scope from the verified roles, the
       // same signal that picks targetUrl below.
