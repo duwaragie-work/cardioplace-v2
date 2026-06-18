@@ -17,7 +17,6 @@ import {
   Building2,
   UserPlus,
   ClipboardList,
-  HeartPulse,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -81,20 +80,12 @@ const PRIMARY_NAV: NavItem[] = [
   // phase/24 — monthly practice analytics. Oversight surface — visible
   // to MEDICAL_DIRECTOR (scoped to own practice), HEALPLACE_OPS, and
   // SUPER_ADMIN. PROVIDER + COORDINATOR don't see it.
+  // phase/24 + phase/25 — practice analytics. The Reports page hosts both
+  // the Monthly report and the 90-day Adherence report as tabs.
   {
     href: '/reports',
     label: 'Reports',
     icon: ClipboardList,
-    matchPrefix: true,
-    show: (roles) => canViewReports(roles),
-  },
-  // phase/25 — 90-day medication adherence report. Same oversight group as
-  // /reports (MED_DIR / OPS / SUPER). Its own top-level route so it doesn't
-  // collide with the /reports matchPrefix highlight.
-  {
-    href: '/adherence',
-    label: 'Adherence',
-    icon: HeartPulse,
     matchPrefix: true,
     show: (roles) => canViewReports(roles),
   },

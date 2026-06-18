@@ -1,18 +1,25 @@
 'use client';
 
-// /reports — Monthly Practice Analytics Report (phase/24).
+// /reports — Practice analytics. Two tabs:
+//   • Monthly  — Monthly Practice Analytics Report (phase/24)
+//   • Adherence — 90-day Medication Adherence Report (phase/25)
 //
 // Role gate: MEDICAL_DIRECTOR, HEALPLACE_OPS, SUPER_ADMIN. Mirrors the
 // 403 card layout from /users + /patients for consistency.
 
+import { useState } from 'react';
 import Link from 'next/link';
-import { Shield } from 'lucide-react';
+import { ClipboardList, HeartPulse, Shield } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { canViewReports } from '@/lib/roleGates';
 import ReportsPanel from '@/components/reports/ReportsPanel';
+import AdherencePanel from '@/components/adherence/AdherencePanel';
+
+type ReportTab = 'monthly' | 'adherence';
 
 export default function ReportsPage() {
   const { user, isLoading } = useAuth();
+  const [tab, setTab] = useState<ReportTab>('monthly');
 
   if (isLoading) return null;
   if (!user) return null;
@@ -64,7 +71,64 @@ export default function ReportsPage() {
 
   return (
     <div className="h-full" style={{ backgroundColor: '#FAFBFF' }}>
-      <ReportsPanel />
+      {/* Tab bar — same max width as the panels below so it lines up. */}
+      <div className="max-w-[1200px] mx-auto px-4 md:px-8 pt-6">
+        <div
+          className="inline-flex items-center gap-1 p-1 rounded-full bg-white"
+          style={{ boxShadow: 'var(--brand-shadow-card)' }}
+          role="tablist"
+          aria-label="Report type"
+        >
+          <TabButton
+            active={tab === 'monthly'}
+            onClick={() => setTab('monthly')}
+            icon={<ClipboardList className="w-4 h-4" />}
+            label="Monthly"
+            testid="report-tab-monthly"
+          />
+          <TabButton
+            active={tab === 'adherence'}
+            onClick={() => setTab('adherence')}
+            icon={<HeartPulse className="w-4 h-4" />}
+            label="Adherence"
+            testid="report-tab-adherence"
+          />
+        </div>
+      </div>
+
+      {tab === 'monthly' ? <ReportsPanel /> : <AdherencePanel />}
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label,
+  testid,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  testid: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      data-testid={testid}
+      className="inline-flex items-center gap-1.5 h-9 px-4 rounded-full text-[13px] font-semibold transition"
+      style={{
+        backgroundColor: active ? 'var(--brand-primary-purple)' : 'transparent',
+        color: active ? 'white' : 'var(--brand-text-secondary)',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
