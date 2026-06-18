@@ -24,6 +24,7 @@ import { AlertTriangle, Activity, Phone } from 'lucide-react';
 import { SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared';
 import { useLanguage } from '@/contexts/LanguageContext';
 import MicButton from '@/components/intake/MicButton';
+import AudioButton from '@/components/intake/AudioButton';
 
 export type OptionDSecondReading = {
   systolicBP: number;
@@ -202,15 +203,23 @@ export function OptionDFlow({
               >
                 <Activity className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} aria-hidden="true" />
               </div>
-              <h2
-                id="optiond-title"
-                ref={headingRef}
-                tabIndex={-1}
-                className="text-[1.125rem] font-bold leading-tight outline-none"
-                style={{ color: 'var(--brand-text-primary)' }}
-              >
-                {t('checkin.optionD.screenB.title')}
-              </h2>
+              <div className="flex items-start gap-2">
+                <h2
+                  id="optiond-title"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-[1.125rem] font-bold leading-tight outline-none"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {t('checkin.optionD.screenB.title')}
+                </h2>
+                <div className="shrink-0 mt-0.5">
+                  <AudioButton
+                    size="sm"
+                    text={`${t('checkin.optionD.screenB.title')}. ${t('checkin.optionD.screenB.body')}`}
+                  />
+                </div>
+              </div>
               <p className="text-[0.875rem] mt-2 mb-5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('checkin.optionD.screenB.body')}
               </p>
@@ -260,19 +269,22 @@ export function OptionDFlow({
                   <label htmlFor="optiond-pulse" className="block text-[0.75rem] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
                     {t('readings.pulseLabel')}
                   </label>
-                  <input
-                    id="optiond-pulse"
-                    data-testid="optiond-pulse"
-                    type="number"
-                    inputMode="numeric"
-                    placeholder={t('readings.pulsePlaceholder')}
-                    value={pulse}
-                    min={30}
-                    max={220}
-                    onChange={(e) => setPulse(e.target.value)}
-                    className="w-full h-12 px-3 rounded-xl border text-[1rem] outline-none"
-                    style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
-                  />
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="optiond-pulse"
+                      data-testid="optiond-pulse"
+                      type="number"
+                      inputMode="numeric"
+                      placeholder={t('readings.pulsePlaceholder')}
+                      value={pulse}
+                      min={30}
+                      max={220}
+                      onChange={(e) => setPulse(e.target.value)}
+                      className="flex-1 h-12 px-3 rounded-xl border text-[1rem] outline-none min-w-0"
+                      style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+                    />
+                    <MicButton inputId="optiond-pulse" numeric onTranscript={(txt) => setPulse(txt)} />
+                  </div>
                 </div>
               </div>
 
