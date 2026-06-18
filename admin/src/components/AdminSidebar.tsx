@@ -17,6 +17,7 @@ import {
   Building2,
   UserPlus,
   ClipboardList,
+  HeartPulse,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -84,6 +85,16 @@ const PRIMARY_NAV: NavItem[] = [
     href: '/reports',
     label: 'Reports',
     icon: ClipboardList,
+    matchPrefix: true,
+    show: (roles) => canViewReports(roles),
+  },
+  // phase/25 — 90-day medication adherence report. Same oversight group as
+  // /reports (MED_DIR / OPS / SUPER). Its own top-level route so it doesn't
+  // collide with the /reports matchPrefix highlight.
+  {
+    href: '/adherence',
+    label: 'Adherence',
+    icon: HeartPulse,
     matchPrefix: true,
     show: (roles) => canViewReports(roles),
   },
