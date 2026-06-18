@@ -597,8 +597,17 @@ describe('DailyJournalService', () => {
       expect(closeCall[0].data.engineEvaluationDeferredUntil).toBeNull()
     })
 
-    it('flag OFF (default) + closeSession → keeps the 5-min defer (backward compat)', async () => {
+    it('DEFAULT (unset) + closeSession → fast-fires (Manisha standing approval — default on)', async () => {
       delete process.env.BUFFER_SKIPS_DEFER
+      primeCreateMocks('s-buf')
+      await service.create('u1', { ...base, sessionId: 's-buf', closeSession: true } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.engineEvaluationDeferredUntil).toBeNull()
+      expect(data.singleReadingFinalized).toBe(true)
+    })
+
+    it('BUFFER_SKIPS_DEFER=false (rollback) + closeSession → legacy 5-min hold', async () => {
+      process.env.BUFFER_SKIPS_DEFER = 'false'
       primeCreateMocks('s-buf')
       const before = Date.now()
       await service.create('u1', { ...base, sessionId: 's-buf', closeSession: true } as any)
@@ -607,7 +616,7 @@ describe('DailyJournalService', () => {
       expect(data.engineEvaluationDeferredUntil).toBeInstanceOf(Date)
       const deferMs = (data.engineEvaluationDeferredUntil as Date).getTime() - before
       expect(deferMs).toBeGreaterThan(4 * 60 * 1000) // ~5 min ahead
-      // no finalize on the close updateMany when the flag is off
+      // no finalize on the close updateMany when explicitly opted out
       const closeCall = mockPrisma.journalEntry.updateMany.mock.calls.find(
         (c: any) => c[0]?.data?.sessionClosedAt,
       )

@@ -228,18 +228,18 @@ export class DailyJournalService {
     // buffer-committed reading's alert fired 5-10 min after "I'm good". When
     // the patient explicitly closes the session (`closeSession` — the buffer
     // already gave them their 5-min edit window on-device), that second window
-    // is pure redundant latency. Flag-gated (BUFFER_SKIPS_DEFER, default off,
-    // on in dev) for instant rollback pending Manisha + CTO sign-off, since it
-    // removes the post-commit edit window the CTO 2026-06-09 policy added.
+    // is pure redundant latency. Now ON BY DEFAULT (Manisha standing approval
+    // 2026-06-18); BUFFER_SKIPS_DEFER stays as a rollback switch — set it to
+    // 'false' to revert to the legacy single-reading-hold behavior (CTO
+    // 2026-06-09 policy) without a code change.
     //
     // Scope: ONLY ordinary buffer commits (closeSession, patient, non-Option-D).
     // Admin entries, Option D AWAITING/CONFIRMATORY (own retake semantics), and
     // chat/voice tool creates (no buffer step — they keep the 5-min defer as
     // their only edit window) are unchanged.
-    // Read per-request so dev/prod (and unit tests) can flip it without a
-    // rebuild. Default off — prod keeps the conservative 5-min post-commit
-    // window until Manisha + CTO sign off; dev sets BUFFER_SKIPS_DEFER=true.
-    const bufferSkipsDefer = process.env.BUFFER_SKIPS_DEFER === 'true'
+    // Read per-request so prod/dev (and unit tests) can flip it without a
+    // rebuild. Default ON — only an explicit 'false' opts back into the hold.
+    const bufferSkipsDefer = process.env.BUFFER_SKIPS_DEFER !== 'false'
     const bufferCommitFastFire =
       bufferSkipsDefer &&
       dto.closeSession === true &&
