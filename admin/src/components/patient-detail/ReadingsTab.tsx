@@ -516,19 +516,27 @@ function SessionGroupCard({
   const first = new Date(Math.min(...times)).toISOString();
   const last = new Date(Math.max(...times)).toISOString();
 
-  // Item B — Option D AWAITING + CONFIRMATORY pair. When the two BPs differ a
-  // lot, surface a provider-side "Large discrepancy" flag: the first reading may
-  // be a measurement error or transient spike rather than a true episode.
-  const awaiting = group.entries.find(
-    (e) => e.emergencyConfirmation === 'AWAITING' && e.systolicBP != null && e.diastolicBP != null,
-  );
+  // Item B — Option D first-of-pair + CONFIRMATORY pair. When the two BPs differ
+  // a lot, surface a provider-side "Large discrepancy" flag: the first reading
+  // may be a measurement error or transient spike rather than a true episode.
+  // NOTE: on confirmation the backend CLEARS the first reading's
+  // emergencyConfirmation back to null (it's now a resolved historical reading),
+  // so find the CONFIRMATORY entry first, then its first-of-pair via
+  // confirmsEntryId — don't look for a lingering 'AWAITING'.
   const confirmatory = group.entries.find(
     (e) =>
       e.emergencyConfirmation === 'CONFIRMATORY' &&
       e.systolicBP != null &&
-      e.diastolicBP != null &&
-      (e.confirmsEntryId == null || e.confirmsEntryId === awaiting?.id),
+      e.diastolicBP != null,
   );
+  const awaiting = confirmatory
+    ? group.entries.find(
+        (e) =>
+          e.id === confirmatory.confirmsEntryId &&
+          e.systolicBP != null &&
+          e.diastolicBP != null,
+      )
+    : undefined;
   const largeDiscrepancy =
     awaiting != null &&
     confirmatory != null &&
