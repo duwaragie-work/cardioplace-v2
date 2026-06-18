@@ -31,6 +31,12 @@ test.describe('Phase/practice-identity — mid-session switcher', () => {
       extraHTTPHeaders: {
         'x-device-id': 'spec35-switch',
         'x-device-platform': 'web',
+        // Multi-practice provider is an admin role → backend's
+        // deriveCookieScope() must resolve to 'admin' so /select-practice
+        // sets `cp_admin_refresh_token` and /switch-practice finds it.
+        // Without this Origin it falls back to 'patient' scope and the
+        // switch fails with "No active session".
+        origin: 'http://localhost:3001',
       },
     })
 
@@ -88,6 +94,7 @@ test.describe('Phase/practice-identity — mid-session switcher', () => {
       extraHTTPHeaders: {
         'x-device-id': 'spec35-forbid',
         'x-device-platform': 'web',
+        origin: 'http://localhost:3001',
       },
     })
     await ctx.post('/api/v2/auth/otp/send', {

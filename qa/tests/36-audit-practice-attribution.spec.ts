@@ -39,6 +39,8 @@ test.describe('Phase/practice-identity — audit attribution end-to-end', () => 
       extraHTTPHeaders: {
         'x-device-id': 'spec36-attr',
         'x-device-platform': 'web',
+        // Admin-role provider — deriveCookieScope must resolve to 'admin'.
+        origin: 'http://localhost:3001',
       },
     })
 
