@@ -278,11 +278,14 @@ html {
    Readable placeholders.
    Tailwind Preflight defaults `::placeholder` to gray-400 (#9ca3af ≈ 2.8:1 on
    white) — faint on phones and below WCAG AA. Set a darker default (~7:1) and
-   keep opacity:1 (some mobile browsers fade placeholders). NO `!important`:
-   inputs that intentionally set a placeholder color via a `placeholder:text-*`
-   utility have higher specificity and still win.
+   keep opacity:1 (some mobile browsers fade placeholders). Scoped to
+   `@layer base` so any explicit `placeholder:text-*` utility (Tailwind's
+   `utilities` layer) overrides it. An UNLAYERED rule would beat every utility
+   regardless of specificity (unlayered > layered).
    ────────────────────────────────────────────────────────────────────────── */
-::placeholder {
-  color: #595959;
-  opacity: 1;
+@layer base {
+  ::placeholder {
+    color: #595959;
+    opacity: 1;
+  }
 }
