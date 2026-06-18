@@ -11,7 +11,9 @@ function makePrisma(opts: {
     userId: string
     medicationTaken: boolean | null
     medicationScheduledLater: boolean
-    missedDoses: number | null
+    missedDoses?: number | null
+    missedMedications?: unknown
+    medicationStatuses?: unknown
   }>
 }) {
   return {
@@ -109,6 +111,62 @@ describe('AdherenceService.compute', () => {
     expect(alice.takenCheckIns).toBe(1)
     expect(alice.adherencePct).toBe(100)
     expect(alice.status).toBe('ON_TRACK')
+  })
+
+  it('sums per-medication missed-dose counts (not the legacy scalar)', async () => {
+    const prisma = makePrisma({
+      assignments: [{ userId: 'a', user: { name: 'Alice', email: null } }],
+      meds: [{ userId: 'a' }],
+      entries: [
+        {
+          userId: 'a',
+          medicationTaken: false,
+          medicationScheduledLater: false,
+          // Legacy scalar would only show 1 — the real counts live per-med.
+          missedDoses: 1,
+          medicationStatuses: [
+            { medicationId: 'm1', taken: 'no', missedDoses: 10 },
+            { medicationId: 'm2', taken: 'no', missedDoses: 3 },
+            { medicationId: 'm3', taken: 'yes' },
+          ],
+        },
+      ],
+    })
+    const report = await svc(prisma).compute(practice, 90, start, end)
+    expect(report.byPatient[0].missedDosesTotal).toBe(13) // 10 + 3, not 1
+    expect(report.overall.totalMissedDoses).toBe(13)
+  })
+
+  it('falls back to missedMedications, then the scalar, for legacy rows', async () => {
+    const prisma = makePrisma({
+      assignments: [
+        { userId: 'a', user: { name: 'Alice', email: null } },
+        { userId: 'b', user: { name: 'Bob', email: null } },
+      ],
+      meds: [{ userId: 'a' }, { userId: 'b' }],
+      entries: [
+        {
+          userId: 'a',
+          medicationTaken: false,
+          medicationScheduledLater: false,
+          // No medicationStatuses → use the dedicated missed list.
+          missedMedications: [{ missedDoses: 4 }, { missedDoses: 2 }],
+        },
+        {
+          userId: 'b',
+          medicationTaken: false,
+          medicationScheduledLater: false,
+          // Neither JSON field → legacy scalar.
+          missedDoses: 5,
+        },
+      ],
+    })
+    const report = await svc(prisma).compute(practice, 90, start, end)
+    const byId = Object.fromEntries(
+      report.byPatient.map((r) => [r.patientId, r.missedDosesTotal]),
+    )
+    expect(byId.a).toBe(6) // 4 + 2
+    expect(byId.b).toBe(5) // scalar fallback
   })
 
   it('sorts below-target patients first, no-data last', async () => {

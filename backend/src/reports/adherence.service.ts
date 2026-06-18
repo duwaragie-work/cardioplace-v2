@@ -22,6 +22,58 @@ function pct(part: number, whole: number): number | null {
 }
 
 /**
+ * Sum the doses a patient marked "missed" on one check-in.
+ *
+ * The accurate source is the per-medication snapshot the check-in form
+ * writes — a patient on multiple meds sets a miss-count (1..10) per med, so
+ * the single scalar `JournalEntry.missedDoses` column (legacy, usually 1)
+ * undercounts. Preference order:
+ *   1. `medicationStatuses` — every answered med; sum the count on each "no".
+ *      Most complete (captures "no" answers even without a reason).
+ *   2. `missedMedications` — the dedicated missed list; sum each entry.
+ *   3. `missedDoses` scalar — legacy rows that predate the per-med snapshot.
+ */
+function missedDosesInEntry(e: {
+  missedMedications: unknown
+  medicationStatuses: unknown
+  missedDoses: number | null
+}): number {
+  const fromStatuses = sumStatusMisses(e.medicationStatuses)
+  if (fromStatuses !== null) return fromStatuses
+  const fromList = sumMissedList(e.missedMedications)
+  if (fromList !== null) return fromList
+  return e.missedDoses ?? 0
+}
+
+/** Sum `missedDoses` over `medicationStatuses` items whose answer was "no".
+ *  Returns null when the value isn't a usable array (so the caller can fall
+ *  back to another source). */
+function sumStatusMisses(json: unknown): number | null {
+  if (!Array.isArray(json)) return null
+  let sum = 0
+  for (const item of json) {
+    if (item && typeof item === 'object' && (item as any).taken === 'no') {
+      const n = Number((item as any).missedDoses)
+      sum += Number.isFinite(n) && n > 0 ? n : 1 // a "no" is at least one miss
+    }
+  }
+  return sum
+}
+
+/** Sum `missedDoses` over a `missedMedications` array (every item is a miss). */
+function sumMissedList(json: unknown): number | null {
+  if (!Array.isArray(json)) return null
+  let sum = 0
+  for (const item of json) {
+    if (item && typeof item === 'object') {
+      const n = Number((item as any).missedDoses)
+      sum += Number.isFinite(n) && n > 0 ? n : 1
+    }
+  }
+  return sum
+}
+
+/**
  * Resolve the rolling window for an N-day look-back ending "now". Rolling
  * (not calendar-bound) — the adherence report always covers the last N days
  * up to the moment of the request. Timezone is carried only for display;
@@ -124,6 +176,8 @@ export class AdherenceService {
               medicationTaken: true,
               medicationScheduledLater: true,
               missedDoses: true,
+              missedMedications: true,
+              medicationStatuses: true,
             },
           })
 
@@ -154,7 +208,7 @@ export class AdherenceService {
     for (const e of entries) {
       const t = ensure(e.userId)
       t.checkInsLogged += 1
-      t.missedDosesTotal += e.missedDoses ?? 0
+      t.missedDosesTotal += missedDosesInEntry(e)
 
       // "Due" = a medication decision was actually required on this entry.
       // Exclude entries where the patient never answered the med question
@@ -303,9 +357,9 @@ export class AdherenceService {
       'Patient',
       'Status',
       'Adherence',
-      'Due check-ins',
-      'Taken',
-      'Missed doses',
+      'Times due',
+      'Times taken',
+      'Doses missed',
       'Check-ins logged',
     )
     for (const p of report.byPatient) {
@@ -355,8 +409,6 @@ export class AdherenceService {
       const HEADER_BG = '#F8FAFC'
       const BORDER = '#E5E7EB'
       const ZEBRA = '#FAFBFF'
-      const AMBER_BG = '#FEF3C7'
-      const AMBER_TX = '#92400E'
 
       const pageWidth =
         doc.page.width - doc.page.margins.left - doc.page.margins.right
@@ -409,26 +461,7 @@ export class AdherenceService {
           doc.y,
         )
 
-      // ── Provisional disclaimer band ──────────────────────────────────
-      doc.moveDown(0.7)
-      const bandH = 26
-      const bandTop = doc.y
-      doc.save()
-      doc.roundedRect(leftX, bandTop, pageWidth, bandH, 6).fill(AMBER_BG)
-      doc
-        .fillColor(AMBER_TX)
-        .font('Helvetica-Bold')
-        .fontSize(8.5)
-        .text(
-          'PROVISIONAL — adherence definition pending clinical sign-off (Dr. Singal). Numbers are indicative only.',
-          leftX + 10,
-          bandTop + 8,
-          { width: pageWidth - 20 },
-        )
-      doc.restore()
-      doc.font('Helvetica')
-      doc.y = bandTop + bandH
-      doc.moveDown(1.0)
+      doc.moveDown(1.2)
 
       // ── KPI tiles (2x2) ──────────────────────────────────────────────
       const drawTile = (
@@ -510,16 +543,27 @@ export class AdherenceService {
         .fontSize(11)
         .text('BY PATIENT', leftX, doc.y, { characterSpacing: 0.6 })
       doc.font('Helvetica')
-      doc.moveDown(0.7)
+      doc.moveDown(0.4)
+      // Plain-language legend so the column meanings are unambiguous.
+      doc
+        .fillColor(MUTED)
+        .fontSize(8)
+        .text(
+          'Times due = check-ins where a dose was due (Yes or No).  Times taken = of those, how many were taken.  Doses missed = total doses reported missed.  Adherence = taken ÷ due.',
+          leftX,
+          doc.y,
+          { width: pageWidth },
+        )
+      doc.moveDown(0.6)
 
       type Col = { label: string; width: number; align?: 'left' | 'right' }
       const cols: Col[] = [
-        { label: 'Patient', width: 0.34 },
+        { label: 'Patient', width: 0.3 },
         { label: 'Status', width: 0.16 },
-        { label: 'Adherence', width: 0.13, align: 'right' },
-        { label: 'Due', width: 0.1, align: 'right' },
-        { label: 'Taken', width: 0.1, align: 'right' },
-        { label: 'Missed', width: 0.17, align: 'right' },
+        { label: 'Adherence', width: 0.14, align: 'right' },
+        { label: 'Times due', width: 0.13, align: 'right' },
+        { label: 'Times taken', width: 0.14, align: 'right' },
+        { label: 'Doses missed', width: 0.13, align: 'right' },
       ]
       const cells: string[][] = report.byPatient.map((p) => [
         p.name,
@@ -538,7 +582,9 @@ export class AdherenceService {
             width: pageWidth,
           })
       } else {
-        const HEADER_H = 22
+        // Taller header so two-word labels (e.g. "DOSES MISSED") can wrap to
+        // two lines without overlapping the row below.
+        const HEADER_H = 30
         const ROW_H = 20
         const CELL_PAD_X = 8
         const FOOTER_RESERVE = 28
@@ -553,11 +599,11 @@ export class AdherenceService {
           doc.font('Helvetica-Bold').fillColor(TEXT).fontSize(8.5)
           for (const c of cols) {
             const w = c.width * pageWidth
-            doc.text(c.label.toUpperCase(), cx + CELL_PAD_X, top + 7, {
+            // Allow wrapping (no lineBreak:false) so a narrow column stacks
+            // its label instead of clipping it.
+            doc.text(c.label.toUpperCase(), cx + CELL_PAD_X, top + 5, {
               width: w - CELL_PAD_X * 2,
               align: c.align ?? 'left',
-              lineBreak: false,
-              ellipsis: true,
             })
             cx += w
           }
@@ -618,7 +664,7 @@ export class AdherenceService {
       }
 
       // ── Footer on every page ─────────────────────────────────────────
-      const footerText = `${report.overall.patientsWithMeds} patients with meds  ·  ${report.overall.patientsBelowTarget} below target  ·  Cardioplace Adherence Report (provisional)`
+      const footerText = `${report.overall.patientsWithMeds} patients with meds  ·  ${report.overall.patientsBelowTarget} below target  ·  Cardioplace Adherence Report`
       const range = doc.bufferedPageRange()
       for (let i = range.start; i < range.start + range.count; i++) {
         doc.switchToPage(i)

@@ -9,7 +9,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle,
   ChevronDown,
   Download,
   FileText,
@@ -172,21 +171,6 @@ export default function AdherencePanel() {
             {downloadingPdf ? 'Downloading…' : 'PDF'}
           </button>
         </div>
-      </div>
-
-      {/* Provisional disclaimer banner */}
-      <div
-        className="flex items-start gap-2 rounded-xl px-3 py-2.5"
-        style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}
-        role="note"
-        data-testid="adherence-provisional-banner"
-      >
-        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden />
-        <p className="text-[12px] font-semibold leading-snug">
-          Provisional — the adherence definition (target {report?.targetPct ?? 80}
-          %, dose-not-due handling) is pending clinical sign-off from Dr. Singal.
-          Treat these numbers as indicative, not final.
-        </p>
       </div>
 
       {/* Filter card */}
@@ -443,9 +427,9 @@ function PatientTable({ report }: { report: AdherenceReport }) {
               <Th>Patient</Th>
               <Th>Status</Th>
               <Th align="right">Adherence</Th>
-              <Th align="right">Due</Th>
-              <Th align="right">Taken</Th>
-              <Th align="right">Missed</Th>
+              <Th align="right">Times due</Th>
+              <Th align="right">Times taken</Th>
+              <Th align="right">Doses missed</Th>
             </tr>
           </thead>
           <tbody>
@@ -482,6 +466,19 @@ function PatientTable({ report }: { report: AdherenceReport }) {
             ))}
           </tbody>
         </table>
+      </div>
+      {/* Plain-language legend so the column meanings are unambiguous. */}
+      <div
+        className="px-4 py-3 border-t text-[11px] leading-relaxed"
+        style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-muted)' }}
+      >
+        <span className="font-semibold">Times due</span> — check-ins where a dose
+        was due (answered Yes or No).{'  '}
+        <span className="font-semibold">Times taken</span> — of those, how many
+        were taken (Yes).{'  '}
+        <span className="font-semibold">Doses missed</span> — total doses the
+        patient reported missing. <span className="font-semibold">Adherence</span>{' '}
+        = times taken ÷ times due.
       </div>
     </div>
   );
