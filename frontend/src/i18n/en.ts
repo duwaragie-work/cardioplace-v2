@@ -101,6 +101,9 @@ const en = {
   // #89 — diastolic-only goal: clarify the axis so the number isn't read as systolic.
   'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
   'dashboard.goalTolerance': 'High alerts begin at {value}, your goal plus a small tolerance.',
+  'dashboard.goalOverridePregnancy': 'Alerts begin at {value} during pregnancy.',
+  'dashboard.goalOverrideHfref': 'Alerts begin at {value} for your heart-failure care.',
+  'dashboard.goalOverrideCad': 'Alerts begin at {value} for your heart condition.',
   'dashboard.setByCareTeam': '· set by your care team',
   'dashboard.chartDateAxis': 'Date',
   'dashboard.chartAt': 'at',

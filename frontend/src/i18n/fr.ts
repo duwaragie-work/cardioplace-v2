@@ -106,6 +106,9 @@ const fr: Record<TranslationKey, string> = {
   // #89 — English placeholder; flagged for Niva translation pass.
   'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
   'dashboard.goalTolerance': 'Les alertes élevées commencent à {value}, votre objectif plus une petite marge.',
+  'dashboard.goalOverridePregnancy': 'Les alertes commencent à {value} pendant la grossesse.',
+  'dashboard.goalOverrideHfref': 'Les alertes commencent à {value} pour le suivi de votre insuffisance cardiaque.',
+  'dashboard.goalOverrideCad': 'Les alertes commencent à {value} pour votre problème cardiaque.',
   'dashboard.setByCareTeam': '· défini par votre équipe soignante',
   'dashboard.chartDateAxis': 'Date',
   'dashboard.chartAt': 'à',

@@ -108,6 +108,9 @@ const am: Record<TranslationKey, string> = {
   // #89 — English placeholder; flagged for Niva translation pass.
   'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
   'dashboard.goalTolerance': 'ከፍተኛ ማንቂያዎች የሚጀምሩት በ{value} ነው፣ ግብዎ ላይ ትንሽ ተጨማሪ ገደብ።',
+  'dashboard.goalOverridePregnancy': 'በእርግዝና ወቅት ማንቂያዎች የሚጀምሩት በ{value} ነው።',
+  'dashboard.goalOverrideHfref': 'ለልብ ድካም እንክብካቤዎ ማንቂያዎች የሚጀምሩት በ{value} ነው።',
+  'dashboard.goalOverrideCad': 'ለልብ ህመምዎ ማንቂያዎች የሚጀምሩት በ{value} ነው።',
   'dashboard.setByCareTeam': '· በተንከባካቢ ቡድንዎ የተዘጋጀ',
   'dashboard.chartDateAxis': 'ቀን',
   'dashboard.chartAt': 'በ',
