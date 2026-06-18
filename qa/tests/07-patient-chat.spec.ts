@@ -97,14 +97,17 @@ test.describe('Phase 4i — chat text (20i)', () => {
   // 20i.1 (UI-only) + 20i.2 (stubbed streaming) run by default — no Gemini.
   // 20i.3 keeps the real-Gemini gate (RUN_LLM_TESTS=1, paid quota).
 
-  test('20i.1 — chat shell renders; typing enables send', async ({ page }) => {
+  test('20i.1 — chat shell renders; typing reveals + enables send', async ({ page }) => {
     await signInPatient(page, PATIENTS.aisha.email)
     await page.goto('/chat')
     const input = page.locator(byTestId(T.chat.input))
     const sendBtn = page.locator(byTestId(T.chat.sendBtn))
     await expect(input).toBeVisible({ timeout: 12_000 })
-    await expect(sendBtn).toBeDisabled()
+    // ChatGPT-style composer: with an empty input the Send button is hidden
+    // (the dictation + voice buttons show instead); typing reveals + enables it.
+    await expect(sendBtn).toHaveCount(0)
     await input.fill('What is my BP target?')
+    await expect(sendBtn).toBeVisible()
     await expect(sendBtn).toBeEnabled()
   })
 

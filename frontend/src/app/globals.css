@@ -109,6 +109,32 @@ body {
   outline-offset: 2px;
 }
 
+/* Chat composer: the rounded, bordered box IS the input affordance, so the
+   global :focus-visible purple ring on its <textarea> reads as a stray outline
+   (text inputs match :focus-visible even on mouse click). Suppress it there;
+   keyboard focus stays visible via the container's focus-within emphasis (a
+   neutral border darken, not the purple ring). Higher specificity than the
+   bare :focus-visible rule above, so it wins without !important. */
+[data-testid="chat-input"]:focus,
+[data-testid="chat-input"]:focus-visible {
+  outline: none;
+  outline-offset: 0;
+}
+[data-testid="chat-message-input"]:focus-within {
+  border-color: var(--brand-text-muted) !important;
+}
+/* Hide the chat textarea's scrollbar. It inherits the purple `.thin-scrollbar`
+   thumb, which — when text wraps (sooner on small screens) — shows on the right
+   edge and reads as a stray vertical purple line between the text and the
+   buttons. The field stays scrollable (wheel / touch); only the bar is hidden. */
+[data-testid="chat-input"] {
+  scrollbar-width: none; /* Firefox */
+}
+[data-testid="chat-input"]::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 /* ── Thin brand scrollbar utility ─────────────────────────────────────────
    Apply via `className="thin-scrollbar"` to any element that owns its own
    overflow (e.g. modal body, scrollable list). Uses the brand primary
