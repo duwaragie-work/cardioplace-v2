@@ -8,7 +8,7 @@
 // collapses to cards below lg.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, Download, FileText, Layers, Loader2 } from 'lucide-react';
+import { ChevronDown, Download, FileText, Loader2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   defaultPreviousMonth,
@@ -122,7 +122,7 @@ export default function CohortPanel() {
             style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
             aria-hidden
           >
-            <Layers className="w-5 h-5" />
+            <Users className="w-5 h-5" />
           </div>
           <div className="min-w-0">
             <h1 className="text-xl font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
@@ -161,7 +161,7 @@ export default function CohortPanel() {
       {/* Filter card */}
       <div className="bg-white rounded-2xl p-3 sm:p-4" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
         <div className="flex flex-row flex-wrap items-end gap-x-3 gap-y-2">
-          <div className="flex flex-col gap-1 min-w-0 sm:flex-row sm:items-center sm:gap-2">
+          <div className="flex flex-col gap-1 min-w-0 flex-1 basis-[140px] sm:flex-row sm:items-center sm:gap-2 sm:basis-auto sm:flex-none">
             <label
               htmlFor="cohort-month"
               className="shrink-0 text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider"
@@ -188,7 +188,7 @@ export default function CohortPanel() {
           </div>
 
           {showPracticePicker && (
-            <div className="flex flex-col gap-1 min-w-0 sm:flex-row sm:items-center sm:gap-2">
+            <div className="flex flex-col gap-1 min-w-0 flex-1 basis-[140px] sm:flex-row sm:items-center sm:gap-2 sm:basis-auto sm:flex-none">
               <label
                 htmlFor="cohort-practice"
                 className="shrink-0 text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider"

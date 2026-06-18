@@ -163,7 +163,7 @@ export default function SlaPanel() {
       {/* Filter card */}
       <div className="bg-white rounded-2xl p-3 sm:p-4" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
         <div className="flex flex-row flex-wrap items-end gap-x-3 gap-y-2">
-          <div className="flex flex-col gap-1 min-w-0 sm:flex-row sm:items-center sm:gap-2">
+          <div className="flex flex-col gap-1 min-w-0 flex-1 basis-[140px] sm:flex-row sm:items-center sm:gap-2 sm:basis-auto sm:flex-none">
             <label
               htmlFor="sla-month"
               className="shrink-0 text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider"
@@ -190,7 +190,7 @@ export default function SlaPanel() {
           </div>
 
           {showPracticePicker && (
-            <div className="flex flex-col gap-1 min-w-0 sm:flex-row sm:items-center sm:gap-2">
+            <div className="flex flex-col gap-1 min-w-0 flex-1 basis-[140px] sm:flex-row sm:items-center sm:gap-2 sm:basis-auto sm:flex-none">
               <label
                 htmlFor="sla-practice"
                 className="shrink-0 text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider"

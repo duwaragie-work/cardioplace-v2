@@ -12,7 +12,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ClipboardList, Gauge, HeartPulse, Layers, Shield, TrendingUp } from 'lucide-react';
+import { CalendarDays, Gauge, Pill, Shield, TrendingUp, Users } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { canViewReports } from '@/lib/roleGates';
 import ReportsPanel from '@/components/reports/ReportsPanel';
@@ -77,11 +77,12 @@ export default function ReportsPage() {
 
   return (
     <div className="h-full" style={{ backgroundColor: '#FAFBFF' }}>
-      {/* Tab bar — same max width as the panels below so it lines up. Scrolls
-          horizontally on narrow screens so all four tabs stay reachable. */}
-      <div className="max-w-[1200px] mx-auto px-4 md:px-8 pt-6 overflow-x-auto">
+      {/* Tab bar — same max width as the panels below so it lines up. Wraps
+          onto multiple rows on narrow screens (no horizontal scroll). The
+          pb gives clear breathing room before the panel header below. */}
+      <div className="max-w-[1200px] mx-auto px-4 md:px-8 pt-6 pb-1">
         <div
-          className="inline-flex items-center gap-1 p-1 rounded-full bg-white w-max"
+          className="flex flex-wrap items-center gap-1 p-1 rounded-2xl bg-white w-fit max-w-full"
           style={{ boxShadow: 'var(--brand-shadow-card)' }}
           role="tablist"
           aria-label="Report type"
@@ -89,7 +90,7 @@ export default function ReportsPage() {
           <TabButton
             active={tab === 'monthly'}
             onClick={() => setTab('monthly')}
-            icon={<ClipboardList className="w-4 h-4" />}
+            icon={<CalendarDays className="w-4 h-4" />}
             label="Monthly"
             testid="report-tab-monthly"
           />
@@ -110,14 +111,14 @@ export default function ReportsPage() {
           <TabButton
             active={tab === 'cohorts'}
             onClick={() => setTab('cohorts')}
-            icon={<Layers className="w-4 h-4" />}
+            icon={<Users className="w-4 h-4" />}
             label="Cohorts"
             testid="report-tab-cohorts"
           />
           <TabButton
             active={tab === 'adherence'}
             onClick={() => setTab('adherence')}
-            icon={<HeartPulse className="w-4 h-4" />}
+            icon={<Pill className="w-4 h-4" />}
             label="Adherence"
             testid="report-tab-adherence"
           />

@@ -12,8 +12,8 @@ import {
   ChevronDown,
   Download,
   FileText,
-  HeartPulse,
   Loader2,
+  Pill,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -131,7 +131,7 @@ export default function AdherencePanel() {
             style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
             aria-hidden
           >
-            <HeartPulse className="w-5 h-5" />
+            <Pill className="w-5 h-5" />
           </div>
           <div className="min-w-0">
             <h1
@@ -180,7 +180,7 @@ export default function AdherencePanel() {
       >
         <div className="flex flex-row flex-wrap items-end gap-x-3 gap-y-2">
           {/* Window picker */}
-          <div className="flex flex-col gap-1 min-w-0 sm:flex-row sm:items-center sm:gap-2">
+          <div className="flex flex-col gap-1 min-w-0 flex-1 basis-[140px] sm:flex-row sm:items-center sm:gap-2 sm:basis-auto sm:flex-none">
             <label
               htmlFor="adherence-window"
               className="shrink-0 text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider"
@@ -216,7 +216,7 @@ export default function AdherencePanel() {
 
           {/* Practice picker — only when caller has more than one */}
           {showPracticePicker && (
-            <div className="flex flex-col gap-1 min-w-0 sm:flex-row sm:items-center sm:gap-2">
+            <div className="flex flex-col gap-1 min-w-0 flex-1 basis-[140px] sm:flex-row sm:items-center sm:gap-2 sm:basis-auto sm:flex-none">
               <label
                 htmlFor="adherence-practice"
                 className="shrink-0 text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider"
