@@ -14,3 +14,5 @@ export * from './session.js';
 export * from './consent.js';
 export * from './report-sla.js';
 export * from './monthly-report.js';
+export * from './option-d-discrepancy.js';
+export * from './effective-threshold.js';

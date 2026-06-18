@@ -2174,6 +2174,9 @@ export default function CheckIn() {
   // True when the review screen should take over (vs. the wizard re-opened to
   // add / edit a reading inside the buffer).
   const [bufferReviewing, setBufferReviewing] = useState(false);
+  // True between clearing an emptied buffer and the /dashboard navigation landing,
+  // so the render shows the skeleton instead of flashing the wizard's step 1.
+  const [navigatingAway, setNavigatingAway] = useState(false);
   // Set while editing a buffered reading — on submit we replace it in place.
   const [editingBufferLocalId, setEditingBufferLocalId] = useState<string | null>(null);
   const [committingBuffer, setCommittingBuffer] = useState(false);
@@ -2872,10 +2875,21 @@ export default function CheckIn() {
     setCommittingBuffer(true);
     try {
       const created = [] as Awaited<ReturnType<typeof createJournalEntry>>[];
-      for (const payload of commitPayloads(draft)) {
+      const payloads = commitPayloads(draft);
+      for (let i = 0; i < payloads.length; i++) {
         // Bug 19 — "I'm good" is an explicit session boundary; close it so the
         // active-session prompt won't re-offer this sitting on the next check-in.
-        created.push(await createJournalEntry({ ...payload, closeSession: true }));
+        // Bug 23 — closeSession ALSO triggers the backend buffer fast-fire (skip
+        // the post-commit single-reading hold). Send it ONLY on the LAST reading
+        // so a multi-reading sitting still session-averages: the earlier readings
+        // stay held until this final one closes the session, then the engine
+        // fires once on the averaged result. The backend's sessionClosedAt +
+        // finalize updateMany covers every reading in the shared session, so one
+        // closeSession on the last reading still closes the whole sitting.
+        const isLast = i === payloads.length - 1;
+        created.push(
+          await createJournalEntry({ ...payloads[i], closeSession: isLast }),
+        );
       }
       if (user?.id) {
         clearBufferDraft(user.id);
@@ -2952,6 +2966,9 @@ export default function CheckIn() {
     const next = removeReading(bufferDraft, localId);
     if (next.readings.length === 0) {
       if (user?.id) clearBufferDraft(user.id);
+      // Render the skeleton (not the wizard) until /dashboard takes over —
+      // without this the cleared buffer briefly falls through to step 1.
+      setNavigatingAway(true);
       setBufferDraft(null);
       setBufferReviewing(false);
       router.push('/dashboard');
@@ -2964,7 +2981,7 @@ export default function CheckIn() {
   // Authed loading state — skeleton mirroring the wizard chrome (top bar +
   // step header + a few content rows + sticky CTA placeholder) so the page
   // doesn't flash a generic spinner before the first step renders.
-  if (isLoading || !isAuthenticated || profileLoading || activeSessionLoading) {
+  if (isLoading || !isAuthenticated || profileLoading || activeSessionLoading || navigatingAway) {
     return <CheckInSkeleton />;
   }
 

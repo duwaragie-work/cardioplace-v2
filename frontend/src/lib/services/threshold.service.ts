@@ -1,6 +1,9 @@
 import { fetchWithAuth } from './token'
+import type { EffectiveThreshold } from '@cardioplace/shared'
 
 const API = process.env.NEXT_PUBLIC_API_URL
+
+export type { EffectiveThreshold }
 
 /**
  * Patient's BP / HR target range, set by their care team.
@@ -36,4 +39,21 @@ export async function getMyThreshold(): Promise<PatientThresholdDto | null> {
   }
   const json = await res.json()
   return (json.data ?? null) as PatientThresholdDto | null
+}
+
+/**
+ * Item C / Bug 24 — the EFFECTIVE high-alert threshold (pregnancy / HFrEF / CAD
+ * overrides applied), so the dashboard shows the alert point the engine actually
+ * uses rather than the raw custom values. Null when the patient has no clinical
+ * profile yet.
+ */
+export async function getMyEffectiveThreshold(): Promise<EffectiveThreshold | null> {
+  const res = await fetchWithAuth(`${API}/api/me/threshold/effective`)
+  if (!res.ok) {
+    if (res.status === 404) return null
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json()
+  return (json.data ?? null) as EffectiveThreshold | null
 }

@@ -22,7 +22,13 @@ import {
   getJournalEntries,
   updateJournalEntry,
   deleteJournalEntry,
+  ReadingTimeConflictError,
 } from '@/lib/services/journal.service';
+import {
+  resolveEditedMeasuredAt,
+  findMeasuredAtCollision,
+  isEditableBadgeVisible,
+} from '@/lib/readingEdit';
 import { getMyPatientProfile } from '@/lib/services/intake.service';
 import {
   listMyMedications,
@@ -607,8 +613,7 @@ function EntryCard({
               grace period this reading hasn't been committed to the engine yet,
               so edits/deletes are "free". Informational only; edit/delete stay
               available after the window too. */}
-          {entry.engineEvaluationDeferredUntil &&
-            new Date(entry.engineEvaluationDeferredUntil).getTime() > Date.now() && (
+          {isEditableBadgeVisible(entry.engineEvaluationDeferredUntil, Date.now()) && (
               <span
                 data-testid={`reading-editable-${entry.id}`}
                 className="text-[0.625rem] px-1.5 py-0.5 rounded-full font-semibold"
@@ -1197,9 +1202,14 @@ function EditModal({
                 >
                   {t('checkin.time')}
                 </label>
+                {/* Bug 25 — step="1" exposes the SECONDS spinner so two
+                    readings can share a minute (e.g. 16:15:30 vs 16:15:00)
+                    without an unavoidable :00 collision. measuredTime is now
+                    HH:MM:SS. */}
                 <input
                   id="readings-edit-time"
                   type="time"
+                  step="1"
                   value={form.measuredTime}
                   onChange={(e) => onChange('measuredTime', e.target.value)}
                   className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none min-w-0"
@@ -1209,6 +1219,13 @@ function EditModal({
                     colorScheme: 'light',
                   }}
                 />
+                <p
+                  data-testid="edit-seconds-note"
+                  className="mt-1 text-[0.7rem] leading-snug"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                >
+                  {t('readings.edit.secondsNote')}
+                </p>
               </div>
             </div>
 
@@ -1657,12 +1674,16 @@ function EditModal({
           style={{ borderTop: '1px solid var(--brand-border)' }}
         >
           {error && (
-            <p
-              className="text-[0.78125rem] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
+            <div
+              role="alert"
+              className="flex items-center justify-center gap-2 text-[0.78125rem] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
               style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
             >
-              {error}
-            </p>
+              <span>{error}</span>
+              {/* Bug 25 — let the patient hear the message (e.g. the collision
+                  guidance) so it's understandable without reading. */}
+              <AudioButton size="sm" text={error} />
+            </div>
           )}
           <div className="flex gap-3">
             <button
@@ -2184,10 +2205,12 @@ export default function ReadingsPage() {
     const dd = String(dt.getDate()).padStart(2, '0');
     const hh = String(dt.getHours()).padStart(2, '0');
     const mi = String(dt.getMinutes()).padStart(2, '0');
+    // Bug 25 — seconds are now editable (step="1"), so seed them too.
+    const ss = String(dt.getSeconds()).padStart(2, '0');
 
     const populated: EditForm = {
       measuredDate: isValid ? `${yyyy}-${mm}-${dd}` : '',
-      measuredTime: isValid ? `${hh}:${mi}` : '',
+      measuredTime: isValid ? `${hh}:${mi}:${ss}` : '',
       position: entry.position ?? '',
       systolic: entry.systolicBP?.toString() ?? '',
       diastolic: entry.diastolicBP?.toString() ?? '',
@@ -2248,6 +2271,19 @@ export default function ReadingsPage() {
       setEditError(validation);
       return;
     }
+    // A BP reading can't be cleared to nothing. Pre-fix, emptying BOTH numbers
+    // passed validation but the empty values were never PATCHed, so the old BP
+    // silently stuck — a confusing no-op. If this entry was logged WITH a BP,
+    // require it to keep one. (Weight-/symptom-only entries that never had BP
+    // are unaffected — they may stay empty.)
+    if (
+      (editEntry.systolicBP != null || editEntry.diastolicBP != null) &&
+      !editForm.systolic &&
+      !editForm.diastolic
+    ) {
+      setEditError(t('readings.validate.bpBoth'));
+      return;
+    }
     // Per-medication: a med marked "No" must carry a reason — the backend
     // requires `reason` on every missedMedications entry.
     const missingReason = medications.some(
@@ -2259,14 +2295,34 @@ export default function ReadingsPage() {
       setEditError(t('readings.validate.missedReason'));
       return;
     }
+    // Bug 25 — resolve the final measuredAt preserving the original seconds when
+    // the minute is unchanged (the HH:MM picker can't show seconds), then reject
+    // a collision with an existing reading inline, before the PATCH. The page
+    // already holds the recent readings in memory, so the check is free; the
+    // backend 409 (catch below) is the safety net for a reading outside that set.
+    let finalMeasuredAt: string | undefined;
+    if (editForm.measuredDate && editForm.measuredTime) {
+      finalMeasuredAt = resolveEditedMeasuredAt(
+        editEntry.measuredAt,
+        editForm.measuredDate,
+        editForm.measuredTime,
+      );
+      const collision = findMeasuredAtCollision(
+        entries,
+        finalMeasuredAt,
+        editEntry.id,
+      );
+      if (collision) {
+        setEditError(t('readings.validate.timeCollision'));
+        return;
+      }
+    }
     setEditSaving(true);
     setEditError('');
     try {
       const payload: Parameters<typeof updateJournalEntry>[1] = {};
-      if (editForm.measuredDate && editForm.measuredTime) {
-        payload.measuredAt = new Date(
-          `${editForm.measuredDate}T${editForm.measuredTime}`,
-        ).toISOString();
+      if (finalMeasuredAt) {
+        payload.measuredAt = finalMeasuredAt;
       }
       if (editForm.position) payload.position = editForm.position;
       if (editForm.systolic) payload.systolicBP = parseInt(editForm.systolic, 10);
@@ -2359,7 +2415,13 @@ export default function ReadingsPage() {
       closeEdit();
       load();
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : 'Failed to save. Please try again.');
+      // Bug 25 Part C — backend 409 safety net (a collision the in-memory check
+      // missed, e.g. a reading outside the loaded window or a concurrent add).
+      if (err instanceof ReadingTimeConflictError) {
+        setEditError(t('readings.validate.timeCollision'));
+      } else {
+        setEditError(err instanceof Error ? err.message : 'Failed to save. Please try again.');
+      }
     } finally {
       setEditSaving(false);
     }

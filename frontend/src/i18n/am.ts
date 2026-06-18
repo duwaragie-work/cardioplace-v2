@@ -108,6 +108,9 @@ const am: Record<TranslationKey, string> = {
   // #89 — English placeholder; flagged for Niva translation pass.
   'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
   'dashboard.goalTolerance': 'ከፍተኛ ማንቂያዎች የሚጀምሩት በ{value} ነው፣ ግብዎ ላይ ትንሽ ተጨማሪ ገደብ።',
+  'dashboard.goalOverridePregnancy': 'በእርግዝና ወቅት ማንቂያዎች የሚጀምሩት በ{value} ነው።',
+  'dashboard.goalOverrideHfref': 'ለልብ ድካም እንክብካቤዎ ማንቂያዎች የሚጀምሩት በ{value} ነው።',
+  'dashboard.goalOverrideCad': 'ለልብ ህመምዎ ማንቂያዎች የሚጀምሩት በ{value} ነው።',
   'dashboard.setByCareTeam': '· በተንከባካቢ ቡድንዎ የተዘጋጀ',
   'dashboard.chartDateAxis': 'ቀን',
   'dashboard.chartAt': 'በ',
@@ -250,6 +253,8 @@ const am: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': 'ንባብዎን አስቀምጠናል እና የእንክብካቤ ቡድንዎ እንዲያገኝዎት አሳውቀናል።',
   'checkin.optionD.screenC.safetyFooter': 'አሁን ጤናዎ ካልተሰማዎት፣ እባክዎ ሐኪምዎን ወይም 911 ይደውሉ።',
   'checkin.optionD.screenC.done': 'ወደ ዳሽቦርድ ተመለስ',
+  'checkin.optionD.confirmedNormal.title': 'ሁለተኛው ንባብዎ የተሻለ ይመስላል',
+  'checkin.optionD.confirmedNormal.body': 'የክትትል ንባብዎ ይበልጥ ደህንነቱ በተጠበቀ ክልል ውስጥ ነው። ሁለቱንም ንባቦች አስቀምጠን ለእንክብካቤ ቡድንዎ አሳውቀናል — አሁንም ሊያገኙዎት ይችላሉ።',
   // Resume intro — Screen A ራስ-ሰር መቀጠያ (2026-06-16)። ጊዜያዊ (ማኒሻ በመጠባበቅ ላይ)።
   'checkin.optionD.resumeIntro': 'ከአሁን ቀደም የጀመሩትን ንባብ እንጨርስ',
   // Part 1 — FE buffer review screen. ጊዜያዊ (ማኒሻ በመጠባበቅ ላይ)።
@@ -638,9 +643,11 @@ const am: Record<TranslationKey, string> = {
   'readings.crisis': 'ቀውስ',
 
   // ─── Readings (audit sweep additions) ──────────────────────────────────────
-  'readings.validate.bpBoth': 'የደም ግፊት ሁለቱንም ቁጥር ያስገቡ (ወይም ሁለቱንም ያጥፉ)።',
+  'readings.validate.bpBoth': 'የደም ግፊት ሁለቱንም ቁጥር ያስገቡ።',
   'readings.validate.weightRange': 'ክብደቱ ከ20 እስከ 600 መሆን አለበት።',
   'readings.validate.missedReason': 'ላመለጡት እያንዳንዱ መድኃኒት ምክንያት ይምረጡ።',
+  'readings.validate.timeCollision': 'በዚህ ትክክለኛ ሰዓት ላይ ቀድሞውኑ ንባብ አለዎት። ሰዓቱን ይቀይሩ ወይም ነባሩን ንባብ ያስተካክሉ።',
+  'readings.edit.secondsNote': 'ሰከንዶችንም ማስተካከል ይችላሉ — ሁለት ንባቦች በተመሳሳይ ደቂቃ ውስጥ ሲሆኑ ጠቃሚ ነው።',
   'readings.sameMinute': 'ተመሳሳይ ደቂቃ',
   'readings.sessionReadings': 'ክፍለ-ጊዜ · {count} ንባቦች',
   'readings.readingsCount': '{count} ንባቦች',

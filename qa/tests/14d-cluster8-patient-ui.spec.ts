@@ -134,25 +134,27 @@ async function clickSymptomButtonViaUI(
   return true
 }
 
-async function postAngioedemaEntry(
-  patientEmail: string,
-  opts: { faceSwelling?: boolean; throatTightness?: boolean } = { faceSwelling: true },
+/**
+ * Bug 16 (click->submit->navigate) - the angioedema EmergencyAlertScreen is
+ * reached by SUBMITTING the check-in, not by an inline takeover. Walk to the
+ * B3 symptoms step, select the airway symptom, then submit (B3 is the last
+ * step, so its footer button is checkin-submit-btn - CheckIn.tsx:3330). The
+ * post-submit handler (routeToFiredEmergencyAlert) polls the async engine and
+ * deep-links to /alerts/[id]; we return once the URL has settled there.
+ */
+async function submitAngioedemaCheckInViaUI(
+  page: Page,
+  symptomKey: string,
 ): Promise<void> {
-  const api = await authedApi(API_BASE_URL, patientEmail)
-  try {
-    await postJournalEntry(api, {
-      measuredAt: new Date().toISOString(),
-      systolicBP: 124,
-      diastolicBP: 78,
-      pulse: 72,
-      position: 'SITTING',
-      faceSwelling: opts.faceSwelling,
-      throatTightness: opts.throatTightness,
-      sessionId: crypto.randomUUID(),
-    })
-  } finally {
-    await api.dispose()
-  }
+  const reached = await clickSymptomButtonViaUI(page, symptomKey)
+  expect(
+    reached,
+    `${symptomKey} button must be reachable in the check-in flow`,
+  ).toBe(true)
+  const submit = page.locator(byTestId(T.checkin.submit))
+  await submit.scrollIntoViewIfNeeded({ timeout: 5_000 }).catch(() => {})
+  await submit.click({ timeout: 10_000 })
+  await page.waitForURL(/\/alerts\/[^/]+$/, { timeout: 30_000 })
 }
 
 test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert treatment', () => {
@@ -161,9 +163,10 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
     'Write tests gated behind RUN_WRITE_TESTS=1 (mutates seed-patient state)',
   )
 
-  test('1. faceSwelling button receives click + EmergencyAlertScreen renders with 911 button (ACE branch)', async ({ page }) => {
+  test('1. faceSwelling submit -> EmergencyAlertScreen renders with 911 button (ACE branch)', async ({ page }) => {
     test.setTimeout(120_000)
     const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
+      await tc.setEnrollment(uid, 'ENROLLED')
       await tc.setUserMedication(uid, {
         drugName: 'Lisinopril',
         drugClass: 'ACE_INHIBITOR',
@@ -173,23 +176,11 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
     })
     try {
       await signInPatient(page, PATIENTS.aisha.email)
-      // Exercise the new button via UI (the C8.1 deliverable).
-      const clicked = await clickSymptomButtonViaUI(page, 'FACE_SWELLING')
-      expect(clicked, 'FACE_SWELLING button must be reachable in the check-in flow').toBe(true)
-
-      // Drive the engine via API (proven path — spec 20). The §D assertion
-      // is "patient UI surfaces are exercised + the resulting full-screen
-      // emergency renders with the signed-off body + 911 CTA".
-      await postAngioedemaEntry(PATIENTS.aisha.email, { faceSwelling: true })
-      const alerts = await waitForAlerts(tc, userId, (xs) =>
-        xs.some((a) => a.ruleId === 'RULE_ACE_ANGIOEDEMA'),
-      )
-      const row = alerts.find((a) => a.ruleId === 'RULE_ACE_ANGIOEDEMA')!
-      expect(row.tier).toBe('TIER_1_ANGIOEDEMA')
-
-      await page.goto(`/alerts/${row.id}`)
-      // Post-FIX 1 (commit 388b816): angioedema routes to
-      // EmergencyAlertScreen — full-screen red, 911 button, signed-off body.
+      // Bug 16 - click->submit->navigate: selecting the airway symptom + submitting
+      // routes the patient straight to the full-screen 911 alert at /alerts/[id].
+      await submitAngioedemaCheckInViaUI(page, 'FACE_SWELLING')
+      // Post-FIX 1 (commit 388b816): angioedema routes to EmergencyAlertScreen -
+      // full-screen red, 911 button, signed-off body.
       await expect(page.locator(byTestId(T.emergency.screen))).toBeVisible({
         timeout: 20_000,
       })
@@ -197,19 +188,25 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
       const msg = page.locator(byTestId(T.emergency.message))
       await expect(msg).toBeVisible()
       await expect(msg).toContainText(/911|emergency room/i)
+      // Confirm the engine routed the airway emergency to the ACE angioedema rule.
+      const alerts = await waitForAlerts(tc, userId, (xs) =>
+        xs.some((a) => a.ruleId === 'RULE_ACE_ANGIOEDEMA'),
+      )
+      expect(alerts.find((a) => a.ruleId === 'RULE_ACE_ANGIOEDEMA')!.tier).toBe(
+        'TIER_1_ANGIOEDEMA',
+      )
     } finally {
       await tc.dispose()
     }
   })
 
-  test('2. throatTightness button + NO ACE/ARB → EmergencyAlertScreen STILL shows (universal airway)', async ({ page }) => {
+  test('2. throatTightness submit + NO ACE/ARB -> EmergencyAlertScreen STILL shows (universal airway)', async ({ page }) => {
     test.setTimeout(120_000)
     const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
-      // Clear seed Lisinopril (ACE), keep Aisha on Amlodipine (DHP_CCB —
-      // non-ACE/ARB). Rule routes GENERIC (no ACE/ARB in roster) AND the
-      // UI helper has a predictable MEDICATION step (would be skipped with
-      // 0 meds, but having one med makes navigation order independent of
-      // prior test cleanups).
+      await tc.setEnrollment(uid, 'ENROLLED')
+      // Clear seed Lisinopril (ACE), keep Aisha on Amlodipine (DHP_CCB,
+      // non-ACE/ARB) so the rule routes GENERIC and the MEDICATION step has a
+      // predictable row to click.
       await tc.clearUserMedications(uid)
       await tc.setUserMedication(uid, {
         drugName: 'Amlodipine',
@@ -220,35 +217,30 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
     })
     try {
       await signInPatient(page, PATIENTS.aisha.email)
-      const clicked = await clickSymptomButtonViaUI(page, 'THROAT_TIGHTNESS')
-      expect(clicked, 'THROAT_TIGHTNESS button must be reachable').toBe(true)
-
-      await postAngioedemaEntry(PATIENTS.aisha.email, { throatTightness: true })
-      const alerts = await waitForAlerts(tc, userId, (xs) =>
-        xs.some((a) => a.ruleId === 'RULE_GENERIC_ANGIOEDEMA'),
-      )
-      const row = alerts.find((a) => a.ruleId === 'RULE_GENERIC_ANGIOEDEMA')!
-      expect(row.tier).toBe('TIER_1_ANGIOEDEMA')
-
-      await page.goto(`/alerts/${row.id}`)
-      // Critical: airway symptoms must surface the full-screen emergency
-      // even with no med history (allergic / idiopathic / hereditary).
+      await submitAngioedemaCheckInViaUI(page, 'THROAT_TIGHTNESS')
+      // Critical: airway symptoms must surface the full-screen emergency even
+      // with no ACE/ARB history (allergic / idiopathic / hereditary).
       await expect(page.locator(byTestId(T.emergency.screen))).toBeVisible({
         timeout: 20_000,
       })
       await expect(page.locator(byTestId(T.emergency.call911))).toBeVisible()
       await expect(page.locator(byTestId(T.emergency.message))).toContainText(/911/)
+      const alerts = await waitForAlerts(tc, userId, (xs) =>
+        xs.some((a) => a.ruleId === 'RULE_GENERIC_ANGIOEDEMA'),
+      )
+      expect(
+        alerts.find((a) => a.ruleId === 'RULE_GENERIC_ANGIOEDEMA')!.tier,
+      ).toBe('TIER_1_ANGIOEDEMA')
     } finally {
       await tc.dispose()
     }
   })
 
-  test('3. faceSwelling + ARB → Tier 1 red alert + ARB-variant physician text', async ({ page }) => {
+  test('3. faceSwelling + ARB -> Tier 1 red alert + ARB-variant physician text', async ({ page }) => {
     test.setTimeout(120_000)
     const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
-      // Clear Aisha's seed Lisinopril (ACE) so the rule routes to the ARB
-      // branch — without this, the ACE inhibitor still matches and the
-      // physician message uses the ACE variant.
+      await tc.setEnrollment(uid, 'ENROLLED')
+      // Clear Aisha's seed Lisinopril (ACE) so the rule routes to the ARB branch.
       await tc.clearUserMedications(uid)
       await tc.setUserMedication(uid, {
         drugName: 'Losartan',
@@ -259,28 +251,20 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
     })
     try {
       await signInPatient(page, PATIENTS.aisha.email)
-      const clicked = await clickSymptomButtonViaUI(page, 'FACE_SWELLING')
-      expect(clicked).toBe(true)
-
-      await postAngioedemaEntry(PATIENTS.aisha.email, { faceSwelling: true })
+      await submitAngioedemaCheckInViaUI(page, 'FACE_SWELLING')
+      // EmergencyAlertScreen renders (full-screen red); body is the signed-off
+      // ACE_ANGIOEDEMA registry message (patient UI doesn't show physician text).
+      await expect(page.locator(byTestId(T.emergency.screen))).toBeVisible({
+        timeout: 20_000,
+      })
+      await expect(page.locator(byTestId(T.emergency.call911))).toBeVisible()
+      // Physician message is the ARB variant - verified at the DB layer.
       const alerts = await waitForAlerts(tc, userId, (xs) =>
         xs.some((a) => a.ruleId === 'RULE_ACE_ANGIOEDEMA'),
       )
       const row = alerts.find((a) => a.ruleId === 'RULE_ACE_ANGIOEDEMA')!
       expect(row.tier).toBe('TIER_1_ANGIOEDEMA')
-      // Physician message is the ARB variant (verified at the DB layer —
-      // patient UI doesn't display physician text per v2's tier split).
       expect(row.physicianMessage ?? '').toMatch(/\(ARB\)/)
-
-      await page.goto(`/alerts/${row.id}`)
-      // EmergencyAlertScreen renders (full-screen red) — title is neutral
-      // non-diagnostic, body comes from the signed-off ACE_ANGIOEDEMA
-      // registry message (ARB-variant physician text was verified above at
-      // the DB layer; patient UI doesn't show physician text per v2 split).
-      await expect(page.locator(byTestId(T.emergency.screen))).toBeVisible({
-        timeout: 20_000,
-      })
-      await expect(page.locator(byTestId(T.emergency.call911))).toBeVisible()
     } finally {
       await tc.dispose()
     }
@@ -288,7 +272,8 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
 
   test('4a. ACE branch patient message INCLUDES "do not take ... medicine"', async ({ page }) => {
     test.setTimeout(120_000)
-    const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
+    const { tc } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
+      await tc.setEnrollment(uid, 'ENROLLED')
       await tc.setUserMedication(uid, {
         drugName: 'Lisinopril',
         drugClass: 'ACE_INHIBITOR',
@@ -298,12 +283,7 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
     })
     try {
       await signInPatient(page, PATIENTS.aisha.email)
-      await postAngioedemaEntry(PATIENTS.aisha.email, { faceSwelling: true })
-      const alerts = await waitForAlerts(tc, userId, (xs) =>
-        xs.some((a) => a.ruleId === 'RULE_ACE_ANGIOEDEMA'),
-      )
-      const row = alerts.find((a) => a.ruleId === 'RULE_ACE_ANGIOEDEMA')!
-      await page.goto(`/alerts/${row.id}`)
+      await submitAngioedemaCheckInViaUI(page, 'FACE_SWELLING')
       // EmergencyAlertScreen body carries the signed-off ACE registry message.
       const msg = page.locator(byTestId(T.emergency.message))
       await expect(msg).toBeVisible({ timeout: 20_000 })
@@ -317,10 +297,10 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
 
   test('4b. GENERIC branch (no ACE/ARB) patient message OMITS the "stop medicine" line', async ({ page }) => {
     test.setTimeout(120_000)
-    const { tc, userId } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
-      // Clear seed Lisinopril, keep Amlodipine (DHP_CCB, non-ACE/ARB) so
-      // the GENERIC branch fires AND the UI MEDICATION step has a row to
-      // click (decouples test from prior-test cleanup state).
+    const { tc } = await setupPatient(PATIENTS.aisha.email, async (tc, uid) => {
+      await tc.setEnrollment(uid, 'ENROLLED')
+      // Clear seed Lisinopril, keep Amlodipine (DHP_CCB, non-ACE/ARB) so the
+      // GENERIC branch fires AND the MEDICATION step has a row to click.
       await tc.clearUserMedications(uid)
       await tc.setUserMedication(uid, {
         drugName: 'Amlodipine',
@@ -331,16 +311,11 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
     })
     try {
       await signInPatient(page, PATIENTS.aisha.email)
-      await postAngioedemaEntry(PATIENTS.aisha.email, { faceSwelling: true })
-      const alerts = await waitForAlerts(tc, userId, (xs) =>
-        xs.some((a) => a.ruleId === 'RULE_GENERIC_ANGIOEDEMA'),
-      )
-      const row = alerts.find((a) => a.ruleId === 'RULE_GENERIC_ANGIOEDEMA')!
-      await page.goto(`/alerts/${row.id}`)
+      await submitAngioedemaCheckInViaUI(page, 'FACE_SWELLING')
       const msg = page.locator(byTestId(T.emergency.message))
       await expect(msg).toBeVisible({ timeout: 20_000 })
-      // Generic branch must NOT tell the patient to stop a medicine —
-      // cause may be allergic / idiopathic / hereditary, not a drug.
+      // Generic branch must NOT tell the patient to stop a medicine - cause may
+      // be allergic / idiopathic / hereditary, not a drug.
       await expect(msg).not.toContainText(/do not take/i)
       await expect(msg).toContainText(/911|emergency room/i)
     } finally {
