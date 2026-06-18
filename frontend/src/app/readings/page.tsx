@@ -2242,6 +2242,19 @@ export default function ReadingsPage() {
       setEditError(validation);
       return;
     }
+    // A BP reading can't be cleared to nothing. Pre-fix, emptying BOTH numbers
+    // passed validation but the empty values were never PATCHed, so the old BP
+    // silently stuck — a confusing no-op. If this entry was logged WITH a BP,
+    // require it to keep one. (Weight-/symptom-only entries that never had BP
+    // are unaffected — they may stay empty.)
+    if (
+      (editEntry.systolicBP != null || editEntry.diastolicBP != null) &&
+      !editForm.systolic &&
+      !editForm.diastolic
+    ) {
+      setEditError(t('readings.validate.bpBoth'));
+      return;
+    }
     // Per-medication: a med marked "No" must carry a reason — the backend
     // requires `reason` on every missedMedications entry.
     const missingReason = medications.some(

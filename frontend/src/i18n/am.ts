@@ -638,7 +638,7 @@ const am: Record<TranslationKey, string> = {
   'readings.crisis': 'ቀውስ',
 
   // ─── Readings (audit sweep additions) ──────────────────────────────────────
-  'readings.validate.bpBoth': 'የደም ግፊት ሁለቱንም ቁጥር ያስገቡ (ወይም ሁለቱንም ያጥፉ)።',
+  'readings.validate.bpBoth': 'የደም ግፊት ሁለቱንም ቁጥር ያስገቡ።',
   'readings.validate.weightRange': 'ክብደቱ ከ20 እስከ 600 መሆን አለበት።',
   'readings.validate.missedReason': 'ላመለጡት እያንዳንዱ መድኃኒት ምክንያት ይምረጡ።',
   'readings.validate.timeCollision': 'በዚህ ትክክለኛ ሰዓት ላይ ቀድሞውኑ ንባብ አለዎት። ሰዓቱን ይቀይሩ ወይም ነባሩን ንባብ ያስተካክሉ።',

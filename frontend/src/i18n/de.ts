@@ -635,7 +635,7 @@ const de: Record<TranslationKey, string> = {
   'readings.crisis': 'Krise',
 
   // ─── Readings (audit sweep additions) ──────────────────────────────────────
-  'readings.validate.bpBoth': 'Geben Sie beide Blutdruckwerte ein (oder löschen Sie beide).',
+  'readings.validate.bpBoth': 'Geben Sie beide Blutdruckwerte ein.',
   'readings.validate.weightRange': 'Das Gewicht muss zwischen 20 und 600 liegen.',
   'readings.validate.missedReason': 'Bitte wählen Sie für jedes ausgelassene Medikament einen Grund.',
   'readings.validate.timeCollision': 'Sie haben bereits eine Messung zu genau dieser Zeit. Ändern Sie die Zeit oder bearbeiten Sie die vorhandene Messung.',

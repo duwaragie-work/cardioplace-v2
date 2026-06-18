@@ -635,7 +635,7 @@ const es: Record<TranslationKey, string> = {
   'readings.crisis': 'Crisis',
 
   // ─── Readings (audit sweep additions) ──────────────────────────────────────
-  'readings.validate.bpBoth': 'Ingrese ambos números de presión arterial (o borre los dos).',
+  'readings.validate.bpBoth': 'Ingrese ambos números de presión arterial.',
   'readings.validate.weightRange': 'El peso debe estar entre 20 y 600.',
   'readings.validate.missedReason': 'Elija un motivo para cada medicamento que omitió.',
   'readings.validate.timeCollision': 'Ya tiene una lectura a esta hora exacta. Cambie la hora o edite la lectura existente.',

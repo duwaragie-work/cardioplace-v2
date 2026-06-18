@@ -652,7 +652,7 @@ const en = {
   // Validation errors that overlap with check-in reuse checkin.err.* keys
   // directly (one source of truth per locale). bpBoth's "(or clear both)"
   // variant and weightRange are edit-only and stay here.
-  'readings.validate.bpBoth': 'Enter both blood pressure numbers (or clear both).',
+  'readings.validate.bpBoth': 'Enter both blood pressure numbers.',
   'readings.validate.weightRange': 'Weight should be between 20 and 600.',
   'readings.validate.missedReason': 'Please pick a reason for each medication you missed.',
   'readings.validate.timeCollision': 'You already have a reading at this exact time. Change the time or edit the existing reading.',
