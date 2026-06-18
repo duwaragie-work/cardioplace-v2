@@ -1436,7 +1436,7 @@ describe('journal-tools', () => {
       )
     })
 
-    it('close_session omitted defaults to false in the DTO', async () => {
+    it('close_session omitted on a single-reading (no session_id) defaults to true (Item 7 — handoff: "every chat-initiated entry defaults to closeSession: true")', async () => {
       mockJournalService.create.mockResolvedValue({
         data: { id: 'j2', systolicBP: 130, diastolicBP: 85 },
       })
@@ -1449,6 +1449,54 @@ describe('journal-tools', () => {
           diastolic_bp: 85,
           medication_taken: true,
           symptoms: [],
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ closeSession: true }),
+      )
+    })
+
+    it('close_session omitted WITH session_id (Q3 multi-reading mid-batch) defaults to false', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'j2b', systolicBP: 130, diastolicBP: 85 },
+      })
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 85,
+          medication_taken: true,
+          symptoms: [],
+          session_id: 'q3-session-abc',
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ closeSession: false, sessionId: 'q3-session-abc' }),
+      )
+    })
+
+    it('explicit close_session=false overrides the single-reading default (model opt-out path)', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'j2c', systolicBP: 130, diastolicBP: 85 },
+      })
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 85,
+          medication_taken: true,
+          symptoms: [],
+          close_session: false,
         },
         mockJournalService as any,
         'user-1',
