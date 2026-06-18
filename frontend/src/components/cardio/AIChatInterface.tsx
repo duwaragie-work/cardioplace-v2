@@ -444,7 +444,7 @@ function DeleteConfirmModal({
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 function SidebarContent({
-  sessions, activeId, onSelect, onNewConversation, onDeleteSession, userInitials, userName, riskTier, isLoading,
+  sessions, activeId, onSelect, onNewConversation, onDeleteSession, userInitials, userName, riskTier, isLoading, onClose,
 }: {
   sessions: Session[];
   activeId: string | null;
@@ -455,6 +455,9 @@ function SidebarContent({
   userName: string;
   riskTier: string;
   isLoading: boolean;
+  // Mobile drawer passes this to render an in-header close button; the desktop
+  // sidebar omits it (no close affordance needed).
+  onClose?: () => void;
 }) {
   const { t } = useLanguage();
   const riskColor =
@@ -468,7 +471,19 @@ function SidebarContent({
     <div className="flex flex-col h-full overflow-hidden">
       <style>{sidebarScrollStyles}</style>
       <div className="px-4 pt-5 pb-3 shrink-0">
-        <h2 className="text-[0.9375rem] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.conversations')}</h2>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h2 className="text-[0.9375rem] font-bold" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.conversations')}</h2>
+          {onClose && (
+            <button
+              onClick={onClose}
+              aria-label={t('common.close')}
+              className="lg:hidden -mr-1 w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition hover:bg-gray-100"
+              style={{ backgroundColor: 'var(--brand-background)' }}
+            >
+              <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+            </button>
+          )}
+        </div>
         <button
           onClick={onNewConversation}
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[0.8125rem] font-semibold transition-all hover:opacity-90 active:scale-[0.98]"
@@ -563,7 +578,7 @@ function VoiceCallBar({
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      className="shrink-0 flex items-center gap-3 px-4 lg:px-6 py-2.5"
+      className="shrink-0 flex items-center gap-2 sm:gap-3 px-3 sm:px-4 lg:px-6 py-2.5"
       style={{ backgroundColor: '#F3EEFB', borderBottom: '1px solid var(--brand-border)' }}
     >
       {/* Animated dot */}
@@ -573,23 +588,25 @@ function VoiceCallBar({
         animate={{ scale: isListening || isSpeaking ? [1, 1.4, 1] : 1 }}
         transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
       />
-      <div className="flex items-center gap-2 flex-1 min-w-0">
+      <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0 overflow-hidden">
         <Mic className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
-        <span className="text-[0.75rem] font-semibold" style={{ color: 'var(--brand-primary-purple)' }}>
-          {t('chat.voiceMode')}
+        {/* "Voice mode" label is dropped on phones to make room — the mic icon
+            already conveys the mode, and the state label stays. */}
+        <span className="text-[0.75rem] font-semibold shrink-0 hidden sm:inline" style={{ color: 'var(--brand-primary-purple)' }}>
+          {t('chat.voiceMode')} ·
         </span>
         <span
           data-testid="voice-state-label"
-          className="text-[0.75rem]"
+          className="text-[0.75rem] truncate"
           style={{ color: 'var(--brand-text-muted)' }}
         >
-          · {stateLabel[state] ?? state}
+          {stateLabel[state] ?? state}
         </span>
       </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem]" style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}>
-          <PhoneCall className="w-3 h-3" />
-          <span>{t('chat.emergencyCall')}</span>
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[0.625rem] shrink-0" style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}>
+          <PhoneCall className="w-3 h-3 shrink-0" />
+          <span className="hidden sm:inline">{t('chat.emergencyCall')}</span>
         </div>
         <button
           data-testid="voice-end-button"
@@ -1978,13 +1995,11 @@ export default function AIChatInterface() {
               initial={{ x: -288 }} animate={{ x: 0 }} exit={{ x: -288 }}
               transition={{ type: 'spring', stiffness: 360, damping: 34 }}
             >
-              <button onClick={() => setShowSessions(false)} className="absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center z-10 transition hover:bg-gray-100" style={{ backgroundColor: 'var(--brand-background)' }}>
-                <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
-              </button>
               <SidebarContent
                 sessions={sessions} activeId={activeSessionId} onSelect={handleSelectSession}
                 onNewConversation={handleNewConversation} onDeleteSession={handleRequestDelete} userInitials={userInitials}
                 userName={userName} riskTier={riskTier} isLoading={isLoadingSessions}
+                onClose={() => setShowSessions(false)}
               />
             </motion.div>
           </>
