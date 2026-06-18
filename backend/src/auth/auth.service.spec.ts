@@ -19,6 +19,7 @@ import { EmailService } from '../email/email.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { AuthService } from './auth.service.js'
 import { BcryptService } from './bcrypt.service.js'
+import { GeolocationService } from './geolocation.service.js'
 import { ProfileDto } from './dto/profile.dto.js'
 
 // Type for spying on private methods in tests
@@ -64,48 +65,72 @@ describe('AuthService', () => {
   }
 
   beforeEach(async () => {
+    // June 2026 — issueRefreshToken / rotateRefreshToken / revoke now wrap
+    // the RefreshToken + AuthSession writes in a single transaction. The
+    // callback form receives the Prisma client; for tests we just pass
+    // the mock straight through so the inner calls land on the same
+    // jest mocks. AuthSession.findMany defaults to [] so enforceSessionLimit
+    // sees "no prior sessions" and skips eviction unless a test overrides.
+    const prismaMock: Record<string, unknown> = {
+      authLog: {
+        create: jest.fn(),
+      },
+      otpCode: {
+        create: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+        delete: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      user: {
+        findUnique: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+      refreshToken: {
+        create: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+      },
+      authSession: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+        delete: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      account: {
+        findUnique: jest.fn(),
+        create: jest.fn(),
+      },
+      device: {
+        findUnique: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+        upsert: jest.fn(),
+      },
+      userDevice: {
+        findFirst: jest.fn(),
+        create: jest.fn(),
+        upsert: jest.fn(),
+      },
+    }
+    prismaMock.$transaction = jest
+      .fn()
+      .mockImplementation(async (arg: unknown) => {
+        if (typeof arg === 'function') {
+          return (arg as (tx: unknown) => Promise<unknown>)(prismaMock)
+        }
+        return Promise.all(arg as Promise<unknown>[])
+      })
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
         {
           provide: PrismaService,
-          useValue: {
-            authLog: {
-              create: jest.fn(),
-            },
-            otpCode: {
-              create: jest.fn(),
-              findFirst: jest.fn(),
-              update: jest.fn(),
-              delete: jest.fn(),
-              deleteMany: jest.fn(),
-            },
-            user: {
-              findUnique: jest.fn(),
-              create: jest.fn(),
-              update: jest.fn(),
-            },
-            refreshToken: {
-              create: jest.fn(),
-              findFirst: jest.fn(),
-              update: jest.fn(),
-            },
-            account: {
-              findUnique: jest.fn(),
-              create: jest.fn(),
-            },
-            device: {
-              findUnique: jest.fn(),
-              create: jest.fn(),
-              update: jest.fn(),
-              upsert: jest.fn(),
-            },
-            userDevice: {
-              findFirst: jest.fn(),
-              create: jest.fn(),
-              upsert: jest.fn(),
-            },
-          },
+          useValue: prismaMock,
         },
         {
           provide: JwtService,
@@ -142,6 +167,19 @@ describe('AuthService', () => {
           provide: EmailService,
           useValue: {
             sendOtp: jest.fn(),
+          },
+        },
+        {
+          provide: GeolocationService,
+          useValue: {
+            // Defaults: same geohash + UNKNOWN country → no anomaly.
+            // Individual tests override via jest.spyOn(geo, ...).
+            computeGeohash: jest.fn((ip: string | null) => (ip ? `gh-${ip}` : null)),
+            lookupCountry: jest.fn(() => 'UNKNOWN'),
+            isAnomaly: jest.fn(
+              (stored: string | null, current: string | null) =>
+                !!stored && !!current && stored !== current,
+            ),
           },
         },
       ],
@@ -975,6 +1013,452 @@ describe('AuthService', () => {
 
       expect(prisma.device.upsert).toHaveBeenCalled()
       expect(prisma.userDevice.upsert).not.toHaveBeenCalled()
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Phase 3 — concurrent session cap (Manisha 2026-06-12 Doc 2 Q1)
+  // ────────────────────────────────────────────────────────────────────────
+  describe('enforceSessionLimit (concurrent sessions)', () => {
+    const PATIENT_ID = 'patient-1'
+    const ADMIN_ID = 'admin-1'
+
+    // Helper — invoke the private enforceSessionLimit via issueTokenPair,
+    // checking the side effects on prisma.authSession + refreshToken.
+    const runEnforce = async (userId: string, roles: UserRole[]) => {
+      const minimalUser = {
+        id: userId,
+        email: 'x@y',
+        name: null,
+        roles,
+        onboardingStatus: OnboardingStatus.COMPLETED,
+        accountStatus: AccountStatus.ACTIVE,
+      }
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'new-token-id',
+      })
+      ;(prisma.authSession.create as jest.Mock).mockResolvedValue({})
+      await (service as AuthServiceWithPrivateMethods).issueTokenPair(
+        minimalUser,
+        {},
+      )
+    }
+
+    it('PATIENT: new login revokes the prior single session', async () => {
+      const priorRefreshTokenId = 'prior-token'
+      ;(prisma.authSession.findMany as jest.Mock).mockResolvedValue([
+        { id: 'prior-session', refreshTokenId: priorRefreshTokenId },
+      ])
+      await runEnforce(PATIENT_ID, [UserRole.PATIENT])
+      expect(prisma.refreshToken.update).toHaveBeenCalledWith({
+        where: { id: priorRefreshTokenId },
+        data: { revokedAt: expect.any(Date) },
+      })
+      expect(prisma.authSession.delete).toHaveBeenCalledWith({
+        where: { id: 'prior-session' },
+      })
+      expect(prisma.authLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ event: 'session_evicted' }),
+        }),
+      )
+    })
+
+    it('ADMIN: 2 prior sessions — no eviction (under 3-cap)', async () => {
+      ;(prisma.authSession.findMany as jest.Mock).mockResolvedValue([
+        { id: 's1', refreshTokenId: 't1' },
+        { id: 's2', refreshTokenId: 't2' },
+      ])
+      await runEnforce(ADMIN_ID, [UserRole.PROVIDER])
+      expect(prisma.refreshToken.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: { revokedAt: expect.any(Date) } }),
+      )
+      expect(prisma.authSession.delete).not.toHaveBeenCalled()
+    })
+
+    it('ADMIN: 3 prior sessions — 4th login evicts the most-idle by lastActivityAt', async () => {
+      // findMany is called with orderBy lastActivityAt asc, so the first
+      // element is the most-idle. The fixtures encode that order directly.
+      ;(prisma.authSession.findMany as jest.Mock).mockResolvedValue([
+        { id: 's-idle-most', refreshTokenId: 't-idle-most' },
+        { id: 's-mid', refreshTokenId: 't-mid' },
+        { id: 's-fresh', refreshTokenId: 't-fresh' },
+      ])
+      await runEnforce(ADMIN_ID, [UserRole.PROVIDER])
+      expect(prisma.refreshToken.update).toHaveBeenCalledWith({
+        where: { id: 't-idle-most' },
+        data: { revokedAt: expect.any(Date) },
+      })
+      expect(prisma.authSession.delete).toHaveBeenCalledWith({
+        where: { id: 's-idle-most' },
+      })
+      // The fresher pair must NOT be touched.
+      expect(prisma.refreshToken.update).not.toHaveBeenCalledWith({
+        where: { id: 't-fresh' },
+        data: { revokedAt: expect.any(Date) },
+      })
+    })
+
+    for (const role of [
+      UserRole.COORDINATOR,
+      UserRole.HEALPLACE_OPS,
+      UserRole.MEDICAL_DIRECTOR,
+      UserRole.SUPER_ADMIN,
+    ]) {
+      it(`${role} treated as admin (3-session cap, not 1)`, async () => {
+        ;(prisma.authSession.findMany as jest.Mock).mockResolvedValue([
+          { id: 'a', refreshTokenId: 'at' },
+          { id: 'b', refreshTokenId: 'bt' },
+        ])
+        await runEnforce('multi-role-user', [role])
+        // 2 prior sessions < 3 cap → no eviction. If the role had been
+        // classed as a patient (cap=1), 2 sessions would have triggered.
+        expect(prisma.authSession.delete).not.toHaveBeenCalled()
+      })
+    }
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Phase 3 — AuthSession lifecycle through rotate + revoke
+  // ────────────────────────────────────────────────────────────────────────
+  describe('rotateRefreshToken: AuthSession heartbeat', () => {
+    it('updates AuthSession.refreshTokenId on rotation (lastActivityAt bumps via @updatedAt)', async () => {
+      const oldTokenId = 'old-token'
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue({
+        id: oldTokenId,
+        userId: mockUser.id,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        user: mockUser,
+        authSession: {
+          id: 'session-1',
+          userAgent: 'old-ua',
+          ipAddress: '1.2.3.4',
+          deviceId: 'd1',
+          deviceType: 'web',
+          lastActivityAt: new Date(),
+        },
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'new-token',
+      })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      await service.rotateRefreshToken('raw-token', {
+        userAgent: 'new-ua',
+      })
+
+      expect(prisma.authSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'session-1' },
+          data: expect.objectContaining({
+            refreshTokenId: 'new-token',
+            userAgent: 'new-ua',
+          }),
+        }),
+      )
+    })
+
+    it('legacy refresh token with no AuthSession — creates one on rotate (defensive)', async () => {
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue({
+        id: 'legacy-token',
+        userId: mockUser.id,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        user: mockUser,
+        authSession: null,
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'new-token',
+      })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.create as jest.Mock).mockResolvedValue({})
+
+      await service.rotateRefreshToken('raw-token', {})
+
+      expect(prisma.authSession.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: mockUser.id,
+            refreshTokenId: 'new-token',
+          }),
+        }),
+      )
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Phase 2 — idle timeout (Manisha 2026-06-12 Doc 3 Q7)
+  // ────────────────────────────────────────────────────────────────────────
+  describe('rotateRefreshToken: idle timeout (Phase 2)', () => {
+    const buildIdleFixture = (deviceType: 'web' | 'mobile', minutesIdle: number) => ({
+      id: 'token-1',
+      userId: mockUser.id,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 86_400_000),
+      user: mockUser,
+      authSession: {
+        id: 'session-1',
+        deviceType,
+        userAgent: 'ua',
+        ipAddress: '1.2.3.4',
+        deviceId: 'd1',
+        lastActivityAt: new Date(Date.now() - minutesIdle * 60_000),
+      },
+    })
+
+    it('web session: allows refresh inside the 15-min idle window (14 min)', async () => {
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildIdleFixture('web', 14),
+      )
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'new-token',
+      })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      const result = await service.rotateRefreshToken('raw-token', {})
+      expect(result.refreshToken).toBeDefined()
+      expect(prisma.authSession.delete).not.toHaveBeenCalled()
+    })
+
+    it('web session: rejects refresh past the 15-min idle window (16 min)', async () => {
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildIdleFixture('web', 16),
+      )
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.delete as jest.Mock).mockResolvedValue({})
+
+      await expect(
+        service.rotateRefreshToken('raw-token', {}),
+      ).rejects.toThrow(/idle timeout/i)
+      expect(prisma.authSession.delete).toHaveBeenCalledWith({
+        where: { id: 'session-1' },
+      })
+      expect(prisma.refreshToken.update).toHaveBeenCalledWith({
+        where: { id: 'token-1' },
+        data: { revokedAt: expect.any(Date) },
+      })
+      expect(prisma.authLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ event: 'idle_timeout' }),
+        }),
+      )
+    })
+
+    it('mobile session: allows refresh inside the 5-min idle window (4 min)', async () => {
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildIdleFixture('mobile', 4),
+      )
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'new-token',
+      })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      const result = await service.rotateRefreshToken('raw-token', {})
+      expect(result.refreshToken).toBeDefined()
+      expect(prisma.authSession.delete).not.toHaveBeenCalled()
+    })
+
+    it('mobile session: rejects refresh past the 5-min idle window (6 min)', async () => {
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildIdleFixture('mobile', 6),
+      )
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.delete as jest.Mock).mockResolvedValue({})
+
+      await expect(
+        service.rotateRefreshToken('raw-token', {}),
+      ).rejects.toThrow(/idle timeout/i)
+      expect(prisma.authSession.delete).toHaveBeenCalled()
+    })
+
+    it('legacy token with no AuthSession: skips idle gate (one grace refresh)', async () => {
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue({
+        id: 'legacy-token',
+        userId: mockUser.id,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        user: mockUser,
+        authSession: null,
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'new-token',
+      })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.create as jest.Mock).mockResolvedValue({})
+
+      const result = await service.rotateRefreshToken('raw-token', {})
+      expect(result.refreshToken).toBeDefined()
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Phase 3 — Geolocation anomaly logging (Manisha 2026-06-12 Doc 2 Q1)
+  // ────────────────────────────────────────────────────────────────────────
+  describe('rotateRefreshToken: geolocation anomaly audit (audit-only, no block)', () => {
+    let geo: GeolocationService
+
+    beforeEach(() => {
+      geo = service['geolocation'] as GeolocationService
+    })
+
+    const buildFixture = (storedGeohash: string | null, storedCountry: string | null) => ({
+      id: 'token-1',
+      userId: mockUser.id,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 86_400_000),
+      user: mockUser,
+      authSession: {
+        id: 'session-1',
+        deviceType: 'web',
+        userAgent: 'ua',
+        ipAddress: '1.2.3.4',
+        deviceId: 'd1',
+        lastActivityAt: new Date(),
+        geohash: storedGeohash,
+        ipCountry: storedCountry,
+      },
+    })
+
+    it('same geohash on rotation → no anomaly logged, rotation succeeds', async () => {
+      ;(geo.computeGeohash as jest.Mock).mockReturnValue('gh-same')
+      ;(geo.lookupCountry as jest.Mock).mockReturnValue('US')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildFixture('gh-same', 'US'),
+      )
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({ id: 'new-token' })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      const result = await service.rotateRefreshToken('raw-token', {
+        ipAddress: '1.2.3.4',
+      })
+      expect(result.refreshToken).toBeDefined()
+      expect(prisma.authLog.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ event: 'geolocation_anomaly' }),
+        }),
+      )
+    })
+
+    it('different geohash on rotation → geolocation_anomaly logged, rotation succeeds', async () => {
+      ;(geo.computeGeohash as jest.Mock).mockReturnValue('gh-NEW')
+      ;(geo.lookupCountry as jest.Mock).mockReturnValue('GB')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildFixture('gh-OLD', 'US'),
+      )
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({ id: 'new-token' })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      const result = await service.rotateRefreshToken('raw-token', {
+        ipAddress: '5.6.7.8',
+      })
+      // Rotation still proceeds — anomaly is audit-only.
+      expect(result.refreshToken).toBeDefined()
+      // Anomaly event logged with both geohashes in metadata.
+      expect(prisma.authLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            event: 'geolocation_anomaly',
+            userId: mockUser.id,
+            metadata: expect.objectContaining({
+              storedGeohash: 'gh-OLD',
+              currentGeohash: 'gh-NEW',
+              storedCountry: 'US',
+              currentCountry: 'GB',
+            }),
+          }),
+        }),
+      )
+    })
+
+    it('first rotation (stored geohash null) → no anomaly logged, geohash backfills', async () => {
+      ;(geo.computeGeohash as jest.Mock).mockReturnValue('gh-FIRST')
+      ;(geo.lookupCountry as jest.Mock).mockReturnValue('UNKNOWN')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildFixture(null, null),
+      )
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({ id: 'new-token' })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      await service.rotateRefreshToken('raw-token', { ipAddress: '1.2.3.4' })
+
+      expect(prisma.authLog.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ event: 'geolocation_anomaly' }),
+        }),
+      )
+      // The new geohash is written to the session for the next rotation to compare.
+      expect(prisma.authSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ geohash: 'gh-FIRST' }),
+        }),
+      )
+    })
+
+    it('IP missing on rotation (currentGeohash null) → no anomaly logged', async () => {
+      ;(geo.computeGeohash as jest.Mock).mockReturnValue(null)
+      ;(geo.lookupCountry as jest.Mock).mockReturnValue('UNKNOWN')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue(
+        buildFixture('gh-OLD', 'US'),
+      )
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({ id: 'new-token' })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      await service.rotateRefreshToken('raw-token', {})
+
+      expect(prisma.authLog.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ event: 'geolocation_anomaly' }),
+        }),
+      )
+    })
+  })
+
+  describe('revokeRefreshToken: deletes paired AuthSession', () => {
+    it('logout deletes the AuthSession row alongside revoking the token', async () => {
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue({
+        id: 'token-1',
+        userId: mockUser.id,
+        user: mockUser,
+        authSession: { id: 'session-1' },
+      })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.delete as jest.Mock).mockResolvedValue({})
+
+      await service.revokeRefreshToken('raw-token', {})
+
+      expect(prisma.refreshToken.update).toHaveBeenCalledWith({
+        where: { id: 'token-1' },
+        data: { revokedAt: expect.any(Date) },
+      })
+      expect(prisma.authSession.delete).toHaveBeenCalledWith({
+        where: { id: 'session-1' },
+      })
+    })
+
+    it('logout with no paired AuthSession (legacy) — still revokes the token', async () => {
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue({
+        id: 'token-1',
+        userId: mockUser.id,
+        user: mockUser,
+        authSession: null,
+      })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+
+      await service.revokeRefreshToken('raw-token', {})
+
+      expect(prisma.refreshToken.update).toHaveBeenCalledWith({
+        where: { id: 'token-1' },
+        data: { revokedAt: expect.any(Date) },
+      })
+      expect(prisma.authSession.delete).not.toHaveBeenCalled()
     })
   })
 })

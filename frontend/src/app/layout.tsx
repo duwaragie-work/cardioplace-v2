@@ -7,6 +7,7 @@ import NavbarWrapper from "@/components/NavbarWrapper";
 import ScrollToTop from "@/components/ScrollToTop";
 import PoweredByFooter from "@/components/PoweredByFooter";
 import SkipLink from "@/components/SkipLink";
+import IdleWarningToast from "@/components/auth/IdleWarningToast";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -41,6 +42,7 @@ export default function RootLayout({
           <LanguageProvider>
             <SkipLink />
             <ScrollToTop />
+            <IdleWarningToast />
             <NavbarWrapper>{children}</NavbarWrapper>
             <PoweredByFooter />
           </LanguageProvider>

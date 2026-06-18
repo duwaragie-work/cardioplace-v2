@@ -19,9 +19,9 @@ model DeviationAlert {
   pulsePressure         Int?
   suboptimalMeasurement Boolean    @default(false)
 
-  patientMessage    String? @db.Text
-  caregiverMessage  String? @db.Text
-  physicianMessage  String? @db.Text
+  patientMessage   String? @db.Text
+  caregiverMessage String? @db.Text
+  physicianMessage String? @db.Text
 
   dismissible         Boolean @default(true)
   resolutionAction    String?
@@ -44,11 +44,11 @@ model DeviationAlert {
   // existing rows pick up CURRENT_TIMESTAMP at migration time.
   acknowledgedByUserId String?
   resolvedAt           DateTime?
-  updatedAt            DateTime  @updatedAt @default(now())
+  updatedAt            DateTime  @default(now()) @updatedAt
 
-  escalationEvents     EscalationEvent[]
-  notifications        Notification[]
-  scheduledCalls       ScheduledCall[]
+  escalationEvents      EscalationEvent[]
+  notifications         Notification[]
+  scheduledCalls        ScheduledCall[]
   caregiverDispatchLogs CaregiverDispatchLog[]
 
   // Phase/7 — dropped @@unique([journalEntryId, type]). v2 allows multiple

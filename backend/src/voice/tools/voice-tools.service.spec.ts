@@ -19,7 +19,7 @@ const CTX = { userId: 'user-1', timezone: 'America/New_York' }
 
 describe('VoiceToolsService.dispatch', () => {
   let service: VoiceToolsService
-  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
+  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock; hasActiveMedications: jest.Mock }
   let gemini: { extractBpFromImage: jest.Mock }
   let alertEngine: { evaluateAdHoc: jest.Mock }
   let intakeStatus: { getStatus: jest.Mock }
@@ -33,6 +33,10 @@ describe('VoiceToolsService.dispatch', () => {
       findOne: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+      // Bug 60 — dispatcher reads this for the popup hasActiveMedications
+      // signal. Default true so legacy assertions stay green; Bug 60 tests
+      // can override per-case.
+      hasActiveMedications: jest.fn(async () => true),
     }
     gemini = { extractBpFromImage: jest.fn() }
     alertEngine = { evaluateAdHoc: jest.fn() }
@@ -1114,7 +1118,7 @@ describe('mapVoiceSymptomsToFlags', () => {
 // own describe so it sees the same per-test setup as the main suite.
 describe('VoiceToolsService.dispatch — Bug 56 (symptom auto-map + dedupe)', () => {
   let service: VoiceToolsService
-  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
+  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock; hasActiveMedications: jest.Mock }
 
   beforeEach(async () => {
     dailyJournal = {
@@ -1123,6 +1127,8 @@ describe('VoiceToolsService.dispatch — Bug 56 (symptom auto-map + dedupe)', ()
       findOne: jest.fn() as jest.Mock,
       update: jest.fn() as jest.Mock,
       delete: jest.fn() as jest.Mock,
+      // Bug 60 — default to "has meds" so legacy assertions pass.
+      hasActiveMedications: jest.fn(async () => true) as jest.Mock,
     }
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -1249,6 +1255,8 @@ describe('VoiceToolsService.dispatch — Bug 57 (actionable update errors)', () 
             findOne: jest.fn(),
             update: jest.fn(),
             delete: jest.fn(),
+            // Bug 60 — minimal mock so the dispatcher's await call resolves.
+            hasActiveMedications: jest.fn(async () => true),
           },
         },
         { provide: GeminiService, useValue: { extractBpFromImage: jest.fn() } },
@@ -1297,7 +1305,7 @@ describe('VoiceToolsService.dispatch — Bug 57 (actionable update errors)', () 
 // claiming a successful update.
 describe('VoiceToolsService.dispatch — Bug 59 (no-change graceful response)', () => {
   let service: VoiceToolsService
-  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock }
+  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock; hasActiveMedications: jest.Mock }
 
   beforeEach(async () => {
     dailyJournal = {
@@ -1306,6 +1314,8 @@ describe('VoiceToolsService.dispatch — Bug 59 (no-change graceful response)', 
       findOne: jest.fn() as jest.Mock,
       update: jest.fn() as jest.Mock,
       delete: jest.fn() as jest.Mock,
+      // Bug 60 — default to "has meds" so legacy assertions pass.
+      hasActiveMedications: jest.fn(async () => true) as jest.Mock,
     }
     const moduleRef = await Test.createTestingModule({
       providers: [

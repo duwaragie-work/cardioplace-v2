@@ -19,6 +19,7 @@ import {
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { BcryptService } from './bcrypt.service.js'
+import { GeolocationService } from './geolocation.service.js'
 import type { ProfileDto } from './dto/profile.dto.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -35,6 +36,17 @@ export interface AuthResponse extends TokenPair {
   roles: UserRole[]
   login_method: 'otp' | 'magic_link' | 'google' | 'apple'
   name: string | null
+}
+
+// June 2026 — session context piped from controller → service to populate
+// AuthSession (concurrent-session limit + idle tracking). All optional —
+// social/legacy paths may omit individual fields.
+export interface SessionContext {
+  userAgent?: string
+  deviceId?: string
+  ipAddress?: string
+  /** 'web' | 'mobile' — resolved by controller (x-device-platform → UA fallback). */
+  deviceType?: string
 }
 
 interface MinimalUser {
@@ -72,6 +84,27 @@ function parseDuration(duration: string): number {
   return value * (map[unit] ?? 86_400_000)
 }
 
+// Manisha 2026-06-12 Doc 2 Q1 — concurrent-session caps. Admin/provider
+// users get 3 simultaneous sessions; patients get 1. The cap is enforced
+// at issuance (4th login on an admin evicts the most-idle).
+const ADMIN_SESSION_LIMIT = 3
+const PATIENT_SESSION_LIMIT = 1
+const ADMIN_ROLES: readonly UserRole[] = [
+  UserRole.PROVIDER,
+  UserRole.MEDICAL_DIRECTOR,
+  UserRole.COORDINATOR,
+  UserRole.HEALPLACE_OPS,
+  UserRole.SUPER_ADMIN,
+]
+
+// Manisha 2026-06-12 Doc 3 Q7 — idle timeout. 15 min for web sessions,
+// 5 min for mobile. The frontend hook drives the UX (warning toast + auto
+// logout); the backend enforcement here is belt-and-suspenders so a stale
+// session can't be revived via refresh even if the frontend timer was
+// disabled or the request came from a non-browser client.
+const IDLE_TIMEOUT_WEB_MS = 15 * 60_000
+const IDLE_TIMEOUT_MOBILE_MS = 5 * 60_000
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -80,6 +113,7 @@ export class AuthService {
     private config: ConfigService,
     private bcryptService: BcryptService,
     private emailService: EmailService,
+    private geolocation: GeolocationService,
   ) {}
 
   // ─── Token Issuance ─────────────────────────────────────────────────────────
@@ -93,14 +127,42 @@ export class AuthService {
     )
   }
 
-  async issueRefreshToken(userId: string, userAgent?: string): Promise<string> {
+  /**
+   * Issue a refresh token AND a paired AuthSession row in one transaction.
+   * AuthSession is the canonical "active session" record used by the
+   * concurrent-session cap (Phase 3) and the idle timeout (Phase 2).
+   */
+  async issueRefreshToken(
+    userId: string,
+    context?: SessionContext,
+  ): Promise<string> {
     const rawToken = randomBytes(40).toString('hex')
     const tokenHash = sha256(rawToken)
     const expiresIn = this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '30d')
     const expiresAt = new Date(Date.now() + parseDuration(expiresIn))
 
-    await this.prisma.refreshToken.create({
-      data: { tokenHash, expiresAt, userAgent, userId },
+    await this.prisma.$transaction(async (tx) => {
+      const token = await tx.refreshToken.create({
+        data: {
+          tokenHash,
+          expiresAt,
+          userAgent: context?.userAgent,
+          userId,
+        },
+      })
+      await tx.authSession.create({
+        data: {
+          userId,
+          refreshTokenId: token.id,
+          deviceType: context?.deviceType ?? null,
+          deviceId: context?.deviceId ?? null,
+          userAgent: context?.userAgent ?? null,
+          ipAddress: context?.ipAddress ?? null,
+          geohash: this.geolocation.computeGeohash(context?.ipAddress ?? null),
+          ipCountry: this.geolocation.lookupCountry(context?.ipAddress ?? null),
+          expiresAt,
+        },
+      })
     })
 
     return rawToken
@@ -108,17 +170,13 @@ export class AuthService {
 
   async rotateRefreshToken(
     rawToken: string,
-    context?: {
-      deviceId?: string
-      ipAddress?: string
-      userAgent?: string
-    },
+    context?: SessionContext,
   ): Promise<TokenPair & { user: MinimalUser }> {
     const tokenHash = sha256(rawToken)
 
     const existing = await this.prisma.refreshToken.findFirst({
       where: { tokenHash },
-      include: { user: true },
+      include: { user: true, authSession: true },
     })
 
     if (!existing || existing.revokedAt || existing.expiresAt < new Date()) {
@@ -139,15 +197,132 @@ export class AuthService {
       )
     }
 
-    await this.prisma.refreshToken.update({
-      where: { id: existing.id },
-      data: { revokedAt: new Date() },
+    // Manisha 2026-06-12 Doc 3 Q7 — idle timeout. If the paired
+    // AuthSession's lastActivityAt is older than the per-device-type
+    // threshold, revoke the chain and force re-auth. Frontend hook
+    // (useIdleTimeout) drives the UX side; this is the belt-and-suspenders
+    // backend gate so a non-browser client or a disabled hook can't keep
+    // a stale session alive. Legacy sessions (authSession === null,
+    // issued before this migration) skip the check — they get one more
+    // refresh-grace and are upgraded to a tracked session by the rotate
+    // path below.
+    if (existing.authSession) {
+      const idleLimit =
+        existing.authSession.deviceType === 'mobile'
+          ? IDLE_TIMEOUT_MOBILE_MS
+          : IDLE_TIMEOUT_WEB_MS
+      const idleMs =
+        Date.now() - existing.authSession.lastActivityAt.getTime()
+      if (idleMs > idleLimit) {
+        await this.prisma.$transaction([
+          this.prisma.refreshToken.update({
+            where: { id: existing.id },
+            data: { revokedAt: new Date() },
+          }),
+          this.prisma.authSession.delete({
+            where: { id: existing.authSession.id },
+          }),
+        ])
+        await this.logAuthEvent({
+          event: 'idle_timeout',
+          userId: existing.user.id,
+          deviceId: context?.deviceId,
+          ipAddress: context?.ipAddress,
+          userAgent: context?.userAgent,
+          metadata: {
+            idleMs,
+            deviceType: existing.authSession.deviceType ?? 'web',
+          },
+          success: false,
+          errorCode: 'idle_timeout',
+        })
+        throw new UnauthorizedException('Session idle timeout')
+      }
+    }
+
+    // Rotation: revoke the old token, issue a new one, and re-point the
+    // AuthSession (same logical session, fresh tokens). lastActivityAt
+    // updates via @updatedAt — Phase 2's idle check above reads it.
+    const expiresIn = this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '30d')
+    const newExpiresAt = new Date(Date.now() + parseDuration(expiresIn))
+    const newRawToken = randomBytes(40).toString('hex')
+    const newTokenHash = sha256(newRawToken)
+
+    // Manisha 2026-06-12 Doc 2 Q1 — geolocation anomaly check. Compare the
+    // request's current geohash against the stored value; if both are
+    // non-null and differ, write a `geolocation_anomaly` audit row to
+    // AuthLog. Audit-only — the rotation always proceeds.
+    const currentGeohash = this.geolocation.computeGeohash(context?.ipAddress ?? null)
+    const currentCountry = this.geolocation.lookupCountry(context?.ipAddress ?? null)
+    const storedGeohash = existing.authSession?.geohash ?? null
+    const storedCountry = existing.authSession?.ipCountry ?? null
+    const anomaly = this.geolocation.isAnomaly(storedGeohash, currentGeohash)
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.refreshToken.update({
+        where: { id: existing.id },
+        data: { revokedAt: new Date() },
+      })
+      const newToken = await tx.refreshToken.create({
+        data: {
+          tokenHash: newTokenHash,
+          expiresAt: newExpiresAt,
+          userAgent: context?.userAgent,
+          userId: existing.userId,
+        },
+      })
+      if (existing.authSession) {
+        await tx.authSession.update({
+          where: { id: existing.authSession.id },
+          data: {
+            refreshTokenId: newToken.id,
+            expiresAt: newExpiresAt,
+            userAgent: context?.userAgent ?? existing.authSession.userAgent,
+            ipAddress: context?.ipAddress ?? existing.authSession.ipAddress,
+            deviceId: context?.deviceId ?? existing.authSession.deviceId,
+            geohash: currentGeohash ?? existing.authSession.geohash,
+            ipCountry: currentCountry ?? existing.authSession.ipCountry,
+          },
+        })
+      } else {
+        // Defensive: legacy refresh tokens issued before the AuthSession
+        // model existed don't have a paired session row. Create one now so
+        // the session-cap accounting stays consistent on the next login.
+        await tx.authSession.create({
+          data: {
+            userId: existing.userId,
+            refreshTokenId: newToken.id,
+            deviceType: context?.deviceType ?? null,
+            deviceId: context?.deviceId ?? null,
+            userAgent: context?.userAgent ?? null,
+            ipAddress: context?.ipAddress ?? null,
+            geohash: currentGeohash,
+            ipCountry: currentCountry,
+            expiresAt: newExpiresAt,
+          },
+        })
+      }
     })
 
-    const [accessToken, refreshToken] = await Promise.all([
-      this.issueAccessToken(existing.user),
-      this.issueRefreshToken(existing.userId, context?.userAgent),
-    ])
+    if (anomaly) {
+      await this.logAuthEvent({
+        event: 'geolocation_anomaly',
+        userId: existing.user.id,
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        metadata: {
+          authSessionId: existing.authSession?.id,
+          storedGeohash,
+          currentGeohash,
+          storedCountry,
+          currentCountry,
+        },
+        success: true,
+      })
+    }
+
+    const accessToken = await this.issueAccessToken(existing.user)
 
     await this.logAuthEvent({
       event: 'refresh_success',
@@ -158,27 +333,34 @@ export class AuthService {
       success: true,
     })
 
-    return { accessToken, refreshToken, user: existing.user }
+    return {
+      accessToken,
+      refreshToken: newRawToken,
+      user: existing.user,
+    }
   }
 
   async revokeRefreshToken(
     rawToken: string,
-    context?: {
-      deviceId?: string
-      ipAddress?: string
-      userAgent?: string
-    },
+    context?: SessionContext,
   ): Promise<void> {
     const tokenHash = sha256(rawToken)
     const existing = await this.prisma.refreshToken.findFirst({
       where: { tokenHash, revokedAt: null },
-      include: { user: true },
+      include: { user: true, authSession: true },
     })
     if (!existing) return
 
-    await this.prisma.refreshToken.update({
-      where: { id: existing.id },
-      data: { revokedAt: new Date() },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.refreshToken.update({
+        where: { id: existing.id },
+        data: { revokedAt: new Date() },
+      })
+      if (existing.authSession) {
+        await tx.authSession.delete({
+          where: { id: existing.authSession.id },
+        })
+      }
     })
 
     await this.logAuthEvent({
@@ -191,14 +373,66 @@ export class AuthService {
     })
   }
 
+  /**
+   * Manisha 2026-06-12 Doc 2 Q1 — cap concurrent sessions. PATIENT users
+   * get 1 active session (a new login evicts the prior one); admin/
+   * provider users get 3 (4th login evicts the most-idle, ordered by
+   * AuthSession.lastActivityAt). Called from issueTokenPair before token
+   * creation so the new session always lands inside the limit.
+   */
+  private async enforceSessionLimit(
+    userId: string,
+    roles: UserRole[],
+  ): Promise<void> {
+    const limit = roles.some((r) => ADMIN_ROLES.includes(r))
+      ? ADMIN_SESSION_LIMIT
+      : PATIENT_SESSION_LIMIT
+
+    const sessions = await this.prisma.authSession.findMany({
+      where: {
+        userId,
+        expiresAt: { gt: new Date() },
+        refreshToken: { revokedAt: null },
+      },
+      orderBy: { lastActivityAt: 'asc' },
+      select: { id: true, refreshTokenId: true },
+    })
+
+    if (sessions.length < limit) return
+
+    // Evict the (sessions.length - limit + 1) most-idle so the incoming
+    // login fits under the cap. For the patient (limit=1) case this
+    // revokes the single prior session; for admins it's usually just
+    // the oldest.
+    const toEvict = sessions.slice(0, sessions.length - limit + 1)
+    for (const session of toEvict) {
+      await this.prisma.$transaction([
+        this.prisma.refreshToken.update({
+          where: { id: session.refreshTokenId },
+          data: { revokedAt: new Date() },
+        }),
+        this.prisma.authSession.delete({ where: { id: session.id } }),
+      ])
+      await this.logAuthEvent({
+        event: 'session_evicted',
+        userId,
+        success: true,
+        metadata: {
+          reason: 'role-limit-exceeded',
+          evictedSessionId: session.id,
+          limit,
+        },
+      })
+    }
+  }
+
   private async issueTokenPair(
     user: MinimalUser,
-    userAgent?: string,
+    context?: SessionContext,
   ): Promise<TokenPair> {
-    const [accessToken, refreshToken] = await Promise.all([
-      this.issueAccessToken(user),
-      this.issueRefreshToken(user.id, userAgent),
-    ])
+    await this.enforceSessionLimit(user.id, user.roles)
+    const accessToken = await this.issueAccessToken(user)
+    const refreshToken = await this.issueRefreshToken(user.id, context)
     return { accessToken, refreshToken }
   }
 
@@ -344,6 +578,7 @@ export class AuthService {
       ipAddress?: string
       userAgent?: string
       timezone?: string
+      deviceType?: string
     },
   ): Promise<AuthResponse> {
     const providerId = profile.id
@@ -361,7 +596,12 @@ export class AuthService {
       )
       this.assertAccountActive(user)
       await this.silentlyUpdateTimezone(user.id, context?.timezone)
-      const tokens = await this.issueTokenPair(user, context?.userAgent)
+      const tokens = await this.issueTokenPair(user, {
+        userAgent: context?.userAgent,
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        deviceType: context?.deviceType,
+      })
 
       await this.logAuthEvent({
         event: 'social_login_success',
@@ -403,6 +643,7 @@ export class AuthService {
       ipAddress?: string
       userAgent?: string
       timezone?: string
+      deviceType?: string
     },
   ): Promise<AuthResponse> {
     const res = await fetch(
@@ -457,7 +698,12 @@ export class AuthService {
       )
       this.assertAccountActive(user)
       await this.silentlyUpdateTimezone(user.id, context?.timezone)
-      const tokens = await this.issueTokenPair(user, context?.userAgent)
+      const tokens = await this.issueTokenPair(user, {
+        userAgent: context?.userAgent,
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        deviceType: context?.deviceType,
+      })
 
       await this.logAuthEvent({
         event: 'social_login_success',
@@ -499,6 +745,7 @@ export class AuthService {
       ipAddress?: string
       userAgent?: string
       timezone?: string
+      deviceType?: string
     },
   ): Promise<AuthResponse> {
     const appleSignin = await import('apple-signin-auth')
@@ -532,7 +779,12 @@ export class AuthService {
       )
       this.assertAccountActive(user)
       await this.silentlyUpdateTimezone(user.id, context?.timezone)
-      const tokens = await this.issueTokenPair(user, context?.userAgent)
+      const tokens = await this.issueTokenPair(user, {
+        userAgent: context?.userAgent,
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        deviceType: context?.deviceType,
+      })
 
       await this.logAuthEvent({
         event: 'social_login_success',
@@ -578,6 +830,7 @@ export class AuthService {
       ipAddress?: string
       userAgent?: string
       timezone?: string
+      deviceType?: string
     },
   ): Promise<AuthResponse> {
     const providerId = profile.id
@@ -596,7 +849,12 @@ export class AuthService {
       )
       this.assertAccountActive(user)
       await this.silentlyUpdateTimezone(user.id, context?.timezone)
-      const tokens = await this.issueTokenPair(user, context?.userAgent)
+      const tokens = await this.issueTokenPair(user, {
+        userAgent: context?.userAgent,
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        deviceType: context?.deviceType,
+      })
 
       await this.logAuthEvent({
         event: 'social_login_success',
@@ -774,6 +1032,7 @@ export class AuthService {
       userAgent?: string
       timezone?: string
       appContext?: 'admin' | 'patient'
+      deviceType?: string
     },
   ): Promise<AuthResponse> {
     if (!email?.trim()) {
@@ -924,7 +1183,12 @@ export class AuthService {
       success: true,
     })
 
-    const tokens = await this.issueTokenPair(user, context?.userAgent)
+    const tokens = await this.issueTokenPair(user, {
+      userAgent: context?.userAgent,
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      deviceType: context?.deviceType,
+    })
     return this.buildAuthResponse(tokens, user, 'otp')
   }
 
@@ -1173,6 +1437,7 @@ export class AuthService {
       ipAddress?: string
       userAgent?: string
       timezone?: string
+      deviceType?: string
     },
   ): Promise<AuthResponse> {
     if (!token?.trim()) {
@@ -1258,7 +1523,12 @@ export class AuthService {
       success: true,
     })
 
-    const tokens = await this.issueTokenPair(user, context?.userAgent)
+    const tokens = await this.issueTokenPair(user, {
+      userAgent: context?.userAgent,
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      deviceType: context?.deviceType,
+    })
     return this.buildAuthResponse(tokens, user, 'magic_link')
   }
 
@@ -1348,6 +1618,7 @@ export class AuthService {
       ipAddress?: string
       userAgent?: string
       timezone?: string
+      deviceType?: string
     },
   ): Promise<AuthResponse> {
     if (!rawToken?.trim()) {
@@ -1539,7 +1810,12 @@ export class AuthService {
       via: 'invite_accept',
     })
 
-    const tokens = await this.issueTokenPair(result.user, context?.userAgent)
+    const tokens = await this.issueTokenPair(result.user, {
+      userAgent: context?.userAgent,
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      deviceType: context?.deviceType,
+    })
     return this.buildAuthResponse(tokens, result.user, 'magic_link')
   }
 

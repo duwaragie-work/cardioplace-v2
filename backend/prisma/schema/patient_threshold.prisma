@@ -1,6 +1,6 @@
 model PatientThreshold {
-  id              String   @id @default(uuid())
-  userId          String   @unique
+  id              String    @id @default(uuid())
+  userId          String    @unique
   sbpUpperTarget  Int?
   sbpLowerTarget  Int?
   dbpUpperTarget  Int?

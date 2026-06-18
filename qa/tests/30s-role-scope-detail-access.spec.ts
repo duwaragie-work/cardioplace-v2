@@ -18,6 +18,14 @@ import { byTestId, T } from '../helpers/selectors.js'
  * ForbiddenException for PROVIDER + MED_DIR (scoped roles) but short-circuits
  * for OPS/SUPER (unscoped → the downstream lookup 404s instead, which is NOT
  * the out-of-scope redirect — that's the negative assertion in case 4).
+ *
+ * June 2026 update (Manisha 2026-06-12 Doc 3 Q2): the PROVIDER detail check
+ * is now practice-membership-based, not primary/backup-OR. With the single
+ * seed practice both checks deny the same absent-id case, so this spec keeps
+ * its coverage unchanged. The new positive case (PROVIDER opens a non-
+ * assigned in-practice patient → detail loads) is in 31-practice-visibility-
+ * refactor.spec.ts. Negative cross-practice case is gated on seed expansion
+ * (see SCOPE NOTE in 30r-role-scope-lists.spec.ts).
  */
 
 // Well-formed but guaranteed-absent ULID. assertCanAccessPatient findUnique

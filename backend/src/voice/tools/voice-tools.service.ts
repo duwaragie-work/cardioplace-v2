@@ -44,6 +44,14 @@ export interface CheckinSummary {
   medicationTaken?: boolean
   symptoms: string[]
   saved: boolean
+  /**
+   * Bug 60 — whether the patient has ANY active (non-discontinued,
+   * non-rejected, non-PRN) medications on file. When false, frontend
+   * renderers suppress the medication label entirely so the vacuously-
+   * true medicationTaken=true we save for 0-meds patients (per Bug 53)
+   * doesn't render as the misleading "All medications taken ✓" pill.
+   */
+  hasActiveMedications?: boolean
 }
 
 export interface UpdateSummary {
@@ -55,6 +63,8 @@ export interface UpdateSummary {
   medicationTaken?: boolean
   symptoms: string[]
   updated: boolean
+  /** Bug 60 — see CheckinSummary.hasActiveMedications. */
+  hasActiveMedications?: boolean
 }
 
 export interface DeleteSummary {
@@ -780,6 +790,11 @@ export class VoiceToolsService {
       ? normaliseWeightToKg(weight, typeof args.weight_unit === 'string' ? args.weight_unit : undefined)
       : 0
     const popupLbs = popupKg > 0 ? kgToLbs(popupKg) : 0
+    // Bug 60 — surface whether the patient has ANY active medications so
+    // the popup + verbal summary can hide the misleading "All medications
+    // taken" pill for 0-meds patients (who store medicationTaken=true
+    // vacuously per Bug 53).
+    const activeMeds = await this.dailyJournal.hasActiveMedications(ctx.userId)
     const checkinSummary: CheckinSummary = {
       systolicBP: bpProvided ? sbp : undefined,
       diastolicBP: bpProvided ? dbp : undefined,
@@ -787,6 +802,7 @@ export class VoiceToolsService {
       medicationTaken,
       symptoms,
       saved,
+      hasActiveMedications: activeMeds,
     }
     events.push({ kind: 'checkin_saved', payload: checkinSummary })
     events.push({
@@ -825,6 +841,9 @@ export class VoiceToolsService {
         entry_date_used: resolvedDate,
         measurement_time_used: resolvedTime,
         weight_display: voiceWeightDisplay,
+        // Bug 60 — propagate so the LLM doesn't say "I saved your check-in
+        // and you took all your medications" to a 0-meds patient.
+        has_active_medications: activeMeds,
         message: savedMessage,
       },
       events,
@@ -1146,6 +1165,8 @@ export class VoiceToolsService {
       }
     }
 
+    // Bug 60 — see hasActiveMedications helper docstring.
+    const activeMedsForUpdate = await this.dailyJournal.hasActiveMedications(ctx.userId)
     const summary: UpdateSummary = {
       entryId,
       entryDate: entryDate || undefined,
@@ -1166,6 +1187,7 @@ export class VoiceToolsService {
       medicationTaken: finalMed,
       symptoms: finalSymptoms,
       updated,
+      hasActiveMedications: activeMedsForUpdate,
     }
     events.push({ kind: 'checkin_updated', payload: summary })
     events.push({
@@ -1207,6 +1229,9 @@ export class VoiceToolsService {
         // changed.
         ...(noChange ? { no_change: true as const } : {}),
         weight_display: voiceUpdateWeightDisplay,
+        // Bug 60 — propagate so the LLM doesn't verbalise medication
+        // adherence for a 0-meds patient.
+        has_active_medications: activeMedsForUpdate,
         message: noChange
           ? noChangeMessage ?? 'No changes — the reading already has those values. Nothing to update.'
           : updated

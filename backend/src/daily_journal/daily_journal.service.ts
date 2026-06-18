@@ -795,6 +795,27 @@ export class DailyJournalService {
     }
   }
 
+  /**
+   * Bug 60 — does the patient have ANY active (non-discontinued, non-rejected,
+   * non-PRN) medications on file? Used by the chat + voice dispatchers to
+   * gate the popup / verbal summary so 0-meds patients don't see a
+   * misleading "All medications taken" pill rendered from the vacuously-
+   * true `medicationTaken=true` we save for them per Bug 53. Matches the
+   * filter rule in system-prompt.service.ts:appendMedications (i.e.
+   * `contextMeds` + `pendingMeds` — both empty for 0-meds patients).
+   */
+  async hasActiveMedications(userId: string): Promise<boolean> {
+    const count = await this.prisma.patientMedication.count({
+      where: {
+        userId,
+        discontinuedAt: null,
+        verificationStatus: { not: 'REJECTED' },
+        NOT: { frequency: 'AS_NEEDED' },
+      },
+    })
+    return count > 0
+  }
+
   async findOne(userId: string, id: string) {
     const entry = await this.prisma.journalEntry.findFirst({
       where: { id, userId },

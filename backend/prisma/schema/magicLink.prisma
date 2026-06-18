@@ -1,10 +1,10 @@
 model MagicLink {
-  id        String   @id @default(ulid())
+  id        String    @id @default(ulid())
   email     String
   tokenHash String
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([email])
   @@index([tokenHash])

@@ -5,6 +5,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import AdminShell from "@/components/AdminShell";
 import SkipLink from "@/components/SkipLink";
+import IdleWarningToast from "@/components/auth/IdleWarningToast";
 
 export const metadata: Metadata = {
   title: "Cardioplace Admin",
@@ -25,6 +26,7 @@ export default function RootLayout({
         <AuthProvider>
           <LanguageProvider>
             <SkipLink />
+            <IdleWarningToast />
             {/* AdminShell wraps authed pages with sidebar + top bar; landing
                 / auth routes pass through unchanged so they keep their own
                 marketing chrome. */}
