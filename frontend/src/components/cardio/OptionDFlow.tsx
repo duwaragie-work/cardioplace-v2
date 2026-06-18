@@ -59,6 +59,13 @@ export function OptionDFlow({
 }) {
   const { t } = useLanguage();
   const [phase, setPhase] = useState<Phase>('screenA');
+  // Bug 26 — Screen C copy depends on how the flow resolved:
+  //   'confirmedNormal' = a sub-emergency second reading (reassure)
+  //   'declined'        = the patient couldn't retake (UNCONFIRMED, the original
+  //                       Screen C purpose). A still-emergency second reading
+  //                       never reaches Screen C — CheckIn routes it to the 911
+  //                       alert instead (see onSubmitSecond).
+  const [outcome, setOutcome] = useState<'declined' | 'confirmedNormal'>('declined');
   const [sys, setSys] = useState('');
   const [dia, setDia] = useState('');
   const [pulse, setPulse] = useState('');
@@ -94,6 +101,7 @@ export function OptionDFlow({
       // Non-fatal — the server cron still finalizes the held reading.
     } finally {
       setBusy(false);
+      setOutcome('declined');
       setPhase('screenC');
     }
   }
@@ -114,7 +122,19 @@ export function OptionDFlow({
     setBusy(true);
     try {
       await onSubmitSecond({ systolicBP: s, diastolicBP: d, pulse: p });
-      onDone();
+      // Bug 26 — a sub-emergency second reading is the CONFIRMED_NORMAL outcome:
+      // show the reassurance Screen C instead of bouncing straight to /dashboard
+      // (the patient had no idea their follow-up looked better). A still-emergency
+      // second reading (≥180/120) is already routed to the 911 alert inside
+      // onSubmitSecond, so let onDone() hand off to it.
+      const stillEmergency = s >= 180 || d >= 120;
+      if (stillEmergency) {
+        onDone();
+      } else {
+        setBusy(false);
+        setOutcome('confirmedNormal');
+        setPhase('screenC');
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : t('checkin.err.submit'));
       setBusy(false);
@@ -344,17 +364,30 @@ export function OptionDFlow({
                   id="optiond-title"
                   ref={headingRef}
                   tabIndex={-1}
+                  data-testid="optiond-screenc-title"
                   className="text-[1.125rem] font-bold leading-tight outline-none"
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
-                  {t('checkin.optionD.screenC.title')}
+                  {t(
+                    outcome === 'confirmedNormal'
+                      ? 'checkin.optionD.confirmedNormal.title'
+                      : 'checkin.optionD.screenC.title',
+                  )}
                 </h2>
                 <div className="shrink-0">
                   <AudioButton
                     size="sm"
                     text={[
-                      t('checkin.optionD.screenC.title'),
-                      t('checkin.optionD.screenC.body'),
+                      t(
+                        outcome === 'confirmedNormal'
+                          ? 'checkin.optionD.confirmedNormal.title'
+                          : 'checkin.optionD.screenC.title',
+                      ),
+                      t(
+                        outcome === 'confirmedNormal'
+                          ? 'checkin.optionD.confirmedNormal.body'
+                          : 'checkin.optionD.screenC.body',
+                      ),
                       t('checkin.optionD.screenC.safetyFooter'),
                       t('checkin.optionD.screenC.done'),
                     ].join('. ')}
@@ -362,7 +395,11 @@ export function OptionDFlow({
                 </div>
               </div>
               <p className="text-[0.9375rem] mt-3 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-                {t('checkin.optionD.screenC.body')}
+                {t(
+                  outcome === 'confirmedNormal'
+                    ? 'checkin.optionD.confirmedNormal.body'
+                    : 'checkin.optionD.screenC.body',
+                )}
               </p>
               <div
                 data-testid="optiond-safety-footer"

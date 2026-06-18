@@ -251,6 +251,8 @@ const fr: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': "Nous avons enregistré votre mesure et informé votre équipe soignante qu'elle doit prendre de vos nouvelles.",
   'checkin.optionD.screenC.safetyFooter': 'Si vous vous sentez mal en ce moment, veuillez appeler votre médecin ou le 911.',
   'checkin.optionD.screenC.done': 'Retour au tableau de bord',
+  'checkin.optionD.confirmedNormal.title': 'Votre deuxième mesure semble meilleure',
+  'checkin.optionD.confirmedNormal.body': 'Votre mesure de contrôle est dans une plage plus sûre. Nous avons enregistré les deux mesures et informé votre équipe soignante — elle pourrait tout de même vous contacter.',
   // Resume intro — reprise auto de l'écran A (2026-06-16). PROVISOIRE (en attente de Manisha).
   'checkin.optionD.resumeIntro': "Terminons votre mesure de tout à l'heure",
   // Part 1 — FE buffer review screen. PROVISOIRE (en attente de Manisha).

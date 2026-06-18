@@ -253,6 +253,8 @@ const am: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': 'ንባብዎን አስቀምጠናል እና የእንክብካቤ ቡድንዎ እንዲያገኝዎት አሳውቀናል።',
   'checkin.optionD.screenC.safetyFooter': 'አሁን ጤናዎ ካልተሰማዎት፣ እባክዎ ሐኪምዎን ወይም 911 ይደውሉ።',
   'checkin.optionD.screenC.done': 'ወደ ዳሽቦርድ ተመለስ',
+  'checkin.optionD.confirmedNormal.title': 'ሁለተኛው ንባብዎ የተሻለ ይመስላል',
+  'checkin.optionD.confirmedNormal.body': 'የክትትል ንባብዎ ይበልጥ ደህንነቱ በተጠበቀ ክልል ውስጥ ነው። ሁለቱንም ንባቦች አስቀምጠን ለእንክብካቤ ቡድንዎ አሳውቀናል — አሁንም ሊያገኙዎት ይችላሉ።',
   // Resume intro — Screen A ራስ-ሰር መቀጠያ (2026-06-16)። ጊዜያዊ (ማኒሻ በመጠባበቅ ላይ)።
   'checkin.optionD.resumeIntro': 'ከአሁን ቀደም የጀመሩትን ንባብ እንጨርስ',
   // Part 1 — FE buffer review screen. ጊዜያዊ (ማኒሻ በመጠባበቅ ላይ)።

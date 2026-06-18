@@ -251,6 +251,8 @@ const de: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': 'Wir haben Ihren Messwert gespeichert und Ihr Behandlungsteam informiert, dass es sich bei Ihnen melden soll.',
   'checkin.optionD.screenC.safetyFooter': 'Wenn Sie sich gerade unwohl fühlen, rufen Sie bitte Ihren Arzt oder den Notruf 911 an.',
   'checkin.optionD.screenC.done': 'Zurück zur Übersicht',
+  'checkin.optionD.confirmedNormal.title': 'Ihre zweite Messung sieht besser aus',
+  'checkin.optionD.confirmedNormal.body': 'Ihre Kontrollmessung liegt in einem sichereren Bereich. Wir haben beide Messungen gespeichert und Ihr Behandlungsteam informiert — es meldet sich möglicherweise trotzdem bei Ihnen.',
   // Resume intro — Screen A auto-resume (2026-06-16). PLATZHALTER (Manisha ausstehend).
   'checkin.optionD.resumeIntro': 'Lassen Sie uns Ihre Messung von vorhin abschließen',
   // Part 1 — FE buffer review screen. PLATZHALTER (Manisha ausstehend).

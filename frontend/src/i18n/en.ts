@@ -255,6 +255,9 @@ const en = {
   'checkin.optionD.screenC.body': 'We saved your reading and let your care team know they should check in with you.',
   'checkin.optionD.screenC.safetyFooter': "If you're feeling unwell right now, please call your doctor or 911.",
   'checkin.optionD.screenC.done': 'Back to dashboard',
+  // Bug 26 — confirmed-normal Screen C variant (PLACEHOLDER pending Manisha CONFIRM).
+  'checkin.optionD.confirmedNormal.title': 'Your second reading looks better',
+  'checkin.optionD.confirmedNormal.body': 'Your follow-up reading is in a safer range. We saved both readings and let your care team know — they may still reach out to check in.',
   // Resume intro — shown above Screen A when the patient returns to an
   // unfinished held emergency (auto-resume). PLACEHOLDER (pending Manisha).
   'checkin.optionD.resumeIntro': "Let's finish your reading from a moment ago",
