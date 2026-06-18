@@ -138,10 +138,15 @@ const IDLE_TIMEOUT_MOBILE_MS = 5 * 60_000
 // who has zero PracticeProvider memberships cannot sign in (Forbidden). A
 // user with two or more memberships gets the selector challenge.
 // SUPER_ADMIN and HEALPLACE_OPS act org-wide and bypass the selector.
+//
+// COORDINATOR is INTENTIONALLY OMITTED — that role's membership lives on the
+// 1:1 PracticeCoordinator relation, NOT PracticeProvider. Including them here
+// caused every COORDINATOR sign-in to be blocked with "No practice membership"
+// (specs 35.4 / 35.5 / 37.* / 38.1). resolvePracticeContext() handles
+// COORDINATOR's auto-attribution from PracticeCoordinator below.
 const MULTI_PRACTICE_ROLES: readonly UserRole[] = [
   UserRole.PROVIDER,
   UserRole.MEDICAL_DIRECTOR,
-  UserRole.COORDINATOR,
 ]
 
 // 5-min challenge token TTL — long enough for the patient to walk through
@@ -526,7 +531,27 @@ export class AuthService {
     // Org-wide roles bypass selector even if they happen to have PracticeProvider
     // memberships — they act across the whole org. Patients + any non-multi
     // role also bypass.
-    if (isOrgWide || !isMultiPracticeRole) return { kind: 'none' }
+    if (isOrgWide) return { kind: 'none' }
+
+    // COORDINATOR — at-most-one practice via the 1:1 PracticeCoordinator
+    // relation, never the multi-row PracticeProvider table. Auto-set the
+    // activePracticeId so their audit attribution (practiceContext) is
+    // populated, but never block sign-in or surface a selector. If the
+    // COORDINATOR row is missing, fall through to 'none' so legacy accounts
+    // can still sign in (the role-routing layer above gates what they can do).
+    if (roles.includes(UserRole.COORDINATOR)) {
+      const coord = await this.prisma.practiceCoordinator.findUnique({
+        where: { userId },
+        select: { practiceId: true },
+      })
+      if (coord) return { kind: 'auto', activePracticeId: coord.practiceId }
+      // No PracticeCoordinator row: don't block (only PROVIDER / MED_DIR get
+      // blocked for missing practice membership — Manisha 2026-06-12 §1
+      // applies to clinical-decision roles, not front-desk roles).
+      if (!isMultiPracticeRole) return { kind: 'none' }
+    }
+
+    if (!isMultiPracticeRole) return { kind: 'none' }
 
     const memberships = await this.prisma.practiceProvider.findMany({
       where: { userId },

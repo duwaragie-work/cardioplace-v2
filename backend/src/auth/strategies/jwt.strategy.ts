@@ -85,16 +85,36 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   async validate(payload: JwtPayload) {
     const activePracticeId = payload.activePracticeId ?? null
     if (activePracticeId) {
-      const membership = await this.prisma.practiceProvider.findUnique({
-        where: {
-          practiceId_userId: {
-            practiceId: activePracticeId,
-            userId: payload.sub,
+      // Membership can live on either of two 1:N relations depending on role:
+      //   • PROVIDER / MED_DIR → PracticeProvider (compound practiceId_userId)
+      //   • COORDINATOR        → PracticeCoordinator (1:1 by userId)
+      // Earlier this only checked PracticeProvider — that bounced every
+      // COORDINATOR request with PRACTICE_MEMBERSHIP_REVOKED because their
+      // activePracticeId (auto-set in resolvePracticeContext from
+      // PracticeCoordinator) never matched a PracticeProvider row. Spec 38.3
+      // saw 401s where it expected 200/403; specs 35.x / 37.x / 38.x all
+      // appeared to "time out" because /me + /admin/* both 401'd, leaving
+      // the admin shell stuck at the spinner. Probe both relations: as long
+      // as ONE of them confirms membership for the active practice, the
+      // request is authentic.
+      const [asProvider, asCoordinator] = await Promise.all([
+        this.prisma.practiceProvider.findUnique({
+          where: {
+            practiceId_userId: {
+              practiceId: activePracticeId,
+              userId: payload.sub,
+            },
           },
-        },
-        select: { id: true },
-      })
-      if (!membership) {
+          select: { id: true },
+        }),
+        this.prisma.practiceCoordinator.findUnique({
+          where: { userId: payload.sub },
+          select: { practiceId: true },
+        }),
+      ])
+      const coordinatorMatch =
+        asCoordinator !== null && asCoordinator.practiceId === activePracticeId
+      if (!asProvider && !coordinatorMatch) {
         throw new UnauthorizedException({
           message: 'Your practice membership has changed — please pick a practice again.',
           errorCode: 'PRACTICE_MEMBERSHIP_REVOKED',

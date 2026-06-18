@@ -125,6 +125,11 @@ describe('AuthService', () => {
         findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn(),
       },
+      // June 2026 — COORDINATOR practice attribution. Their membership lives
+      // on the 1:1 PracticeCoordinator relation, not PracticeProvider.
+      practiceCoordinator: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
     }
     prismaMock.$transaction = jest
       .fn()
@@ -1504,6 +1509,37 @@ describe('AuthService', () => {
     it('PATIENT → kind:"none" (not a multi-practice role)', async () => {
       const result = await service.resolvePracticeContext('user-x', [
         UserRole.PATIENT,
+      ])
+      expect(result).toEqual({ kind: 'none' })
+    })
+
+    // Regression — adding COORDINATOR to MULTI_PRACTICE_ROLES caused every
+    // COORDINATOR sign-in to be blocked with "No practice membership" because
+    // resolvePracticeContext looked them up in PracticeProvider (always
+    // empty for COORDINATOR) instead of the 1:1 PracticeCoordinator relation.
+    // Broke Playwright specs 35.4 / 35.5 / 37.1 / 37.3 / 37.4 / 38.1.
+    it('COORDINATOR with a PracticeCoordinator row → kind:"auto" with that practiceId (audit attribution lives on the 1:1 relation)', async () => {
+      ;(prisma.practiceCoordinator.findUnique as jest.Mock).mockResolvedValue({
+        practiceId: 'p-cedar',
+      })
+      const result = await service.resolvePracticeContext('coord-1', [
+        UserRole.COORDINATOR,
+      ])
+      expect(result).toEqual({ kind: 'auto', activePracticeId: 'p-cedar' })
+      expect(prisma.practiceCoordinator.findUnique).toHaveBeenCalledWith({
+        where: { userId: 'coord-1' },
+        select: { practiceId: true },
+      })
+      // PracticeProvider must NOT be queried for COORDINATOR — they never
+      // belong there and the old code falsely blocked them on its empty
+      // result set.
+      expect(prisma.practiceProvider.findMany).not.toHaveBeenCalled()
+    })
+
+    it('COORDINATOR without a PracticeCoordinator row → kind:"none" (front-desk role; missing-practice is not a clinical blocker like §1 requires for PROVIDER/MED_DIR)', async () => {
+      ;(prisma.practiceCoordinator.findUnique as jest.Mock).mockResolvedValue(null)
+      const result = await service.resolvePracticeContext('coord-orphan', [
+        UserRole.COORDINATOR,
       ])
       expect(result).toEqual({ kind: 'none' })
     })
