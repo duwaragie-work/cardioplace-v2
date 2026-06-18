@@ -654,6 +654,36 @@ describe('DailyJournalService', () => {
       expect(data.engineEvaluationDeferredUntil).toBeNull()
       expect(data.singleReadingFinalized).toBe(false)
     })
+
+    // Bug 27 (2026-06-18) — a CONFIRMATORY second-of-pair is evaluated on create
+    // (the engine fires the resolved outcome immediately), so the 5-min editable
+    // defer is a lie for it. Same flag gate as the buffer fast-fire.
+    function primeConfirmatoryMocks(sessionId: string) {
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' }) // gate
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // resolveCreateSessionId: fresh id
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // inherited first-of-pair lookup
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(bug23Entry(sessionId))
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // newer-outside-session
+    }
+    const confirmsId = '11111111-1111-1111-1111-111111111111'
+
+    it('confirmsEntryId + flag ON (default) → engineEvaluationDeferredUntil null (no editable lie)', async () => {
+      delete process.env.BUFFER_SKIPS_DEFER
+      primeConfirmatoryMocks('s-cfm')
+      await service.create('u1', { ...base, sessionId: 's-cfm', confirmsEntryId: confirmsId } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.engineEvaluationDeferredUntil).toBeNull()
+    })
+
+    it('confirmsEntryId + flag OFF (rollback) → keeps the legacy 5-min defer', async () => {
+      process.env.BUFFER_SKIPS_DEFER = 'false'
+      primeConfirmatoryMocks('s-cfm')
+      const before = Date.now()
+      await service.create('u1', { ...base, sessionId: 's-cfm', confirmsEntryId: confirmsId } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.engineEvaluationDeferredUntil).toBeInstanceOf(Date)
+      expect((data.engineEvaluationDeferredUntil as Date).getTime() - before).toBeGreaterThan(4 * 60 * 1000)
+    })
   })
 
   // Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) — the
