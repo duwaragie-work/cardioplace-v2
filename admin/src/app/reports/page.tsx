@@ -1,9 +1,10 @@
 'use client';
 
-// /reports — Practice analytics. Four tabs:
+// /reports — Practice analytics. Five tabs:
 //   • Monthly   — Monthly Practice Analytics Report (phase/24)
 //   • Quarterly — Quarterly Outcomes Report (Task 2)
 //   • SLAs      — Alert-Resolution-Time SLA Report (Task 3)
+//   • Cohorts   — Per-Condition Cohort Report (Task 4)
 //   • Adherence — 90-day Medication Adherence Report (phase/25)
 //
 // Role gate: MEDICAL_DIRECTOR, HEALPLACE_OPS, SUPER_ADMIN. Mirrors the
@@ -11,15 +12,16 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ClipboardList, Gauge, HeartPulse, Shield, TrendingUp } from 'lucide-react';
+import { ClipboardList, Gauge, HeartPulse, Layers, Shield, TrendingUp } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { canViewReports } from '@/lib/roleGates';
 import ReportsPanel from '@/components/reports/ReportsPanel';
 import AdherencePanel from '@/components/adherence/AdherencePanel';
 import QuarterlyPanel from '@/components/quarterly/QuarterlyPanel';
 import SlaPanel from '@/components/sla/SlaPanel';
+import CohortPanel from '@/components/cohorts/CohortPanel';
 
-type ReportTab = 'monthly' | 'quarterly' | 'sla' | 'adherence';
+type ReportTab = 'monthly' | 'quarterly' | 'sla' | 'cohorts' | 'adherence';
 
 export default function ReportsPage() {
   const { user, isLoading } = useAuth();
@@ -106,6 +108,13 @@ export default function ReportsPage() {
             testid="report-tab-sla"
           />
           <TabButton
+            active={tab === 'cohorts'}
+            onClick={() => setTab('cohorts')}
+            icon={<Layers className="w-4 h-4" />}
+            label="Cohorts"
+            testid="report-tab-cohorts"
+          />
+          <TabButton
             active={tab === 'adherence'}
             onClick={() => setTab('adherence')}
             icon={<HeartPulse className="w-4 h-4" />}
@@ -118,6 +127,7 @@ export default function ReportsPage() {
       {tab === 'monthly' && <ReportsPanel />}
       {tab === 'quarterly' && <QuarterlyPanel />}
       {tab === 'sla' && <SlaPanel />}
+      {tab === 'cohorts' && <CohortPanel />}
       {tab === 'adherence' && <AdherencePanel />}
     </div>
   );

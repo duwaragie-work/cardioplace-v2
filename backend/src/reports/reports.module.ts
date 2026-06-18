@@ -11,6 +11,8 @@ import { QuarterlyController } from './quarterly.controller.js'
 import { QuarterlyService } from './quarterly.service.js'
 import { SlaController } from './sla.controller.js'
 import { SlaService } from './sla.service.js'
+import { CohortController } from './cohort.controller.js'
+import { CohortService } from './cohort.service.js'
 
 /**
  * Phase/24 — Monthly Practice Analytics Report.
@@ -31,6 +33,7 @@ import { SlaService } from './sla.service.js'
     AdherenceController,
     QuarterlyController,
     SlaController,
+    CohortController,
   ],
   providers: [
     ReportsService,
@@ -38,6 +41,7 @@ import { SlaService } from './sla.service.js'
     AdherenceService,
     QuarterlyService,
     SlaService,
+    CohortService,
   ],
   exports: [
     ReportsService,
@@ -45,6 +49,7 @@ import { SlaService } from './sla.service.js'
     AdherenceService,
     QuarterlyService,
     SlaService,
+    CohortService,
   ],
 })
 export class ReportsModule {}
