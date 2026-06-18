@@ -27,8 +27,6 @@ import {
 import {
   resolveEditedMeasuredAt,
   findMeasuredAtCollision,
-  hasSubMinutePrecision,
-  localTimeWithSeconds,
   isEditableBadgeVisible,
 } from '@/lib/readingEdit';
 import { getMyPatientProfile } from '@/lib/services/intake.service';
@@ -1002,7 +1000,6 @@ function EditModal({
   heightCm,
   isPregnant,
   medications,
-  originalMeasuredAt,
   onChange,
   onSave,
   onClose,
@@ -1012,10 +1009,6 @@ function EditModal({
   error: string;
   /** True when at least one field differs from the original entry. */
   isDirty: boolean;
-  /** Bug 25 — the entry's original measuredAt ISO. Drives the "recorded at
-   *  HH:MM:SS, seconds kept unless you change the minute" hint, since the HH:MM
-   *  time picker can't render the sub-minute precision Bug 15 Part D surfaces. */
-  originalMeasuredAt: string;
   /** From PatientProfile.heightCm — used to compute BMI in the audio summary. */
   heightCm: number | null;
   /** From PatientProfile.isPregnant — gates the pregnancy-specific symptoms. */
@@ -1180,9 +1173,14 @@ function EditModal({
                 >
                   {t('checkin.time')}
                 </label>
+                {/* Bug 25 — step="1" exposes the SECONDS spinner so two
+                    readings can share a minute (e.g. 16:15:30 vs 16:15:00)
+                    without an unavoidable :00 collision. measuredTime is now
+                    HH:MM:SS. */}
                 <input
                   id="readings-edit-time"
                   type="time"
+                  step="1"
                   value={form.measuredTime}
                   onChange={(e) => onChange('measuredTime', e.target.value)}
                   className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none min-w-0"
@@ -1192,21 +1190,13 @@ function EditModal({
                     colorScheme: 'light',
                   }}
                 />
-                {/* Bug 25 — the HH:MM picker can't show seconds. When the entry
-                    carries sub-minute precision, tell the patient the seconds
-                    are kept unless they actually change the minute. */}
-                {hasSubMinutePrecision(originalMeasuredAt) && (
-                  <p
-                    data-testid="edit-original-time-hint"
-                    className="mt-1 text-[0.7rem] leading-snug"
-                    style={{ color: 'var(--brand-text-muted)' }}
-                  >
-                    {t('readings.edit.secondsHint').replace(
-                      '{time}',
-                      localTimeWithSeconds(originalMeasuredAt),
-                    )}
-                  </p>
-                )}
+                <p
+                  data-testid="edit-seconds-note"
+                  className="mt-1 text-[0.7rem] leading-snug"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                >
+                  {t('readings.edit.secondsNote')}
+                </p>
               </div>
             </div>
 
@@ -1655,12 +1645,16 @@ function EditModal({
           style={{ borderTop: '1px solid var(--brand-border)' }}
         >
           {error && (
-            <p
-              className="text-[0.78125rem] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
+            <div
+              role="alert"
+              className="flex items-center justify-center gap-2 text-[0.78125rem] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
               style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
             >
-              {error}
-            </p>
+              <span>{error}</span>
+              {/* Bug 25 — let the patient hear the message (e.g. the collision
+                  guidance) so it's understandable without reading. */}
+              <AudioButton size="sm" text={error} />
+            </div>
           )}
           <div className="flex gap-3">
             <button
@@ -2182,10 +2176,12 @@ export default function ReadingsPage() {
     const dd = String(dt.getDate()).padStart(2, '0');
     const hh = String(dt.getHours()).padStart(2, '0');
     const mi = String(dt.getMinutes()).padStart(2, '0');
+    // Bug 25 — seconds are now editable (step="1"), so seed them too.
+    const ss = String(dt.getSeconds()).padStart(2, '0');
 
     const populated: EditForm = {
       measuredDate: isValid ? `${yyyy}-${mm}-${dd}` : '',
-      measuredTime: isValid ? `${hh}:${mi}` : '',
+      measuredTime: isValid ? `${hh}:${mi}:${ss}` : '',
       position: entry.position ?? '',
       systolic: entry.systolicBP?.toString() ?? '',
       diastolic: entry.diastolicBP?.toString() ?? '',
@@ -2596,7 +2592,6 @@ export default function ReadingsPage() {
             heightCm={heightCm}
             isPregnant={isPregnant}
             medications={medications}
-            originalMeasuredAt={editEntry.measuredAt}
             // JSON.stringify is fine here — EditForm is small + flat. Returns
             // false when the user reopens the modal without touching anything.
             isDirty={

@@ -642,7 +642,7 @@ const am: Record<TranslationKey, string> = {
   'readings.validate.weightRange': 'ክብደቱ ከ20 እስከ 600 መሆን አለበት።',
   'readings.validate.missedReason': 'ላመለጡት እያንዳንዱ መድኃኒት ምክንያት ይምረጡ።',
   'readings.validate.timeCollision': 'በዚህ ትክክለኛ ሰዓት ላይ ቀድሞውኑ ንባብ አለዎት። ሰዓቱን ይቀይሩ ወይም ነባሩን ንባብ ያስተካክሉ።',
-  'readings.edit.secondsHint': 'በ{time} ተመዝግቧል። ደቂቃውን እስካልቀየሩ ድረስ ሰከንዶቹ ይቀመጣሉ።',
+  'readings.edit.secondsNote': 'ሰከንዶችንም ማስተካከል ይችላሉ — ሁለት ንባቦች በተመሳሳይ ደቂቃ ውስጥ ሲሆኑ ጠቃሚ ነው።',
   'readings.sameMinute': 'ተመሳሳይ ደቂቃ',
   'readings.sessionReadings': 'ክፍለ-ጊዜ · {count} ንባቦች',
   'readings.readingsCount': '{count} ንባቦች',

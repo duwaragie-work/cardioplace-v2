@@ -13,25 +13,13 @@
 //
 // Both are framework-free so they can be unit-tested in isolation.
 
-function pad(n: number): string {
-  return String(n).padStart(2, '0');
-}
-
-/** Local wall-clock minute key (YYYY-MM-DDTHH:MM) for a Date — the same basis
- *  the edit modal's date + time pickers are populated from in openEdit(). */
-function localMinuteKey(d: Date): string {
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    `T${pad(d.getHours())}:${pad(d.getMinutes())}`
-  );
-}
-
 /**
  * Resolve the measuredAt to PATCH from the modal's date + time pickers.
- * `chosenDate` = YYYY-MM-DD, `chosenTime` = HH:MM (both local wall-clock).
- * Returns a UTC ISO string. When the chosen minute equals the original entry's
- * minute, the original seconds/ms are preserved; otherwise the seconds reset to
- * :00 (an intentional minute change).
+ * `chosenDate` = YYYY-MM-DD, `chosenTime` = HH:MM or HH:MM:SS (local wall-clock;
+ * the edit modal's <input type="time" step="1"> yields seconds). Returns a UTC
+ * ISO string. When the chosen wall-clock SECOND equals the original entry's
+ * second, the original milliseconds are preserved (the picker can't express ms);
+ * otherwise the chosen time is used verbatim (ms = 000).
  */
 export function resolveEditedMeasuredAt(
   originalISO: string,
@@ -45,14 +33,20 @@ export function resolveEditedMeasuredAt(
       ? originalISO
       : original.toISOString();
   }
-  const chosenMinuteKey = `${chosenDate}T${chosenTime}`;
-  if (Number.isNaN(original.getTime())) {
-    // Original was unparseable — there are no seconds to preserve.
-    return new Date(chosenMinuteKey).toISOString();
+  const chosen = new Date(`${chosenDate}T${chosenTime}`); // local parse
+  if (Number.isNaN(chosen.getTime())) {
+    return Number.isNaN(original.getTime())
+      ? originalISO
+      : original.toISOString();
   }
-  return chosenMinuteKey === localMinuteKey(original)
-    ? original.toISOString() // minute unchanged → keep original seconds/ms
-    : new Date(chosenMinuteKey).toISOString(); // minute changed → :00
+  if (Number.isNaN(original.getTime())) {
+    // Original was unparseable — there are no milliseconds to preserve.
+    return chosen.toISOString();
+  }
+  // Same second (HH:MM:SS unchanged) → keep the original instant incl. ms.
+  return Math.floor(original.getTime() / 1000) === Math.floor(chosen.getTime() / 1000)
+    ? original.toISOString()
+    : chosen.toISOString();
 }
 
 /**
@@ -72,24 +66,6 @@ export function findMeasuredAtCollision<
         e.id !== excludeId && new Date(e.measuredAt).getTime() === target,
     ) ?? null
   );
-}
-
-/**
- * Has-seconds test — drives the edit modal's "recorded at HH:MM:SS, seconds
- * kept" hint. True when the reading carries sub-minute precision the HH:MM
- * picker can't show.
- */
-export function hasSubMinutePrecision(iso: string): boolean {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return false;
-  return d.getSeconds() !== 0 || d.getMilliseconds() !== 0;
-}
-
-/** Local HH:MM:SS for the original-time hint. */
-export function localTimeWithSeconds(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 /**

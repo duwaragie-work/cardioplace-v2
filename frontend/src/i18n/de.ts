@@ -639,7 +639,7 @@ const de: Record<TranslationKey, string> = {
   'readings.validate.weightRange': 'Das Gewicht muss zwischen 20 und 600 liegen.',
   'readings.validate.missedReason': 'Bitte wählen Sie für jedes ausgelassene Medikament einen Grund.',
   'readings.validate.timeCollision': 'Sie haben bereits eine Messung zu genau dieser Zeit. Ändern Sie die Zeit oder bearbeiten Sie die vorhandene Messung.',
-  'readings.edit.secondsHint': 'Aufgezeichnet um {time}. Die Sekunden bleiben erhalten, sofern Sie die Minute nicht ändern.',
+  'readings.edit.secondsNote': 'Sie können auch die Sekunden einstellen — praktisch, wenn zwei Messungen in dieselbe Minute fallen.',
   'readings.sameMinute': 'gleiche Minute',
   'readings.sessionReadings': 'Sitzung · {count} Messungen',
   'readings.readingsCount': '{count} Messungen',
