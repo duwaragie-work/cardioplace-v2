@@ -951,11 +951,19 @@ export async function executeJournalTool(
                     : `${kgToLbs(savedWeightKg)} lbs`,
               }
             : null
+        // Bug 60 — same hasActiveMedications enrichment as voice. Surfaces
+        // whether the patient has ANY active (non-discontinued, non-rejected,
+        // non-PRN) medications so the chat popup / verbal recap can suppress
+        // the misleading "All medications taken" pill for 0-meds patients
+        // (whose medicationTaken=true is vacuously true per Bug 53).
+        const hasActiveMedications =
+          await journalService.hasActiveMedications(userId)
         return JSON.stringify({
           saved: true,
           message: 'Check-in saved successfully.',
           data: result.data,
           weight_display: weightDisplay,
+          has_active_medications: hasActiveMedications,
         })
       } catch (err: any) {
         if (isIntakeIncompleteError(err)) return intakeIncompleteResponse('saved')
@@ -1211,6 +1219,9 @@ export async function executeJournalTool(
         // claiming "Reading updated successfully." The service's canonical
         // message is the spoken / typed reply the bot should use verbatim.
         const noChange = (result as { noChange?: boolean }).noChange === true
+        // Bug 60 — see submit_checkin block above.
+        const hasActiveMedicationsUpdate =
+          await journalService.hasActiveMedications(userId)
         if (noChange) {
           return JSON.stringify({
             updated: false,
@@ -1221,6 +1232,7 @@ export async function executeJournalTool(
                 : 'No changes — the reading already has those values. Nothing to update.',
             data: result.data,
             weight_display: updatedWeightDisplay,
+            has_active_medications: hasActiveMedicationsUpdate,
           })
         }
         return JSON.stringify({
@@ -1228,6 +1240,7 @@ export async function executeJournalTool(
           message: 'Reading updated successfully.',
           data: result.data,
           weight_display: updatedWeightDisplay,
+          has_active_medications: hasActiveMedicationsUpdate,
         })
       } catch (err: any) {
         return JSON.stringify({ updated: false, message: err.message ?? 'Failed to update.' })

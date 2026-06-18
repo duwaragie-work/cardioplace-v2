@@ -21,20 +21,21 @@ model User {
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
 
-  accounts                             Account[]
-  authLogs                             AuthLog[]
-  contentSubmitted                     Content[]                   @relation("ContentSubmittedBy")
-  contentRatings                       ContentRating[]             @relation("ContentRatings")
-  contentReviews                       ContentReview[]             @relation("ContentReviewedBy")
-  deviationAlerts                      DeviationAlert[]
-  escalationEvents                     EscalationEvent[]
-  journalEntries                       JournalEntry[]              @relation("PatientJournalEntries")
-  journalEntriesAdded                  JournalEntry[]              @relation("JournalEntryAddedBy")
-  notifications                        Notification[]
-  refreshTokens                        RefreshToken[]
-  scheduledCalls                       ScheduledCall[]
-  sessions                             Session[]
-  userDevices                          UserDevice[]
+  accounts            Account[]
+  authLogs            AuthLog[]
+  contentSubmitted    Content[]         @relation("ContentSubmittedBy")
+  contentRatings      ContentRating[]   @relation("ContentRatings")
+  contentReviews      ContentReview[]   @relation("ContentReviewedBy")
+  deviationAlerts     DeviationAlert[]
+  escalationEvents    EscalationEvent[]
+  journalEntries      JournalEntry[]    @relation("PatientJournalEntries")
+  journalEntriesAdded JournalEntry[]    @relation("JournalEntryAddedBy")
+  notifications       Notification[]
+  refreshTokens       RefreshToken[]
+  authSessions        AuthSession[]
+  scheduledCalls      ScheduledCall[]
+  sessions            Session[]
+  userDevices         UserDevice[]
 
   patientProfile                       PatientProfile?
   patientMedications                   PatientMedication[]

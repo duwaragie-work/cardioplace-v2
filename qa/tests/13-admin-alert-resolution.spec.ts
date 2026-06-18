@@ -5,6 +5,7 @@ import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
 import {
   postJournalEntry,
+  postSessionWithTwoReadings,
   adminAcknowledgeAlert,
   adminResolveAlert,
   adminAuditAlert,
@@ -283,29 +284,37 @@ test.describe('Bug #6/#7 — clean reading does NOT auto-resolve open BP L1 aler
     await tc.resetUser(u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
 
-    // Each reading gets its own sessionId so the engine evaluates them
-    // independently rather than averaging into a single session.
+    // Each setup reading is a 2-reading session so the engine bypasses the
+    // Cluster 6 Q2 single-reading gate deterministically. Pre-Day-3 mode
+    // also exempts the gate (resetUser wipes Aisha's seed readings →
+    // lifetime count <7), but relying on that exposes a CI-only race:
+    // Reading 2's event handler can run before Reading 1 has been COMMITTED
+    // to a transaction visible to ProfileResolver.count, leaving the
+    // pre-Day-3 derivation deterministic only for the first reading. The
+    // 2-reading-session pattern was applied by commit 540c537 to spec 30u
+    // for the same class of failure. Reading 3 (clean) stays single — it
+    // is supposed to fire NOTHING, so the gate doesn't matter for it.
     const session1 = randomUUID()
     const session2 = randomUUID()
     const session3 = randomUUID()
 
-    // Reading 1 — fires BP_LEVEL_1_HIGH
-    await postJournalEntry(api, {
-      measuredAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+    // Reading 1 — 2-reading session at 165/95 → fires BP_LEVEL_1_HIGH
+    await postSessionWithTwoReadings(api, {
+      sessionId: session1,
+      firstMeasuredAt: new Date(Date.now() - 5 * 60_000).toISOString(),
       systolicBP: 165,
       diastolicBP: 95,
       pulse: 78,
-      sessionId: session1,
     })
     await new Promise((r) => setTimeout(r, 1500))
 
-    // Reading 2 — fires BP_LEVEL_1_LOW (AGE_65_LOW)
-    await postJournalEntry(api, {
-      measuredAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+    // Reading 2 — 2-reading session at 90/55 → fires BP_LEVEL_1_LOW (AGE_65_LOW)
+    await postSessionWithTwoReadings(api, {
+      sessionId: session2,
+      firstMeasuredAt: new Date(Date.now() - 3 * 60_000).toISOString(),
       systolicBP: 90,
       diastolicBP: 55,
       pulse: 72,
-      sessionId: session2,
     })
 
     // Poll for BOTH alerts to land. The engine is event-driven and the

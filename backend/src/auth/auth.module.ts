@@ -6,6 +6,7 @@ import { PassportModule } from '@nestjs/passport'
 import { PrismaModule } from '../prisma/prisma.module.js'
 import { AuthController } from './auth.controller.js'
 import { AuthService } from './auth.service.js'
+import { GeolocationService } from './geolocation.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { Public } from './decorators/public.decorator.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
@@ -30,6 +31,7 @@ export { Public }
   providers: [
     AuthService,
     BcryptService,
+    GeolocationService,
     JwtStrategy,
     // GoogleStrategy,   // DISABLED – OTP-only auth
     // AppleStrategy,    // DISABLED – OTP-only auth

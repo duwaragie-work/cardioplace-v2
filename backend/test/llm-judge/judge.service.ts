@@ -18,6 +18,22 @@ async function getLangSmith() {
   } catch { _ls = false; return false }
 }
 
+// Circuit-breaker. After the first auth failure (401/403) on a createRun
+// call we disable LangSmith for the rest of the test run — otherwise the
+// same 403 fires once per scenario × judge call (~50+ identical warnings
+// per CI run). One warning is enough signal; the rest is noise.
+function tripLangSmith(reason: string) {
+  if (_ls && _ls !== false) {
+    console.warn(`LangSmith tracing disabled for the rest of this run: ${reason}`)
+  }
+  _ls = false
+}
+
+function isAuthFailure(err: unknown): boolean {
+  const status = (err as { status?: number } | null)?.status
+  return status === 401 || status === 403
+}
+
 // ── Types ───────────────────────────────────────────────────────────────────
 export interface JudgeScore { criterion: string; score: number; reasoning: string }
 
@@ -124,7 +140,10 @@ export class JudgeService {
         start_time: Date.now() - opts.latencyMs,
         end_time: Date.now(),
       })
-    } catch (e) { console.warn('LangSmith chatbot log failed:', e) }
+    } catch (e) {
+      if (isAuthFailure(e)) tripLangSmith(`auth failure (${(e as { status?: number }).status})`)
+      console.warn('LangSmith chatbot log failed:', e)
+    }
   }
 
   private async logToLangSmith(r: EvalResult) {
@@ -147,6 +166,9 @@ export class JudgeService {
         start_time: Date.now(),
         end_time: Date.now(),
       })
-    } catch (e) { console.warn('LangSmith judge log failed:', e) }
+    } catch (e) {
+      if (isAuthFailure(e)) tripLangSmith(`auth failure (${(e as { status?: number }).status})`)
+      console.warn('LangSmith judge log failed:', e)
+    }
   }
 }

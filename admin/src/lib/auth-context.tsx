@@ -18,6 +18,7 @@ import {
   AUTH_ROLE_COOKIE,
   LEGACY_MARKER_COOKIES,
 } from '@/lib/cookie-names';
+import { useIdleTimeout } from '@/lib/hooks/useIdleTimeout';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -202,6 +203,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // already set the HttpOnly refresh_token cookie on the verify-OTP
     // response. Keeping it out of JS closes the XSS path.
   };
+
+  // Manisha 2026-06-12 Doc 3 Q7 — idle session timeout. 15 min web,
+  // 5 min mobile. Arm only when signed in. Warning fires a custom
+  // event so layout chrome can render a banner; timeout sign-outs
+  // re-use the existing logout pattern + bounces to /sign-in.
+  useIdleTimeout({
+    enabled: !!token,
+    onWarn: () => {
+      if (typeof window === 'undefined') return;
+      window.dispatchEvent(new CustomEvent('auth:idle-warning'));
+    },
+    onTimeout: () => {
+      if (typeof window === 'undefined') return;
+      fetch(`${API_URL}/api/v2/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      }).catch(() => {});
+      setToken(null);
+      setUser(null);
+      clearTokenState();
+      clearAuthMarkers();
+      window.location.href = '/sign-in?session_expired=1';
+    },
+  });
 
   const logout = async () => {
     // Await the server round-trip so its Set-Cookie clear headers land
