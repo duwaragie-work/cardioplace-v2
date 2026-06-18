@@ -233,10 +233,10 @@ export class DailyJournalService {
     // 'false' to revert to the legacy single-reading-hold behavior (CTO
     // 2026-06-09 policy) without a code change.
     //
-    // Scope: ONLY ordinary buffer commits (closeSession, patient, non-Option-D).
-    // Admin entries, Option D AWAITING/CONFIRMATORY (own retake semantics), and
-    // chat/voice tool creates (no buffer step — they keep the 5-min defer as
-    // their only edit window) are unchanged.
+    // Scope: ordinary buffer commits (closeSession, patient, non-Option-D) AND
+    // Option D CONFIRMATORY second readings (Bug 27 — see below). Admin entries,
+    // Option D AWAITING, and chat/voice tool creates (no buffer step — they keep
+    // the 5-min defer as their only edit window) are unchanged.
     // Read per-request so prod/dev (and unit tests) can flip it without a
     // rebuild. Default ON — only an explicit 'false' opts back into the hold.
     const bufferSkipsDefer = process.env.BUFFER_SKIPS_DEFER !== 'false'
@@ -245,18 +245,30 @@ export class DailyJournalService {
       dto.closeSession === true &&
       !actor &&
       optionDState === null
+    // Bug 27 (2026-06-18) — a CONFIRMATORY second-of-pair is evaluated against
+    // the held first-of-pair IMMEDIATELY on create (the engine fires the resolved
+    // outcome here, not via the cron), so the 5-min "editable before the engine
+    // commits" window is a lie for it — the readings page was showing the badge
+    // on a reading that's already finalized. Skip the defer for it too. Same
+    // flag gate as the buffer fast-fire so 'false' restores all legacy behavior.
+    const confirmatoryFastFire =
+      bufferSkipsDefer &&
+      optionDState === EmergencyConfirmationState.CONFIRMATORY &&
+      !actor
 
     // Step 2 edit window (Manisha 2026-06-12 Q1+Q4) — patient (non-admin)
     // readings are editable/deletable for 5 min before the engine commits. The
     // readings page reads this to surface the edit/delete affordance; the engine
     // firing itself is still gated by the existing single-reading hold. Admin
     // entries and Option D AWAITING readings (held under their own retake
-    // semantics) get no window. Bug 23 — a buffer fast-fire commit also gets no
-    // window: it fires now, so there's nothing to be "editable before".
+    // semantics) get no window. Bug 23/27 — buffer fast-fire + confirmatory
+    // commits get no window: they fire now, so there's nothing to be "editable
+    // before".
     const engineEvaluationDeferredUntil =
       actor ||
       optionDState === EmergencyConfirmationState.AWAITING ||
-      bufferCommitFastFire
+      bufferCommitFastFire ||
+      confirmatoryFastFire
         ? null
         : new Date(Date.now() + SINGLE_READING_FINALIZE_MS)
 
