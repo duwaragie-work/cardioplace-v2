@@ -159,15 +159,28 @@ export function OptionDFlow({
               >
                 <AlertTriangle className="w-8 h-8" style={{ color: 'var(--brand-warning-amber-text)' }} aria-hidden="true" />
               </div>
-              <h2
-                id="optiond-title"
-                ref={headingRef}
-                tabIndex={-1}
-                className="text-[1.25rem] font-bold leading-tight outline-none"
-                style={{ color: 'var(--brand-text-primary)' }}
-              >
-                {t('checkin.optionD.screenA.title')}
-              </h2>
+              <div className="flex items-center justify-center gap-2">
+                <h2
+                  id="optiond-title"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-[1.25rem] font-bold leading-tight outline-none"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {t('checkin.optionD.screenA.title')}
+                </h2>
+                <div className="shrink-0">
+                  <AudioButton
+                    size="sm"
+                    text={[
+                      t('checkin.optionD.screenA.title'),
+                      t('checkin.optionD.screenA.body').replace('{bp}', bpLabel),
+                      t('checkin.optionD.screenA.retake'),
+                      t('checkin.optionD.screenA.cantNow'),
+                    ].join('. ')}
+                  />
+                </div>
+              </div>
               <p className="text-[0.9375rem] mt-3 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
                 {t('checkin.optionD.screenA.body').replace('{bp}', bpLabel)}
               </p>
@@ -216,7 +229,12 @@ export function OptionDFlow({
                 <div className="shrink-0 mt-0.5">
                   <AudioButton
                     size="sm"
-                    text={`${t('checkin.optionD.screenB.title')}. ${t('checkin.optionD.screenB.body')}`}
+                    text={[
+                      t('checkin.optionD.screenB.title'),
+                      t('checkin.optionD.screenB.body'),
+                      t('checkin.optionD.screenB.submit'),
+                      t('checkin.optionD.screenB.cantNow'),
+                    ].join('. ')}
                   />
                 </div>
               </div>
@@ -321,15 +339,28 @@ export function OptionDFlow({
 
           {phase === 'screenC' && (
             <>
-              <h2
-                id="optiond-title"
-                ref={headingRef}
-                tabIndex={-1}
-                className="text-[1.125rem] font-bold leading-tight outline-none"
-                style={{ color: 'var(--brand-text-primary)' }}
-              >
-                {t('checkin.optionD.screenC.title')}
-              </h2>
+              <div className="flex items-center justify-center gap-2">
+                <h2
+                  id="optiond-title"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-[1.125rem] font-bold leading-tight outline-none"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {t('checkin.optionD.screenC.title')}
+                </h2>
+                <div className="shrink-0">
+                  <AudioButton
+                    size="sm"
+                    text={[
+                      t('checkin.optionD.screenC.title'),
+                      t('checkin.optionD.screenC.body'),
+                      t('checkin.optionD.screenC.safetyFooter'),
+                      t('checkin.optionD.screenC.done'),
+                    ].join('. ')}
+                  />
+                </div>
+              </div>
               <p className="text-[0.9375rem] mt-3 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
                 {t('checkin.optionD.screenC.body')}
               </p>
