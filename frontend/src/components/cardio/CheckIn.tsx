@@ -2174,6 +2174,9 @@ export default function CheckIn() {
   // True when the review screen should take over (vs. the wizard re-opened to
   // add / edit a reading inside the buffer).
   const [bufferReviewing, setBufferReviewing] = useState(false);
+  // True between clearing an emptied buffer and the /dashboard navigation landing,
+  // so the render shows the skeleton instead of flashing the wizard's step 1.
+  const [navigatingAway, setNavigatingAway] = useState(false);
   // Set while editing a buffered reading — on submit we replace it in place.
   const [editingBufferLocalId, setEditingBufferLocalId] = useState<string | null>(null);
   const [committingBuffer, setCommittingBuffer] = useState(false);
@@ -2963,6 +2966,9 @@ export default function CheckIn() {
     const next = removeReading(bufferDraft, localId);
     if (next.readings.length === 0) {
       if (user?.id) clearBufferDraft(user.id);
+      // Render the skeleton (not the wizard) until /dashboard takes over —
+      // without this the cleared buffer briefly falls through to step 1.
+      setNavigatingAway(true);
       setBufferDraft(null);
       setBufferReviewing(false);
       router.push('/dashboard');
@@ -2975,7 +2981,7 @@ export default function CheckIn() {
   // Authed loading state — skeleton mirroring the wizard chrome (top bar +
   // step header + a few content rows + sticky CTA placeholder) so the page
   // doesn't flash a generic spinner before the first step renders.
-  if (isLoading || !isAuthenticated || profileLoading || activeSessionLoading) {
+  if (isLoading || !isAuthenticated || profileLoading || activeSessionLoading || navigatingAway) {
     return <CheckInSkeleton />;
   }
 
