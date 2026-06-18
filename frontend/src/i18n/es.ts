@@ -106,6 +106,9 @@ const es: Record<TranslationKey, string> = {
   // #89 — English placeholder; flagged for Niva translation pass.
   'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
   'dashboard.goalTolerance': 'Las alertas altas comienzan en {value}, su objetivo más un pequeño margen.',
+  'dashboard.goalOverridePregnancy': 'Las alertas comienzan en {value} durante el embarazo.',
+  'dashboard.goalOverrideHfref': 'Las alertas comienzan en {value} para el cuidado de su insuficiencia cardíaca.',
+  'dashboard.goalOverrideCad': 'Las alertas comienzan en {value} para su afección cardíaca.',
   'dashboard.setByCareTeam': '· establecido por su equipo de atención',
   'dashboard.chartDateAxis': 'Fecha',
   'dashboard.chartAt': 'a las',
@@ -248,6 +251,8 @@ const es: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': 'Guardamos su lectura e informamos a su equipo de atención para que se comunique con usted.',
   'checkin.optionD.screenC.safetyFooter': 'Si se siente mal en este momento, llame a su médico o al 911.',
   'checkin.optionD.screenC.done': 'Volver al panel',
+  'checkin.optionD.confirmedNormal.title': 'Su segunda lectura se ve mejor',
+  'checkin.optionD.confirmedNormal.body': 'Su lectura de seguimiento está en un rango más seguro. Guardamos ambas lecturas e informamos a su equipo de atención — es posible que aún se comuniquen con usted.',
   // Resume intro — Screen A auto-resume (2026-06-16). PLACEHOLDER (pendiente Manisha).
   'checkin.optionD.resumeIntro': 'Terminemos su lectura de hace un momento',
   // Part 1 — FE buffer review screen. PLACEHOLDER (pendiente Manisha).
@@ -635,9 +640,11 @@ const es: Record<TranslationKey, string> = {
   'readings.crisis': 'Crisis',
 
   // ─── Readings (audit sweep additions) ──────────────────────────────────────
-  'readings.validate.bpBoth': 'Ingrese ambos números de presión arterial (o borre los dos).',
+  'readings.validate.bpBoth': 'Ingrese ambos números de presión arterial.',
   'readings.validate.weightRange': 'El peso debe estar entre 20 y 600.',
   'readings.validate.missedReason': 'Elija un motivo para cada medicamento que omitió.',
+  'readings.validate.timeCollision': 'Ya tiene una lectura a esta hora exacta. Cambie la hora o edite la lectura existente.',
+  'readings.edit.secondsNote': 'También puede ajustar los segundos — útil cuando dos lecturas caen en el mismo minuto.',
   'readings.sameMinute': 'mismo minuto',
   'readings.sessionReadings': 'Sesión · {count} lecturas',
   'readings.readingsCount': '{count} lecturas',

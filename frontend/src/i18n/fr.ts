@@ -106,6 +106,9 @@ const fr: Record<TranslationKey, string> = {
   // #89 — English placeholder; flagged for Niva translation pass.
   'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
   'dashboard.goalTolerance': 'Les alertes élevées commencent à {value}, votre objectif plus une petite marge.',
+  'dashboard.goalOverridePregnancy': 'Les alertes commencent à {value} pendant la grossesse.',
+  'dashboard.goalOverrideHfref': 'Les alertes commencent à {value} pour le suivi de votre insuffisance cardiaque.',
+  'dashboard.goalOverrideCad': 'Les alertes commencent à {value} pour votre problème cardiaque.',
   'dashboard.setByCareTeam': '· défini par votre équipe soignante',
   'dashboard.chartDateAxis': 'Date',
   'dashboard.chartAt': 'à',
@@ -248,6 +251,8 @@ const fr: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': "Nous avons enregistré votre mesure et informé votre équipe soignante qu'elle doit prendre de vos nouvelles.",
   'checkin.optionD.screenC.safetyFooter': 'Si vous vous sentez mal en ce moment, veuillez appeler votre médecin ou le 911.',
   'checkin.optionD.screenC.done': 'Retour au tableau de bord',
+  'checkin.optionD.confirmedNormal.title': 'Votre deuxième mesure semble meilleure',
+  'checkin.optionD.confirmedNormal.body': 'Votre mesure de contrôle est dans une plage plus sûre. Nous avons enregistré les deux mesures et informé votre équipe soignante — elle pourrait tout de même vous contacter.',
   // Resume intro — reprise auto de l'écran A (2026-06-16). PROVISOIRE (en attente de Manisha).
   'checkin.optionD.resumeIntro': "Terminons votre mesure de tout à l'heure",
   // Part 1 — FE buffer review screen. PROVISOIRE (en attente de Manisha).
@@ -635,9 +640,11 @@ const fr: Record<TranslationKey, string> = {
   'readings.crisis': 'Crise',
 
   // ─── Readings (audit sweep additions) ──────────────────────────────────────
-  'readings.validate.bpBoth': 'Entrez les deux chiffres de tension artérielle (ou effacez les deux).',
+  'readings.validate.bpBoth': 'Entrez les deux chiffres de tension artérielle.',
   'readings.validate.weightRange': 'Le poids doit être entre 20 et 600.',
   'readings.validate.missedReason': 'Veuillez choisir une raison pour chaque médicament oublié.',
+  'readings.validate.timeCollision': 'Vous avez déjà une mesure à cette heure exacte. Modifiez l’heure ou la mesure existante.',
+  'readings.edit.secondsNote': 'Vous pouvez aussi régler les secondes — utile quand deux mesures tombent dans la même minute.',
   'readings.sameMinute': 'même minute',
   'readings.sessionReadings': 'Session · {count} lectures',
   'readings.readingsCount': '{count} lectures',

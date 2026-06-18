@@ -101,6 +101,9 @@ const en = {
   // #89 — diastolic-only goal: clarify the axis so the number isn't read as systolic.
   'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
   'dashboard.goalTolerance': 'High alerts begin at {value}, your goal plus a small tolerance.',
+  'dashboard.goalOverridePregnancy': 'Alerts begin at {value} during pregnancy.',
+  'dashboard.goalOverrideHfref': 'Alerts begin at {value} for your heart-failure care.',
+  'dashboard.goalOverrideCad': 'Alerts begin at {value} for your heart condition.',
   'dashboard.setByCareTeam': '· set by your care team',
   'dashboard.chartDateAxis': 'Date',
   'dashboard.chartAt': 'at',
@@ -252,6 +255,9 @@ const en = {
   'checkin.optionD.screenC.body': 'We saved your reading and let your care team know they should check in with you.',
   'checkin.optionD.screenC.safetyFooter': "If you're feeling unwell right now, please call your doctor or 911.",
   'checkin.optionD.screenC.done': 'Back to dashboard',
+  // Bug 26 — confirmed-normal Screen C variant (PLACEHOLDER pending Manisha CONFIRM).
+  'checkin.optionD.confirmedNormal.title': 'Your second reading looks better',
+  'checkin.optionD.confirmedNormal.body': 'Your follow-up reading is in a safer range. We saved both readings and let your care team know — they may still reach out to check in.',
   // Resume intro — shown above Screen A when the patient returns to an
   // unfinished held emergency (auto-resume). PLACEHOLDER (pending Manisha).
   'checkin.optionD.resumeIntro': "Let's finish your reading from a moment ago",
@@ -652,9 +658,11 @@ const en = {
   // Validation errors that overlap with check-in reuse checkin.err.* keys
   // directly (one source of truth per locale). bpBoth's "(or clear both)"
   // variant and weightRange are edit-only and stay here.
-  'readings.validate.bpBoth': 'Enter both blood pressure numbers (or clear both).',
+  'readings.validate.bpBoth': 'Enter both blood pressure numbers.',
   'readings.validate.weightRange': 'Weight should be between 20 and 600.',
   'readings.validate.missedReason': 'Please pick a reason for each medication you missed.',
+  'readings.validate.timeCollision': 'You already have a reading at this exact time. Change the time or edit the existing reading.',
+  'readings.edit.secondsNote': 'You can set the seconds too — handy when two readings fall in the same minute.',
   'readings.sameMinute': 'same minute',
   'readings.sessionReadings': 'Session · {count} readings',
   'readings.readingsCount': '{count} readings',
