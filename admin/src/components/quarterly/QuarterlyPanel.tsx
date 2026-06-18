@@ -435,7 +435,8 @@ function ControlTable({ report }: { report: QuarterlyReport }) {
   }
   return (
     <div className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-      <div className="overflow-x-auto">
+      {/* Desktop table — lg+ */}
+      <div className="hidden lg:block overflow-x-auto">
         <table className="w-full text-left border-collapse" data-testid="quarterly-control-table">
           <thead>
             <tr style={{ backgroundColor: '#F8FAFC' }}>
@@ -481,6 +482,36 @@ function ControlTable({ report }: { report: QuarterlyReport }) {
           </tbody>
         </table>
       </div>
+
+      {/* Mobile / tablet cards — below lg */}
+      <div className="lg:hidden">
+        {report.byPatient.map((p, i) => (
+          <div
+            key={p.patientId}
+            className="px-4 py-4"
+            style={{ borderTop: i > 0 ? '1px solid var(--brand-border)' : undefined }}
+          >
+            <div className="flex items-center justify-between gap-3 mb-3 min-w-0">
+              <span
+                className="text-[13px] font-semibold truncate"
+                style={{ color: 'var(--brand-text-primary)' }}
+              >
+                {p.name}
+              </span>
+              <ControlChip status={p.status} />
+            </div>
+            <dl className="grid grid-cols-3 gap-2 text-[11px]">
+              <Stat label="Average BP" value={`${p.meanSystolic}/${p.meanDiastolic}`} />
+              <Stat
+                label="Target"
+                value={`${p.sbpUpper}/${p.dbpUpper}${p.usedCustomTarget ? ' *' : ''}`}
+              />
+              <Stat label="Readings" value={String(p.readings)} />
+            </dl>
+          </div>
+        ))}
+      </div>
+
       <div
         className="px-4 py-3 border-t text-[11px] leading-relaxed"
         style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-muted)' }}
@@ -514,6 +545,25 @@ function Td({ children, align }: { children: React.ReactNode; align?: 'right' })
     >
       {children}
     </td>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      className="px-2 py-1.5 rounded-lg text-center"
+      style={{ backgroundColor: 'var(--brand-background)' }}
+    >
+      <dt
+        className="text-[10px] uppercase tracking-wider font-semibold"
+        style={{ color: 'var(--brand-text-muted)' }}
+      >
+        {label}
+      </dt>
+      <dd className="font-bold mt-0.5" style={{ color: 'var(--brand-text-primary)' }}>
+        {value}
+      </dd>
+    </div>
   );
 }
 
