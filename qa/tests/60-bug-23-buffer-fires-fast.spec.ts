@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { authedApi } from '../helpers/auth.js'
+import { newTestControl } from '../helpers/test-control.js'
 import { PATIENTS } from '../helpers/accounts.js'
 import { API_BASE_URL } from '../playwright.config.js'
 import { randomUUID } from 'node:crypto'
@@ -51,6 +52,14 @@ test.describe('Bug 23 — buffer commit fires fast', () => {
   })
 
   test('buffer commit (closeSession) fires immediately when BUFFER_SKIPS_DEFER is on', async () => {
+    // Fresh ENROLLED stamp -> enrolledAt = now >= CAD Q2 rollout anchor, so
+    // paul's CAD default sbpUpperTarget resolves to 140 and 146/86 fires
+    // RULE_CAD_HIGH. Without it paul's seed enrolledAt is null -> ramp off ->
+    // upper 160 -> nothing fires -> the fast-fire poll below times out.
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const paul = await tc.findUser(PATIENTS.paul.email)
+    await tc.setEnrollment(paul.id, 'ENROLLED')
+    await tc.dispose()
     const api = await authedApi(API_BASE_URL, PATIENTS.paul.email)
     try {
       const res = await api.post('daily-journal', {
