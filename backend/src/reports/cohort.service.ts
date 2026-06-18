@@ -322,13 +322,13 @@ export class CohortService {
 
       type Col = { label: string; width: number; align?: 'left' | 'right' }
       const cols: Col[] = [
-        { label: 'Cohort', width: 0.24 },
+        { label: 'Cohort', width: 0.2 },
         { label: 'Patients', width: 0.13, align: 'right' },
         { label: 'With readings', width: 0.16, align: 'right' },
         { label: 'Controlled', width: 0.13, align: 'right' },
         { label: 'Control rate', width: 0.14, align: 'right' },
         { label: 'Alerts', width: 0.1, align: 'right' },
-        { label: 'Unverified', width: 0.1, align: 'right' },
+        { label: 'Unverified', width: 0.14, align: 'right' },
       ]
       const cells = report.rows.map((r) => [
         r.label,

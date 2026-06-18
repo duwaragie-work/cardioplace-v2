@@ -242,11 +242,11 @@ export class SlaService {
       const cols: Col[] = [
         { label: 'Tier', width: 0.26 },
         { label: 'Ack target', width: 0.14, align: 'right' },
-        { label: 'Mean ack', width: 0.15, align: 'right' },
+        { label: 'Mean ack', width: 0.11, align: 'right' },
         { label: 'Ack', width: 0.09, align: 'right' },
         { label: 'Resolve target', width: 0.15, align: 'right' },
         { label: 'Mean resolve', width: 0.13, align: 'right' },
-        { label: 'Resolve', width: 0.08, align: 'right' },
+        { label: 'Resolve', width: 0.12, align: 'right' },
       ]
       const HEADER_H = 30
       const ROW_H = 22
