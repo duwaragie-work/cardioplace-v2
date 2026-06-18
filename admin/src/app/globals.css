@@ -273,3 +273,16 @@ html {
     font-size: max(16px, 1rem) !important;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Readable placeholders.
+   Tailwind Preflight defaults `::placeholder` to gray-400 (#9ca3af ≈ 2.8:1 on
+   white) — faint on phones and below WCAG AA. Set a darker default (~7:1) and
+   keep opacity:1 (some mobile browsers fade placeholders). NO `!important`:
+   inputs that intentionally set a placeholder color via a `placeholder:text-*`
+   utility have higher specificity and still win.
+   ────────────────────────────────────────────────────────────────────────── */
+::placeholder {
+  color: #595959;
+  opacity: 1;
+}
