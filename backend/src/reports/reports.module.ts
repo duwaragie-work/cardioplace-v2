@@ -7,6 +7,8 @@ import { ReportsController } from './reports.controller.js'
 import { ReportsService } from './reports.service.js'
 import { AdherenceController } from './adherence.controller.js'
 import { AdherenceService } from './adherence.service.js'
+import { QuarterlyController } from './quarterly.controller.js'
+import { QuarterlyService } from './quarterly.service.js'
 
 /**
  * Phase/24 — Monthly Practice Analytics Report.
@@ -22,8 +24,8 @@ import { AdherenceService } from './adherence.service.js'
  */
 @Module({
   imports: [PrismaModule, EmailModule, ConfigModule],
-  controllers: [ReportsController, AdherenceController],
-  providers: [ReportsService, MonthlyReportCron, AdherenceService],
-  exports: [ReportsService, MonthlyReportCron, AdherenceService],
+  controllers: [ReportsController, AdherenceController, QuarterlyController],
+  providers: [ReportsService, MonthlyReportCron, AdherenceService, QuarterlyService],
+  exports: [ReportsService, MonthlyReportCron, AdherenceService, QuarterlyService],
 })
 export class ReportsModule {}

@@ -1,7 +1,8 @@
 'use client';
 
-// /reports — Practice analytics. Two tabs:
-//   • Monthly  — Monthly Practice Analytics Report (phase/24)
+// /reports — Practice analytics. Three tabs:
+//   • Monthly   — Monthly Practice Analytics Report (phase/24)
+//   • Quarterly — Quarterly Outcomes Report (Task 2)
 //   • Adherence — 90-day Medication Adherence Report (phase/25)
 //
 // Role gate: MEDICAL_DIRECTOR, HEALPLACE_OPS, SUPER_ADMIN. Mirrors the
@@ -9,13 +10,14 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ClipboardList, HeartPulse, Shield } from 'lucide-react';
+import { ClipboardList, HeartPulse, Shield, TrendingUp } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { canViewReports } from '@/lib/roleGates';
 import ReportsPanel from '@/components/reports/ReportsPanel';
 import AdherencePanel from '@/components/adherence/AdherencePanel';
+import QuarterlyPanel from '@/components/quarterly/QuarterlyPanel';
 
-type ReportTab = 'monthly' | 'adherence';
+type ReportTab = 'monthly' | 'quarterly' | 'adherence';
 
 export default function ReportsPage() {
   const { user, isLoading } = useAuth();
@@ -87,6 +89,13 @@ export default function ReportsPage() {
             testid="report-tab-monthly"
           />
           <TabButton
+            active={tab === 'quarterly'}
+            onClick={() => setTab('quarterly')}
+            icon={<TrendingUp className="w-4 h-4" />}
+            label="Quarterly"
+            testid="report-tab-quarterly"
+          />
+          <TabButton
             active={tab === 'adherence'}
             onClick={() => setTab('adherence')}
             icon={<HeartPulse className="w-4 h-4" />}
@@ -96,7 +105,9 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {tab === 'monthly' ? <ReportsPanel /> : <AdherencePanel />}
+      {tab === 'monthly' && <ReportsPanel />}
+      {tab === 'quarterly' && <QuarterlyPanel />}
+      {tab === 'adherence' && <AdherencePanel />}
     </div>
   );
 }
