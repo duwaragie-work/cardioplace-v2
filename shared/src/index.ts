@@ -16,3 +16,4 @@ export * from './report-sla.js';
 export * from './monthly-report.js';
 export * from './adherence.js';
 export * from './quarterly-report.js';
+export * from './sla-report.js';
