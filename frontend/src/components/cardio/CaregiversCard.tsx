@@ -219,14 +219,14 @@ export default function CaregiversCard() {
         )}
 
         {adding && (
-          <div className="rounded-xl px-3 py-3 space-y-2.5" style={{ border: '1px solid var(--brand-border)', backgroundColor: 'var(--brand-background)' }}>
+          <div className="rounded-xl px-3 py-3 space-y-2.5" style={{ border: '1px solid var(--brand-border)', backgroundColor: '#FFFFFF' }}>
             <input
               data-testid="profile-caregiver-name-input"
               aria-label={t('caregiver.namePlaceholder')}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t('caregiver.namePlaceholder')}
-              className="w-full rounded-lg px-3 py-2 text-[0.84375rem]"
+              className="w-full rounded-lg px-3 py-2 text-[0.84375rem] bg-white text-[color:var(--brand-text-primary)]"
               style={{ border: '1px solid var(--brand-border)' }}
             />
             <input
@@ -235,7 +235,7 @@ export default function CaregiversCard() {
               value={relationship}
               onChange={(e) => setRelationship(e.target.value)}
               placeholder={t('caregiver.relationshipPlaceholder')}
-              className="w-full rounded-lg px-3 py-2 text-[0.84375rem]"
+              className="w-full rounded-lg px-3 py-2 text-[0.84375rem] bg-white text-[color:var(--brand-text-primary)]"
               style={{ border: '1px solid var(--brand-border)' }}
             />
             <input
@@ -245,7 +245,7 @@ export default function CaregiversCard() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder={t('caregiver.emailPlaceholder')}
-              className="w-full rounded-lg px-3 py-2 text-[0.84375rem]"
+              className="w-full rounded-lg px-3 py-2 text-[0.84375rem] bg-white text-[color:var(--brand-text-primary)]"
               style={{ border: '1px solid var(--brand-border)' }}
             />
             <select
@@ -253,7 +253,7 @@ export default function CaregiversCard() {
               aria-label="Notification method"
               value={channel}
               onChange={(e) => setChannel(e.target.value as CaregiverNotifyChannelInput)}
-              className="w-full rounded-lg px-3 py-2 text-[0.84375rem] bg-white"
+              className="w-full rounded-lg px-3 py-2 text-[0.84375rem] bg-white text-[color:var(--brand-text-primary)]"
               style={{ border: '1px solid var(--brand-border)' }}
             >
               {/* Cross-Handoff Addendum Decision 2 — caregivers are EMAIL-ONLY

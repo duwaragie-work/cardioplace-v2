@@ -123,7 +123,7 @@ export default function LandingFooter() {
                 placeholder={t('landing.yourEmail')}
                 aria-label={t('landing.yourEmail')}
                 required
-                className="w-full h-11 px-4 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder-white/60 border border-white/40 focus:border-white/60 transition"
+                className="w-full h-11 px-4 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder:text-white/60 border border-white/40 focus:border-white/60 transition"
               />
               <textarea
                 value={message}
@@ -132,7 +132,7 @@ export default function LandingFooter() {
                 aria-label={t('landing.yourMessage')}
                 required
                 rows={3}
-                className="w-full px-4 py-2.5 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder-white/60 border border-white/40 focus:border-white/60 transition resize-none"
+                className="w-full px-4 py-2.5 rounded-xl text-sm outline-none bg-white/15 backdrop-blur-sm text-white placeholder:text-white/60 border border-white/40 focus:border-white/60 transition resize-none"
               />
               <button
                 type="submit"
