@@ -52,6 +52,11 @@ model User {
   profileVerificationLogs              ProfileVerificationLog[]
   caregivers                           PatientCaregiver[]          @relation("PatientCaregivers")
   rejectedReadingLogs                  RejectedReadingLog[]
+
+  // MFA — provider/admin TOTP second factor (Manisha 2026-06-12 §6). Both
+  // null/empty for patients (their biometric arrives later in its own table).
+  totpCredential   TotpCredential?
+  mfaRecoveryCodes MfaRecoveryCode[]
 }
 
 enum UserRole {
