@@ -445,6 +445,12 @@ export class AuthController {
   ) {
     const context = this.buildAuthContext(req)
     const result = await this.authService.acceptInvite(token, context)
+    // Admin-role activation issues no session (sign-in required) — return the
+    // discriminator verbatim so the FE redirects to /sign-in. No cookies, no
+    // device tracking, since there's no token pair.
+    if ('status' in result && result.status === 'SIGN_IN_REQUIRED') {
+      return result
+    }
     // Scope cookies to the destination app — same logic as
     // verifyMagicLink / verifyOtp: admin-role users land on admin.
     const scope = scopeForRoles(result.roles)

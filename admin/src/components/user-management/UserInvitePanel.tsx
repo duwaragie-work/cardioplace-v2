@@ -240,6 +240,8 @@ export default function UserInvitePanel() {
     try {
       const { message } = await resetUserMfa(pendingResetMfa.id, reason);
       showToast(message || 'MFA reset.');
+      // Refetch so the now-unenrolled user loses the "Reset MFA" action.
+      await refresh();
     } catch (e) {
       showToast(
         e instanceof Error ? e.message : 'Could not reset MFA.',

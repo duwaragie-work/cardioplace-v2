@@ -66,6 +66,8 @@ interface CombinedRow {
   practiceId: string | null;
   status: 'ACTIVE' | 'BLOCKED' | 'SUSPENDED' | 'DEACTIVATED' | 'INVITE_PENDING';
   invitedAt: string | null;
+  /** True only for activated users with an enrolled TOTP authenticator. */
+  mfaEnrolled: boolean;
   raw: UserRow | CoordinatorPatientRow | UserInviteRow;
 }
 
@@ -144,6 +146,7 @@ export default function UsersList({
         practiceId: isCoordinatorPatientRow(u) ? null : u.practiceId ?? null,
         status: deriveStatus(u),
         invitedAt: isCoordinatorPatientRow(u) ? null : u.createdAt,
+        mfaEnrolled: isCoordinatorPatientRow(u) ? false : u.mfaEnrolled === true,
         raw: u,
       }),
     );
@@ -157,6 +160,7 @@ export default function UsersList({
       practiceId: inv.practiceId,
       status: 'INVITE_PENDING' as const,
       invitedAt: inv.invitedAt,
+      mfaEnrolled: false,
       raw: inv,
     }));
     // Pending invites first so they don't get buried on page 1.
@@ -300,6 +304,7 @@ export default function UsersList({
                   row.kind === 'user' &&
                   !isSelf &&
                   isStaffTarget &&
+                  row.mfaEnrolled &&
                   callerCanResetMfa &&
                   !!onResetMfaClick;
                 const showUserDash =
@@ -507,6 +512,7 @@ export default function UsersList({
               row.kind === 'user' &&
               !isSelf &&
               isStaffTarget &&
+              row.mfaEnrolled &&
               callerCanResetMfa &&
               !!onResetMfaClick;
             return (

@@ -80,6 +80,18 @@ export interface MfaRequired {
   challengeToken: string
 }
 
+/**
+ * Invite activation for an admin-role user (Manisha 2026-06-12 §6). The
+ * account is created and made ACTIVE, but NO session is issued — admin sign-in
+ * must go through OTP (and then TOTP/MFA), so auto-logging them in from the
+ * invite link would bypass the second factor. The FE redirects to /sign-in
+ * instead. Patients still get a session (auto-login) on activation.
+ */
+export interface InviteSignInRequired {
+  status: 'SIGN_IN_REQUIRED'
+  roles: UserRole[]
+}
+
 export type AuthVerifyResult =
   | AuthResponse
   | PracticeSelectRequired
@@ -2536,7 +2548,7 @@ export class AuthService {
       timezone?: string
       deviceType?: string
     },
-  ): Promise<AuthResponse> {
+  ): Promise<AuthResponse | InviteSignInRequired> {
     if (!rawToken?.trim()) {
       throw new BadRequestException('Token is required')
     }
@@ -2725,6 +2737,16 @@ export class AuthService {
       userAgent: context?.userAgent,
       via: 'invite_accept',
     })
+
+    // Admin-role invitees do NOT get an auto-login session — they sign in via
+    // OTP (then TOTP/MFA) so the second factor isn't bypassed. The account is
+    // already created + ACTIVE above; the FE redirects them to /sign-in.
+    const isAdminInvite = result.user.roles.some((r) =>
+      AuthService.ADMIN_ALLOWED_ROLES.includes(r),
+    )
+    if (isAdminInvite) {
+      return { status: 'SIGN_IN_REQUIRED', roles: result.user.roles }
+    }
 
     const tokens = await this.issueTokenPair(result.user, {
       userAgent: context?.userAgent,

@@ -85,6 +85,10 @@ export default function RegisterPage() {
 
   const [showOtp, setShowOtp] = useState(false);
   const [mounted, setMounted] = useState(false);
+  // Set after an admin invitee activates their account — they're sent here
+  // (instead of auto-logged-in) to sign in with OTP. We prefill their email
+  // and show a one-line "account activated" notice.
+  const [justActivated, setJustActivated] = useState(false);
   const emailTrimmed = email.trim();
   const emailIsValid = useMemo(() => isEmailValid(emailTrimmed), [emailTrimmed]);
   // Inline-validation hint: only show "invalid email" once the user has
@@ -97,6 +101,18 @@ export default function RegisterPage() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
+
+  // Read the post-activation handoff params (?activated=1&email=…) from the
+  // URL on mount. Done via window.location to avoid a useSearchParams Suspense
+  // boundary; client-only so it never runs during SSR.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('activated') !== '1') return;
+    const email = params.get('email');
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setJustActivated(true);
+    if (email) setEmail(email);
+  }, []);
 
   useEffect(() => {
     if (isLoading || !user) return;
@@ -295,6 +311,23 @@ export default function RegisterPage() {
                 {t('register.enterEmail')}
               </p>
             </div>
+
+            {/* Post-activation notice — admin invitees land here to sign in. */}
+            {justActivated && (
+              <div
+                className="mb-6 w-full max-w-105 flex items-start gap-2.5 rounded-xl px-4 py-3 text-sm"
+                style={{
+                  backgroundColor: 'var(--brand-success-green-light, #DCFCE7)',
+                  color: 'var(--brand-success-green, #166534)',
+                }}
+                role="status"
+              >
+                <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  Your account is activated. Sign in with your email to continue.
+                </span>
+              </div>
+            )}
 
 
             {/* Form */}
