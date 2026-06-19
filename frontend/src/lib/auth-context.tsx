@@ -78,6 +78,16 @@ type AuthUser = {
   preferredLanguage?: string | null;
 };
 
+// Phase/practice-identity rehydrate-fix consistency mirror (handoff
+// 2026-06-18). Patient app has no ZeroPracticeModal today (patients aren't
+// practice-bound), so this state has no current consumer — but we mirror
+// the admin shape so future patient-facing copy that needs to display the
+// patient's primary practice (caregiver-facing UI, multi-clinic transitions,
+// etc.) can read it without another schema/auth-context refactor. Without
+// this mirror, the admin + patient auth contexts would have a structural
+// drift that's a tax on every future shared-pattern change.
+type ActivePractice = { id: string; name: string } | null;
+
 interface AuthContextType {
   token: string | null;
   user: AuthUser | null;
@@ -87,6 +97,11 @@ interface AuthContextType {
   logout: () => void;
   markOnboardingComplete: () => void;
   updateUser: (fields: Partial<AuthUser>) => void;
+  /** Mirror of the admin field. Always null for PATIENT-role accounts
+   *  today; reserved for forward-compat. */
+  activePractice: ActivePractice;
+  /** Mirror of the admin field. Always [] for PATIENT-role accounts today. */
+  availablePractices: Array<{ id: string; name: string }>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -98,6 +113,8 @@ const AuthContext = createContext<AuthContextType>({
   logout: () => {},
   markOnboardingComplete: () => {},
   updateUser: () => {},
+  activePractice: null,
+  availablePractices: [],
 });
 
 // Non-token marker cookies for proxy.ts to gate page navigation. They carry
@@ -122,7 +139,18 @@ function clearAuthMarkers() {
   }
 }
 
-async function fetchProfile(accessToken: string): Promise<AuthUser | null> {
+// Phase/practice-identity rehydrate-fix consistency mirror (handoff
+// 2026-06-18). Surface the same activePracticeId / activePractice /
+// availablePractices triple admin's fetchProfile returns. For PATIENT-role
+// accounts the backend returns null + [], so this is a structural mirror,
+// not a behavioural change.
+type PatientProfileResponse = AuthUser & {
+  activePracticeId?: string | null;
+  activePractice?: { id: string; name: string } | null;
+  availablePractices?: Array<{ id: string; name: string }>;
+};
+
+async function fetchProfile(accessToken: string): Promise<PatientProfileResponse | null> {
   try {
     const res = await fetch(`${API_URL}/api/v2/auth/profile`, {
       credentials: 'include',
@@ -141,6 +169,11 @@ async function fetchProfile(accessToken: string): Promise<AuthUser | null> {
       onboardingStatus: data.onboardingStatus,
       enrollmentStatus: data.enrollmentStatus,
       preferredLanguage: data.preferredLanguage ?? null,
+      activePracticeId: data.activePracticeId ?? null,
+      activePractice: data.activePractice ?? null,
+      availablePractices: Array.isArray(data.availablePractices)
+        ? data.availablePractices
+        : [],
     };
   } catch {
     return null;
@@ -155,6 +188,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // (The HttpOnly `refresh_token` cookie isn't visible to JS so we can't
   // peek at storage to short-circuit.)
   const [isLoading, setIsLoading] = useState(true);
+  // Phase/practice-identity rehydrate-fix consistency mirror — see the
+  // type definitions above. Null/[] for every PATIENT-role account today;
+  // populated only if the backend ever surfaces a practice for them.
+  const [activePractice, setActivePractice] = useState<ActivePractice>(null);
+  const [availablePractices, setAvailablePractices] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
 
   // On mount: try a silent refresh against the HttpOnly refresh_token
   // cookie. If it succeeds we hydrate state with a fresh access token +
@@ -192,13 +232,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       if (profile) {
         setToken(newAccess);
-        setUser(profile);
+        setUser({
+          id: profile.id,
+          email: profile.email,
+          name: profile.name,
+          roles: profile.roles,
+          isVerified: profile.isVerified,
+          riskTier: profile.riskTier,
+          accountStatus: profile.accountStatus,
+          onboardingStatus: profile.onboardingStatus,
+          enrollmentStatus: profile.enrollmentStatus,
+          preferredLanguage: profile.preferredLanguage ?? null,
+        });
         writeAuthMarkers(profile.roles ?? []);
+        // Mirror of admin's rehydrate wiring — no consumer on the patient
+        // app today, but the shape stays aligned so future patient-facing
+        // practice copy can rely on it.
+        setActivePractice(profile.activePractice ?? null);
+        setAvailablePractices(profile.availablePractices ?? []);
       } else {
         clearTokenState();
         clearAuthMarkers();
         setToken(null);
         setUser(null);
+        setActivePractice(null);
+        setAvailablePractices([]);
       }
       setIsLoading(false);
     }
@@ -221,6 +279,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     function handleSessionExpired() {
       setToken(null);
       setUser(null);
+      setActivePractice(null);
+      setAvailablePractices([]);
     }
     window.addEventListener('auth:token-refreshed', handleTokenRefreshed);
     window.addEventListener('auth:session-expired', handleSessionExpired);
@@ -332,6 +392,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }).catch(() => {});
       setToken(null);
       setUser(null);
+      setActivePractice(null);
+      setAvailablePractices([]);
       clearTokenState();
       clearAuthMarkers();
       window.location.href = '/sign-in?session_expired=1';
@@ -356,6 +418,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setToken(null);
     setUser(null);
+    setActivePractice(null);
+    setAvailablePractices([]);
     clearTokenState();
     clearAuthMarkers();
     // Hard navigation guarantees the cookie clear has settled before the
@@ -387,6 +451,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         markOnboardingComplete,
         updateUser,
+        activePractice,
+        availablePractices,
       }}
     >
       {children}
