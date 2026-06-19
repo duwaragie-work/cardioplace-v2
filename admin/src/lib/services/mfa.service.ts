@@ -88,6 +88,23 @@ export async function completeEnrollment(
   return data as unknown as EnrollCompleteResponse;
 }
 
+/** Generate a fresh set of recovery codes for the enrolled user, invalidating
+ *  all prior codes. Returns the new codes once (shown for copy/download). */
+export async function regenerateRecoveryCodes(): Promise<EnrollCompleteResponse> {
+  const res = await fetchWithAuth(
+    `${API_URL}/api/v2/auth/mfa/recovery-codes/regenerate`,
+    {
+      method: 'POST',
+      body: '{}',
+    },
+  );
+  const data = await readJson(res);
+  if (!res.ok) {
+    throw new Error(messageFrom(data, 'Could not generate new recovery codes.'));
+  }
+  return data as unknown as EnrollCompleteResponse;
+}
+
 // ─── Sign-in second factor (pre-token, public) ────────────────────────────────
 
 /** Exchange the challenge token + 6-digit TOTP code for the real token pair. */
@@ -113,12 +130,12 @@ export async function verifyChallenge(
   return data as unknown as AdminAuthResponse;
 }
 
-/** Sign in with a one-time recovery code. The response carries
- *  forceReEnroll=true — the caller should route the user to re-enrollment. */
+/** Sign in with a one-time recovery code. Standard backup login — the code is
+ *  consumed but the authenticator is left intact (no reset / re-enroll). */
 export async function verifyRecovery(
   challengeToken: string,
   recoveryCode: string,
-): Promise<AdminAuthResponse & { forceReEnroll?: boolean }> {
+): Promise<AdminAuthResponse> {
   const res = await fetch(`${API_URL}/api/v2/auth/mfa/recovery`, {
     method: 'POST',
     credentials: 'include',
@@ -129,7 +146,7 @@ export async function verifyRecovery(
   if (!res.ok) {
     throw new Error(messageFrom(data, 'Invalid or already-used recovery code.'));
   }
-  return data as unknown as AdminAuthResponse & { forceReEnroll?: boolean };
+  return data as unknown as AdminAuthResponse;
 }
 
 // ─── Admin reset (authenticated, SUPER_ADMIN / HEALPLACE_OPS) ──────────────────

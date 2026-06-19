@@ -288,6 +288,14 @@ export class AuthController {
     )
   }
 
+  // Regenerate recovery codes for an already-enrolled user (profile Security
+  // surface). Authenticated; the enrolled user passes the MfaRequiredGuard.
+  @Post('mfa/recovery-codes/regenerate')
+  async mfaRegenerateRecoveryCodes(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.regenerateRecoveryCodes(id, this.buildAuthContext(req))
+  }
+
   // Challenge + recovery run pre-token (the user only holds the short-lived
   // challenge token), so they're Public and issue + set cookies on success.
 

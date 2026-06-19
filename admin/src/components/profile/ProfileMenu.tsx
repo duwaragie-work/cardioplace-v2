@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { User, Settings, LogOut, ChevronDown } from 'lucide-react';
+import { User, Settings, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { roleLabel } from '@/components/user-management/badges';
 import type { UserRole } from '@/lib/roleGates';
@@ -62,29 +62,16 @@ export default function ProfileMenu() {
         type="button"
         data-testid="admin-profile-menu-trigger"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 h-9 pl-1 pr-2 rounded-full hover:bg-gray-100 cursor-pointer transition-colors"
+        className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-white text-[12px] font-bold cursor-pointer transition-shadow hover:shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#7B00E0]"
+        style={{
+          background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+          boxShadow: '0 2px 8px rgba(123,0,224,0.25)',
+        }}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Account menu"
       >
-        <span
-          className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-white text-[11px] font-bold"
-          style={{
-            background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
-            boxShadow: '0 2px 8px rgba(123,0,224,0.25)',
-          }}
-          aria-hidden
-        >
-          {initialsFor(user?.name, user?.email)}
-        </span>
-        <ChevronDown
-          className="w-3.5 h-3.5 transition-transform"
-          style={{
-            color: 'var(--brand-text-muted)',
-            transform: open ? 'rotate(180deg)' : 'none',
-          }}
-          aria-hidden
-        />
+        {initialsFor(user?.name, user?.email)}
       </button>
 
       {open && (
@@ -154,28 +141,17 @@ export default function ProfileMenu() {
               Profile
             </Link>
 
-            {/* Settings — no dedicated surface yet; shown for discoverability
-                with a "Soon" tag, matching the top-bar Search placeholder. */}
-            <button
-              type="button"
+            <Link
+              href="/settings"
               role="menuitem"
-              disabled
-              className="w-full flex items-center gap-2.5 px-4 py-2 text-[13px] font-semibold cursor-not-allowed"
-              style={{ color: 'var(--brand-text-muted)' }}
+              data-testid="admin-profile-menu-settings"
+              onClick={() => setOpen(false)}
+              className="w-full flex items-center gap-2.5 px-4 py-2 text-[13px] font-semibold transition-colors hover:bg-gray-50"
+              style={{ color: 'var(--brand-text-primary)' }}
             >
-              <Settings className="w-4 h-4" />
+              <Settings className="w-4 h-4" style={{ color: 'var(--brand-text-secondary)' }} />
               Settings
-              <span
-                className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold"
-                style={{
-                  backgroundColor: 'var(--brand-background)',
-                  color: 'var(--brand-text-muted)',
-                  border: '1px solid var(--brand-border)',
-                }}
-              >
-                Soon
-              </span>
-            </button>
+            </Link>
           </div>
 
           <div

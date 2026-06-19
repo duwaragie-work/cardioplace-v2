@@ -2,24 +2,17 @@
 
 // "My account" profile page. Read-only summary of the signed-in user's
 // account (identity, roles, practice, preferences) with a single
-// "Edit profile" action that opens EditProfileModal for the editable,
-// non-clinical fields. Identity fields (email, roles, account status) are
-// surfaced read-only — they're changed through user management, not here.
+// "Edit profile" action that opens EditProfileModal for the display name.
+// Identity fields (email, roles, account status) are surfaced read-only —
+// they're changed through user management, not here. Security (two-factor
+// auth) lives on the Settings page.
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
 import {
   Pencil,
-  Mail,
   ShieldCheck,
-  Building2,
-  Globe,
-  Clock,
-  CalendarDays,
   Loader2,
   AlertCircle,
-  KeyRound,
-  ChevronRight,
 } from 'lucide-react';
 import { RoleBadge, StatusBadge } from '@/components/user-management/badges';
 import type { UserListStatus } from '@/lib/services/user-management.service';
@@ -60,35 +53,30 @@ function formatDate(iso: string): string {
   });
 }
 
-interface InfoRowProps {
-  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
+/** A label-left / value-right detail row. */
+function InfoRow({
+  label,
+  children,
+}: {
   label: string;
   children: React.ReactNode;
-}
-
-function InfoRow({ icon: Icon, label, children }: InfoRowProps) {
+}) {
   return (
     <div
-      className="flex items-start gap-3 px-4 py-3"
+      className="flex items-center justify-between gap-4 px-4 py-3.5"
       style={{ borderTop: '1px solid var(--brand-border)' }}
     >
-      <Icon
-        className="w-4 h-4 mt-0.5 shrink-0"
+      <p
+        className="text-[13px] font-medium shrink-0"
         style={{ color: 'var(--brand-text-muted)' }}
-      />
-      <div className="min-w-0 flex-1">
-        <p
-          className="text-[11px] font-semibold uppercase tracking-wide"
-          style={{ color: 'var(--brand-text-muted)' }}
-        >
-          {label}
-        </p>
-        <div
-          className="mt-0.5 text-[13.5px] font-medium break-words"
-          style={{ color: 'var(--brand-text-primary)' }}
-        >
-          {children}
-        </div>
+      >
+        {label}
+      </p>
+      <div
+        className="text-[13.5px] font-semibold text-right min-w-0 break-words"
+        style={{ color: 'var(--brand-text-primary)' }}
+      >
+        {children}
       </div>
     </div>
   );
@@ -118,11 +106,7 @@ export default function ProfileScreen() {
     void load();
   }, [load]);
 
-  function handleSaved(patch: {
-    name: string;
-    preferredLanguage: string | null;
-    timezone: string | null;
-  }) {
+  function handleSaved(patch: { name: string }) {
     setProfile((prev) => (prev ? { ...prev, ...patch } : prev));
   }
 
@@ -169,53 +153,62 @@ export default function ProfileScreen() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 md:px-6 py-6 md:py-8">
-      {/* Header card — avatar + name + edit action */}
+      {/* Header card — avatar + name + edit action (side-by-side, no banner) */}
       <div
-        className="rounded-2xl bg-white overflow-hidden"
+        className="rounded-2xl bg-white p-5 flex items-center gap-4"
         style={{ border: '1px solid var(--brand-border)' }}
       >
-        <div className="p-5 flex items-center gap-4">
-          <span
-            className="shrink-0 w-16 h-16 rounded-2xl flex items-center justify-center text-white text-[22px] font-bold"
-            style={{
-              background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
-              boxShadow: '0 4px 16px rgba(123,0,224,0.28)',
-            }}
-            aria-hidden
+        <span
+          className="shrink-0 w-16 h-16 rounded-2xl flex items-center justify-center text-white text-[22px] font-bold"
+          style={{
+            background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+            boxShadow: '0 4px 16px rgba(123,0,224,0.28)',
+          }}
+          aria-hidden
+        >
+          {initialsFor(profile.name, profile.email)}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h1
+            className="text-[18px] font-bold leading-tight truncate"
+            style={{ color: 'var(--brand-text-primary)' }}
           >
-            {initialsFor(profile.name, profile.email)}
-          </span>
-          <div className="min-w-0 flex-1">
-            <h1
-              className="text-[18px] font-bold leading-tight truncate"
-              style={{ color: 'var(--brand-text-primary)' }}
-            >
-              {displayName}
-            </h1>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {profile.roles.length > 0 ? (
-                profile.roles.map((r) => <RoleBadge key={r} role={r} />)
-              ) : (
-                <span className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
-                  No role assigned
-                </span>
-              )}
-            </div>
+            {displayName}
+          </h1>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {profile.roles.length > 0 ? (
+              profile.roles.map((r) => <RoleBadge key={r} role={r} />)
+            ) : (
+              <span className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
+                No role assigned
+              </span>
+            )}
           </div>
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            data-testid="admin-profile-edit-trigger"
-            className="btn-admin-secondary shrink-0"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Edit profile</span>
-          </button>
         </div>
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          data-testid="admin-profile-edit-trigger"
+          className="btn-admin-secondary shrink-0 self-start"
+        >
+          <Pencil className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Edit profile</span>
+        </button>
+      </div>
 
-        {/* Detail rows */}
-        <InfoRow icon={Mail} label="Email">
-          <span className="inline-flex items-center gap-2">
+      {/* Account details */}
+      <p
+        className="mt-6 mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
+        style={{ color: 'var(--brand-text-muted)' }}
+      >
+        Account details
+      </p>
+      <div
+        className="rounded-2xl bg-white overflow-hidden [&>div:first-child]:border-t-0"
+        style={{ border: '1px solid var(--brand-border)' }}
+      >
+        <InfoRow label="Email">
+          <span className="inline-flex items-center gap-2 justify-end flex-wrap">
             {profile.email || '—'}
             {profile.email && (
               <span
@@ -239,11 +232,11 @@ export default function ProfileScreen() {
           </span>
         </InfoRow>
 
-        <InfoRow icon={ShieldCheck} label="Account status">
+        <InfoRow label="Account status">
           <StatusBadge status={profile.accountStatus.toUpperCase() as UserListStatus} />
         </InfoRow>
 
-        <InfoRow icon={Building2} label="Active practice">
+        <InfoRow label="Active practice">
           {profile.activePractice?.name ?? (
             <span style={{ color: 'var(--brand-text-muted)' }}>
               Organization-wide access
@@ -251,45 +244,42 @@ export default function ProfileScreen() {
           )}
         </InfoRow>
 
-        <InfoRow icon={Globe} label="Preferred language">
+        <InfoRow label="Preferred language">
           {languageLabel(profile.preferredLanguage)}
         </InfoRow>
 
-        <InfoRow icon={Clock} label="Timezone">
+        <InfoRow label="Timezone">
           {profile.timezone || (
             <span style={{ color: 'var(--brand-text-muted)' }}>Not set</span>
           )}
         </InfoRow>
 
-        <InfoRow icon={CalendarDays} label="Member since">
-          {formatDate(profile.createdAt)}
-        </InfoRow>
+        <InfoRow label="Member since">{formatDate(profile.createdAt)}</InfoRow>
       </div>
 
       {/* Multi-practice memberships (only when 2+) */}
       {profile.availablePractices.length > 1 && (
-        <div
-          className="mt-4 rounded-2xl bg-white overflow-hidden"
-          style={{ border: '1px solid var(--brand-border)' }}
-        >
+        <>
           <p
-            className="px-4 pt-3 pb-1 text-[11px] font-bold uppercase tracking-wide"
+            className="mt-6 mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
             style={{ color: 'var(--brand-text-muted)' }}
           >
             Practice memberships
           </p>
-          <div className="pb-2">
-            {profile.availablePractices.map((p) => (
+          <div
+            className="rounded-2xl bg-white overflow-hidden"
+            style={{ border: '1px solid var(--brand-border)' }}
+          >
+            {profile.availablePractices.map((p, i) => (
               <div
                 key={p.id}
-                className="flex items-center gap-2.5 px-4 py-2 text-[13px]"
-                style={{ color: 'var(--brand-text-primary)' }}
+                className="flex items-center gap-2.5 px-4 py-3 text-[13px]"
+                style={{
+                  color: 'var(--brand-text-primary)',
+                  borderTop: i === 0 ? 'none' : '1px solid var(--brand-border)',
+                }}
               >
-                <Building2
-                  className="w-3.5 h-3.5 shrink-0"
-                  style={{ color: 'var(--brand-text-muted)' }}
-                />
-                <span className="truncate">{p.name}</span>
+                <span className="truncate font-medium">{p.name}</span>
                 {profile.activePractice?.id === p.id && (
                   <span
                     className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide"
@@ -304,39 +294,8 @@ export default function ProfileScreen() {
               </div>
             ))}
           </div>
-        </div>
+        </>
       )}
-
-      {/* Security — two-factor authentication setup entry point. */}
-      <Link
-        href="/sign-in/mfa-enroll"
-        data-testid="admin-profile-mfa-link"
-        className="mt-4 flex items-center gap-3 rounded-2xl bg-white px-4 py-4 transition hover:bg-[var(--brand-primary-purple-light)]"
-        style={{ border: '1px solid var(--brand-border)' }}
-      >
-        <span
-          className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-white"
-          style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
-          aria-hidden
-        >
-          <KeyRound className="w-4 h-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p
-            className="text-[13.5px] font-semibold"
-            style={{ color: 'var(--brand-text-primary)' }}
-          >
-            Two-factor authentication
-          </p>
-          <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
-            Set up or reset the authenticator app on your account.
-          </p>
-        </div>
-        <ChevronRight
-          className="w-4 h-4 shrink-0"
-          style={{ color: 'var(--brand-text-muted)' }}
-        />
-      </Link>
 
       <EditProfileModal
         open={editing}

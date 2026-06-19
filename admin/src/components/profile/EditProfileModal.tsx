@@ -2,31 +2,17 @@
 
 // Edit-profile modal. Mirrors InviteUserModal chrome (bottom-sheet on
 // mobile, centered card on desktop, Esc closes, focus moves to the first
-// field on open). Edits the user-scoped, non-clinical ProfileDto fields:
-// display name, preferred language, timezone. Email + roles are identity
-// and shown read-only on the profile page (not editable here).
+// field on open). Edits only the display name — email + roles are identity
+// (changed through user management) and the other ProfileDto fields aren't
+// exposed here by product decision.
 
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, UserCog, Loader2 } from 'lucide-react';
-import { ALL_LOCALES } from '@/i18n';
 import {
   updateMyProfile,
   type MyProfile,
 } from '@/lib/services/profile.service';
-
-// Curated IANA timezone list — US-first (Wards 7 & 8 DC launch) plus a few
-// common others. Kept short on purpose; the value persisted is the IANA id.
-const TIMEZONES: Array<{ value: string; label: string }> = [
-  { value: 'America/New_York', label: 'Eastern (New York)' },
-  { value: 'America/Chicago', label: 'Central (Chicago)' },
-  { value: 'America/Denver', label: 'Mountain (Denver)' },
-  { value: 'America/Phoenix', label: 'Mountain — no DST (Phoenix)' },
-  { value: 'America/Los_Angeles', label: 'Pacific (Los Angeles)' },
-  { value: 'America/Anchorage', label: 'Alaska (Anchorage)' },
-  { value: 'Pacific/Honolulu', label: 'Hawaii (Honolulu)' },
-  { value: 'UTC', label: 'UTC' },
-];
 
 interface Props {
   open: boolean;
@@ -34,11 +20,7 @@ interface Props {
   onClose: () => void;
   /** Called after a successful save with the patched fields so the parent
    *  can update its view (and the auth context) without a refetch. */
-  onSaved: (patch: {
-    name: string;
-    preferredLanguage: string | null;
-    timezone: string | null;
-  }) => void;
+  onSaved: (patch: { name: string }) => void;
 }
 
 export default function EditProfileModal({
@@ -48,8 +30,6 @@ export default function EditProfileModal({
   onSaved,
 }: Props) {
   const [name, setName] = useState('');
-  const [preferredLanguage, setPreferredLanguage] = useState('');
-  const [timezone, setTimezone] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nameTouched, setNameTouched] = useState(false);
@@ -60,8 +40,6 @@ export default function EditProfileModal({
     if (!open) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setName(profile.name ?? '');
-    setPreferredLanguage(profile.preferredLanguage ?? '');
-    setTimezone(profile.timezone ?? '');
     setNameTouched(false);
     setSubmitting(false);
     setError(null);
@@ -91,17 +69,8 @@ export default function EditProfileModal({
     setError(null);
     const trimmedName = name.trim();
     try {
-      await updateMyProfile({
-        name: trimmedName,
-        // Send only when set — empty string would clear the field.
-        ...(preferredLanguage ? { preferredLanguage } : {}),
-        ...(timezone ? { timezone } : {}),
-      });
-      onSaved({
-        name: trimmedName,
-        preferredLanguage: preferredLanguage || null,
-        timezone: timezone || null,
-      });
+      await updateMyProfile({ name: trimmedName });
+      onSaved({ name: trimmedName });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save your profile.');
@@ -136,7 +105,7 @@ export default function EditProfileModal({
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 60, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 340, damping: 30 }}
-            className="relative w-full sm:max-w-lg bg-white sm:rounded-3xl rounded-t-3xl flex flex-col overflow-hidden"
+            className="relative w-full sm:max-w-md bg-white sm:rounded-3xl rounded-t-3xl flex flex-col overflow-hidden"
             style={{
               maxHeight: '92dvh',
               boxShadow: '0 8px 48px rgba(123,0,224,0.18)',
@@ -170,7 +139,7 @@ export default function EditProfileModal({
                     className="text-[11px] mt-0.5 leading-snug"
                     style={{ color: 'var(--brand-text-muted)' }}
                   >
-                    Update your display name and preferences.
+                    Update your display name.
                   </p>
                 </div>
               </div>
@@ -222,58 +191,6 @@ export default function EditProfileModal({
                     {nameError}
                   </p>
                 )}
-              </div>
-
-              {/* Preferred language */}
-              <div>
-                <label
-                  htmlFor="profile-language"
-                  className="block text-[12px] font-semibold mb-1.5"
-                  style={{ color: 'var(--brand-text-secondary)' }}
-                >
-                  Preferred language
-                </label>
-                <select
-                  id="profile-language"
-                  value={preferredLanguage}
-                  onChange={(e) => setPreferredLanguage(e.target.value)}
-                  data-testid="admin-edit-profile-language"
-                  className="w-full h-9 px-3 rounded-lg text-[13px] outline-none bg-white cursor-pointer"
-                  style={fieldStyle(false)}
-                >
-                  <option value="">Not set</option>
-                  {ALL_LOCALES.map((l) => (
-                    <option key={l.code} value={l.code}>
-                      {l.flag} {l.nativeName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Timezone */}
-              <div>
-                <label
-                  htmlFor="profile-timezone"
-                  className="block text-[12px] font-semibold mb-1.5"
-                  style={{ color: 'var(--brand-text-secondary)' }}
-                >
-                  Timezone
-                </label>
-                <select
-                  id="profile-timezone"
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  data-testid="admin-edit-profile-timezone"
-                  className="w-full h-9 px-3 rounded-lg text-[13px] outline-none bg-white cursor-pointer"
-                  style={fieldStyle(false)}
-                >
-                  <option value="">Not set</option>
-                  {TIMEZONES.map((tz) => (
-                    <option key={tz.value} value={tz.value}>
-                      {tz.label}
-                    </option>
-                  ))}
-                </select>
               </div>
 
               {error && (

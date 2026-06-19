@@ -29,6 +29,10 @@ export interface MyProfile {
   createdAt: string
   preferredLanguage: string | null
   timezone: string | null
+  /** Whether the user has an active TOTP credential enrolled. */
+  mfaEnabled: boolean
+  /** Whether the user's role is under the enforced-MFA policy. */
+  mfaRequired: boolean
   activePractice: { id: string; name: string } | null
   availablePractices: Array<{ id: string; name: string }>
 }
@@ -74,6 +78,8 @@ export async function getMyProfile(): Promise<MyProfile> {
     createdAt: String(data.createdAt ?? ''),
     preferredLanguage: (data.preferredLanguage as string | null) ?? null,
     timezone: (data.timezone as string | null) ?? null,
+    mfaEnabled: Boolean(data.mfaEnabled),
+    mfaRequired: Boolean(data.mfaRequired),
     activePractice:
       (data.activePractice as { id: string; name: string } | null) ?? null,
     availablePractices: Array.isArray(data.availablePractices)

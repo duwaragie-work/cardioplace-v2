@@ -141,13 +141,10 @@ export default function MfaChallengePage() {
       const data = await verifyRecovery(challengeToken, recoveryCode.trim());
       clearStoredChallenge();
       login(data);
-      // Recovery bypassed the authenticator — the backend rotated the secret
-      // and flagged forceReEnroll, so send the user straight to re-enrollment.
-      if (data.forceReEnroll) {
-        router.push('/sign-in/mfa-enroll?reEnroll=1');
-      } else {
-        router.push('/dashboard');
-      }
+      // Standard backup login — the authenticator is untouched, so go straight
+      // to the dashboard. A user who actually lost their app re-enrolls from
+      // settings; we don't force it here.
+      router.push('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid recovery code.');
       setSubmitting(false);

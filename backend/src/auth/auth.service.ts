@@ -45,10 +45,6 @@ export interface AuthResponse extends TokenPair {
   /** Phase/practice-identity — the practice the session is acting as. NULL
    *  for SUPER_ADMIN / HEALPLACE_OPS / PATIENT (audit captures null). */
   activePracticeId?: string | null
-  /** MFA — set true when tokens were issued via a one-time recovery code.
-   *  The FE routes straight to TOTP re-enrollment (the recovery-bypassed
-   *  secret must be rotated; Manisha 2026-06-12 §6). */
-  forceReEnroll?: boolean
   /** MFA — set true when enforcement is on and this MFA-required user has not
    *  yet enrolled TOTP. Tokens ARE issued (enrollment needs a session) but the
    *  FE redirects straight to the enrollment page instead of the dashboard,
@@ -960,6 +956,42 @@ export class AuthService {
     return { recoveryCodes: plain }
   }
 
+  /** Generate a fresh set of recovery codes for an already-enrolled user,
+   *  invalidating every prior code. Returns the new codes ONCE (plaintext,
+   *  never stored). Reached from the profile "Security" surface. */
+  async regenerateRecoveryCodes(
+    userId: string,
+    context?: SessionContext,
+  ): Promise<{ recoveryCodes: string[] }> {
+    const cred = await this.prisma.totpCredential.findUnique({
+      where: { userId },
+      select: { enrolledAt: true },
+    })
+    if (cred?.enrolledAt == null) {
+      throw new BadRequestException(
+        'Set up two-factor authentication before generating recovery codes',
+      )
+    }
+    const { plain, hashes } = await this.mfaService.generateRecoveryCodes()
+    await this.prisma.$transaction(async (tx) => {
+      // Invalidate ALL prior codes (used + unused) — the new set fully replaces
+      // them so an old printout can never be reused.
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId } })
+      await tx.mfaRecoveryCode.createMany({
+        data: hashes.map((codeHash) => ({ userId, codeHash })),
+      })
+    })
+    await this.logAuthEvent({
+      event: 'mfa_recovery_regenerated',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return { recoveryCodes: plain }
+  }
+
   private async countRecentFailedMfa(
     userId: string,
     sinceMs: number,
@@ -1068,7 +1100,11 @@ export class AuthService {
     return { ...resp, activePracticeId }
   }
 
-  /** Sign in with a one-time recovery code; forces TOTP re-enrollment after. */
+  /** Sign in with a one-time recovery code. Standard backup-login behaviour:
+   *  the code is burned (one-time) but the authenticator is left intact — no
+   *  reset, no forced re-enrollment. A user who has actually lost their app
+   *  re-enrolls themselves from settings; losing the codes too is an admin
+   *  reset. (Manisha 2026-06-12 §6.) */
   async mfaRecovery(
     challengeToken: string,
     recoveryCode: string,
@@ -1117,7 +1153,7 @@ export class AuthService {
       success: true,
     })
     const resp = this.buildAuthResponse(tokens, user, 'otp')
-    return { ...resp, activePracticeId, forceReEnroll: true }
+    return { ...resp, activePracticeId }
   }
 
   /** Admin MFA reset — SUPER_ADMIN / HEALPLACE_OPS only; never self-reset.
@@ -2110,6 +2146,17 @@ export class AuthService {
       throw new NotFoundException('User not found')
     }
 
+    // MFA status for the profile "Security" surface. mfaEnabled mirrors the
+    // shouldChallengeMfa check (a TotpCredential row with enrolledAt set);
+    // mfaRequired tells the FE whether the role is under the enforced-MFA
+    // policy (so it can show "Required" and hide any disable affordance).
+    const totpCred = await this.prisma.totpCredential.findUnique({
+      where: { userId },
+      select: { enrolledAt: true },
+    })
+    const mfaEnabled = totpCred?.enrolledAt != null
+    const mfaRequired = requiresMfa(user.roles)
+
     // Phase/practice-identity rehydrate fix (Manisha 2026-06-12 §1, smoke
     // 2026-06-18) — surface activePracticeId + activePractice + the user's
     // available memberships so admin's rehydrate() can restore practice
@@ -2178,6 +2225,9 @@ export class AuthService {
       timezone: user.timezone,
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
+      // MFA status (additive) — drives the profile Security pill.
+      mfaEnabled,
+      mfaRequired,
       // Practice-identity rehydrate fields (additive — pre-fix consumers
       // ignore them).
       activePracticeId: activePractice ? activePractice.id : null,
