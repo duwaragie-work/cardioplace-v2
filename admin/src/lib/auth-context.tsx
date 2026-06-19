@@ -109,7 +109,23 @@ function clearAuthMarkers() {
   }
 }
 
-async function fetchProfile(accessToken: string): Promise<AdminUser | null> {
+// Phase/practice-identity rehydrate fix (smoke 2026-06-18) — /auth/profile
+// now returns activePracticeId + activePractice + availablePractices so the
+// admin app can restore practice context after a browser refresh. Pre-fix
+// rehydrate() only restored user, leaving activePractice null, which
+// dropped every PROVIDER/MED_DIR/COORDINATOR into the ZeroPracticeModal on
+// every F5.
+type ProfileResponse = {
+  id: string;
+  email: string | null;
+  name: string | null;
+  roles: string[];
+  activePracticeId?: string | null;
+  activePractice?: { id: string; name: string } | null;
+  availablePractices?: Array<{ id: string; name: string }>;
+};
+
+async function fetchProfile(accessToken: string): Promise<ProfileResponse | null> {
   try {
     const res = await fetch(`${API_URL}/api/v2/auth/profile`, {
       credentials: 'include',
@@ -122,6 +138,11 @@ async function fetchProfile(accessToken: string): Promise<AdminUser | null> {
       email: data.email,
       name: data.name,
       roles: data.roles,
+      activePracticeId: data.activePracticeId ?? null,
+      activePractice: data.activePractice ?? null,
+      availablePractices: Array.isArray(data.availablePractices)
+        ? data.availablePractices
+        : [],
     };
   } catch {
     return null;
@@ -135,8 +156,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // rehydrate before we can know whether the session is live.
   const [isLoading, setIsLoading] = useState(true);
   // Phase/practice-identity — populated on sign-in (from the verify-OTP
-  // response) and after switch. Hydrated lazily from /auth/profile when
-  // restoring a session via the silent-refresh path.
+  // response), after switch, and on rehydrate (from /auth/profile, which
+  // returns the current AuthSession's activePracticeId + the matching
+  // practice + the user's full membership list). Pre-rehydrate-fix this
+  // was only set during sign-in/switch, so every F5 dropped providers
+  // into the ZeroPracticeModal.
   const [activePractice, setActivePractice] = useState<ActivePractice>(null);
   const [availablePractices, setAvailablePractices] = useState<
     Array<{ id: string; name: string }>
@@ -176,13 +200,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       if (profile) {
         setToken(newAccess);
-        setUser(profile);
+        setUser({
+          id: profile.id,
+          email: profile.email,
+          name: profile.name,
+          roles: profile.roles,
+        });
         writeAuthMarkers(profile.roles ?? []);
+        // Phase/practice-identity rehydrate fix — restore the active
+        // practice + membership list from the profile response. Without
+        // these two setters, ZeroPracticeModal fires after every F5
+        // because its trigger condition is `!activePractice &&
+        // isPracticeBound && !isOrgWide` — and isPracticeBound is true
+        // for PROVIDER / MED_DIR / COORDINATOR.
+        setActivePractice(profile.activePractice ?? null);
+        setAvailablePractices(profile.availablePractices ?? []);
       } else {
         clearTokenState();
         clearAuthMarkers();
         setToken(null);
         setUser(null);
+        setActivePractice(null);
+        setAvailablePractices([]);
       }
       setIsLoading(false);
     }
