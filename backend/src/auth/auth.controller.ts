@@ -32,6 +32,13 @@ import { RefreshDto } from './dto/refresh.dto.js'
 import { SelectPracticeDto, SwitchPracticeDto } from './dto/select-practice.dto.js'
 import { SendOtpDto } from './dto/send-otp.dto.js'
 import { VerifyOtpDto } from './dto/verify-otp.dto.js'
+import {
+  AdminResetMfaDto,
+  EnrollCompleteDto,
+  MfaChallengeDto,
+  MfaRecoveryDto,
+} from './dto/mfa.dto.js'
+import { Roles } from './decorators/roles.decorator.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
 
 @Controller('v2/auth')
@@ -98,6 +105,35 @@ export class AuthController {
     return 'web'
   }
 
+  /** Set the app-scoped access + refresh cookies from an issued token pair.
+   *  Shared by the MFA challenge/recovery handlers (mirrors /otp/verify). */
+  private issueSessionCookies(
+    res: Response,
+    result: { accessToken: string; refreshToken: string; roles: UserRole[] },
+  ): void {
+    const scope = scopeForRoles(result.roles)
+    this.setAccessCookie(res, result.accessToken, scope)
+    this.setRefreshCookie(res, result.refreshToken, scope)
+  }
+
+  /** Upsert/track the calling device after a successful sign-in (mirrors the
+   *  device-tracking step in /otp/verify). No-op when no device id is sent. */
+  private async trackDevice(
+    req: Request,
+    context: { deviceId?: string; userAgent?: string },
+    userId: string,
+  ): Promise<void> {
+    if (!context.deviceId) return
+    await this.authService.upsertOrTrackDevice({
+      deviceId: context.deviceId,
+      userId,
+      platform: req.headers['x-device-platform'] as string | undefined,
+      deviceType: req.headers['x-device-type'] as string | undefined,
+      deviceName: req.headers['x-device-name'] as string | undefined,
+      userAgent: context.userAgent,
+    })
+  }
+
   /* ═══ DISABLED – OTP-only auth ═══════════════════════════════════════════════
    * Google Web, Google Mobile, Apple Mobile, Apple Web, and Guest login routes
    * have been disabled. Only OTP-based authentication is supported.
@@ -137,6 +173,12 @@ export class AuthController {
     // token instead of the real token pair. Return the discriminator shape
     // verbatim; the FE selector page POSTs /select-practice next.
     if ('status' in result && result.status === 'PRACTICE_SELECT_REQUIRED') {
+      return result
+    }
+    // MFA gate — an enrolled provider/admin gets a challenge, not tokens.
+    // Pass the discriminator through verbatim; the FE routes to the TOTP
+    // challenge page and POSTs /mfa/challenge next.
+    if ('status' in result && result.status === 'MFA_REQUIRED') {
       return result
     }
     // Scope cookies to the destination app (admin-role users land on the
@@ -180,6 +222,11 @@ export class AuthController {
       dto.practiceId,
       context,
     )
+    // MFA gate — multi-practice provider/admin who is enrolled gets a
+    // challenge after picking a practice; no tokens/cookies yet.
+    if ('status' in result && result.status === 'MFA_REQUIRED') {
+      return result
+    }
     const scope = scopeForRoles(result.roles)
     this.setAccessCookie(res, result.accessToken, scope)
     this.setRefreshCookie(res, result.refreshToken, scope)
@@ -219,6 +266,83 @@ export class AuthController {
     return result
   }
 
+  // ─── MFA — TOTP second factor (Manisha 2026-06-12 Access Control §6) ────────
+
+  // Enrollment is performed by an authenticated (post-first-factor) user, so
+  // these two routes rely on the default JwtAuthGuard and read req.user.
+
+  @Post('mfa/enroll/start')
+  async mfaEnrollStart(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.startTotpEnrollment(id, this.buildAuthContext(req))
+  }
+
+  @Post('mfa/enroll/complete')
+  async mfaEnrollComplete(@Body() dto: EnrollCompleteDto, @Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.completeTotpEnrollment(
+      id,
+      dto.enrollmentToken,
+      dto.code,
+      this.buildAuthContext(req),
+    )
+  }
+
+  // Challenge + recovery run pre-token (the user only holds the short-lived
+  // challenge token), so they're Public and issue + set cookies on success.
+
+  @Public()
+  @Post('mfa/challenge')
+  async mfaChallenge(
+    @Body() dto: MfaChallengeDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.mfaChallenge(
+      dto.challengeToken,
+      dto.code,
+      context,
+    )
+    this.issueSessionCookies(res, result)
+    await this.trackDevice(req, context, result.userId)
+    return result
+  }
+
+  @Public()
+  @Post('mfa/recovery')
+  async mfaRecovery(
+    @Body() dto: MfaRecoveryDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.mfaRecovery(
+      dto.challengeToken,
+      dto.recoveryCode,
+      context,
+    )
+    this.issueSessionCookies(res, result)
+    await this.trackDevice(req, context, result.userId)
+    return result
+  }
+
+  @Roles(UserRole.SUPER_ADMIN, UserRole.HEALPLACE_OPS)
+  @Post('admin/mfa/reset/:userId')
+  async adminResetMfa(
+    @Param('userId') userId: string,
+    @Body() dto: AdminResetMfaDto,
+    @Req() req: Request,
+  ) {
+    const { id } = req.user as { id: string }
+    return this.authService.adminResetMfa(
+      id,
+      userId,
+      dto.reason,
+      this.buildAuthContext(req),
+    )
+  }
+
   // ─── Magic Link ────────────────────────────────────────────────────────────────
 
   @Public()
@@ -252,6 +376,14 @@ export class AuthController {
           practices: JSON.stringify(result.practices),
         })
         res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/select-practice?${sp.toString()}`)
+        return
+      }
+      // MFA gate — if an enrolled provider/admin ever arrives via magic link,
+      // bounce to the TOTP challenge page carrying the challenge token (mirrors
+      // the selector redirect above). Patients have no TOTP so never hit this.
+      if ('status' in result && result.status === 'MFA_REQUIRED') {
+        const sp = new URLSearchParams({ challengeToken: result.challengeToken })
+        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/mfa-challenge?${sp.toString()}`)
         return
       }
       // Magic-link verify is a top-level GET (clicked from an email) so the

@@ -20,6 +20,8 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
+import { MfaService } from './mfa.service.js'
+import { mfaResetEmailHtml } from '../email/email-templates.js'
 import type { ProfileDto } from './dto/profile.dto.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -43,6 +45,10 @@ export interface AuthResponse extends TokenPair {
   /** Phase/practice-identity — the practice the session is acting as. NULL
    *  for SUPER_ADMIN / HEALPLACE_OPS / PATIENT (audit captures null). */
   activePracticeId?: string | null
+  /** MFA — set true when tokens were issued via a one-time recovery code.
+   *  The FE routes straight to TOTP re-enrollment (the recovery-bypassed
+   *  secret must be rotated; Manisha 2026-06-12 §6). */
+  forceReEnroll?: boolean
 }
 
 /**
@@ -59,7 +65,24 @@ export interface PracticeSelectRequired {
   practices: Array<{ id: string; name: string }>
 }
 
-export type AuthVerifyResult = AuthResponse | PracticeSelectRequired
+/**
+ * MFA (Manisha 2026-06-12 Access Control §6, HIPAA 45 CFR §164.312(d)) — when
+ * an MFA-enrolled provider/admin clears the first factor (and, if applicable,
+ * the practice selector) we do NOT issue tokens yet. We return this shape so
+ * the FE routes to the TOTP challenge page. The challenge token is a
+ * short-lived signed JWT carrying the verified userId + resolved
+ * activePracticeId; POST /mfa/challenge (or /mfa/recovery) exchanges it for
+ * the real token pair.
+ */
+export interface MfaRequired {
+  status: 'MFA_REQUIRED'
+  challengeToken: string
+}
+
+export type AuthVerifyResult =
+  | AuthResponse
+  | PracticeSelectRequired
+  | MfaRequired
 
 // June 2026 — session context piped from controller → service to populate
 // AuthSession (concurrent-session limit + idle tracking). All optional —
@@ -153,6 +176,36 @@ const MULTI_PRACTICE_ROLES: readonly UserRole[] = [
 // the selector page, short enough to bound replay risk if the token leaks.
 const PRACTICE_SELECT_CHALLENGE_TTL = '5m'
 
+// MFA (Manisha 2026-06-12 Access Control §6). Roles for which TOTP is the
+// mandatory second factor. Patients are intentionally excluded — their
+// (optional) biometric path is a later phase with its own table.
+const MFA_REQUIRED_ROLES: readonly UserRole[] = [
+  UserRole.PROVIDER,
+  UserRole.MEDICAL_DIRECTOR,
+  UserRole.COORDINATOR,
+  UserRole.HEALPLACE_OPS,
+  UserRole.SUPER_ADMIN,
+]
+
+// Short-lived MFA tokens. Challenge = post-first-factor, pre-token; enrollment
+// carries the pending (not-yet-persisted) secret across the start→complete
+// round-trip so we stay stateless across backend instances.
+const MFA_CHALLENGE_TTL = '5m'
+const MFA_ENROLL_TTL = '10m'
+
+// Failed-attempt lockout (Manisha 2026-06-12 §6). 5 fails / 15 min → temporary
+// lock (recovery code still works); 10 fails / 1 h → hard lock requiring admin
+// reset. Counted from the mfa_challenge_failed AuthLog rows.
+const MFA_SOFT_LOCK_THRESHOLD = 5
+const MFA_SOFT_LOCK_WINDOW_MS = 15 * 60_000
+const MFA_HARD_LOCK_THRESHOLD = 10
+const MFA_HARD_LOCK_WINDOW_MS = 60 * 60_000
+
+/** True if any of the user's roles makes TOTP mandatory. */
+function requiresMfa(roles: UserRole[]): boolean {
+  return roles.some((r) => MFA_REQUIRED_ROLES.includes(r))
+}
+
 type PracticeResolution =
   | { kind: 'auto'; activePracticeId: string }
   | { kind: 'select'; practices: Array<{ id: string; name: string }> }
@@ -168,6 +221,7 @@ export class AuthService {
     private bcryptService: BcryptService,
     private emailService: EmailService,
     private geolocation: GeolocationService,
+    private mfaService: MfaService,
   ) {}
 
   // ─── Token Issuance ─────────────────────────────────────────────────────────
@@ -590,7 +644,7 @@ export class AuthService {
     challengeToken: string,
     practiceId: string,
     context?: SessionContext,
-  ): Promise<AuthResponse> {
+  ): Promise<AuthResponse | MfaRequired> {
     let payload: { sub: string; kind: string }
     try {
       payload = await this.jwtService.verifyAsync(challengeToken)
@@ -615,6 +669,13 @@ export class AuthService {
     })
     if (!membership) {
       throw new ForbiddenException('Not a member of that practice')
+    }
+    // MFA gate (Manisha 2026-06-12 §6) — multi-practice provider/admin path.
+    // Now that the practice is chosen, an enrolled user is challenged before
+    // tokens; the resolved practiceId rides inside the challenge token.
+    if (await this.shouldChallengeMfa(user.id, user.roles)) {
+      const mfaChallengeToken = await this.signMfaChallenge(user.id, practiceId)
+      return { status: 'MFA_REQUIRED', challengeToken: mfaChallengeToken }
     }
     const tokens = await this.issueTokenPair(user, {
       ...context,
@@ -709,6 +770,378 @@ export class AuthService {
       success: true,
     })
     return { activePracticeId: practiceId, accessToken }
+  }
+
+  // ─── MFA — TOTP second factor (Manisha 2026-06-12 §6) ─────────────────────
+
+  /** Whether this user must clear a TOTP challenge before tokens are issued —
+   *  true only for MFA-required roles that have completed enrollment. Un-
+   *  enrolled users sign in normally; the force-enrollment guard (gated by
+   *  MFA_ENFORCEMENT_ENABLED) pushes them to enroll afterward. */
+  private async shouldChallengeMfa(
+    userId: string,
+    roles: UserRole[],
+  ): Promise<boolean> {
+    if (!requiresMfa(roles)) return false
+    const cred = await this.prisma.totpCredential.findUnique({
+      where: { userId },
+      select: { enrolledAt: true },
+    })
+    return cred?.enrolledAt != null
+  }
+
+  private async signMfaChallenge(
+    userId: string,
+    activePracticeId: string | null,
+  ): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: userId, kind: 'mfa_challenge', activePracticeId: activePracticeId ?? null },
+      { expiresIn: MFA_CHALLENGE_TTL },
+    )
+  }
+
+  private async verifyMfaChallenge(
+    token: string,
+  ): Promise<{ userId: string; activePracticeId: string | null }> {
+    let payload: { sub: string; kind: string; activePracticeId?: string | null }
+    try {
+      payload = await this.jwtService.verifyAsync(token)
+    } catch {
+      throw new UnauthorizedException('MFA challenge invalid or expired')
+    }
+    if (payload.kind !== 'mfa_challenge') {
+      throw new UnauthorizedException('MFA challenge invalid or expired')
+    }
+    return { userId: payload.sub, activePracticeId: payload.activePracticeId ?? null }
+  }
+
+  private async signEnrollmentToken(
+    userId: string,
+    secret: string,
+  ): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: userId, kind: 'mfa_enroll', secret },
+      { expiresIn: MFA_ENROLL_TTL },
+    )
+  }
+
+  private async verifyEnrollmentToken(
+    token: string,
+    expectedUserId: string,
+  ): Promise<string> {
+    let payload: { sub: string; kind: string; secret: string }
+    try {
+      payload = await this.jwtService.verifyAsync(token)
+    } catch {
+      throw new BadRequestException('Enrollment session expired — restart MFA setup')
+    }
+    if (payload.kind !== 'mfa_enroll' || payload.sub !== expectedUserId) {
+      throw new BadRequestException('Enrollment session invalid — restart MFA setup')
+    }
+    return payload.secret
+  }
+
+  /** Enrollment step 1 — generate a secret + QR. The secret is NOT persisted;
+   *  it rides back inside a signed enrollment token (the QR already exposes it
+   *  to the client, so this leaks nothing new) and is stored only once the
+   *  first code is verified in completeTotpEnrollment. Stateless, so it works
+   *  across multiple backend instances. */
+  async startTotpEnrollment(
+    userId: string,
+    context?: SessionContext,
+  ): Promise<{
+    provisioningUri: string
+    qrCodeDataUrl: string
+    enrollmentToken: string
+  }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, roles: true },
+    })
+    if (!user) throw new NotFoundException('User not found')
+    if (!requiresMfa(user.roles)) {
+      throw new ForbiddenException('MFA enrollment does not apply to this account')
+    }
+    const issuer = this.config.get<string>('MFA_TOTP_ISSUER', 'Cardioplace')
+    const secret = this.mfaService.generateSecret()
+    const provisioningUri = this.mfaService.buildProvisioningUri(
+      user.email ?? userId,
+      secret,
+      issuer,
+    )
+    const qrCodeDataUrl = await this.mfaService.buildQrDataUrl(provisioningUri)
+    const enrollmentToken = await this.signEnrollmentToken(userId, secret)
+    await this.logAuthEvent({
+      event: 'mfa_enrollment_started',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return { provisioningUri, qrCodeDataUrl, enrollmentToken }
+  }
+
+  /** Enrollment step 2 — verify the first code, persist the encrypted secret +
+   *  hashed recovery codes, mark enrolled. Returns the 10 recovery codes ONCE
+   *  (plaintext, never stored). */
+  async completeTotpEnrollment(
+    userId: string,
+    enrollmentToken: string,
+    code: string,
+    context?: SessionContext,
+  ): Promise<{ recoveryCodes: string[] }> {
+    const secret = await this.verifyEnrollmentToken(enrollmentToken, userId)
+    if (!this.mfaService.verifyCode(secret, code)) {
+      await this.logAuthEvent({
+        event: 'mfa_enrollment_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'invalid_code',
+      })
+      throw new BadRequestException(
+        'That code is incorrect — check your authenticator app and try again',
+      )
+    }
+    const { plain, hashes } = await this.mfaService.generateRecoveryCodes()
+    const secretEncrypted = this.mfaService.encryptSecret(secret)
+    const now = new Date()
+    await this.prisma.$transaction(async (tx) => {
+      await tx.totpCredential.upsert({
+        where: { userId },
+        create: { userId, secretEncrypted, enrolledAt: now },
+        update: { secretEncrypted, enrolledAt: now, mfaResetByAdminAt: null },
+      })
+      // Replace any prior unused codes (covers a recovery-forced re-enrollment).
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId, usedAt: null } })
+      await tx.mfaRecoveryCode.createMany({
+        data: hashes.map((codeHash) => ({ userId, codeHash })),
+      })
+    })
+    await this.logAuthEvent({
+      event: 'mfa_enrollment_completed',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return { recoveryCodes: plain }
+  }
+
+  private async countRecentFailedMfa(
+    userId: string,
+    sinceMs: number,
+  ): Promise<number> {
+    return this.prisma.authLog.count({
+      where: {
+        userId,
+        event: 'mfa_challenge_failed',
+        createdAt: { gt: new Date(Date.now() - sinceMs) },
+      },
+    })
+  }
+
+  /** Throw if the user is currently locked out. Hard lock (10/h) demands an
+   *  admin reset; soft lock (5/15min) is temporary (recovery code still works). */
+  private async assertNotMfaLocked(userId: string): Promise<void> {
+    if (
+      (await this.countRecentFailedMfa(userId, MFA_HARD_LOCK_WINDOW_MS)) >=
+      MFA_HARD_LOCK_THRESHOLD
+    ) {
+      await this.logAuthEvent({
+        event: 'mfa_locked',
+        userId,
+        method: 'otp',
+        metadata: { tier: 'hard' },
+        success: false,
+        errorCode: 'mfa_locked_admin',
+      })
+      throw new ForbiddenException({
+        message:
+          'Too many failed attempts. Contact an administrator to reset your MFA.',
+        errorCode: 'mfa_locked_admin',
+      })
+    }
+    if (
+      (await this.countRecentFailedMfa(userId, MFA_SOFT_LOCK_WINDOW_MS)) >=
+      MFA_SOFT_LOCK_THRESHOLD
+    ) {
+      throw new ForbiddenException({
+        message:
+          'Too many attempts. Wait a few minutes or use a recovery code.',
+        errorCode: 'mfa_locked_temporary',
+      })
+    }
+  }
+
+  private async loadActiveUser(userId: string): Promise<MinimalUser> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        roles: true,
+        onboardingStatus: true,
+        accountStatus: true,
+      },
+    })
+    if (!user) throw new UnauthorizedException('User not found')
+    this.assertAccountActive(user)
+    return user
+  }
+
+  /** Exchange an MFA challenge + 6-digit code for the real token pair. */
+  async mfaChallenge(
+    challengeToken: string,
+    code: string,
+    context?: SessionContext,
+  ): Promise<AuthResponse> {
+    const { userId, activePracticeId } =
+      await this.verifyMfaChallenge(challengeToken)
+    await this.assertNotMfaLocked(userId)
+    const cred = await this.prisma.totpCredential.findUnique({
+      where: { userId },
+      select: { secretEncrypted: true, enrolledAt: true },
+    })
+    if (!cred?.enrolledAt || !cred.secretEncrypted) {
+      throw new BadRequestException('MFA is not set up for this account')
+    }
+    const secret = this.mfaService.decryptSecret(cred.secretEncrypted)
+    if (!this.mfaService.verifyCode(secret, code)) {
+      await this.logAuthEvent({
+        event: 'mfa_challenge_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        practiceContext: activePracticeId,
+        success: false,
+        errorCode: 'invalid_code',
+      })
+      throw new UnauthorizedException('Invalid code')
+    }
+    const user = await this.loadActiveUser(userId)
+    const tokens = await this.issueTokenPair(user, { ...context, activePracticeId })
+    await this.logAuthEvent({
+      event: 'mfa_challenge_succeeded',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      practiceContext: activePracticeId,
+      success: true,
+    })
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    return { ...resp, activePracticeId }
+  }
+
+  /** Sign in with a one-time recovery code; forces TOTP re-enrollment after. */
+  async mfaRecovery(
+    challengeToken: string,
+    recoveryCode: string,
+    context?: SessionContext,
+  ): Promise<AuthResponse> {
+    const { userId, activePracticeId } =
+      await this.verifyMfaChallenge(challengeToken)
+    const unused = await this.prisma.mfaRecoveryCode.findMany({
+      where: { userId, usedAt: null },
+      select: { id: true, codeHash: true },
+    })
+    let matchedId: string | null = null
+    for (const row of unused) {
+      if (await this.mfaService.verifyRecoveryCode(recoveryCode, row.codeHash)) {
+        matchedId = row.id
+        break
+      }
+    }
+    if (!matchedId) {
+      await this.logAuthEvent({
+        event: 'mfa_challenge_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        metadata: { via: 'recovery_code' },
+        practiceContext: activePracticeId,
+        success: false,
+        errorCode: 'invalid_recovery_code',
+      })
+      throw new UnauthorizedException('Invalid or already-used recovery code')
+    }
+    await this.prisma.mfaRecoveryCode.update({
+      where: { id: matchedId },
+      data: { usedAt: new Date() },
+    })
+    const user = await this.loadActiveUser(userId)
+    const tokens = await this.issueTokenPair(user, { ...context, activePracticeId })
+    await this.logAuthEvent({
+      event: 'mfa_recovery_code_used',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      practiceContext: activePracticeId,
+      success: true,
+    })
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    return { ...resp, activePracticeId, forceReEnroll: true }
+  }
+
+  /** Admin MFA reset — SUPER_ADMIN / HEALPLACE_OPS only; never self-reset.
+   *  Clears the secret + enrollment, deletes unused recovery codes, stamps
+   *  mfaResetByAdminAt, audits with resetter + reason, and emails the user. */
+  async adminResetMfa(
+    actorId: string,
+    targetUserId: string,
+    reason: string,
+    context?: SessionContext,
+  ): Promise<{ message: string }> {
+    if (actorId === targetUserId) {
+      throw new ForbiddenException(
+        'You cannot reset your own MFA — ask another administrator',
+      )
+    }
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, email: true, name: true },
+    })
+    if (!target) throw new NotFoundException('User not found')
+    await this.prisma.$transaction(async (tx) => {
+      // Keep the row (preserves mfaResetByAdminAt for audit); blank the secret
+      // + clear enrolledAt so the next sign-in routes through enrollment.
+      await tx.totpCredential.updateMany({
+        where: { userId: targetUserId },
+        data: { secretEncrypted: '', enrolledAt: null, mfaResetByAdminAt: new Date() },
+      })
+      await tx.mfaRecoveryCode.deleteMany({
+        where: { userId: targetUserId, usedAt: null },
+      })
+    })
+    await this.logAuthEvent({
+      event: 'mfa_reset_by_admin',
+      userId: targetUserId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: { resetBy: actorId, reason },
+      success: true,
+    })
+    if (target.email) {
+      await this.emailService.sendEmail(
+        target.email,
+        'Your Cardioplace two-factor authentication was reset',
+        mfaResetEmailHtml(target.name ?? null),
+      )
+    }
+    return {
+      message:
+        'MFA reset. The user will set up two-factor authentication again on next sign-in.',
+    }
   }
 
   private buildAuthResponse(
@@ -1484,6 +1917,15 @@ export class AuthService {
     const activePracticeId =
       resolution.kind === 'auto' ? resolution.activePracticeId : null
 
+    // MFA gate (Manisha 2026-06-12 §6) — an MFA-enrolled provider/admin does
+    // NOT get tokens here; they get a challenge carrying the resolved practice
+    // context. The multi-practice path is gated later in selectPractice (after
+    // the selector), so it isn't reachable in this auto/none branch.
+    if (await this.shouldChallengeMfa(user.id, user.roles)) {
+      const challengeToken = await this.signMfaChallenge(user.id, activePracticeId)
+      return { status: 'MFA_REQUIRED', challengeToken }
+    }
+
     const tokens = await this.issueTokenPair(user, {
       userAgent: context?.userAgent,
       deviceId: context?.deviceId,
@@ -1903,6 +2345,13 @@ export class AuthService {
     }
     const activePracticeId =
       resolution.kind === 'auto' ? resolution.activePracticeId : null
+
+    // MFA gate — symmetric with verifyOtp. An enrolled provider/admin gets a
+    // challenge instead of tokens (patients have no TOTP, so this no-ops them).
+    if (await this.shouldChallengeMfa(user.id, user.roles)) {
+      const mfaChallengeToken = await this.signMfaChallenge(user.id, activePracticeId)
+      return { status: 'MFA_REQUIRED', challengeToken: mfaChallengeToken }
+    }
 
     const tokens = await this.issueTokenPair(user, {
       userAgent: context?.userAgent,

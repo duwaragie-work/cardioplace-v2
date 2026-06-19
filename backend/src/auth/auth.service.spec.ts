@@ -21,6 +21,7 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { AuthService } from './auth.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
+import { MfaService } from './mfa.service.js'
 import { ProfileDto } from './dto/profile.dto.js'
 
 // Type for spying on private methods in tests
@@ -130,6 +131,20 @@ describe('AuthService', () => {
       practiceCoordinator: {
         findUnique: jest.fn().mockResolvedValue(null),
       },
+      // MFA (Manisha 2026-06-12 §6). shouldChallengeMfa reads totpCredential
+      // on the verifyOtp/selectPractice paths; default null = not enrolled =
+      // no challenge, preserving existing sign-in test behavior.
+      totpCredential: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
+        updateMany: jest.fn(),
+      },
+      mfaRecoveryCode: {
+        findMany: jest.fn().mockResolvedValue([]),
+        createMany: jest.fn(),
+        deleteMany: jest.fn(),
+        update: jest.fn(),
+      },
     }
     prismaMock.$transaction = jest
       .fn()
@@ -201,6 +216,22 @@ describe('AuthService', () => {
               (stored: string | null, current: string | null) =>
                 !!stored && !!current && stored !== current,
             ),
+          },
+        },
+        {
+          provide: MfaService,
+          useValue: {
+            generateSecret: jest.fn(() => 'MOCKSECRET'),
+            buildProvisioningUri: jest.fn(() => 'otpauth://totp/mock'),
+            buildQrDataUrl: jest.fn(async () => 'data:image/png;base64,mock'),
+            verifyCode: jest.fn(() => true),
+            encryptSecret: jest.fn((s: string) => `enc(${s})`),
+            decryptSecret: jest.fn((e: string) => e),
+            generateRecoveryCodes: jest.fn(async () => ({
+              plain: ['AAAAA-11111'],
+              hashes: ['hash-AAAAA11111'],
+            })),
+            verifyRecoveryCode: jest.fn(async () => false),
           },
         },
       ],
