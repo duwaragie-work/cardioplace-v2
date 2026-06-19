@@ -7,6 +7,7 @@
 // drifts again.
 
 import {
+  appendThreshold,
   renderThresholdAxis,
   sanitiseForPrompt,
   SystemPromptService,
@@ -366,6 +367,144 @@ describe('SystemPromptService — Bug 14 chat-prompt form-parity guards', () => 
         expect(prompt).toMatch(/SKIP this step entirely|skip this step entirely/i)
         expect(prompt).toMatch(/medication_taken\s*=\s*true.{0,200}vacuously|vacuously true[\s\S]{0,200}medication_taken/i)
       })
+
+      // ─── Bug 26 (Round-3 chat-v2 alignment, handoff 2026-06-18) ────────
+      // Phase/16 Item 2 — Option D confirmatory branch never scripted what
+      // the bot should SAY when the second reading dropped below 180/120.
+      // shared/src/alert-messages.ts:1239 deliberately keeps the
+      // RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL patient/caregiver messages
+      // empty — the chat surface owns the spoken outcome — so without a
+      // prompt-side script the patient hears nothing. Plus a clinically
+      // required 911 safety-net sentence.
+      it('Bug 26 — Item 2 has a verbatim CONFIRMED-NORMAL verbal outcome for the confirmatory drop', () => {
+        // The branch text trigger so we know we're checking the right block.
+        expect(prompt).toMatch(/CONFIRMED-NORMAL VERBAL OUTCOME/i)
+        // The verbatim line the model must deliver in the same turn as the
+        // confirmatory submit_checkin. Allow line wraps with [\s\S].
+        expect(prompt).toMatch(
+          /Good news[\s\S]{0,40}second reading came back lower[\s\S]{0,200}no emergency alert was needed/i,
+        )
+        // Care-team-can-see-both half of the script.
+        expect(prompt).toMatch(/Your care team can see both readings/i)
+        // 911 safety-net clause is clinically required — never drop it.
+        expect(prompt).toMatch(/call 911 right away/i)
+        // Cross-reference to the registry rule the branch maps to (so a
+        // future edit that splits the rule id can search-find this spot).
+        expect(prompt).toMatch(/RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL/)
+        // The bifurcation MUST also tell the model what to do when the
+        // confirmatory stayed ≥180/120 (ABSOLUTE_EMERGENCY path) so it
+        // doesn't accidentally use the calming "good news" wording for an
+        // emergency that's still emergency.
+        expect(prompt).toMatch(/SBP\s*≥\s*180\s*OR\s*(?:confirmatory\s*)?DBP\s*≥\s*120/i)
+      })
     })
   }
+})
+
+// ─── Round-3 Item C (Bug 24) — chat patient-context renders the EFFECTIVE
+//     threshold, not the raw provider-set PatientThreshold. Mirrors the
+//     dashboard's `me-threshold` controller so the bot, the dashboard, and
+//     the engine all quote the same number. Pre-fix a pregnant patient
+//     asking "what's my BP goal?" heard the raw provider number (or
+//     "no goal set") even though the engine alerted at 140/90.
+//
+// The `ctx` factory mirrors the one in
+// daily_journal/services/profile-resolver.service.spec.ts (intentional copy;
+// keeping the chat-side regression self-contained per the comment at the
+// top of this file).
+describe('appendThreshold — Round-3 Item C effective-threshold rendering', () => {
+  function ctx(over: Record<string, any> = {}): any {
+    return {
+      pregnancyThresholdsActive: false,
+      personalizedEligible: false,
+      threshold: null,
+      enrolledAt: null,
+      practiceName: null,
+      ...over,
+      profile: {
+        resolvedHFType: 'NOT_APPLICABLE',
+        hasCAD: false,
+        ...(over.profile ?? {}),
+      },
+    }
+  }
+
+  function render(context: any): string {
+    const lines: string[] = []
+    appendThreshold(lines, context as any)
+    return lines.join('\n')
+  }
+
+  it('pregnant + no custom PatientThreshold → bot quotes the effective 140/90 + pregnancy reason + no tolerance band', () => {
+    const out = render(ctx({ pregnancyThresholdsActive: true }))
+    expect(out).toMatch(/Effective BP goal: aim below 140\/90 mmHg/)
+    expect(out).toMatch(/pregnancy override/i)
+    expect(out).toMatch(/no tolerance band|alert threshold/i)
+    // Critical: must NOT fall back to "Provider has not yet set a personal
+    // BP goal" — that's the pre-fix bug for pregnant patients without a
+    // custom threshold row.
+    expect(out).not.toMatch(/Provider has not yet set a personal BP goal/i)
+  })
+
+  it('pregnant + custom 176/120 → pregnancy override wins (140/90), raw row still surfaced for clinical context', () => {
+    const out = render(
+      ctx({
+        pregnancyThresholdsActive: true,
+        personalizedEligible: true,
+        threshold: {
+          sbpUpperTarget: 176,
+          dbpUpperTarget: 120,
+          sbpLowerTarget: null,
+          dbpLowerTarget: null,
+          hrUpperTarget: null,
+          hrLowerTarget: null,
+          setAt: new Date('2026-06-01T00:00:00Z'),
+        },
+      }),
+    )
+    expect(out).toMatch(/Effective BP goal: aim below 140\/90 mmHg/)
+    expect(out).toMatch(/pregnancy override/i)
+    // Raw row is informational — keep it but clearly label "for context".
+    expect(out).toMatch(/Provider-set goals \(for context\)/)
+  })
+
+  it('CAD-ramp eligible → effective goal differs from raw, override=cad', () => {
+    const out = render(
+      ctx({
+        profile: { resolvedHFType: 'NOT_APPLICABLE', hasCAD: true },
+      }),
+    )
+    expect(out).toMatch(/cad override/i)
+  })
+
+  it('personalized eligible (custom 140/90, no override) → goal 140/90 + tolerance 20 band → alerts at 160/110', () => {
+    const out = render(
+      ctx({
+        personalizedEligible: true,
+        threshold: {
+          sbpUpperTarget: 140,
+          dbpUpperTarget: 90,
+          sbpLowerTarget: null,
+          dbpLowerTarget: null,
+          hrUpperTarget: null,
+          hrLowerTarget: null,
+          setAt: new Date('2026-06-01T00:00:00Z'),
+        },
+      }),
+    )
+    expect(out).toMatch(/Effective BP goal: aim below 140\/90 mmHg/)
+    // No override → tolerance band wording, alert point > goal. Engine
+    // computes SBP+20 / DBP+10 per its tolerance constants — so 160/100
+    // (not 160/110). The "+20" string is the SBP_TOLERANCE the prompt
+    // surfaces verbatim; DBP tolerance is a backend detail.
+    expect(out).toMatch(/alerts begin at 160\/100.*goal \+ 20 tolerance/i)
+    expect(out).not.toMatch(/pregnancy override|hfref override|cad override/i)
+  })
+
+  it('no overrides AND no PatientThreshold → standard goal 140/90 surfaces; no raw "Provider-set" line at all (vs pre-fix "Provider has not yet set a personal BP goal")', () => {
+    const out = render(ctx())
+    expect(out).toMatch(/Effective BP goal: aim below 140\/90 mmHg/)
+    expect(out).not.toMatch(/Provider-set goals \(for context\)/)
+    expect(out).not.toMatch(/Provider has not yet set a personal BP goal/i)
+  })
 })

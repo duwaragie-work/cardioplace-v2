@@ -2,6 +2,13 @@ import { Injectable, Optional } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { ResolvedContext } from '@cardioplace/shared'
 import { kgToLbs } from '../../common/units.js'
+// Round 3 Item C / Bug 24 — chat patient-context renders the engine's
+// effective threshold (pregnancy / HFrEF / CAD / personalized overrides
+// applied) so the bot quotes the same number the dashboard does and the
+// engine alerts on. Without this, a pregnant patient's "what's my goal?"
+// quoted the raw provider-set PatientThreshold (which can be ~196) instead
+// of the effective 140/90 the engine actually fires at.
+import { computeEffectiveThreshold } from '../../daily_journal/services/profile-resolver.service.js'
 
 /**
  * Scaffolding for future chat routing — phase/16 always sends PATIENT. The
@@ -834,6 +841,9 @@ Before calling submit_checkin you MUST verbalise the values back to the patient 
 TRIGGER: a NEW submit_checkin where SBP ≥ 180 OR DBP ≥ 120, AND the patient reports NO co-occurring Level-2 symptoms (chest pain, severe headache, focal neuro, AMS, severe epigastric pain, visual changes, throat tightness, face swelling). Co-occurring symptoms take the SYMPTOM-OVERRIDE 911 path (Item 3) instead — never both.
 AFTER the submit_checkin succeeds (backend creates the entry as emergencyConfirmation=AWAITING), the response in the SAME assistant turn MUST be: "That reading is in the high range. To make sure, can you sit calmly for one minute and then take another reading? I'll wait." Don't add extra advice; don't ask other questions; just the confirmatory ask.
 RESUME — if the patient context shows an "Open AWAITING entry: …" line, the patient is mid-Option-D from a prior turn. On their next message, gently resume: "I see you had a high reading at <time> — 195 over 120. Did you get a chance to take that second reading?" (use the exact id from context). When the patient gives the confirmatory numbers, call submit_checkin with confirms_entry_id = <the AWAITING id> AND close_session: true. Backend pairs them and fires RULE_ABSOLUTE_EMERGENCY (still emergency-range) or RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL (second reading dropped below 180/120).
+CONFIRMED-NORMAL VERBAL OUTCOME (Bug 26 — handoff 2026-06-18). After the confirmatory submit_checkin succeeds, you have the BP values you just submitted in your own context — branch on them locally:
+  • If the confirmatory SBP < 180 AND confirmatory DBP < 120: say verbatim (placeholder pending Manisha sign-off): "Good news — your second reading came back lower, below the emergency range, so no emergency alert was needed. Your care team can see both readings. If you develop chest pain, severe headache, vision changes, weakness, or trouble breathing, call 911 right away." This mirrors the rule the backend fires (RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL) — whose patient/caregiver message is intentionally empty in the registry because the chat surface owns the spoken outcome. The 911 safety-net sentence is clinically required — never drop it.
+  • If the confirmatory SBP ≥ 180 OR confirmatory DBP ≥ 120: the SYMPTOM-OVERRIDE 911 / standard emergency wording from elsewhere in this prompt applies; do NOT use the confirmed-normal phrasing. Backend fires RULE_ABSOLUTE_EMERGENCY and the standard Tier-1 alert flow takes over.
 DECLINE PATH — if the patient explicitly refuses ("I can't right now", "later", "no, skip it", "I don't want to take another"), call submit_checkin with decline_confirmation: true and confirms_entry_id = <AWAITING id>. Leave BP fields as 0/omitted — backend bypasses entry creation and flips the held AWAITING entry to UNCONFIRMED immediately, firing RULE_UNCONFIRMED_EMERGENCY Tier 1 without waiting for the 4-hour cron. Then say verbatim: "OK — I've sent the first reading to your care team. If you feel unwell, please call your doctor or 911 right away."
 
 (Item 3) SYMPTOM-OVERRIDE 911 — hard rule, no exceptions.
@@ -1358,22 +1368,47 @@ export function renderThresholdAxis(
   return null
 }
 
-function appendThreshold(lines: string[], ctx: ResolvedContext): void {
+// Exported so the Round-3 Item C unit tests can drive it with a synthetic
+// ResolvedContext (pregnancy / CAD-ramp / personalized) without instantiating
+// the full SystemPromptService + buildPatientContext fixture.
+export function appendThreshold(lines: string[], ctx: ResolvedContext): void {
+  // Round 3 Item C / Bug 24 (2026-06-18) — the effective goal is what the
+  // engine alerts on, so it's what the bot must quote. computeEffectiveThreshold
+  // resolves pregnancy / HFrEF / CAD overrides on top of any custom
+  // PatientThreshold (handoff 2026-06-18 §"Item C"). The chat patient-context
+  // used to render only `ctx.threshold` (raw provider goals), so a pregnant
+  // patient who asked "what's my BP goal?" heard the wrong number — or
+  // "Provider has not yet set a personal BP goal" while the engine quietly
+  // alerted at 140/90. Reuse the shared compute; never re-derive locally.
+  const eff = computeEffectiveThreshold(ctx)
+  const alertSuffix = eff.toleranceMmHg > 0
+    ? ` — alerts begin at ${eff.sbpHighAlertThreshold}/${eff.dbpHighAlertThreshold} (goal + ${eff.toleranceMmHg} tolerance)`
+    : ` — this is the alert threshold (no tolerance band when an override applies)`
+  const reasonSuffix = eff.overrideReason
+    ? `, driven by ${eff.overrideReason} override`
+    : ''
+  lines.push(
+    `Effective BP goal: aim below ${eff.sbpGoal}/${eff.dbpGoal} mmHg${reasonSuffix}${alertSuffix}.`,
+  )
+
+  // Keep the raw provider-set row for clinical context (so the model can
+  // explain to the patient that their provider chose different targets if
+  // the override is overriding them). When no PatientThreshold exists, skip
+  // it — effective threshold already conveys what they need to know.
   const t = ctx.threshold
-  if (!t) {
-    lines.push('Provider-set BP goal: Provider has not yet set a personal BP goal.')
-    lines.push('')
-    return
+  if (t) {
+    const parts: string[] = []
+    const sbp = renderThresholdAxis('SBP', t.sbpLowerTarget, t.sbpUpperTarget, 'mmHg')
+    if (sbp) parts.push(sbp)
+    const dbp = renderThresholdAxis('DBP', t.dbpLowerTarget, t.dbpUpperTarget, 'mmHg')
+    if (dbp) parts.push(dbp)
+    const hr = renderThresholdAxis('HR', t.hrLowerTarget, t.hrUpperTarget, 'bpm')
+    if (hr) parts.push(hr)
+    if (parts.length > 0) {
+      const setOn = new Date(t.setAt).toISOString().slice(0, 10)
+      lines.push(`Provider-set goals (for context): ${parts.join(', ')}, set ${setOn}.`)
+    }
   }
-  const parts: string[] = []
-  const sbp = renderThresholdAxis('SBP', t.sbpLowerTarget, t.sbpUpperTarget, 'mmHg')
-  if (sbp) parts.push(sbp)
-  const dbp = renderThresholdAxis('DBP', t.dbpLowerTarget, t.dbpUpperTarget, 'mmHg')
-  if (dbp) parts.push(dbp)
-  const hr = renderThresholdAxis('HR', t.hrLowerTarget, t.hrUpperTarget, 'bpm')
-  if (hr) parts.push(hr)
-  const setOn = new Date(t.setAt).toISOString().slice(0, 10)
-  lines.push(`Provider-set goals: ${parts.join(', ')}, set ${setOn}.`)
   lines.push('')
 }
 
