@@ -1603,7 +1603,10 @@ export class AuthService {
 
   // ─── Profile — Get ────────────────────────────────────────────────────────────
 
-  async getProfile(userId: string) {
+  async getProfile(
+    userId: string,
+    ctx?: { practiceId: string | null },
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -1631,6 +1634,58 @@ export class AuthService {
       throw new NotFoundException('User not found')
     }
 
+    // Phase/practice-identity rehydrate fix (Manisha 2026-06-12 §1, smoke
+    // 2026-06-18) — surface activePracticeId + activePractice + the user's
+    // available memberships so admin's rehydrate() can restore practice
+    // context after a browser refresh. Without these fields, F5 dropped
+    // every PROVIDER/MED_DIR/COORDINATOR into the ZeroPracticeModal even
+    // though their AuthSession + JWT still carried activePracticeId.
+    //
+    // Probe BOTH membership relations — the dual-relation pattern mirrors
+    // resolvePracticeContext() and JwtStrategy.validate(). COORDINATOR
+    // membership is 1:1 on PracticeCoordinator; PROVIDER / MED_DIR is 1:N
+    // on PracticeProvider. SUPER_ADMIN / HEALPLACE_OPS are unscoped and
+    // get null/[].
+    const isOrgWide =
+      user.roles.includes(UserRole.SUPER_ADMIN) ||
+      user.roles.includes(UserRole.HEALPLACE_OPS)
+    const isCoordinator = user.roles.includes(UserRole.COORDINATOR)
+    const activePracticeIdFromCtx = ctx?.practiceId ?? null
+
+    let availablePractices: Array<{ id: string; name: string }> = []
+    if (!isOrgWide) {
+      const [providerRows, coordinatorRow] = await Promise.all([
+        this.prisma.practiceProvider.findMany({
+          where: { userId: user.id },
+          select: { practice: { select: { id: true, name: true } } },
+        }),
+        isCoordinator
+          ? this.prisma.practiceCoordinator.findUnique({
+              where: { userId: user.id },
+              select: { practice: { select: { id: true, name: true } } },
+            })
+          : Promise.resolve(null),
+      ])
+      const seen = new Set<string>()
+      for (const r of providerRows) {
+        if (r.practice && !seen.has(r.practice.id)) {
+          availablePractices.push(r.practice)
+          seen.add(r.practice.id)
+        }
+      }
+      if (coordinatorRow?.practice && !seen.has(coordinatorRow.practice.id)) {
+        availablePractices.push(coordinatorRow.practice)
+      }
+    }
+    // activePractice is the row matching the JWT's activePracticeId — if
+    // the JWT carries a stale id (practice deleted after sign-in) we
+    // return null + leave the FE to surface the ZeroPracticeModal
+    // correctly (this case = genuinely no practice).
+    const activePractice =
+      activePracticeIdFromCtx
+        ? availablePractices.find((p) => p.id === activePracticeIdFromCtx) ?? null
+        : null
+
     return {
       id: user.id,
       email: user.email,
@@ -1647,6 +1702,11 @@ export class AuthService {
       timezone: user.timezone,
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
+      // Practice-identity rehydrate fields (additive — pre-fix consumers
+      // ignore them).
+      activePracticeId: activePractice ? activePractice.id : null,
+      activePractice,
+      availablePractices,
     }
   }
 

@@ -910,8 +910,11 @@ describe('AuthService', () => {
 
       const result = await service.getProfile(mockUser.id)
 
-      // Match the transformed response shape (not the raw DB row)
-      expect(result).toEqual({
+      // Match the transformed response shape (not the raw DB row).
+      // PATIENT is non-org-wide + non-COORDINATOR so the dual-relation
+      // probe runs and finds nothing (default mock returns [] / null),
+      // leaving activePractice = null + availablePractices = [].
+      expect(result).toMatchObject({
         id: mockUser.id,
         email: mockUser.email,
         name: mockUser.name,
@@ -924,6 +927,9 @@ describe('AuthService', () => {
         timezone: 'Asia/Colombo',
         onboardingStatus: OnboardingStatus.COMPLETED,
         createdAt: mockUser.createdAt.toISOString(),
+        activePracticeId: null,
+        activePractice: null,
+        availablePractices: [],
       })
     })
 
@@ -934,6 +940,133 @@ describe('AuthService', () => {
       await expect(service.getProfile('nonexistent-id')).rejects.toThrow(
         NotFoundException,
       )
+    })
+
+    // Practice-identity rehydrate-fix coverage (Manisha 2026-06-12 §1, smoke
+    // 2026-06-18) — getProfile MUST return activePracticeId + activePractice
+    // + availablePractices so admin's rehydrate() can restore the practice
+    // chip after a browser refresh. Pre-fix, F5 dropped every PROVIDER /
+    // MED_DIR / COORDINATOR into ZeroPracticeModal.
+    describe('practice-identity rehydrate fields', () => {
+      const dbRowFor = (roles: UserRole[]) => ({
+        id: mockUser.id,
+        email: mockUser.email,
+        name: mockUser.name,
+        roles,
+        isVerified: mockUser.isVerified,
+        onboardingStatus: OnboardingStatus.COMPLETED,
+        accountStatus: AccountStatus.ACTIVE,
+        dateOfBirth: null,
+        communicationPreference: null,
+        preferredLanguage: 'en',
+        timezone: 'America/New_York',
+        createdAt: mockUser.createdAt,
+      })
+
+      it('multi-practice PROVIDER with active practice → returns both practices in availablePractices + activePractice = the active one', async () => {
+        ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(
+          dbRowFor([UserRole.PROVIDER]),
+        )
+        ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+          { practice: { id: 'seed-cedar-hill', name: 'Cedar Hill' } },
+          { practice: { id: 'seed-bridgepoint', name: 'BridgePoint' } },
+        ])
+
+        const result = await service.getProfile(mockUser.id, {
+          practiceId: 'seed-cedar-hill',
+        })
+
+        expect(result.activePracticeId).toBe('seed-cedar-hill')
+        expect(result.activePractice).toEqual({
+          id: 'seed-cedar-hill',
+          name: 'Cedar Hill',
+        })
+        expect(result.availablePractices).toEqual([
+          { id: 'seed-cedar-hill', name: 'Cedar Hill' },
+          { id: 'seed-bridgepoint', name: 'BridgePoint' },
+        ])
+        // COORDINATOR-only lookup must NOT run for a pure PROVIDER.
+        expect(prisma.practiceCoordinator.findUnique).not.toHaveBeenCalled()
+      })
+
+      it('SUPER_ADMIN → activePracticeId/activePractice null + availablePractices [] (org-wide, never queries memberships)', async () => {
+        ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(
+          dbRowFor([UserRole.SUPER_ADMIN]),
+        )
+
+        const result = await service.getProfile(mockUser.id, {
+          practiceId: null,
+        })
+
+        expect(result.activePracticeId).toBeNull()
+        expect(result.activePractice).toBeNull()
+        expect(result.availablePractices).toEqual([])
+        // Org-wide bypass — neither membership relation should be touched.
+        expect(prisma.practiceProvider.findMany).not.toHaveBeenCalled()
+        expect(prisma.practiceCoordinator.findUnique).not.toHaveBeenCalled()
+      })
+
+      it('COORDINATOR (1:1 PracticeCoordinator) → resolves the single practice as both activePractice and the sole availablePractice', async () => {
+        ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(
+          dbRowFor([UserRole.COORDINATOR]),
+        )
+        ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([])
+        ;(prisma.practiceCoordinator.findUnique as jest.Mock).mockResolvedValue({
+          practice: { id: 'seed-cedar-hill', name: 'Cedar Hill' },
+        })
+
+        const result = await service.getProfile(mockUser.id, {
+          practiceId: 'seed-cedar-hill',
+        })
+
+        expect(result.activePracticeId).toBe('seed-cedar-hill')
+        expect(result.activePractice).toEqual({
+          id: 'seed-cedar-hill',
+          name: 'Cedar Hill',
+        })
+        expect(result.availablePractices).toEqual([
+          { id: 'seed-cedar-hill', name: 'Cedar Hill' },
+        ])
+      })
+
+      it('JWT carries a STALE activePracticeId (practice deleted post-sign-in) → activePractice null + availablePractices unchanged (FE will route to selector / show ZeroPracticeModal correctly)', async () => {
+        ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(
+          dbRowFor([UserRole.PROVIDER]),
+        )
+        ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+          { practice: { id: 'seed-cedar-hill', name: 'Cedar Hill' } },
+        ])
+
+        const result = await service.getProfile(mockUser.id, {
+          practiceId: 'deleted-practice-id',
+        })
+
+        // No match on the stale id → activePractice null (genuine
+        // "needs to re-select" signal). Available list still reflects
+        // the user's real memberships so the selector can render.
+        expect(result.activePracticeId).toBeNull()
+        expect(result.activePractice).toBeNull()
+        expect(result.availablePractices).toEqual([
+          { id: 'seed-cedar-hill', name: 'Cedar Hill' },
+        ])
+      })
+
+      it('no ctx passed (backwards-compat — older call sites) → activePracticeId/activePractice null', async () => {
+        ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(
+          dbRowFor([UserRole.PROVIDER]),
+        )
+        ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+          { practice: { id: 'seed-cedar-hill', name: 'Cedar Hill' } },
+        ])
+
+        const result = await service.getProfile(mockUser.id)
+
+        expect(result.activePracticeId).toBeNull()
+        expect(result.activePractice).toBeNull()
+        expect(result.availablePractices).toEqual([
+          { id: 'seed-cedar-hill', name: 'Cedar Hill' },
+        ])
+      })
     })
   })
 

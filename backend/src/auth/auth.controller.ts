@@ -24,6 +24,7 @@ import {
   LEGACY_REFRESH_COOKIE,
   scopeForRoles,
 } from './cookie-scope.js'
+import { ActiveContext } from './decorators/active-context.decorator.js'
 import { Public } from './decorators/public.decorator.js'
 import { ConsentDto } from './dto/consent.dto.js'
 import { ProfileDto } from './dto/profile.dto.js'
@@ -405,9 +406,12 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get('profile')
-  getProfile(@Req() req: Request) {
+  getProfile(
+    @Req() req: Request,
+    @ActiveContext() ctx: { practiceId: string | null },
+  ) {
     const { id } = req.user as { id: string }
-    return this.authService.getProfile(id)
+    return this.authService.getProfile(id, ctx)
   }
 
   @UseGuards(JwtAuthGuard)
