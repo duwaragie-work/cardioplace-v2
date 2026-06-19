@@ -446,9 +446,33 @@ describe('appendThreshold — Round-3 Item C effective-threshold rendering', () 
     expect(out).not.toMatch(/Provider has not yet set a personal BP goal/i)
   })
 
-  it('pregnant + custom 176/120 → pregnancy override wins (140/90), raw row still surfaced for clinical context', () => {
+  // CROSS-CHECK with qa/tests/64-pregnancy-dashboard-threshold.spec.ts
+  // (handoff 2026-06-18 §"Tests required" — "Cross-check against
+  // qa/tests/64-pregnancy-dashboard-threshold.spec.ts so chat and dashboard
+  // quote the same number").
+  //
+  // Priya is a pregnant patient with a provider-set custom threshold of
+  // 176/120. The engine fires at the pregnancy override (140/90). Spec 64
+  // asserts the patient DASHBOARD shows exactly three things:
+  //
+  //   (a) "Below 140/90 mmHg" as the goal number
+  //   (b) a caption that mentions "pregnancy" + contains "140/90"
+  //   (c) no "196" anywhere in the goal card (196 = the pre-fix lie:
+  //       custom SBP 176 + 20-mmHg standard tolerance = 196, which is the
+  //       number a personalized-rule-style render would have produced and
+  //       what the pre-Item-C dashboard actually showed)
+  //
+  // Both surfaces share the same source — the dashboard calls
+  // ThresholdService.getEffectiveThreshold → computeEffectiveThreshold(ctx),
+  // and after the Item C wiring, appendThreshold here goes through the
+  // exact same function. So mathematically the numbers MUST match; this
+  // test cements that by asserting the chat surface satisfies the same
+  // three claims spec 64 makes about the dashboard for Priya's shape.
+  it('CROSS-CHECK vs qa spec 64 — pregnant + custom 176/120 → chat quotes 140/90, mentions pregnancy, NEVER the 196 lie', () => {
     const out = render(
       ctx({
+        // Priya's resolved-context shape — pregnant + a personalized custom
+        // threshold the engine ignores because pregnancy wins.
         pregnancyThresholdsActive: true,
         personalizedEligible: true,
         threshold: {
@@ -462,9 +486,28 @@ describe('appendThreshold — Round-3 Item C effective-threshold rendering', () 
         },
       }),
     )
+
+    // (a) goal number 140/90 — same SBP/DBP pair spec 64 asserts on the
+    // dashboard via /Below\s*140\/90\s*mmHg/i.
     expect(out).toMatch(/Effective BP goal: aim below 140\/90 mmHg/)
+
+    // (b) caption mentions pregnancy + contains 140/90 — spec 64 asserts
+    // the dashboard's goal-tolerance caption does both.
     expect(out).toMatch(/pregnancy override/i)
-    // Raw row is informational — keep it but clearly label "for context".
+    // The override-driven line includes the alert threshold (which IS
+    // 140/90 because tolerance band is 0 when an override applies), so
+    // 140/90 appears in the caption-equivalent text too.
+    expect(out).toMatch(/no tolerance band|alert threshold/i)
+
+    // (c) the pre-fix "196" lie must NOT appear — same negative assertion
+    // spec 64 makes (toHaveCount(0) on /196/). 196 would show up if the
+    // chat surface fell through to a personalized-style render of
+    // raw-SBP + 20-mmHg tolerance; with the Item C wiring it MUST NOT.
+    expect(out).not.toMatch(/196/)
+
+    // Bonus: raw row is informational — keep it but clearly label "for
+    // context" so the model can explain the discrepancy if the patient
+    // asks why their provider set 176/120 but the bot quotes 140/90.
     expect(out).toMatch(/Provider-set goals \(for context\)/)
   })
 
