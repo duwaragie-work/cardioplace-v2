@@ -18,6 +18,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, type AdminAuthResponse } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { MFA_CHALLENGE_STORAGE_KEY } from '@/lib/services/mfa.service';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -61,6 +62,7 @@ export default function SelectPracticePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setChallenge(readChallenge());
   }, []);
 
@@ -106,6 +108,9 @@ export default function SelectPracticePage() {
       });
       const data = (await res.json()) as AdminAuthResponse & {
         message?: string;
+        status?: string;
+        challengeToken?: string;
+        mfaEnrollmentRequired?: boolean;
       };
       if (!res.ok) {
         throw new Error(data?.message ?? t('signIn.selectPractice.error'));
@@ -115,7 +120,28 @@ export default function SelectPracticePage() {
       } catch {
         /* sessionStorage unavailable */
       }
+      // MFA (Manisha 2026-06-12 §6) — an enrolled multi-practice provider gets
+      // a challenge after picking a practice; hand off to the second-factor
+      // page instead of issuing tokens here.
+      if (data.status === 'MFA_REQUIRED' && data.challengeToken) {
+        try {
+          sessionStorage.setItem(
+            MFA_CHALLENGE_STORAGE_KEY,
+            JSON.stringify({ challengeToken: data.challengeToken }),
+          );
+        } catch {
+          /* sessionStorage unavailable — challenge page falls back to URL */
+        }
+        router.push('/sign-in/mfa-challenge');
+        return;
+      }
       login(data);
+      // Forced enrollment after the practice pick — same handoff as the OTP
+      // sign-in page; go to the chrome-free setup page, not the dashboard.
+      if (data.mfaEnrollmentRequired) {
+        router.push('/sign-in/mfa-enroll?required=1');
+        return;
+      }
       router.push('/dashboard');
     } catch (err) {
       setError(

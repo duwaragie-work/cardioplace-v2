@@ -49,6 +49,11 @@ export interface AuthResponse extends TokenPair {
    *  The FE routes straight to TOTP re-enrollment (the recovery-bypassed
    *  secret must be rotated; Manisha 2026-06-12 §6). */
   forceReEnroll?: boolean
+  /** MFA — set true when enforcement is on and this MFA-required user has not
+   *  yet enrolled TOTP. Tokens ARE issued (enrollment needs a session) but the
+   *  FE redirects straight to the enrollment page instead of the dashboard,
+   *  so the gate appears immediately after sign-in (Manisha 2026-06-12 §6). */
+  mfaEnrollmentRequired?: boolean
 }
 
 /**
@@ -692,7 +697,11 @@ export class AuthService {
       success: true,
     })
     const resp = this.buildAuthResponse(tokens, user, 'otp')
-    return { ...resp, activePracticeId: practiceId }
+    const mfaEnrollmentRequired = await this.shouldForceMfaEnrollment(
+      user.id,
+      user.roles,
+    )
+    return { ...resp, activePracticeId: practiceId, mfaEnrollmentRequired }
   }
 
   /**
@@ -788,6 +797,25 @@ export class AuthService {
       select: { enrolledAt: true },
     })
     return cred?.enrolledAt != null
+  }
+
+  /** Whether enforcement is on and this MFA-required user has NOT enrolled —
+   *  i.e. they should be redirected to TOTP setup immediately after sign-in.
+   *  Mirrors the MfaRequiredGuard's runtime check, but evaluated at verify
+   *  time so the FE redirects up front instead of after a 403 round-trip. */
+  private async shouldForceMfaEnrollment(
+    userId: string,
+    roles: UserRole[],
+  ): Promise<boolean> {
+    if (this.config.get<string>('MFA_ENFORCEMENT_ENABLED') !== 'true') {
+      return false
+    }
+    if (!requiresMfa(roles)) return false
+    const cred = await this.prisma.totpCredential.findUnique({
+      where: { userId },
+      select: { enrolledAt: true },
+    })
+    return cred?.enrolledAt == null
   }
 
   private async signMfaChallenge(
@@ -1934,7 +1962,13 @@ export class AuthService {
       activePracticeId,
     })
     const resp = this.buildAuthResponse(tokens, user, 'otp')
-    return { ...resp, activePracticeId }
+    // Force-enrollment signal — tokens ARE issued (enrollment needs a session)
+    // but the FE redirects straight to TOTP setup instead of the dashboard.
+    const mfaEnrollmentRequired = await this.shouldForceMfaEnrollment(
+      user.id,
+      user.roles,
+    )
+    return { ...resp, activePracticeId, mfaEnrollmentRequired }
   }
 
   // ─── Device Tracking ────────────────────────────────────────────────────────

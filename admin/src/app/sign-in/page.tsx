@@ -6,6 +6,7 @@ import { useAuth, type AdminAuthResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { hasAdminRole } from "@/lib/roleGates";
 import { getOrCreateDeviceId } from "@/lib/device";
+import { MFA_CHALLENGE_STORAGE_KEY } from "@/lib/services/mfa.service";
 
 // Where a rehydrated NON-admin user (the shared API refresh-token cookie can
 // resolve a PATIENT profile on the admin origin) gets sent — their own app.
@@ -75,6 +76,11 @@ export default function RegisterPage() {
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const resendTimerRef = useRef<number | null>(null);
+  // When we're handing off to forced MFA enrollment we call login() (to set
+  // the session) but must NOT let the "already-signed-in → dashboard" effect
+  // below fire — it would race our push to /sign-in/mfa-enroll and flash the
+  // dashboard. A ref updates synchronously and is read on the next render.
+  const skipAuthedRedirect = useRef(false);
   // Admin app is OTP-only — magic-link mode was removed.
 
   const [showOtp, setShowOtp] = useState(false);
@@ -94,6 +100,9 @@ export default function RegisterPage() {
 
   useEffect(() => {
     if (isLoading || !user) return;
+    // Forced-enrollment handoff in progress — let handleVerifyOtp's push to
+    // /sign-in/mfa-enroll win instead of redirecting to the dashboard.
+    if (skipAuthedRedirect.current) return;
     // A live session resolved. If it carries an admin-tier role, go to the
     // admin dashboard. If NOT (e.g. a PATIENT whose shared API refresh-token
     // cookie rehydrated here), cross-redirect to the patient app instead of
@@ -229,7 +238,33 @@ export default function RegisterPage() {
         router.push('/sign-in/select-practice');
         return;
       }
+      // MFA (Manisha 2026-06-12 §6) — an enrolled provider/admin gets a
+      // challenge token instead of tokens. Stash it (tab-scoped) and route to
+      // the second-factor page, mirroring the practice-select handoff above.
+      if (data && data.status === 'MFA_REQUIRED') {
+        try {
+          sessionStorage.setItem(
+            MFA_CHALLENGE_STORAGE_KEY,
+            JSON.stringify({ challengeToken: data.challengeToken }),
+          );
+        } catch {
+          // sessionStorage unavailable — the challenge page reads URL params too.
+        }
+        router.push('/sign-in/mfa-challenge');
+        return;
+      }
+      // Forced enrollment (MFA_ENFORCEMENT_ENABLED on + not yet enrolled) —
+      // set the guard BEFORE login() so the "already-signed-in → dashboard"
+      // effect skips this case, then route to the chrome-free setup page.
+      // Tokens were issued, so the session keeps the enroll endpoints working;
+      // we just don't flash the dashboard on the way.
+      const forceEnroll = !!(data && data.mfaEnrollmentRequired);
+      if (forceEnroll) skipAuthedRedirect.current = true;
       login(data as AdminAuthResponse);
+      if (forceEnroll) {
+        router.push("/sign-in/mfa-enroll?required=1");
+        return;
+      }
       router.push("/dashboard");
     } catch (err) {
       setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.invalidOtp');

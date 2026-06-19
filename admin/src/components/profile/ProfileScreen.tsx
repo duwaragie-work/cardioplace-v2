@@ -7,6 +7,7 @@
 // surfaced read-only — they're changed through user management, not here.
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   Pencil,
   Mail,
@@ -17,6 +18,8 @@ import {
   CalendarDays,
   Loader2,
   AlertCircle,
+  KeyRound,
+  ChevronRight,
 } from 'lucide-react';
 import { RoleBadge, StatusBadge } from '@/components/user-management/badges';
 import type { UserListStatus } from '@/lib/services/user-management.service';
@@ -111,6 +114,7 @@ export default function ProfileScreen() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 
@@ -302,6 +306,37 @@ export default function ProfileScreen() {
           </div>
         </div>
       )}
+
+      {/* Security — two-factor authentication setup entry point. */}
+      <Link
+        href="/sign-in/mfa-enroll"
+        data-testid="admin-profile-mfa-link"
+        className="mt-4 flex items-center gap-3 rounded-2xl bg-white px-4 py-4 transition hover:bg-[var(--brand-primary-purple-light)]"
+        style={{ border: '1px solid var(--brand-border)' }}
+      >
+        <span
+          className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-white"
+          style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
+          aria-hidden
+        >
+          <KeyRound className="w-4 h-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p
+            className="text-[13.5px] font-semibold"
+            style={{ color: 'var(--brand-text-primary)' }}
+          >
+            Two-factor authentication
+          </p>
+          <p className="text-[12px]" style={{ color: 'var(--brand-text-muted)' }}>
+            Set up or reset the authenticator app on your account.
+          </p>
+        </div>
+        <ChevronRight
+          className="w-4 h-4 shrink-0"
+          style={{ color: 'var(--brand-text-muted)' }}
+        />
+      </Link>
 
       <EditProfileModal
         open={editing}

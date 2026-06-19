@@ -95,6 +95,28 @@ export async function fetchWithAuth(
     headers: buildHeaders(currentAccessToken),
   });
 
+  // MFA force-enrollment gate (Manisha 2026-06-12 §6). Once
+  // MFA_ENFORCEMENT_ENABLED is on, the backend MfaRequiredGuard 403s every
+  // route except the enroll endpoints for a not-yet-enrolled provider/admin.
+  // Bounce them to the enrollment wizard (which only calls enroll routes, so
+  // it loads fine). Guard against a redirect loop if we're already there.
+  if (response.status === 403) {
+    try {
+      const cloned = response.clone();
+      const data = (await cloned.json()) as { errorCode?: string };
+      if (
+        data?.errorCode === 'mfa_enrollment_required' &&
+        !window.location.pathname.startsWith('/sign-in/mfa-enroll')
+      ) {
+        window.location.href = '/sign-in/mfa-enroll?required=1';
+        return response;
+      }
+    } catch {
+      // Not JSON — fall through and return the 403 to the caller.
+    }
+    return response;
+  }
+
   if (response.status !== 401) return response;
 
   // Phase/practice-identity — JwtStrategy throws PRACTICE_MEMBERSHIP_REVOKED

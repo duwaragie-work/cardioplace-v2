@@ -39,6 +39,9 @@ export type AdminAuthResponse = {
   /** Phase/practice-identity — null for SUPER_ADMIN / HEALPLACE_OPS or when
    *  the user has zero memberships (defensive — backend blocks this case). */
   activePracticeId?: string | null;
+  /** MFA — true when enforcement is on and this user hasn't enrolled TOTP. The
+   *  sign-in page redirects to /sign-in/mfa-enroll instead of the dashboard. */
+  mfaEnrollmentRequired?: boolean;
 };
 
 /** Phase/practice-identity — discriminated response shape returned by
