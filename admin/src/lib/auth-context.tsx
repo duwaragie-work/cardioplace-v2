@@ -347,6 +347,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       availablePractices.find((p) => p.id === data.activePracticeId) ??
       data.availablePractices?.find((p) => p.id === data.activePracticeId);
     setActivePractice(target ?? { id: data.activePracticeId, name: '' });
+    // PR #90 Bug C — data-fetching components (patient list, alerts, stats)
+    // keep their own client-side fetch cache and don't auto-bust on an
+    // auth-context state change, so the chip flips to the new practice while
+    // the visible data stays scoped to the OLD activePracticeId until a hard
+    // reload re-queries. router.refresh() only re-runs Server Components (most
+    // of admin fetches client-side), and per-hook cache invalidation would
+    // mean wiring every hook to activePractice — a full reload is the standard
+    // multi-tenant "switch context → invalidate everything" pattern.
+    //
+    // Deferred one tick so the caller's success toast (fired in
+    // PracticeContextChip AFTER this promise resolves) paints before the
+    // navigation tears the page down. ~half-second of toast, then reload.
+    if (typeof window !== 'undefined') {
+      setTimeout(() => window.location.reload(), 600);
+    }
   };
 
   // Manisha 2026-06-12 Doc 3 Q7 — idle session timeout. 15 min web,
