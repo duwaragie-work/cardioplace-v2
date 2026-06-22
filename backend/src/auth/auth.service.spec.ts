@@ -132,6 +132,12 @@ describe('AuthService', () => {
       practiceCoordinator: {
         findUnique: jest.fn().mockResolvedValue(null),
       },
+      // PR #90 — a MEDICAL_DIRECTOR's practice membership lives on
+      // PracticeMedicalDirector; resolvePracticeContext probes it so an MD who
+      // heads a practice (but isn't a provider-member) isn't blocked at sign-in.
+      practiceMedicalDirector: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       // MFA (Manisha 2026-06-12 §6). shouldChallengeMfa reads totpCredential
       // on the verifyOtp/selectPractice paths; default null = not enrolled =
       // no challenge, preserving existing sign-in test behavior.
@@ -1840,6 +1846,69 @@ describe('AuthService', () => {
         UserRole.MEDICAL_DIRECTOR,
       ])
       expect(result.kind).toBe('select')
+    })
+
+    // PR #90 regression (CI spec 10 medicalDirector sign-in 403'd) — an MD's
+    // membership lives on PracticeMedicalDirector, NOT PracticeProvider. The
+    // pre-fix lookup only probed PracticeProvider → 0 rows → kind:"blocked" →
+    // verifyOtp threw "No practice membership" and blocked every seeded MD.
+    it('MEDICAL_DIRECTOR who heads ONE practice (PracticeMedicalDirector only, no provider row) → kind:"auto"', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([])
+      ;(prisma.practiceMedicalDirector.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-cedar', name: 'Cedar Hill' } },
+      ])
+      const result = await service.resolvePracticeContext('md-1', [
+        UserRole.MEDICAL_DIRECTOR,
+      ])
+      expect(result).toEqual({ kind: 'auto', activePracticeId: 'p-cedar' })
+    })
+
+    it('MEDICAL_DIRECTOR heading 2 practices via PracticeMedicalDirector → kind:"select"', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([])
+      ;(prisma.practiceMedicalDirector.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-a', name: 'A' } },
+        { practice: { id: 'p-b', name: 'B' } },
+      ])
+      const result = await service.resolvePracticeContext('md-2', [
+        UserRole.MEDICAL_DIRECTOR,
+      ])
+      expect(result).toEqual({
+        kind: 'select',
+        practices: [
+          { id: 'p-a', name: 'A' },
+          { id: 'p-b', name: 'B' },
+        ],
+      })
+    })
+
+    it('MEDICAL_DIRECTOR who is ALSO a provider-member of the same practice → deduped to kind:"auto" (one practice)', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-cedar', name: 'Cedar Hill' } },
+      ])
+      ;(prisma.practiceMedicalDirector.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-cedar', name: 'Cedar Hill' } },
+      ])
+      const result = await service.resolvePracticeContext('md-3', [
+        UserRole.MEDICAL_DIRECTOR,
+      ])
+      expect(result).toEqual({ kind: 'auto', activePracticeId: 'p-cedar' })
+    })
+
+    it('MEDICAL_DIRECTOR with zero rows in BOTH relations → kind:"blocked" (Manisha §1 refusal preserved)', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([])
+      ;(prisma.practiceMedicalDirector.findMany as jest.Mock).mockResolvedValue([])
+      const result = await service.resolvePracticeContext('md-orphan', [
+        UserRole.MEDICAL_DIRECTOR,
+      ])
+      expect(result).toEqual({ kind: 'blocked' })
+    })
+
+    it('PROVIDER (not MED_DIR) never queries PracticeMedicalDirector', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-a', name: 'A' } },
+      ])
+      await service.resolvePracticeContext('prov-1', [UserRole.PROVIDER])
+      expect(prisma.practiceMedicalDirector.findMany).not.toHaveBeenCalled()
     })
 
     it('SUPER_ADMIN with 2+ memberships → still "none" (org-wide trumps)', async () => {

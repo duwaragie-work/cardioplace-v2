@@ -671,18 +671,38 @@ export class AuthService {
 
     if (!isMultiPracticeRole) return { kind: 'none' }
 
-    const memberships = await this.prisma.practiceProvider.findMany({
-      where: { userId },
-      select: { practiceId: true, practice: { select: { id: true, name: true } } },
-    })
-    if (memberships.length === 0) return { kind: 'blocked' }
-    if (memberships.length === 1) {
-      return { kind: 'auto', activePracticeId: memberships[0].practiceId }
+    // A clinical role's practice membership can live on EITHER relation:
+    //   • PROVIDER        → PracticeProvider (provider-member of the practice)
+    //   • MEDICAL_DIRECTOR → PracticeMedicalDirector (heads the practice) — and
+    //     optionally PracticeProvider too if they also see patients directly.
+    // Probe both and union by practiceId so a MED_DIR who heads a practice but
+    // isn't a provider-member isn't wrongly blocked at sign-in. Mirrors the
+    // COORDINATOR dual-relation fix (ba522f3) + resolvePracticeBundle. Manisha
+    // §1 STILL blocks a clinical role with ZERO membership across BOTH
+    // relations — the refusal rule is unchanged, only the lookup is corrected.
+    const isMedDir = roles.includes(UserRole.MEDICAL_DIRECTOR)
+    const [providerRows, medDirRows] = await Promise.all([
+      this.prisma.practiceProvider.findMany({
+        where: { userId },
+        select: { practice: { select: { id: true, name: true } } },
+      }),
+      isMedDir
+        ? this.prisma.practiceMedicalDirector.findMany({
+            where: { userId },
+            select: { practice: { select: { id: true, name: true } } },
+          })
+        : Promise.resolve([] as { practice: { id: string; name: string } }[]),
+    ])
+    const byId = new Map<string, { id: string; name: string }>()
+    for (const r of [...providerRows, ...medDirRows]) {
+      if (r.practice) byId.set(r.practice.id, r.practice)
     }
-    return {
-      kind: 'select',
-      practices: memberships.map((m) => ({ id: m.practice.id, name: m.practice.name })),
+    const practices = Array.from(byId.values())
+    if (practices.length === 0) return { kind: 'blocked' }
+    if (practices.length === 1) {
+      return { kind: 'auto', activePracticeId: practices[0].id }
     }
+    return { kind: 'select', practices }
   }
 
   /**
