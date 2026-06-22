@@ -106,7 +106,18 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
       ),
     }
     configService = {
-      get: jest.fn().mockImplementation((key: string, dflt?: string) => dflt),
+      // The Vertex-migration factory (buildGoogleGenAIClient) uses `get`
+      // for GOOGLE_API_KEY (not getOrThrow) so it can branch on
+      // GEMINI_PROVIDER before failing. Default mock returned `undefined`
+      // for unrecognized keys, which made the factory throw
+      // 'GOOGLE_API_KEY is not defined in environment' in every voice
+      // test that previously relied on the pre-migration getOrThrow.
+      // Stub a value here so the AI Studio branch (the default
+      // GEMINI_PROVIDER) constructs cleanly.
+      get: jest.fn().mockImplementation((key: string, dflt?: string) => {
+        if (key === 'GOOGLE_API_KEY') return 'test-google-api-key'
+        return dflt
+      }),
       getOrThrow: jest.fn().mockReturnValue('test-secret'),
     }
     // Bug 17 — voice now fetches the rolling session summary from
