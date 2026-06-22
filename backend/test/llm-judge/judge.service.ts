@@ -60,9 +60,25 @@ export class JudgeService {
   private ai: GoogleGenAI
 
   constructor() {
-    const key = process.env.GOOGLE_API_KEY
-    if (!key) throw new Error('GOOGLE_API_KEY required for judge')
-    this.ai = new GoogleGenAI({ apiKey: key })
+    // Match the production factory (backend/src/gemini/google-genai-client.factory.ts):
+    // branch on GEMINI_PROVIDER so the judge can run against either provider.
+    // Without this the e2e LLM-judge suite would silently skip in a
+    // Vertex-only env (no GOOGLE_API_KEY), losing CI coverage.
+    const provider = (process.env.GEMINI_PROVIDER ?? 'ai_studio').toLowerCase()
+    if (provider === 'vertex') {
+      const project = process.env.GOOGLE_CLOUD_PROJECT
+      if (!project) {
+        throw new Error(
+          'GEMINI_PROVIDER=vertex requires GOOGLE_CLOUD_PROJECT for the judge',
+        )
+      }
+      const location = process.env.GOOGLE_CLOUD_LOCATION ?? 'us-central1'
+      this.ai = new GoogleGenAI({ vertexai: true, project, location })
+    } else {
+      const key = process.env.GOOGLE_API_KEY
+      if (!key) throw new Error('GOOGLE_API_KEY required for judge')
+      this.ai = new GoogleGenAI({ apiKey: key })
+    }
   }
 
   async evaluate(opts: {

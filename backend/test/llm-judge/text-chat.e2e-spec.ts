@@ -5,7 +5,9 @@
  * verifies tool calls + emergency detection, and judges response quality.
  * All results logged to LangSmith.
  *
- * Requires: GOOGLE_API_KEY, DATABASE_URL, JWT_ACCESS_SECRET
+ * Requires: DATABASE_URL, JWT_ACCESS_SECRET, AND ONE OF:
+ *   • GOOGLE_API_KEY                                      (AI Studio path)
+ *   • GEMINI_PROVIDER=vertex + GOOGLE_CLOUD_PROJECT       (Vertex AI path)
  * Optional: LANGSMITH_API_KEY, LANGSMITH_PROJECT
  *
  * Run: npm run test:e2e -- --testPathPattern=llm-judge/text
@@ -16,7 +18,13 @@ import request from 'supertest'
 import { JudgeService, EvalResult } from './judge.service.js'
 import { setupTestApp, teardownTestApp, TestContext } from './test-helpers.js'
 
-const skip = !process.env.GOOGLE_API_KEY
+// Skip iff neither provider's credentials are available. Mirrors the
+// runtime provider selection in `backend/src/gemini/google-genai-client.factory.ts`.
+const hasAiStudioCreds = Boolean(process.env.GOOGLE_API_KEY)
+const hasVertexCreds =
+  (process.env.GEMINI_PROVIDER ?? '').toLowerCase() === 'vertex' &&
+  Boolean(process.env.GOOGLE_CLOUD_PROJECT)
+const skip = !hasAiStudioCreds && !hasVertexCreds
 const descr = skip ? describe.skip : describe
 
 descr('Text Chat — Real E2E + LLM-as-Judge', () => {
