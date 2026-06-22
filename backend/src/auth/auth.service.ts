@@ -51,6 +51,14 @@ export interface AuthResponse extends TokenPair {
   /** Phase/practice-identity — the practice the session is acting as. NULL
    *  for SUPER_ADMIN / HEALPLACE_OPS / PATIENT (audit captures null). */
   activePracticeId?: string | null
+  /** Phase/practice-identity (PR #90 Bug A) — the resolved active practice
+   *  WITH its name, so the admin chip can render "Acting as: <name>" on the
+   *  fresh sign-in/select window without waiting for /auth/profile. NULL when
+   *  activePracticeId is null. */
+  activePractice?: { id: string; name: string } | null
+  /** The user's switchable practice memberships. Mirrors /auth/profile so the
+   *  selector + chip dropdown have the full list immediately after select. */
+  availablePractices?: Array<{ id: string; name: string }>
   /** MFA — set true when enforcement is on and this MFA-required user has not
    *  yet enrolled TOTP. Tokens ARE issued (enrollment needs a session) but the
    *  FE redirects straight to the enrollment page instead of the dashboard,
@@ -487,7 +495,21 @@ export class AuthService {
       })
     }
 
-    const accessToken = await this.issueAccessToken(existing.user)
+    // Phase/practice-identity rehydrate-fix root cause (smoke 2026-06-18) —
+    // the new access token MUST carry the AuthSession's activePracticeId
+    // claim. Without it, every browser refresh quietly strips the practice
+    // context: the FE's rehydrate() got a JWT with activePracticeId=null,
+    // /auth/profile via @ActiveContext() got null, getProfile resolved
+    // activePractice=null, ZeroPracticeModal fired (or for the multi-
+    // practice provider's audited writes, practiceContext silently NULL'd).
+    // The AuthSession row preserves activePracticeId across rotation —
+    // the rotation just wasn't propagating it to the new JWT. Source of
+    // truth is the (now-just-updated) session; legacy refresh tokens with
+    // no paired session simply get null (no practice context to preserve).
+    const accessToken = await this.issueAccessToken(
+      existing.user,
+      existing.authSession?.activePracticeId ?? null,
+    )
 
     await this.logAuthEvent({
       event: 'refresh_success',
@@ -649,18 +671,38 @@ export class AuthService {
 
     if (!isMultiPracticeRole) return { kind: 'none' }
 
-    const memberships = await this.prisma.practiceProvider.findMany({
-      where: { userId },
-      select: { practiceId: true, practice: { select: { id: true, name: true } } },
-    })
-    if (memberships.length === 0) return { kind: 'blocked' }
-    if (memberships.length === 1) {
-      return { kind: 'auto', activePracticeId: memberships[0].practiceId }
+    // A clinical role's practice membership can live on EITHER relation:
+    //   • PROVIDER        → PracticeProvider (provider-member of the practice)
+    //   • MEDICAL_DIRECTOR → PracticeMedicalDirector (heads the practice) — and
+    //     optionally PracticeProvider too if they also see patients directly.
+    // Probe both and union by practiceId so a MED_DIR who heads a practice but
+    // isn't a provider-member isn't wrongly blocked at sign-in. Mirrors the
+    // COORDINATOR dual-relation fix (ba522f3) + resolvePracticeBundle. Manisha
+    // §1 STILL blocks a clinical role with ZERO membership across BOTH
+    // relations — the refusal rule is unchanged, only the lookup is corrected.
+    const isMedDir = roles.includes(UserRole.MEDICAL_DIRECTOR)
+    const [providerRows, medDirRows] = await Promise.all([
+      this.prisma.practiceProvider.findMany({
+        where: { userId },
+        select: { practice: { select: { id: true, name: true } } },
+      }),
+      isMedDir
+        ? this.prisma.practiceMedicalDirector.findMany({
+            where: { userId },
+            select: { practice: { select: { id: true, name: true } } },
+          })
+        : Promise.resolve([] as { practice: { id: string; name: string } }[]),
+    ])
+    const byId = new Map<string, { id: string; name: string }>()
+    for (const r of [...providerRows, ...medDirRows]) {
+      if (r.practice) byId.set(r.practice.id, r.practice)
     }
-    return {
-      kind: 'select',
-      practices: memberships.map((m) => ({ id: m.practice.id, name: m.practice.name })),
+    const practices = Array.from(byId.values())
+    if (practices.length === 0) return { kind: 'blocked' }
+    if (practices.length === 1) {
+      return { kind: 'auto', activePracticeId: practices[0].id }
     }
+    return { kind: 'select', practices }
   }
 
   /**
@@ -705,11 +747,7 @@ export class AuthService {
     })
     if (!user) throw new UnauthorizedException('User not found')
     this.assertAccountActive(user)
-    const membership = await this.prisma.practiceProvider.findUnique({
-      where: { practiceId_userId: { practiceId, userId: user.id } },
-      select: { id: true },
-    })
-    if (!membership) {
+    if (!(await this.isPracticeMember(user.id, practiceId))) {
       throw new ForbiddenException('Not a member of that practice')
     }
     // MFA gate (Manisha 2026-06-12 §6) — multi-practice provider/admin path.
@@ -734,11 +772,26 @@ export class AuthService {
       success: true,
     })
     const resp = this.buildAuthResponse(tokens, user, 'otp')
+    // PR #90 Bug A — carry the resolved practice name + memberships so the
+    // admin chip renders "Acting as: <name>" on the fresh select window
+    // (pre-fix it fell back to the "Acting as practice" placeholder until
+    // /auth/profile resolved the name post-refresh). Merged with the MFA
+    // enrollment gate (Manisha §6): this return is only reached when the
+    // user is NOT MFA-challenged (enrolled users returned MFA_REQUIRED at the
+    // gate above), so an enforcement-on-but-not-yet-enrolled user still gets
+    // tokens + the redirect-to-enroll flag alongside their practice context.
+    const bundle = await this.resolvePracticeBundle(user, practiceId)
     const mfaEnrollmentRequired = await this.shouldForceMfaEnrollment(
       user.id,
       user.roles,
     )
-    return { ...resp, activePracticeId: practiceId, mfaEnrollmentRequired }
+    return {
+      ...resp,
+      activePracticeId: practiceId,
+      activePractice: bundle.activePractice,
+      availablePractices: bundle.availablePractices,
+      mfaEnrollmentRequired,
+    }
   }
 
   /**
@@ -759,7 +812,12 @@ export class AuthService {
     rawRefreshToken: string,
     practiceId: string,
     context?: SessionContext,
-  ): Promise<{ activePracticeId: string; accessToken: string }> {
+  ): Promise<{
+    activePracticeId: string
+    accessToken: string
+    activePractice: { id: string; name: string } | null
+    availablePractices: Array<{ id: string; name: string }>
+  }> {
     const tokenHash = sha256(rawRefreshToken)
     const existing = await this.prisma.refreshToken.findFirst({
       where: { tokenHash, userId, revokedAt: null },
@@ -776,12 +834,13 @@ export class AuthService {
     refreshTokenId: string,
     practiceId: string,
     context?: SessionContext,
-  ): Promise<{ activePracticeId: string; accessToken: string }> {
-    const membership = await this.prisma.practiceProvider.findUnique({
-      where: { practiceId_userId: { practiceId, userId } },
-      select: { id: true },
-    })
-    if (!membership) {
+  ): Promise<{
+    activePracticeId: string
+    accessToken: string
+    activePractice: { id: string; name: string } | null
+    availablePractices: Array<{ id: string; name: string }>
+  }> {
+    if (!(await this.isPracticeMember(userId, practiceId))) {
       throw new ForbiddenException('Not a member of that practice')
     }
     const prior = await this.prisma.authSession.findUnique({
@@ -815,7 +874,108 @@ export class AuthService {
       practiceContext: practiceId,
       success: true,
     })
-    return { activePracticeId: practiceId, accessToken }
+    const bundle = await this.resolvePracticeBundle(session.user, practiceId)
+    return {
+      activePracticeId: practiceId,
+      accessToken,
+      activePractice: bundle.activePractice,
+      availablePractices: bundle.availablePractices,
+    }
+  }
+
+  /**
+   * Phase/practice-identity (PR #90 Bug A) — resolve the active practice
+   * (with name) + the user's switchable memberships for a given
+   * activePracticeId. Mirrors the logic /auth/profile uses so select /
+   * switch responses carry the same shape the rehydrate path returns —
+   * which is what lets the admin chip render "Acting as: <name>" on the
+   * fresh sign-in window instead of the "Acting as practice" placeholder.
+   *
+   * Probes BOTH membership relations (PracticeProvider 1:N for PROVIDER /
+   * MED_DIR, PracticeCoordinator 1:1 for COORDINATOR) — same dual-relation
+   * pattern as resolvePracticeContext() and JwtStrategy.validate().
+   * Org-wide roles (SUPER_ADMIN / HEALPLACE_OPS) get null/[].
+   */
+  /**
+   * Whether `userId` holds membership in `practiceId` via EITHER the
+   * PracticeProvider (PROVIDER) or PracticeMedicalDirector (MED_DIR) relation.
+   * Gates select-practice / switch-practice. PR #90: a MED_DIR heads a
+   * practice via PracticeMedicalDirector, so probing only PracticeProvider
+   * wrongly rejected a multi-practice MED_DIR picking a practice they head.
+   * (COORDINATOR is 1:1 + auto-resolved, so it never reaches select/switch.)
+   */
+  private async isPracticeMember(
+    userId: string,
+    practiceId: string,
+  ): Promise<boolean> {
+    const [asProvider, asMedDir] = await Promise.all([
+      this.prisma.practiceProvider.findUnique({
+        where: { practiceId_userId: { practiceId, userId } },
+        select: { id: true },
+      }),
+      this.prisma.practiceMedicalDirector.findUnique({
+        where: { practiceId_userId: { practiceId, userId } },
+        select: { id: true },
+      }),
+    ])
+    return asProvider !== null || asMedDir !== null
+  }
+
+  private async resolvePracticeBundle(
+    user: { id: string; roles: UserRole[] },
+    activePracticeId: string | null,
+  ): Promise<{
+    activePractice: { id: string; name: string } | null
+    availablePractices: Array<{ id: string; name: string }>
+  }> {
+    const isOrgWide =
+      user.roles.includes(UserRole.SUPER_ADMIN) ||
+      user.roles.includes(UserRole.HEALPLACE_OPS)
+    const isCoordinator = user.roles.includes(UserRole.COORDINATOR)
+    const isMedDir = user.roles.includes(UserRole.MEDICAL_DIRECTOR)
+
+    const availablePractices: Array<{ id: string; name: string }> = []
+    if (!isOrgWide) {
+      // PR #90: probe ALL three membership relations. A MED_DIR heads a
+      // practice via PracticeMedicalDirector (not PracticeProvider) — omitting
+      // it left availablePractices empty + activePractice null on /auth/profile,
+      // which fired the FE ZeroPracticeModal on every medical-director page and
+      // its overlay swallowed all clicks.
+      const [providerRows, medDirRows, coordinatorRow] = await Promise.all([
+        this.prisma.practiceProvider.findMany({
+          where: { userId: user.id },
+          select: { practice: { select: { id: true, name: true } } },
+        }),
+        isMedDir
+          ? this.prisma.practiceMedicalDirector.findMany({
+              where: { userId: user.id },
+              select: { practice: { select: { id: true, name: true } } },
+            })
+          : Promise.resolve([] as { practice: { id: string; name: string } }[]),
+        isCoordinator
+          ? this.prisma.practiceCoordinator.findUnique({
+              where: { userId: user.id },
+              select: { practice: { select: { id: true, name: true } } },
+            })
+          : Promise.resolve(null),
+      ])
+      const seen = new Set<string>()
+      for (const r of [...providerRows, ...medDirRows]) {
+        if (r.practice && !seen.has(r.practice.id)) {
+          availablePractices.push(r.practice)
+          seen.add(r.practice.id)
+        }
+      }
+      if (coordinatorRow?.practice && !seen.has(coordinatorRow.practice.id)) {
+        availablePractices.push(coordinatorRow.practice)
+      }
+    }
+
+    const activePractice = activePracticeId
+      ? availablePractices.find((p) => p.id === activePracticeId) ?? null
+      : null
+
+    return { activePractice, availablePractices }
   }
 
   // ─── MFA — TOTP second factor (Manisha 2026-06-12 §6) ─────────────────────
@@ -2647,45 +2807,17 @@ export class AuthService {
     // membership is 1:1 on PracticeCoordinator; PROVIDER / MED_DIR is 1:N
     // on PracticeProvider. SUPER_ADMIN / HEALPLACE_OPS are unscoped and
     // get null/[].
-    const isOrgWide =
-      user.roles.includes(UserRole.SUPER_ADMIN) ||
-      user.roles.includes(UserRole.HEALPLACE_OPS)
-    const isCoordinator = user.roles.includes(UserRole.COORDINATOR)
-    const activePracticeIdFromCtx = ctx?.practiceId ?? null
-
-    let availablePractices: Array<{ id: string; name: string }> = []
-    if (!isOrgWide) {
-      const [providerRows, coordinatorRow] = await Promise.all([
-        this.prisma.practiceProvider.findMany({
-          where: { userId: user.id },
-          select: { practice: { select: { id: true, name: true } } },
-        }),
-        isCoordinator
-          ? this.prisma.practiceCoordinator.findUnique({
-              where: { userId: user.id },
-              select: { practice: { select: { id: true, name: true } } },
-            })
-          : Promise.resolve(null),
-      ])
-      const seen = new Set<string>()
-      for (const r of providerRows) {
-        if (r.practice && !seen.has(r.practice.id)) {
-          availablePractices.push(r.practice)
-          seen.add(r.practice.id)
-        }
-      }
-      if (coordinatorRow?.practice && !seen.has(coordinatorRow.practice.id)) {
-        availablePractices.push(coordinatorRow.practice)
-      }
-    }
     // activePractice is the row matching the JWT's activePracticeId — if
     // the JWT carries a stale id (practice deleted after sign-in) we
     // return null + leave the FE to surface the ZeroPracticeModal
-    // correctly (this case = genuinely no practice).
-    const activePractice =
-      activePracticeIdFromCtx
-        ? availablePractices.find((p) => p.id === activePracticeIdFromCtx) ?? null
-        : null
+    // correctly (this case = genuinely no practice). Shared with
+    // selectPractice / switchPractice via resolvePracticeBundle (PR #90).
+    const activePracticeIdFromCtx = ctx?.practiceId ?? null
+    const { activePractice, availablePractices } =
+      await this.resolvePracticeBundle(
+        { id: user.id, roles: user.roles },
+        activePracticeIdFromCtx,
+      )
 
     return {
       id: user.id,

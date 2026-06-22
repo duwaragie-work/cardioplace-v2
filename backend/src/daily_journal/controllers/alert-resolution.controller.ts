@@ -57,7 +57,11 @@ export class AlertResolutionController {
       id: string
       roles: UserRole[]
     }
-    return this.service.acknowledge(id, { id: actorId, roles }, ctx)
+    return this.service.acknowledge(
+      id,
+      { id: actorId, roles, activePracticeId: ctx.practiceId },
+      ctx,
+    )
   }
 
   @Post(':id/resolve')
@@ -73,7 +77,12 @@ export class AlertResolutionController {
       id: string
       roles: UserRole[]
     }
-    return this.service.resolve(id, { id: actorId, roles }, dto, ctx)
+    return this.service.resolve(
+      id,
+      { id: actorId, roles, activePracticeId: ctx.practiceId },
+      dto,
+      ctx,
+    )
   }
 
   @Get(':id/audit')

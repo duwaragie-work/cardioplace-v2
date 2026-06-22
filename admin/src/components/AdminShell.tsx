@@ -36,7 +36,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   // pages, so they must not render the sidebar / top bar.
   if (
     PUBLIC_PATHS.has(pathname) ||
-    pathname.startsWith('/sign-in/') ||
+    pathname.startsWith('/sign-in/') ||   // pre-session sub-routes: select-practice, MFA challenge, forced TOTP enroll
     pathname.startsWith('/auth/') ||
     pathname.startsWith('/activate/')
   ) {

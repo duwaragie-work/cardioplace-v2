@@ -85,20 +85,30 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   async validate(payload: JwtPayload) {
     const activePracticeId = payload.activePracticeId ?? null
     if (activePracticeId) {
-      // Membership can live on either of two 1:N relations depending on role:
-      //   • PROVIDER / MED_DIR → PracticeProvider (compound practiceId_userId)
-      //   • COORDINATOR        → PracticeCoordinator (1:1 by userId)
-      // Earlier this only checked PracticeProvider — that bounced every
-      // COORDINATOR request with PRACTICE_MEMBERSHIP_REVOKED because their
-      // activePracticeId (auto-set in resolvePracticeContext from
-      // PracticeCoordinator) never matched a PracticeProvider row. Spec 38.3
-      // saw 401s where it expected 200/403; specs 35.x / 37.x / 38.x all
-      // appeared to "time out" because /me + /admin/* both 401'd, leaving
-      // the admin shell stuck at the spinner. Probe both relations: as long
-      // as ONE of them confirms membership for the active practice, the
-      // request is authentic.
-      const [asProvider, asCoordinator] = await Promise.all([
+      // Membership can live on ANY of three relations depending on role:
+      //   • PROVIDER         → PracticeProvider (compound practiceId_userId)
+      //   • MEDICAL_DIRECTOR → PracticeMedicalDirector (compound practiceId_userId)
+      //   • COORDINATOR      → PracticeCoordinator (1:1 by userId)
+      // Earlier this only checked PracticeProvider (+ later PracticeCoordinator)
+      // — that bounced every MED_DIR / COORDINATOR request with
+      // PRACTICE_MEMBERSHIP_REVOKED because their activePracticeId (resolved in
+      // resolvePracticeContext from PracticeMedicalDirector / PracticeCoordinator)
+      // never matched a PracticeProvider row. PR #90: a MED_DIR heads a practice
+      // via PracticeMedicalDirector, NOT PracticeProvider, so omitting it bounced
+      // every medicalDirector to /sign-in/select-practice?reason=membership-changed
+      // immediately after a successful sign-in. Probe all three: as long as ONE
+      // confirms membership for the active practice, the request is authentic.
+      const [asProvider, asMedDir, asCoordinator] = await Promise.all([
         this.prisma.practiceProvider.findUnique({
+          where: {
+            practiceId_userId: {
+              practiceId: activePracticeId,
+              userId: payload.sub,
+            },
+          },
+          select: { id: true },
+        }),
+        this.prisma.practiceMedicalDirector.findUnique({
           where: {
             practiceId_userId: {
               practiceId: activePracticeId,
@@ -114,7 +124,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       ])
       const coordinatorMatch =
         asCoordinator !== null && asCoordinator.practiceId === activePracticeId
-      if (!asProvider && !coordinatorMatch) {
+      if (!asProvider && !asMedDir && !coordinatorMatch) {
         throw new UnauthorizedException({
           message: 'Your practice membership has changed — please pick a practice again.',
           errorCode: 'PRACTICE_MEMBERSHIP_REVOKED',

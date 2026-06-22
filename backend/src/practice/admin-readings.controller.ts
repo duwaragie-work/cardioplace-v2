@@ -21,7 +21,9 @@ import { CreateJournalEntryDto } from '../daily_journal/dto/create-journal-entry
 import { UpdateJournalEntryDto } from '../daily_journal/dto/update-journal-entry.dto.js'
 import { UserRole } from '../generated/prisma/enums.js'
 
-type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
+type AuthedReq = Request & {
+  user: { id: string; roles: UserRole[]; activePracticeId?: string | null }
+}
 
 // Care-team CRUD on patient readings — clinic-floor entry on the patient's
 // behalf (coordinator/provider keying in cuff readings) + transcription-error
@@ -102,6 +104,10 @@ export class AdminReadingsController {
   }
 
   private actorOf(req: AuthedReq): ActorUser {
-    return { id: req.user.id, roles: req.user.roles }
+    return {
+      id: req.user.id,
+      roles: req.user.roles,
+      activePracticeId: req.user.activePracticeId,
+    }
   }
 }
