@@ -932,14 +932,26 @@ export class AuthService {
       user.roles.includes(UserRole.SUPER_ADMIN) ||
       user.roles.includes(UserRole.HEALPLACE_OPS)
     const isCoordinator = user.roles.includes(UserRole.COORDINATOR)
+    const isMedDir = user.roles.includes(UserRole.MEDICAL_DIRECTOR)
 
     const availablePractices: Array<{ id: string; name: string }> = []
     if (!isOrgWide) {
-      const [providerRows, coordinatorRow] = await Promise.all([
+      // PR #90: probe ALL three membership relations. A MED_DIR heads a
+      // practice via PracticeMedicalDirector (not PracticeProvider) — omitting
+      // it left availablePractices empty + activePractice null on /auth/profile,
+      // which fired the FE ZeroPracticeModal on every medical-director page and
+      // its overlay swallowed all clicks.
+      const [providerRows, medDirRows, coordinatorRow] = await Promise.all([
         this.prisma.practiceProvider.findMany({
           where: { userId: user.id },
           select: { practice: { select: { id: true, name: true } } },
         }),
+        isMedDir
+          ? this.prisma.practiceMedicalDirector.findMany({
+              where: { userId: user.id },
+              select: { practice: { select: { id: true, name: true } } },
+            })
+          : Promise.resolve([] as { practice: { id: string; name: string } }[]),
         isCoordinator
           ? this.prisma.practiceCoordinator.findUnique({
               where: { userId: user.id },
@@ -948,7 +960,7 @@ export class AuthService {
           : Promise.resolve(null),
       ])
       const seen = new Set<string>()
-      for (const r of providerRows) {
+      for (const r of [...providerRows, ...medDirRows]) {
         if (r.practice && !seen.has(r.practice.id)) {
           availablePractices.push(r.practice)
           seen.add(r.practice.id)

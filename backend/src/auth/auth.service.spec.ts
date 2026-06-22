@@ -1091,6 +1091,33 @@ describe('AuthService', () => {
         ])
       })
 
+      // PR #90 regression — a MED_DIR heads a practice via PracticeMedicalDirector,
+      // not PracticeProvider. Pre-fix /auth/profile returned activePractice null +
+      // availablePractices [] for every medical-director, firing the FE
+      // ZeroPracticeModal whose overlay swallowed all clicks on the patient detail.
+      it('MEDICAL_DIRECTOR (PracticeMedicalDirector, no provider row) → resolves the headed practice as activePractice + availablePractice', async () => {
+        ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(
+          dbRowFor([UserRole.MEDICAL_DIRECTOR]),
+        )
+        ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([])
+        ;(prisma.practiceMedicalDirector.findMany as jest.Mock).mockResolvedValue([
+          { practice: { id: 'seed-cedar-hill', name: 'Cedar Hill' } },
+        ])
+
+        const result = await service.getProfile(mockUser.id, {
+          practiceId: 'seed-cedar-hill',
+        })
+
+        expect(result.activePracticeId).toBe('seed-cedar-hill')
+        expect(result.activePractice).toEqual({
+          id: 'seed-cedar-hill',
+          name: 'Cedar Hill',
+        })
+        expect(result.availablePractices).toEqual([
+          { id: 'seed-cedar-hill', name: 'Cedar Hill' },
+        ])
+      })
+
       it('JWT carries a STALE activePracticeId (practice deleted post-sign-in) → activePractice null + availablePractices unchanged (FE will route to selector / show ZeroPracticeModal correctly)', async () => {
         ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(
           dbRowFor([UserRole.PROVIDER]),
