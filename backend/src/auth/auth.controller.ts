@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -38,6 +39,12 @@ import {
   MfaChallengeDto,
   MfaRecoveryDto,
 } from './dto/mfa.dto.js'
+import {
+  WebAuthnAuthOptionsDto,
+  WebAuthnAuthVerifyDto,
+  WebAuthnRecoverDto,
+  WebAuthnRegisterVerifyDto,
+} from './dto/webauthn.dto.js'
 import { Roles } from './decorators/roles.decorator.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
 
@@ -179,6 +186,12 @@ export class AuthController {
     // Pass the discriminator through verbatim; the FE routes to the TOTP
     // challenge page and POSTs /mfa/challenge next.
     if ('status' in result && result.status === 'MFA_REQUIRED') {
+      return result
+    }
+    // Patient biometric gate — a patient with a registered device gets a
+    // WebAuthn challenge instead of tokens. Return it verbatim; the patient FE
+    // fetches options + POSTs /webauthn/authenticate/verify next.
+    if ('status' in result && result.status === 'WEBAUTHN_REQUIRED') {
       return result
     }
     // Scope cookies to the destination app (admin-role users land on the
@@ -351,6 +364,95 @@ export class AuthController {
     )
   }
 
+  // ─── WebAuthn — patient biometric second factor (Face ID / fingerprint) ─────
+
+  // Registration is performed by an authenticated patient (post first factor),
+  // so these two routes rely on the default JwtAuthGuard and read req.user.
+
+  @Post('webauthn/register/start')
+  async webAuthnRegisterStart(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.startWebAuthnRegistration(id)
+  }
+
+  @Post('webauthn/register/verify')
+  async webAuthnRegisterVerify(
+    @Body() dto: WebAuthnRegisterVerifyDto,
+    @Req() req: Request,
+  ) {
+    const { id } = req.user as { id: string }
+    return this.authService.completeWebAuthnRegistration(
+      id,
+      dto.registrationToken,
+      dto.response,
+      dto.deviceName,
+      this.buildAuthContext(req),
+    )
+  }
+
+  // Authentication runs pre-token (the patient only holds the short-lived
+  // challenge token), so options/verify/recover are Public.
+
+  @Public()
+  @Post('webauthn/authenticate/options')
+  async webAuthnAuthOptions(@Body() dto: WebAuthnAuthOptionsDto) {
+    return this.authService.webAuthnAuthenticationOptions(dto.challengeToken)
+  }
+
+  @Public()
+  @Post('webauthn/authenticate/verify')
+  async webAuthnAuthVerify(
+    @Body() dto: WebAuthnAuthVerifyDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.webAuthnAuthenticate(
+      dto.challengeToken,
+      dto.response,
+      context,
+    )
+    this.issueSessionCookies(res, result)
+    await this.trackDevice(req, context, result.userId)
+    return result
+  }
+
+  @Public()
+  @Post('webauthn/authenticate/recover')
+  async webAuthnAuthRecover(
+    @Body() dto: WebAuthnRecoverDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.webAuthnRecoverDisable(
+      dto.challengeToken,
+      context,
+    )
+    this.issueSessionCookies(res, result)
+    await this.trackDevice(req, context, result.userId)
+    return result
+  }
+
+  @Get('webauthn/credentials')
+  async webAuthnListCredentials(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.listWebAuthnCredentials(id)
+  }
+
+  @Delete('webauthn/credentials/:id')
+  async webAuthnDeleteCredential(
+    @Param('id') credentialRowId: string,
+    @Req() req: Request,
+  ) {
+    const { id } = req.user as { id: string }
+    return this.authService.deleteWebAuthnCredential(
+      id,
+      credentialRowId,
+      this.buildAuthContext(req),
+    )
+  }
+
   // ─── Magic Link ────────────────────────────────────────────────────────────────
 
   @Public()
@@ -392,6 +494,14 @@ export class AuthController {
       if ('status' in result && result.status === 'MFA_REQUIRED') {
         const sp = new URLSearchParams({ challengeToken: result.challengeToken })
         res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/mfa-challenge?${sp.toString()}`)
+        return
+      }
+      // Patient biometric gate — a patient with a registered device bounces to
+      // the patient app's biometric page carrying the challenge token. Always
+      // the patient app (biometric is patient-side; providers use TOTP above).
+      if ('status' in result && result.status === 'WEBAUTHN_REQUIRED') {
+        const sp = new URLSearchParams({ challengeToken: result.challengeToken })
+        res.redirect(`${patientAppUrl}/sign-in/biometric?${sp.toString()}`)
         return
       }
       // Magic-link verify is a top-level GET (clicked from an email) so the

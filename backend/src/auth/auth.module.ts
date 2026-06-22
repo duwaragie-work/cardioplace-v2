@@ -9,6 +9,7 @@ import { AuthService } from './auth.service.js'
 import { GeolocationService } from './geolocation.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { MfaService } from './mfa.service.js'
+import { WebAuthnService } from './webauthn.service.js'
 import { Public } from './decorators/public.decorator.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
 import { MfaRequiredGuard } from './guards/mfa-required.guard.js'
@@ -35,6 +36,7 @@ export { Public }
     BcryptService,
     GeolocationService,
     MfaService,
+    WebAuthnService,
     JwtStrategy,
     // GoogleStrategy,   // DISABLED – OTP-only auth
     // AppleStrategy,    // DISABLED – OTP-only auth

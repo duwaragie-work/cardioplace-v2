@@ -21,6 +21,12 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
 import { MfaService } from './mfa.service.js'
+import { WebAuthnService } from './webauthn.service.js'
+import type {
+  AuthenticatorTransportFuture,
+  AuthenticationResponseJSON,
+  RegistrationResponseJSON,
+} from '@simplewebauthn/server'
 import { mfaResetEmailHtml } from '../email/email-templates.js'
 import type { ProfileDto } from './dto/profile.dto.js'
 
@@ -92,10 +98,25 @@ export interface InviteSignInRequired {
   roles: UserRole[]
 }
 
+/**
+ * Patient biometric second factor (WebAuthn / passkeys). When a patient who
+ * has registered a biometric device clears the first factor (OTP / magic-link)
+ * we do NOT issue tokens yet — we return this shape so the FE fetches the
+ * assertion options (POST /webauthn/authenticate/options) and completes the
+ * Face ID / fingerprint prompt. The challenge token is a short-lived signed JWT
+ * carrying the verified userId + the WebAuthn challenge; POST
+ * /webauthn/authenticate/verify exchanges it for the real token pair.
+ */
+export interface WebAuthnRequired {
+  status: 'WEBAUTHN_REQUIRED'
+  challengeToken: string
+}
+
 export type AuthVerifyResult =
   | AuthResponse
   | PracticeSelectRequired
   | MfaRequired
+  | WebAuthnRequired
 
 // June 2026 — session context piped from controller → service to populate
 // AuthSession (concurrent-session limit + idle tracking). All optional —
@@ -219,6 +240,13 @@ function requiresMfa(roles: UserRole[]): boolean {
   return roles.some((r) => MFA_REQUIRED_ROLES.includes(r))
 }
 
+// Patient biometric second factor (WebAuthn / passkeys). Optional + opt-in, so
+// there's no enforcement flag — the gate fires only when the patient has
+// registered at least one device. Short-lived tokens carry the challenge so
+// the ceremony stays stateless across backend instances.
+const WEBAUTHN_CHALLENGE_TTL = '5m'
+const WEBAUTHN_REGISTER_TTL = '10m'
+
 type PracticeResolution =
   | { kind: 'auto'; activePracticeId: string }
   | { kind: 'select'; practices: Array<{ id: string; name: string }> }
@@ -235,6 +263,7 @@ export class AuthService {
     private emailService: EmailService,
     private geolocation: GeolocationService,
     private mfaService: MfaService,
+    private webAuthnService: WebAuthnService,
   ) {}
 
   // ─── Token Issuance ─────────────────────────────────────────────────────────
@@ -1220,6 +1249,400 @@ export class AuthService {
     }
   }
 
+  // ─── WebAuthn — patient biometric second factor (Face ID / fingerprint) ─────
+  //
+  // OPTIONAL, opt-in from patient settings. OTP / magic-link stays the first
+  // factor; this only adds a second step once a patient has registered a
+  // device. Patients with no registered credential are completely unaffected,
+  // so this doesn't change sign-in for anyone else. Registration requires an
+  // existing session (JwtAuthGuard), so a not-yet-signed-in user is never
+  // shown setup — they enable it later from settings.
+
+  /** Whether this sign-in must clear a biometric second factor — true only for
+   *  a PATIENT who has registered at least one device. */
+  private async shouldChallengeWebAuthn(
+    userId: string,
+    roles: UserRole[],
+  ): Promise<boolean> {
+    if (!roles.includes(UserRole.PATIENT)) return false
+    const count = await this.prisma.webAuthnCredential.count({
+      where: { userId },
+    })
+    return count > 0
+  }
+
+  private async signWebAuthnAuthToken(
+    userId: string,
+    challenge: string,
+    activePracticeId: string | null,
+  ): Promise<string> {
+    return this.jwtService.signAsync(
+      {
+        sub: userId,
+        kind: 'webauthn_auth',
+        challenge,
+        activePracticeId: activePracticeId ?? null,
+      },
+      { expiresIn: WEBAUTHN_CHALLENGE_TTL },
+    )
+  }
+
+  private async verifyWebAuthnAuthToken(token: string): Promise<{
+    userId: string
+    challenge: string
+    activePracticeId: string | null
+  }> {
+    let payload: {
+      sub: string
+      kind: string
+      challenge: string
+      activePracticeId?: string | null
+    }
+    try {
+      payload = await this.jwtService.verifyAsync(token)
+    } catch {
+      throw new UnauthorizedException('Biometric challenge invalid or expired')
+    }
+    if (payload.kind !== 'webauthn_auth') {
+      throw new UnauthorizedException('Biometric challenge invalid or expired')
+    }
+    return {
+      userId: payload.sub,
+      challenge: payload.challenge,
+      activePracticeId: payload.activePracticeId ?? null,
+    }
+  }
+
+  private async signWebAuthnRegToken(
+    userId: string,
+    challenge: string,
+  ): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: userId, kind: 'webauthn_reg', challenge },
+      { expiresIn: WEBAUTHN_REGISTER_TTL },
+    )
+  }
+
+  private async verifyWebAuthnRegToken(
+    token: string,
+    expectedUserId: string,
+  ): Promise<string> {
+    let payload: { sub: string; kind: string; challenge: string }
+    try {
+      payload = await this.jwtService.verifyAsync(token)
+    } catch {
+      throw new BadRequestException(
+        'Biometric setup expired — start setup again',
+      )
+    }
+    if (payload.kind !== 'webauthn_reg' || payload.sub !== expectedUserId) {
+      throw new BadRequestException('Biometric setup invalid — start again')
+    }
+    return payload.challenge
+  }
+
+  /** Sign-in gate helper — mint the challenge token returned as
+   *  WEBAUTHN_REQUIRED. The actual assertion options are fetched separately
+   *  (webAuthnAuthenticationOptions) so the OTP and magic-link paths share one
+   *  small response shape. */
+  private async startWebAuthnAuthentication(
+    userId: string,
+    activePracticeId: string | null,
+  ): Promise<string> {
+    const challenge = this.webAuthnService.randomChallenge()
+    return this.signWebAuthnAuthToken(userId, challenge, activePracticeId)
+  }
+
+  /** Build the navigator.credentials.get() options for a pending second factor.
+   *  allowCredentials is the patient's registered devices, so the browser only
+   *  prompts on a device that holds one of them. */
+  async webAuthnAuthenticationOptions(challengeToken: string) {
+    const { userId, challenge } =
+      await this.verifyWebAuthnAuthToken(challengeToken)
+    const creds = await this.prisma.webAuthnCredential.findMany({
+      where: { userId },
+      select: { credentialId: true, transports: true },
+    })
+    if (creds.length === 0) {
+      throw new BadRequestException('No biometric devices registered')
+    }
+    return this.webAuthnService.buildAuthenticationOptions({
+      challenge,
+      allowCredentials: creds.map((c) => ({
+        id: c.credentialId,
+        transports: c.transports as AuthenticatorTransportFuture[],
+      })),
+    })
+  }
+
+  /** Complete the biometric second factor — verify the assertion, bump the
+   *  signature counter, and issue the real token pair. */
+  async webAuthnAuthenticate(
+    challengeToken: string,
+    response: AuthenticationResponseJSON,
+    context?: SessionContext,
+  ): Promise<AuthResponse> {
+    const { userId, challenge, activePracticeId } =
+      await this.verifyWebAuthnAuthToken(challengeToken)
+    const cred = await this.prisma.webAuthnCredential.findUnique({
+      where: { credentialId: response.id },
+    })
+    if (!cred || cred.userId !== userId) {
+      await this.logAuthEvent({
+        event: 'webauthn_auth_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        practiceContext: activePracticeId,
+        success: false,
+        errorCode: 'unknown_credential',
+      })
+      throw new UnauthorizedException('Biometric device not recognized')
+    }
+    let verification: Awaited<
+      ReturnType<WebAuthnService['verifyAuthentication']>
+    >
+    try {
+      verification = await this.webAuthnService.verifyAuthentication({
+        response,
+        challenge,
+        credential: {
+          id: cred.credentialId,
+          publicKey: cred.publicKey,
+          counter: cred.counter,
+          transports: cred.transports as AuthenticatorTransportFuture[],
+        },
+      })
+    } catch {
+      verification = { verified: false } as typeof verification
+    }
+    if (!verification.verified) {
+      await this.logAuthEvent({
+        event: 'webauthn_auth_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        practiceContext: activePracticeId,
+        success: false,
+        errorCode: 'assertion_failed',
+      })
+      throw new UnauthorizedException('Biometric verification failed')
+    }
+    // Persist the new signature counter (replay-protection) + last-used stamp.
+    await this.prisma.webAuthnCredential.update({
+      where: { id: cred.id },
+      data: {
+        counter: verification.authenticationInfo.newCounter,
+        lastUsedAt: new Date(),
+      },
+    })
+    const user = await this.loadActiveUser(userId)
+    const tokens = await this.issueTokenPair(user, {
+      ...context,
+      activePracticeId,
+    })
+    await this.logAuthEvent({
+      event: 'webauthn_auth_succeeded',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      practiceContext: activePracticeId,
+      success: true,
+    })
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    return { ...resp, activePracticeId }
+  }
+
+  /** Graceful lost-device recovery. The challenge token proves a fresh
+   *  first-factor pass (OTP / magic-link), so a patient who can no longer use
+   *  their biometric (lost / wiped device) can remove it and sign in. This is
+   *  acceptable because email/OTP is the account-recovery root for patients;
+   *  it prevents a permanent lockout that a device-bound second factor would
+   *  otherwise create. */
+  async webAuthnRecoverDisable(
+    challengeToken: string,
+    context?: SessionContext,
+  ): Promise<AuthResponse> {
+    const { userId, activePracticeId } =
+      await this.verifyWebAuthnAuthToken(challengeToken)
+    await this.prisma.webAuthnCredential.deleteMany({ where: { userId } })
+    const user = await this.loadActiveUser(userId)
+    const tokens = await this.issueTokenPair(user, {
+      ...context,
+      activePracticeId,
+    })
+    await this.logAuthEvent({
+      event: 'webauthn_recovery_disabled',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      practiceContext: activePracticeId,
+      success: true,
+    })
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    return { ...resp, activePracticeId }
+  }
+
+  /** Settings — start biometric registration (patient only). Returns the
+   *  create() options + a stateless registration token carrying the challenge.
+   *  The secret material never touches the server until verify. */
+  async startWebAuthnRegistration(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, name: true, roles: true },
+    })
+    if (!user) throw new NotFoundException('User not found')
+    if (!user.roles.includes(UserRole.PATIENT)) {
+      throw new ForbiddenException(
+        'Biometric sign-in is only available for patient accounts',
+      )
+    }
+    const existing = await this.prisma.webAuthnCredential.findMany({
+      where: { userId },
+      select: { credentialId: true, transports: true },
+    })
+    const challenge = this.webAuthnService.randomChallenge()
+    const options = await this.webAuthnService.buildRegistrationOptions({
+      userId,
+      userName: user.email ?? userId,
+      userDisplayName: user.name ?? user.email ?? 'Patient',
+      challenge,
+      excludeCredentials: existing.map((c) => ({
+        id: c.credentialId,
+        transports: c.transports as AuthenticatorTransportFuture[],
+      })),
+    })
+    const registrationToken = await this.signWebAuthnRegToken(userId, challenge)
+    await this.logAuthEvent({
+      event: 'webauthn_registration_started',
+      userId,
+      method: 'otp',
+      success: true,
+    })
+    return { options, registrationToken }
+  }
+
+  /** Settings — finish registration: verify the attestation and persist the
+   *  credential. The patient can now use biometric as a second factor. */
+  async completeWebAuthnRegistration(
+    userId: string,
+    registrationToken: string,
+    response: RegistrationResponseJSON,
+    deviceName: string | undefined,
+    context?: SessionContext,
+  ): Promise<{ id: string; deviceName: string | null }> {
+    const challenge = await this.verifyWebAuthnRegToken(
+      registrationToken,
+      userId,
+    )
+    let verification: Awaited<ReturnType<WebAuthnService['verifyRegistration']>>
+    try {
+      verification = await this.webAuthnService.verifyRegistration({
+        response,
+        challenge,
+      })
+    } catch {
+      verification = { verified: false } as typeof verification
+    }
+    if (!verification.verified || !verification.registrationInfo) {
+      await this.logAuthEvent({
+        event: 'webauthn_registration_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'attestation_failed',
+      })
+      throw new BadRequestException('Biometric setup could not be verified')
+    }
+    const info = verification.registrationInfo
+    // Guard the unique constraint with a friendly message (same device already
+    // registered, possibly to another account).
+    const dup = await this.prisma.webAuthnCredential.findUnique({
+      where: { credentialId: info.credential.id },
+      select: { id: true },
+    })
+    if (dup) {
+      throw new BadRequestException('This device is already registered')
+    }
+    const saved = await this.prisma.webAuthnCredential.create({
+      data: {
+        userId,
+        credentialId: info.credential.id,
+        publicKey: this.webAuthnService.encodePublicKey(info.credential.publicKey),
+        counter: info.credential.counter,
+        transports: info.credential.transports ?? [],
+        deviceType: info.credentialDeviceType,
+        backedUp: info.credentialBackedUp,
+        deviceName: deviceName?.trim() || null,
+      },
+      select: { id: true, deviceName: true },
+    })
+    await this.logAuthEvent({
+      event: 'webauthn_registration_completed',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return saved
+  }
+
+  /** Settings — list the patient's registered biometric devices. */
+  async listWebAuthnCredentials(userId: string): Promise<
+    Array<{
+      id: string
+      deviceName: string | null
+      deviceType: string | null
+      backedUp: boolean
+      createdAt: Date
+      lastUsedAt: Date | null
+    }>
+  > {
+    return this.prisma.webAuthnCredential.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        deviceName: true,
+        deviceType: true,
+        backedUp: true,
+        createdAt: true,
+        lastUsedAt: true,
+      },
+    })
+  }
+
+  /** Settings — remove a registered device (disable biometric on it). When the
+   *  last one is removed, the patient simply signs in with OTP again. */
+  async deleteWebAuthnCredential(
+    userId: string,
+    id: string,
+    context?: SessionContext,
+  ): Promise<{ removed: true }> {
+    const res = await this.prisma.webAuthnCredential.deleteMany({
+      where: { id, userId },
+    })
+    if (res.count === 0) {
+      throw new NotFoundException('Device not found')
+    }
+    await this.logAuthEvent({
+      event: 'webauthn_credential_removed',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return { removed: true }
+  }
+
   private buildAuthResponse(
     tokens: TokenPair,
     user: MinimalUser,
@@ -2002,6 +2425,17 @@ export class AuthService {
       return { status: 'MFA_REQUIRED', challengeToken }
     }
 
+    // Patient biometric second factor (WebAuthn) — if this patient has
+    // registered a device, require the Face ID / fingerprint assertion before
+    // tokens. Patients without a registered device are unaffected.
+    if (await this.shouldChallengeWebAuthn(user.id, user.roles)) {
+      const challengeToken = await this.startWebAuthnAuthentication(
+        user.id,
+        activePracticeId,
+      )
+      return { status: 'WEBAUTHN_REQUIRED', challengeToken }
+    }
+
     const tokens = await this.issueTokenPair(user, {
       userAgent: context?.userAgent,
       deviceId: context?.deviceId,
@@ -2447,6 +2881,15 @@ export class AuthService {
     if (await this.shouldChallengeMfa(user.id, user.roles)) {
       const mfaChallengeToken = await this.signMfaChallenge(user.id, activePracticeId)
       return { status: 'MFA_REQUIRED', challengeToken: mfaChallengeToken }
+    }
+
+    // Patient biometric second factor (WebAuthn) — symmetric with verifyOtp.
+    if (await this.shouldChallengeWebAuthn(user.id, user.roles)) {
+      const webAuthnChallengeToken = await this.startWebAuthnAuthentication(
+        user.id,
+        activePracticeId,
+      )
+      return { status: 'WEBAUTHN_REQUIRED', challengeToken: webAuthnChallengeToken }
     }
 
     const tokens = await this.issueTokenPair(user, {

@@ -54,6 +54,7 @@
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "@prisma/adapter-pg": "^7.3.0",
     "@prisma/client": "^7.3.0",
+    "@simplewebauthn/server": "^13.3.1",
     "@types/pdfkit": "^0.17.6",
     "@types/qrcode": "^1.5.6",
     "apple-signin-auth": "^2.0.0",
