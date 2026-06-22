@@ -132,6 +132,14 @@ describe('AuthService', () => {
       practiceCoordinator: {
         findUnique: jest.fn().mockResolvedValue(null),
       },
+      // PR #90 — a MEDICAL_DIRECTOR's practice membership lives on
+      // PracticeMedicalDirector; resolvePracticeContext + isPracticeMember probe
+      // it so an MD who heads a practice (but isn't a provider-member) isn't
+      // blocked at sign-in / select-practice / switch-practice.
+      practiceMedicalDirector: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
       // MFA (Manisha 2026-06-12 §6). shouldChallengeMfa reads totpCredential
       // on the verifyOtp/selectPractice paths; default null = not enrolled =
       // no challenge, preserving existing sign-in test behavior.
@@ -1083,6 +1091,33 @@ describe('AuthService', () => {
         ])
       })
 
+      // PR #90 regression — a MED_DIR heads a practice via PracticeMedicalDirector,
+      // not PracticeProvider. Pre-fix /auth/profile returned activePractice null +
+      // availablePractices [] for every medical-director, firing the FE
+      // ZeroPracticeModal whose overlay swallowed all clicks on the patient detail.
+      it('MEDICAL_DIRECTOR (PracticeMedicalDirector, no provider row) → resolves the headed practice as activePractice + availablePractice', async () => {
+        ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(
+          dbRowFor([UserRole.MEDICAL_DIRECTOR]),
+        )
+        ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([])
+        ;(prisma.practiceMedicalDirector.findMany as jest.Mock).mockResolvedValue([
+          { practice: { id: 'seed-cedar-hill', name: 'Cedar Hill' } },
+        ])
+
+        const result = await service.getProfile(mockUser.id, {
+          practiceId: 'seed-cedar-hill',
+        })
+
+        expect(result.activePracticeId).toBe('seed-cedar-hill')
+        expect(result.activePractice).toEqual({
+          id: 'seed-cedar-hill',
+          name: 'Cedar Hill',
+        })
+        expect(result.availablePractices).toEqual([
+          { id: 'seed-cedar-hill', name: 'Cedar Hill' },
+        ])
+      })
+
       it('JWT carries a STALE activePracticeId (practice deleted post-sign-in) → activePractice null + availablePractices unchanged (FE will route to selector / show ZeroPracticeModal correctly)', async () => {
         ;(prisma.user.findUnique as jest.Mock).mockResolvedValue(
           dbRowFor([UserRole.PROVIDER]),
@@ -1370,6 +1405,71 @@ describe('AuthService', () => {
           }),
         }),
       )
+    })
+
+    // Phase/practice-identity rehydrate-fix root cause (smoke 2026-06-18).
+    // Before the fix, rotateRefreshToken minted the new access token with
+    // `issueAccessToken(existing.user)` — NO second argument — so the JWT's
+    // activePracticeId claim was always null after a refresh. Every browser
+    // refresh silently stripped the practice context: the FE's rehydrate()
+    // got a JWT with activePracticeId=null, /auth/profile via
+    // @ActiveContext() resolved null, getProfile returned activePractice=null
+    // → ZeroPracticeModal fired. Symptom was hidden because spec 37 (the
+    // regression Playwright) had a "trivial pass" — modal-absent assertions
+    // passed on /sign-in (where the FE bounced) too. Fix: thread the
+    // session's activePracticeId into the new access token so it survives
+    // rotation.
+    it('preserves the AuthSession activePracticeId on the new access token (rehydrate fix root cause)', async () => {
+      const issueAccessSpy = jest.spyOn(service, 'issueAccessToken')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue({
+        id: 'old-token',
+        userId: mockUser.id,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        user: mockUser,
+        authSession: {
+          id: 'session-1',
+          userAgent: 'ua',
+          ipAddress: '1.2.3.4',
+          deviceId: 'd1',
+          deviceType: 'web',
+          lastActivityAt: new Date(),
+          // The point of this test — rotation must propagate this claim.
+          activePracticeId: 'seed-cedar-hill',
+        },
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'new-token',
+      })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      await service.rotateRefreshToken('raw-token', {})
+
+      expect(issueAccessSpy).toHaveBeenCalledWith(mockUser, 'seed-cedar-hill')
+      issueAccessSpy.mockRestore()
+    })
+
+    it('legacy refresh token with no AuthSession → access token has null activePracticeId (no claim to preserve)', async () => {
+      const issueAccessSpy = jest.spyOn(service, 'issueAccessToken')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue({
+        id: 'legacy-no-session',
+        userId: mockUser.id,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        user: mockUser,
+        authSession: null,
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'new-token',
+      })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.create as jest.Mock).mockResolvedValue({})
+
+      await service.rotateRefreshToken('raw-token', {})
+
+      expect(issueAccessSpy).toHaveBeenCalledWith(mockUser, null)
+      issueAccessSpy.mockRestore()
     })
 
     it('legacy refresh token with no AuthSession — creates one on rotate (defensive)', async () => {
@@ -1777,6 +1877,69 @@ describe('AuthService', () => {
       expect(result.kind).toBe('select')
     })
 
+    // PR #90 regression (CI spec 10 medicalDirector sign-in 403'd) — an MD's
+    // membership lives on PracticeMedicalDirector, NOT PracticeProvider. The
+    // pre-fix lookup only probed PracticeProvider → 0 rows → kind:"blocked" →
+    // verifyOtp threw "No practice membership" and blocked every seeded MD.
+    it('MEDICAL_DIRECTOR who heads ONE practice (PracticeMedicalDirector only, no provider row) → kind:"auto"', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([])
+      ;(prisma.practiceMedicalDirector.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-cedar', name: 'Cedar Hill' } },
+      ])
+      const result = await service.resolvePracticeContext('md-1', [
+        UserRole.MEDICAL_DIRECTOR,
+      ])
+      expect(result).toEqual({ kind: 'auto', activePracticeId: 'p-cedar' })
+    })
+
+    it('MEDICAL_DIRECTOR heading 2 practices via PracticeMedicalDirector → kind:"select"', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([])
+      ;(prisma.practiceMedicalDirector.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-a', name: 'A' } },
+        { practice: { id: 'p-b', name: 'B' } },
+      ])
+      const result = await service.resolvePracticeContext('md-2', [
+        UserRole.MEDICAL_DIRECTOR,
+      ])
+      expect(result).toEqual({
+        kind: 'select',
+        practices: [
+          { id: 'p-a', name: 'A' },
+          { id: 'p-b', name: 'B' },
+        ],
+      })
+    })
+
+    it('MEDICAL_DIRECTOR who is ALSO a provider-member of the same practice → deduped to kind:"auto" (one practice)', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-cedar', name: 'Cedar Hill' } },
+      ])
+      ;(prisma.practiceMedicalDirector.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-cedar', name: 'Cedar Hill' } },
+      ])
+      const result = await service.resolvePracticeContext('md-3', [
+        UserRole.MEDICAL_DIRECTOR,
+      ])
+      expect(result).toEqual({ kind: 'auto', activePracticeId: 'p-cedar' })
+    })
+
+    it('MEDICAL_DIRECTOR with zero rows in BOTH relations → kind:"blocked" (Manisha §1 refusal preserved)', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([])
+      ;(prisma.practiceMedicalDirector.findMany as jest.Mock).mockResolvedValue([])
+      const result = await service.resolvePracticeContext('md-orphan', [
+        UserRole.MEDICAL_DIRECTOR,
+      ])
+      expect(result).toEqual({ kind: 'blocked' })
+    })
+
+    it('PROVIDER (not MED_DIR) never queries PracticeMedicalDirector', async () => {
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-a', name: 'A' } },
+      ])
+      await service.resolvePracticeContext('prov-1', [UserRole.PROVIDER])
+      expect(prisma.practiceMedicalDirector.findMany).not.toHaveBeenCalled()
+    })
+
     it('SUPER_ADMIN with 2+ memberships → still "none" (org-wide trumps)', async () => {
       ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
         { practiceId: 'p-a', practice: { id: 'p-a', name: 'A' } },
@@ -1835,6 +1998,44 @@ describe('AuthService', () => {
       expect(authLogCall).toBeTruthy()
       const data = (authLogCall![0] as { data: { practiceContext: string } }).data
       expect(data.practiceContext).toBe('p-b')
+    })
+
+    it('PR #90 Bug A — response carries activePractice {id,name} + availablePractices', async () => {
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue({
+        id: 'pp-1',
+      })
+      ;(prisma.authSession.findUnique as jest.Mock).mockResolvedValue({
+        activePracticeId: 'p-a',
+      })
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({
+        user: provider,
+      })
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-a', name: 'Cedar Hill' } },
+        { practice: { id: 'p-b', name: 'BridgePoint' } },
+      ])
+      const result = await service.switchPractice('user-prov', 'token-1', 'p-b')
+      expect(result.activePractice).toEqual({ id: 'p-b', name: 'BridgePoint' })
+      expect(result.availablePractices).toEqual([
+        { id: 'p-a', name: 'Cedar Hill' },
+        { id: 'p-b', name: 'BridgePoint' },
+      ])
+    })
+
+    it('PR #90 — MED_DIR who heads the target practice (PracticeMedicalDirector, no provider row) can switch', async () => {
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue(null)
+      ;(prisma.practiceMedicalDirector.findUnique as jest.Mock).mockResolvedValue({
+        id: 'pmd-1',
+      })
+      ;(prisma.authSession.findUnique as jest.Mock).mockResolvedValue({
+        activePracticeId: 'p-a',
+      })
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({
+        user: provider,
+      })
+      const result = await service.switchPractice('md-1', 'token-1', 'p-b')
+      expect(result.activePracticeId).toBe('p-b')
+      expect(prisma.authSession.update).toHaveBeenCalled()
     })
   })
 
@@ -1918,6 +2119,60 @@ describe('AuthService', () => {
       expect(authLogCall).toBeTruthy()
       const data = (authLogCall![0] as { data: { practiceContext: string } }).data
       expect(data.practiceContext).toBe('p-a')
+    })
+
+    it('PR #90 Bug A — response carries activePractice {id,name} + availablePractices', async () => {
+      setupHappyPath()
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-a', name: 'Cedar Hill' } },
+        { practice: { id: 'p-b', name: 'BridgePoint' } },
+      ])
+      const result = await service.selectPractice('valid.jwt', 'p-a')
+      expect(result.activePractice).toEqual({ id: 'p-a', name: 'Cedar Hill' })
+      expect(result.availablePractices).toEqual([
+        { id: 'p-a', name: 'Cedar Hill' },
+        { id: 'p-b', name: 'BridgePoint' },
+      ])
+    })
+
+    it('PR #90 Bug A — SUPER_ADMIN-style org-wide select yields null activePractice + [] (edge case)', async () => {
+      // A SUPER_ADMIN never hits the selector, but assert the bundle stays
+      // null/[] for an org-wide role so the response shape is well-defined.
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        ...provider,
+        roles: [UserRole.SUPER_ADMIN],
+      })
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue({
+        id: 'pp-1',
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'token-fresh',
+      })
+      ;(prisma.authSession.create as jest.Mock).mockResolvedValue({
+        id: 'sess-fresh',
+      })
+      const result = await service.selectPractice('valid.jwt', 'p-a')
+      expect(result.activePractice).toBeNull()
+      expect(result.availablePractices).toEqual([])
+    })
+
+    it('PR #90 — MED_DIR who heads the chosen practice (PracticeMedicalDirector, no provider row) can select', async () => {
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        ...provider,
+        roles: [UserRole.MEDICAL_DIRECTOR],
+      })
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue(null)
+      ;(prisma.practiceMedicalDirector.findUnique as jest.Mock).mockResolvedValue({
+        id: 'pmd-1',
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'token-fresh',
+      })
+      ;(prisma.authSession.create as jest.Mock).mockResolvedValue({
+        id: 'sess-fresh',
+      })
+      const result = await service.selectPractice('valid.jwt', 'p-a')
+      expect(result.activePracticeId).toBe('p-a')
     })
   })
 })

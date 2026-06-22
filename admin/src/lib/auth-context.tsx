@@ -39,6 +39,12 @@ export type AdminAuthResponse = {
   /** Phase/practice-identity — null for SUPER_ADMIN / HEALPLACE_OPS or when
    *  the user has zero memberships (defensive — backend blocks this case). */
   activePracticeId?: string | null;
+  /** PR #90 Bug A — the resolved active practice WITH its name, so the chip
+   *  renders "Acting as: <name>" on the fresh sign-in/select window without
+   *  waiting for /auth/profile. */
+  activePractice?: { id: string; name: string } | null;
+  /** PR #90 Bug A — switchable memberships, mirrors /auth/profile. */
+  availablePractices?: Array<{ id: string; name: string }>;
   /** MFA — true when enforcement is on and this user hasn't enrolled TOTP. The
    *  sign-in page redirects to /sign-in/mfa-enroll instead of the dashboard. */
   mfaEnrollmentRequired?: boolean;
@@ -178,13 +184,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // rehydrate. Refresh-token rotation is single-use, so whichever fetch
     // reaches the backend second gets a 401 — and the loser's rehydrate
     // clears user state, which bounces the destination page to /sign-in.
-    if (
-      typeof window !== 'undefined' &&
-      window.location.pathname === '/auth/magic-link' &&
-      new URLSearchParams(window.location.search).has('accessToken')
-    ) {
-      setIsLoading(false);
-      return;
+    if (typeof window !== 'undefined') {
+      const pathname = window.location.pathname;
+      const isFreshMagicLink =
+        pathname === '/auth/magic-link' &&
+        new URLSearchParams(window.location.search).has('accessToken');
+      // Phase/practice-identity pre-session bounce fix —
+      // /sign-in/select-practice has only a short-lived challenge token
+      // in sessionStorage, no refresh-token cookie yet. Running rehydrate
+      // here gets a 401, clears auth markers, and bounces the user back
+      // to /sign-in before they can pick a practice.
+      const isSelectPractice = pathname.startsWith('/sign-in/select-practice');
+      if (isFreshMagicLink || isSelectPractice) {
+        setIsLoading(false);
+        return;
+      }
     }
 
     let cancelled = false;
@@ -275,15 +289,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (newUser?.roles) {
       writeAuthMarkers(newUser.roles);
     }
-    // Phase/practice-identity — surface the active practice (when present)
-    // so AdminTopBar can render "Acting as: …". The id arrives in the
-    // verify-OTP / select-practice response; the name is looked up lazily
-    // via /auth/profile after sign-in (the verify endpoint's response
-    // payload doesn't carry practice names for backwards-compat).
-    if (response.activePracticeId) {
+    // Phase/practice-identity — surface the active practice so AdminTopBar
+    // can render "Acting as: <name>". PR #90 Bug A: /select-practice now
+    // returns activePractice {id,name} + availablePractices, so the chip
+    // shows the real name immediately. Older payloads carry only
+    // activePracticeId (name unknown until /auth/profile) — keep that as a
+    // fallback so a stale response doesn't crash, but the chip renders
+    // nothing for an empty name rather than the "Acting as practice" lie.
+    if (response.activePractice) {
+      setActivePractice(response.activePractice);
+    } else if (response.activePracticeId) {
       setActivePractice({ id: response.activePracticeId, name: '' });
     } else {
       setActivePractice(null);
+    }
+    if (response.availablePractices) {
+      setAvailablePractices(response.availablePractices);
     }
     // Refresh token deliberately NOT persisted client-side — the backend
     // already set the HttpOnly refresh_token cookie on the verify-OTP
@@ -312,13 +333,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = (await res.json()) as {
       activePracticeId: string;
       accessToken: string;
+      activePractice?: { id: string; name: string } | null;
+      availablePractices?: Array<{ id: string; name: string }>;
     };
     setToken(data.accessToken);
     setAccessToken(data.accessToken);
-    const target = availablePractices.find((p) => p.id === data.activePracticeId);
-    setActivePractice(
-      target ?? { id: data.activePracticeId, name: '' },
-    );
+    // PR #90 Bug A — the switch response now carries the resolved practice
+    // {id,name}; prefer it so the chip updates to the real name. Fall back
+    // to the local membership list, then to an id-only stub (which the chip
+    // renders as nothing rather than the "Acting as practice" placeholder).
+    if (data.availablePractices) {
+      setAvailablePractices(data.availablePractices);
+    }
+    const target =
+      data.activePractice ??
+      availablePractices.find((p) => p.id === data.activePracticeId) ??
+      data.availablePractices?.find((p) => p.id === data.activePracticeId);
+    setActivePractice(target ?? { id: data.activePracticeId, name: '' });
+    // PR #90 Bug C — data-fetching components (patient list, alerts, stats)
+    // keep their own client-side fetch cache and don't auto-bust on an
+    // auth-context state change, so the chip flips to the new practice while
+    // the visible data stays scoped to the OLD activePracticeId until a hard
+    // reload re-queries. router.refresh() only re-runs Server Components (most
+    // of admin fetches client-side), and per-hook cache invalidation would
+    // mean wiring every hook to activePractice — a full reload is the standard
+    // multi-tenant "switch context → invalidate everything" pattern.
+    //
+    // Deferred one tick so the caller's success toast (fired in
+    // PracticeContextChip AFTER this promise resolves) paints before the
+    // navigation tears the page down. ~half-second of toast, then reload.
+    if (typeof window !== 'undefined') {
+      setTimeout(() => window.location.reload(), 600);
+    }
   };
 
   // Manisha 2026-06-12 Doc 3 Q7 — idle session timeout. 15 min web,

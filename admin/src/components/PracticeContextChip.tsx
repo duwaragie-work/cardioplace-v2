@@ -44,7 +44,13 @@ export default function PracticeContextChip() {
   if (!activePractice) return null;
 
   const multi = availablePractices.length >= 2;
-  const label = activePractice.name || 'Acting as practice';
+  // PR #90 Bug A — the backend now resolves the practice name on
+  // select/switch/profile, so activePractice.name is populated. Defensive:
+  // if it's somehow still empty (a stale id-only response), render nothing
+  // rather than the misleading "Acting as practice" literal that smoke
+  // surfaced as "Acting as: Acting as practice".
+  const label = activePractice.name;
+  if (!label) return null;
 
   if (!multi) {
     return (
