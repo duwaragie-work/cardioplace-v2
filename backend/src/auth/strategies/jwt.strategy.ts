@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PassportStrategy } from '@nestjs/passport'
 import type { Request } from 'express'
 import { ExtractJwt, Strategy } from 'passport-jwt'
 import { UserRole } from '../../generated/prisma/enums.js'
+import { PrismaService } from '../../prisma/prisma.service.js'
 import {
   LEGACY_ACCESS_COOKIE,
   cookieName,
@@ -14,6 +15,11 @@ export interface JwtPayload {
   sub: string
   email: string | null
   roles: UserRole[]
+  /** Phase/practice-identity — the practice the session is acting as.
+   *  Signed at issue time (sign-in / select-practice / switch-practice).
+   *  Switching mints a fresh access token so the FE sees the new context
+   *  on its next request without a DB hit on the auth path. */
+  activePracticeId?: string | null
   iat?: number
   exp?: number
 }
@@ -46,7 +52,10 @@ function fromAccessCookie(req: Request): string | null {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     super({
       // Accept BOTH the Authorization: Bearer header AND the HttpOnly cookie.
       // Bearer takes precedence so existing API clients that send the header
@@ -61,7 +70,62 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     })
   }
 
-  validate(payload: JwtPayload) {
-    return { id: payload.sub, email: payload.email, roles: payload.roles }
+  /**
+   * Phase/practice-identity (Manisha 2026-06-12 §1, Edge Case 1) — if the
+   * access token carries an `activePracticeId` claim but the user is no
+   * longer a member of that practice (admin removed them after sign-in),
+   * the request must NOT silently succeed under the stale context. Throw
+   * a 401 with a discriminated `errorCode` the FE catches on the
+   * 401-refresh-retry path to bounce the user to /sign-in/select-practice
+   * with a "your practice membership has changed" banner. One indexed
+   * PracticeProvider lookup per request when the claim is set — skipped
+   * entirely for SUPER_ADMIN / HEALPLACE_OPS / PATIENT sessions (their
+   * claim is null).
+   */
+  async validate(payload: JwtPayload) {
+    const activePracticeId = payload.activePracticeId ?? null
+    if (activePracticeId) {
+      // Membership can live on either of two 1:N relations depending on role:
+      //   • PROVIDER / MED_DIR → PracticeProvider (compound practiceId_userId)
+      //   • COORDINATOR        → PracticeCoordinator (1:1 by userId)
+      // Earlier this only checked PracticeProvider — that bounced every
+      // COORDINATOR request with PRACTICE_MEMBERSHIP_REVOKED because their
+      // activePracticeId (auto-set in resolvePracticeContext from
+      // PracticeCoordinator) never matched a PracticeProvider row. Spec 38.3
+      // saw 401s where it expected 200/403; specs 35.x / 37.x / 38.x all
+      // appeared to "time out" because /me + /admin/* both 401'd, leaving
+      // the admin shell stuck at the spinner. Probe both relations: as long
+      // as ONE of them confirms membership for the active practice, the
+      // request is authentic.
+      const [asProvider, asCoordinator] = await Promise.all([
+        this.prisma.practiceProvider.findUnique({
+          where: {
+            practiceId_userId: {
+              practiceId: activePracticeId,
+              userId: payload.sub,
+            },
+          },
+          select: { id: true },
+        }),
+        this.prisma.practiceCoordinator.findUnique({
+          where: { userId: payload.sub },
+          select: { practiceId: true },
+        }),
+      ])
+      const coordinatorMatch =
+        asCoordinator !== null && asCoordinator.practiceId === activePracticeId
+      if (!asProvider && !coordinatorMatch) {
+        throw new UnauthorizedException({
+          message: 'Your practice membership has changed — please pick a practice again.',
+          errorCode: 'PRACTICE_MEMBERSHIP_REVOKED',
+        })
+      }
+    }
+    return {
+      id: payload.sub,
+      email: payload.email,
+      roles: payload.roles,
+      activePracticeId,
+    }
   }
 }

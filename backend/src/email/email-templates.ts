@@ -169,6 +169,35 @@ export function magicLinkEmailHtml(url: string): string {
 }
 
 /**
+ * Sent when a SUPER_ADMIN / HEALPLACE_OPS resets a user's MFA (Manisha
+ * 2026-06-12 Access Control §6). Placeholder copy — final wording pending
+ * Manisha sign-off.
+ */
+export function mfaResetEmailHtml(name: string | null): string {
+  return wrap(`
+    <div style="text-align: center;">
+      <div style="margin-bottom: 16px;">
+        <span style="display: inline-block; width: 56px; height: 56px; line-height: 56px;
+                     border-radius: 50%; background: #f3f0ff; font-size: 28px;">
+          🔐
+        </span>
+      </div>
+      <h2 style="margin: 0 0 8px; color: #1a1a2e; font-size: 20px;">Your two-factor authentication was reset</h2>
+      <p style="color: #374151; margin: 0 0 16px; font-size: 14px; line-height: 1.6;">
+        ${name ? `Hi ${name},` : 'Hello,'} an administrator has reset the
+        two-factor authentication (authenticator app) on your Cardioplace account.
+      </p>
+      <p style="color: #374151; margin: 0 0 16px; font-size: 14px; line-height: 1.6;">
+        You'll be asked to set up two-factor authentication again the next time you sign in.
+      </p>
+      <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+        If you didn't expect this, contact your administrator right away.
+      </p>
+    </div>
+  `)
+}
+
+/**
  * Human-readable label for a UserRole, used in invite/activation emails.
  *
  * Kept loose-typed (string input) so the template stays self-contained

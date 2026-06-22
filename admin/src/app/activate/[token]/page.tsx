@@ -97,8 +97,20 @@ export default function ActivateInvitePage({ params }: PageProps) {
         }
         throw new Error(msg);
       }
-      const data = (await res.json()) as AdminAuthResponse;
-      login(data);
+      const data = (await res.json()) as
+        | AdminAuthResponse
+        | { status: 'SIGN_IN_REQUIRED' };
+      // Admin invitees are activated but NOT auto-logged-in — they must sign
+      // in via OTP (then MFA), so don't persist any session locally. Send
+      // them to the sign-in page with their email prefilled.
+      if ('status' in data && data.status === 'SIGN_IN_REQUIRED') {
+        const email = preview?.email ?? '';
+        window.location.href = `/sign-in?activated=1${
+          email ? `&email=${encodeURIComponent(email)}` : ''
+        }`;
+        return;
+      }
+      login(data as AdminAuthResponse);
       window.location.href = '/dashboard';
     } catch (err: unknown) {
       setActivateError(

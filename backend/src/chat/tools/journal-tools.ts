@@ -353,7 +353,10 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
         '   seated quietly. Pass partials through `measurement_conditions`; omit any flag the patient didn\'t answer. ' +
         'If ANY of fields 1–3 have not been explicitly answered by the patient in the conversation, ' +
         'DO NOT call this tool — ask the missing question first. ' +
-        'After collecting everything, you must summarise and get the patient to confirm before calling.',
+        'After collecting everything, summarise the values back to the patient (BP, position, pulse if collected) ' +
+        'and WAIT for an explicit affirmative ("yes" / "send it" / "looks right" / "ok send") before calling. ' +
+        'Same-turn confirmation IS acceptable if the patient appends "send it" to the values themselves. ' +
+        'Bypass safe ONLY when `decline_confirmation: true` (Option D decline path — see that field).',
       parameters: {
         type: Type.OBJECT,
         properties: {
@@ -438,6 +441,36 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
               'proximity window expired), first call get_recent_readings, find an entry from that session and ' +
               'reuse its sessionId on the new submit_checkin. Backend groups same-session readings for alert ' +
               'averaging even when they span more than 5 minutes. Omit for one-off single-reading check-ins.',
+          },
+          close_session: {
+            type: Type.BOOLEAN,
+            description:
+              'Mark this reading as the FINAL one in the current measurement session. Defaults to false. ' +
+              'Set true when:\n' +
+              '  • Single-reading check-in: always true (one reading = one session, closed immediately).\n' +
+              '  • Q3 multi-reading session: true on the LAST submit_checkin call only (the prior calls stay false).\n' +
+              '  • Option D AWAITING (the FIRST emergency-range reading): NEVER true — the session waits for the confirmatory entry to close it.\n' +
+              '  • Option D CONFIRMATORY (the second-of-pair): true (the confirmatory entry closes the pair).\n' +
+              'Backend stamps `sessionClosedAt` on every entry sharing this session_id when true.',
+          },
+          confirms_entry_id: {
+            type: Type.STRING,
+            description:
+              'Option D pair-link. Set ONLY when the patient is taking the CONFIRMATORY (second) reading after an ' +
+              'earlier emergency-range reading was held as AWAITING. Pass the AWAITING entry id (surfaced in the ' +
+              '"Open AWAITING entry" patient-context line). Backend uses this to mark the AWAITING entry as resolved ' +
+              'and to decide whether the pair fires RULE_ABSOLUTE_EMERGENCY (still emergency-range) or ' +
+              'RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL (second reading dropped below threshold). Omit on every other call.',
+          },
+          decline_confirmation: {
+            type: Type.BOOLEAN,
+            description:
+              'Option D decline path. Set true ONLY when the patient explicitly REFUSES to take the confirmatory ' +
+              'second reading after an AWAITING entry exists ("I can\'t right now", "later", "no, skip it"). ' +
+              'When true, the BP fields (systolic_bp/diastolic_bp/etc.) are NOT required — pass zeros or omit. ' +
+              'Backend skips creating a new JournalEntry and instead routes the AWAITING entry through ' +
+              'finalizeUnconfirmedEmergency → RULE_UNCONFIRMED_EMERGENCY Tier 1 immediately (no 4-hour cron wait). ' +
+              'Default false.',
           },
         },
         required: ['entry_date', 'measurement_time', 'systolic_bp', 'diastolic_bp', 'medication_taken', 'symptoms'],
@@ -608,6 +641,34 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
       },
     },
     {
+      // Phase/16 Item 5 — out-of-window reading flag. The patient can edit
+      // entries within the 5-min window via update_checkin / delete_checkin;
+      // outside the window the entry is locked. This tool is the documented
+      // escape: write a non-blocking, non-emergency audit row so the care
+      // team can review the flagged reading on its own schedule.
+      name: 'flag_reading_error',
+      description:
+        "Flag a past reading as possibly wrong when the patient asks to correct it but it's outside the 5-minute edit window. " +
+        'This is NOT an emergency — it writes a non-blocking audit note for the care team to review on their next chart visit. ' +
+        'DO NOT call for: in-window edits (use update_checkin), real emergencies (use flag_emergency), or routine questions.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          entry_id: {
+            type: Type.STRING,
+            description:
+              'The id of the entry the patient wants flagged. Get it from a get_recent_readings call FIRST so you have the right row.',
+          },
+          reason: {
+            type: Type.STRING,
+            description:
+              "Brief note in the patient's own words explaining what they think the correct value should be (e.g. 'typo — actual was 132/85, not 232/85').",
+          },
+        },
+        required: ['entry_id', 'reason'],
+      },
+    },
+    {
       name: 'evaluate_reading',
       description:
         "Ask the patient's personalised rule engine what a BP / HR reading means FOR THIS PATIENT. " +
@@ -709,6 +770,42 @@ export async function executeJournalTool(
   const journalService = ctx.journalService
   switch (name) {
     case 'submit_checkin': {
+      // Option D decline path (Item 2 — Nivakaran chat-v2 handoff). The model
+      // routes the patient's refusal ("I can't right now" / "later" / "no")
+      // through submit_checkin with decline_confirmation:true + confirms_entry_id
+      // pointing at the held AWAITING entry. Bypass field validation entirely —
+      // no new JournalEntry row is created; instead we flip the held entry to
+      // UNCONFIRMED immediately so RULE_UNCONFIRMED_EMERGENCY fires without
+      // waiting for the 4-hour cron safety net.
+      if (args.decline_confirmation === true) {
+        if (!args.confirms_entry_id || typeof args.confirms_entry_id !== 'string') {
+          return JSON.stringify({
+            saved: false,
+            reason: 'DECLINE_WITHOUT_ID',
+            message:
+              'decline_confirmation:true requires confirms_entry_id pointing at the AWAITING entry the patient is declining.',
+          })
+        }
+        try {
+          const result = await journalService.finalizeUnconfirmedEmergency(
+            userId,
+            args.confirms_entry_id.trim(),
+          )
+          ctx.onPatientDataMutated?.(userId)
+          return JSON.stringify({
+            declined: true,
+            message:
+              'Confirmatory reading declined. The original reading has been sent to the care team.',
+            data: result,
+          })
+        } catch (err: any) {
+          return JSON.stringify({
+            saved: false,
+            message: err.message ?? 'Failed to decline confirmation.',
+          })
+        }
+      }
+
       // Bug 13 — OCR verbal-confirmation guard. submit_bp_from_photo stamps
       // ctx.ocrState.lastAt + clears userMessageSince. The streaming loop
       // flips userMessageSince=true on every new user turn. If we reach
@@ -923,6 +1020,62 @@ export async function executeJournalTool(
           notes: args.notes ?? '',
           sessionId:
             typeof args.session_id === 'string' && args.session_id.trim() ? args.session_id.trim() : undefined,
+          // Option D pair-link — model fills only when the patient is taking
+          // the confirmatory second reading after an AWAITING hold (Item 2).
+          // Backend's DailyJournalService.create branches on this to mark the
+          // AWAITING entry as resolved and decide ABSOLUTE_EMERGENCY vs
+          // CONFIRMED_NORMAL based on the second reading.
+          confirmsEntryId:
+            typeof args.confirms_entry_id === 'string' && args.confirms_entry_id.trim()
+              ? args.confirms_entry_id.trim()
+              : undefined,
+          // Phase/16 Item 2 — Option D AWAITING auto-detection for the chat
+          // path. The FE buffer sets beginEmergencyConfirmation when the
+          // patient goes through Screen A; chat has no Screen A so the
+          // dispatcher auto-detects emergency-range + no co-occurring
+          // symptoms (the symptom-override path fires Tier 1 instantly and
+          // does NOT belong in Option D). This is what makes the bot's
+          // "can you sit calmly for one minute" ask actually correspond to
+          // an AWAITING entry — without it the cron safety net never fires
+          // RULE_UNCONFIRMED_EMERGENCY because the entry never enters the
+          // hold state. NEVER set true on confirms_entry_id calls (those
+          // are the SECOND reading) or decline calls.
+          beginEmergencyConfirmation: (() => {
+            if (args.confirms_entry_id) return false
+            const sbp = Number(args.systolic_bp)
+            const dbp = Number(args.diastolic_bp)
+            const emergencyRange = sbp >= 180 || dbp >= 120
+            if (!emergencyRange) return false
+            const hasOverrideSymptom =
+              finalFlags.chestPainOrDyspnea === true ||
+              finalFlags.severeHeadache === true ||
+              finalFlags.focalNeuroDeficit === true ||
+              finalFlags.alteredMentalStatus === true ||
+              finalFlags.severeEpigastricPain === true ||
+              finalFlags.throatTightness === true ||
+              finalFlags.faceSwelling === true
+            // Symptom-override path: backend fires Tier 1 instantly via the
+            // engine, NOT AWAITING. Only the symptom-free emergency-range
+            // reading enters Option D hold.
+            return !hasOverrideSymptom
+          })(),
+          // Session boundary — Phase/16 Item 7 (Nivakaran chat-v2 handoff
+          // 2026-06-17). Handoff: "every chat-initiated createJournalEntry
+          // defaults to closeSession: true (single reading = one session =
+          // closed immediately on commit)". We can't always trust the LLM
+          // to thread the flag explicitly, so default-by-shape:
+          //   • model explicitly set close_session → honour it verbatim
+          //   • model passed session_id (Q3 / continuation) → leave false
+          //     unless the model opts in (handoff: "true on the LAST")
+          //   • single reading (no session_id) → true (matches Bug 19 /
+          //     handoff intent)
+          // Backend still ignores closeSession when emergencyConfirmation
+          // is AWAITING (guarded in DailyJournalService.create), so the
+          // Option D first-of-pair never closes prematurely.
+          closeSession:
+            args.close_session !== undefined
+              ? args.close_session === true
+              : !args.session_id,
         } as any)
         ctx.onPatientDataMutated?.(userId)
         // Bug 54 — include weight_display so the LLM verbalises back in the
@@ -1421,6 +1574,37 @@ export async function executeJournalTool(
         emergency_situation: args.emergency_situation ?? 'Emergency detected',
         message: 'Emergency flagged. Continue responding to the patient with 911 guidance.',
       })
+    }
+
+    case 'flag_reading_error': {
+      // Phase/16 Item 5 — out-of-window reading flag (Nivakaran chat-v2
+      // handoff 2026-06-17). NOT a clinical emergency; writes a
+      // PATIENT_REPORT row on ProfileVerificationLog so the care team can
+      // review the flagged reading on their next chart visit. No
+      // escalation, no dispatch.
+      const entryId = typeof args.entry_id === 'string' ? args.entry_id.trim() : ''
+      const reason = typeof args.reason === 'string' ? args.reason : ''
+      if (!entryId) {
+        return JSON.stringify({
+          flagged: false,
+          reason: 'MISSING_ENTRY_ID',
+          message: 'entry_id is required — call get_recent_readings first to look up the entry.',
+        })
+      }
+      try {
+        const result = await journalService.flagReadingError(userId, entryId, reason)
+        return JSON.stringify({
+          flagged: true,
+          entry_id: result.entryId,
+          message:
+            'Flagged for care-team review. Tell the patient their care team will look at the flagged reading on their next chart review.',
+        })
+      } catch (err: any) {
+        return JSON.stringify({
+          flagged: false,
+          message: err?.message ?? 'Failed to flag reading.',
+        })
+      }
     }
 
     case 'evaluate_reading': {

@@ -43,6 +43,9 @@ export interface UserRow {
    *  for coordinators, first PracticeProvider/PracticeMedicalDirector
    *  membership for clinical staff). `null` for OPS / SUPER_ADMIN. */
   practiceId: string | null
+  /** True when the user has an enrolled TOTP authenticator. Drives the
+   *  "Reset MFA" action — only enrolled users can be reset. */
+  mfaEnrolled?: boolean
 }
 
 /** Coordinator-scoped patient row — backend strips every field but these. */

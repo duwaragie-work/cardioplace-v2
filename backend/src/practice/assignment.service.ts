@@ -41,6 +41,7 @@ export class AssignmentService {
     actor: ActorUser,
     patientUserId: string,
     dto: CreateAssignmentDto,
+    ctx?: { practiceId: string | null },
   ) {
     // MED_DIR is gated to practices they head; OPS/SUPER unscoped. Runs
     // before any DB writes so a denied caller can't see the audit row.
@@ -88,6 +89,7 @@ export class AssignmentService {
         actor.id,
         Prisma.JsonNull,
         this.assignmentSnapshot(assignment),
+        ctx?.practiceId ?? null,
       )
       return {
         statusCode: 201,
@@ -155,6 +157,7 @@ export class AssignmentService {
     actor: ActorUser,
     patientUserId: string,
     dto: UpdateAssignmentDto,
+    ctx?: { practiceId: string | null },
   ) {
     const existing = await this.prisma.patientProviderAssignment.findUnique({
       where: { userId: patientUserId },
@@ -210,6 +213,7 @@ export class AssignmentService {
       actor.id,
       this.assignmentSnapshot(existing),
       this.assignmentSnapshot(updated),
+      ctx?.practiceId ?? null,
     )
     return {
       statusCode: 200,
@@ -237,6 +241,7 @@ export class AssignmentService {
     adminId: string,
     previousValue: AssignmentSnapshot | typeof Prisma.JsonNull,
     newValue: AssignmentSnapshot,
+    practiceContext: string | null = null,
   ): Promise<void> {
     await this.prisma.profileVerificationLog.create({
       data: {
@@ -249,6 +254,7 @@ export class AssignmentService {
         changedByRole: VerifierRole.ADMIN,
         changeType: VerificationChangeType.ADMIN_ASSIGNMENT_CHANGE,
         rationale: null,
+        practiceContext,
       },
     })
   }

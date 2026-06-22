@@ -10,6 +10,7 @@ import {
   Req,
 } from '@nestjs/common'
 import type { Request } from 'express'
+import { ActiveContext } from '../auth/decorators/active-context.decorator.js'
 import { Roles } from '../auth/decorators/roles.decorator.js'
 import { PatientAccessService } from '../common/patient-access.service.js'
 import { UserRole } from '../generated/prisma/enums.js'
@@ -48,11 +49,13 @@ export class AssignmentController {
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Body() dto: CreateAssignmentDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.service.create(
       { id: req.user.id, roles: req.user.roles },
       patientUserId,
       dto,
+      ctx,
     )
   }
 
@@ -74,11 +77,13 @@ export class AssignmentController {
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Body() dto: UpdateAssignmentDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.service.update(
       { id: req.user.id, roles: req.user.roles },
       patientUserId,
       dto,
+      ctx,
     )
   }
 }

@@ -124,7 +124,12 @@ export class DailyJournalService {
    * and makes a stale client sessionId a hard 400 instead of a silent
    * re-group. Patient-app calls leave it undefined.
    */
-  async create(userId: string, dto: CreateJournalEntryDto, actor?: ActorUser) {
+  async create(
+    userId: string,
+    dto: CreateJournalEntryDto,
+    actor?: ActorUser,
+    ctx?: { practiceId: string | null },
+  ) {
     // Layer A journaling gate — patient must have a PatientProfile row
     // (completed clinical intake) before their readings get persisted. The
     // rule engine relies on PatientProfile for every safety-net bias; without
@@ -413,6 +418,7 @@ export class DailyJournalService {
           fieldPath: actor ? 'journal_entry.admin_added' : 'journal_entry.created',
           previousValue: null,
           newValue: this.serializeForAudit(created),
+          practiceContext: ctx?.practiceId ?? null,
         })
 
         return created
@@ -559,6 +565,7 @@ export class DailyJournalService {
     entryId: string,
     dto: UpdateJournalEntryDto,
     actor?: ActorUser,
+    ctx?: { practiceId: string | null },
   ) {
     const existing = await this.prisma.journalEntry.findFirst({
       where: { id: entryId, userId },
@@ -712,6 +719,7 @@ export class DailyJournalService {
           fieldPath: actor ? 'journal_entry.admin_edited' : 'journal_entry.edited',
           previousValue: this.serializeForAudit(existing),
           newValue: this.serializeForAudit(row),
+          practiceContext: ctx?.practiceId ?? null,
         })
         return row
       })
@@ -872,6 +880,47 @@ export class DailyJournalService {
       },
     })
     return count > 0
+  }
+
+  /**
+   * Phase/16 Item 5 — out-of-window reading flag. Patient asked to correct a
+   * reading that's locked (older than the 5-min edit window or already
+   * engine-evaluated), so we can't mutate it. Instead we write a
+   * non-blocking audit row the care team picks up on their next chart
+   * review. NOT an emergency — no escalation, no dispatch, just an
+   * audit-trail note tagged PATIENT_REPORT.
+   */
+  async flagReadingError(
+    userId: string,
+    entryId: string,
+    reason: string,
+  ): Promise<{ flagged: true; entryId: string }> {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { id: entryId, userId },
+      select: { id: true, measuredAt: true, systolicBP: true, diastolicBP: true },
+    })
+    if (!entry) {
+      throw new NotFoundException('Journal entry not found')
+    }
+    const trimmed = (reason ?? '').trim().slice(0, 500)
+    await this.prisma.profileVerificationLog.create({
+      data: {
+        userId,
+        fieldPath: `journalEntry:${entryId}.flagged`,
+        previousValue: {
+          systolicBP: entry.systolicBP,
+          diastolicBP: entry.diastolicBP,
+          measuredAt: entry.measuredAt.toISOString(),
+        } as Prisma.InputJsonValue,
+        newValue: Prisma.JsonNull,
+        changedBy: userId,
+        changedByRole: 'PATIENT',
+        changeType: 'PATIENT_REPORT',
+        discrepancyFlag: true,
+        rationale: trimmed || 'Patient flagged this reading as possibly incorrect.',
+      },
+    })
+    return { flagged: true, entryId }
   }
 
   async findOne(userId: string, id: string) {
@@ -1381,7 +1430,12 @@ export class DailyJournalService {
    * and NO session re-evaluation emit. Full row fetched (not a narrow select)
    * because the audit snapshot must capture the state being destroyed.
    */
-  async delete(userId: string, id: string, actor?: ActorUser) {
+  async delete(
+    userId: string,
+    id: string,
+    actor?: ActorUser,
+    ctx?: { practiceId: string | null },
+  ) {
     const entry = await this.prisma.journalEntry.findFirst({
       where: { id, userId },
     })
@@ -1421,6 +1475,7 @@ export class DailyJournalService {
         fieldPath: actor ? 'journal_entry.admin_deleted' : 'journal_entry.deleted',
         previousValue: this.serializeForAudit(entry),
         newValue: null,
+        practiceContext: ctx?.practiceId ?? null,
       })
       await tx.journalEntry.delete({ where: { id } })
     })
@@ -1739,6 +1794,12 @@ export class DailyJournalService {
       fieldPath: string
       previousValue: Prisma.InputJsonValue | null
       newValue: Prisma.InputJsonValue | null
+      /**
+       * Phase/practice-identity (Manisha 2026-06-12 §1) — the activePracticeId
+       * on the actor's AuthSession at the moment of write. NULL on patient-
+       * self-report rows and pre-policy entries.
+       */
+      practiceContext?: string | null
     },
   ): Promise<void> {
     await tx.profileVerificationLog.create({
@@ -1750,6 +1811,7 @@ export class DailyJournalService {
         changedBy: args.actor?.id ?? args.userId,
         changedByRole: this.verifierRoleFor(args.actor),
         changeType: args.changeType,
+        practiceContext: args.practiceContext ?? null,
       },
     })
   }

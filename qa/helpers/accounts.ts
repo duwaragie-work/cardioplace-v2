@@ -142,8 +142,21 @@ export const ADMINS = {
     roles: ['COORDINATOR'],
     name: 'Lakshitha Fernando',
   },
+  // June 2026 — phase/practice-identity (Manisha 2026-06-12 §1). Seeded
+  // ONLY when SEED_TEST_FIXTURES=true so production seed stays single-
+  // practice. Member of BOTH seed-cedar-hill and seed-bridgepoint to drive
+  // specs 34/35/36 (selector + switcher + audit attribution).
+  multiPracticeProvider: {
+    email:
+      process.env.ADMIN_MULTI_PRACTICE_PROVIDER_EMAIL ??
+      'multi-practice-provider@cardioplace.test',
+    roles: ['PROVIDER'],
+    name: 'Dr. Aisha Nasser',
+  },
 } as const
 
 export type AdminKey = keyof typeof ADMINS
 
 export const SEED_PRACTICE_ID = 'seed-cedar-hill'
+// Phase/practice-identity — second practice seeded behind SEED_TEST_FIXTURES.
+export const SEED_PRACTICE_B_ID = 'seed-bridgepoint'

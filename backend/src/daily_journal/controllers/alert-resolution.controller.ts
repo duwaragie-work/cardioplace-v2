@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import type { Request } from 'express'
+import { ActiveContext } from '../../auth/decorators/active-context.decorator.js'
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard.js'
 import { RolesGuard } from '../../auth/guards/roles.guard.js'
 import { Roles } from '../../auth/decorators/roles.decorator.js'
@@ -47,12 +48,16 @@ export class AlertResolutionController {
   @Post(':id/acknowledge')
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.PROVIDER)
-  acknowledge(@Req() req: Request, @Param('id') id: string) {
+  acknowledge(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @ActiveContext() ctx: { practiceId: string | null },
+  ) {
     const { id: actorId, roles } = req.user as {
       id: string
       roles: UserRole[]
     }
-    return this.service.acknowledge(id, { id: actorId, roles })
+    return this.service.acknowledge(id, { id: actorId, roles }, ctx)
   }
 
   @Post(':id/resolve')
@@ -62,12 +67,13 @@ export class AlertResolutionController {
     @Req() req: Request,
     @Param('id') id: string,
     @Body() dto: ResolveAlertDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     const { id: actorId, roles } = req.user as {
       id: string
       roles: UserRole[]
     }
-    return this.service.resolve(id, { id: actorId, roles }, dto)
+    return this.service.resolve(id, { id: actorId, roles }, dto, ctx)
   }
 
   @Get(':id/audit')

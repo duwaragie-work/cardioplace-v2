@@ -44,6 +44,11 @@ model DeviationAlert {
   // existing rows pick up CURRENT_TIMESTAMP at migration time.
   acknowledgedByUserId String?
   resolvedAt           DateTime?
+  // June 2026 — practice-context attribution (Manisha 2026-06-12 Access
+  // Control §1, HIPAA 45 CFR §164.312(a)(2)(i)). The activePracticeId on
+  // the actor's AuthSession at the moment of ack/resolve. NULL on creation
+  // (cron-fired alerts have no actor) and for pre-policy rows.
+  actorPracticeContext String?
   updatedAt            DateTime  @default(now()) @updatedAt
 
   escalationEvents      EscalationEvent[]

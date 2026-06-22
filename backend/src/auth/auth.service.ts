@@ -20,6 +20,14 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
+import { MfaService } from './mfa.service.js'
+import { WebAuthnService } from './webauthn.service.js'
+import type {
+  AuthenticatorTransportFuture,
+  AuthenticationResponseJSON,
+  RegistrationResponseJSON,
+} from '@simplewebauthn/server'
+import { mfaResetEmailHtml } from '../email/email-templates.js'
 import type { ProfileDto } from './dto/profile.dto.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -30,13 +38,85 @@ export interface TokenPair {
 }
 
 export interface AuthResponse extends TokenPair {
+  /** Discriminator for AuthVerifyResult. AUTHENTICATED = real token pair
+   *  in the response; the FE routes to the dashboard. The selector branch
+   *  uses 'PRACTICE_SELECT_REQUIRED' instead — see PracticeSelectRequired. */
+  status?: 'AUTHENTICATED'
   userId: string
   email: string | null
   onboarding_required: boolean
   roles: UserRole[]
   login_method: 'otp' | 'magic_link' | 'google' | 'apple'
   name: string | null
+  /** Phase/practice-identity — the practice the session is acting as. NULL
+   *  for SUPER_ADMIN / HEALPLACE_OPS / PATIENT (audit captures null). */
+  activePracticeId?: string | null
+  /** MFA — set true when enforcement is on and this MFA-required user has not
+   *  yet enrolled TOTP. Tokens ARE issued (enrollment needs a session) but the
+   *  FE redirects straight to the enrollment page instead of the dashboard,
+   *  so the gate appears immediately after sign-in (Manisha 2026-06-12 §6). */
+  mfaEnrollmentRequired?: boolean
 }
+
+/**
+ * Phase/practice-identity (Manisha 2026-06-12 Access Control §1) — when a
+ * multi-practice provider signs in, we don't issue tokens yet; instead the
+ * verify endpoint returns this shape so the FE routes to the selector page.
+ * The challenge token is a short-lived signed JWT carrying the verified
+ * userId; the selector POST exchanges it for the real token pair plus the
+ * chosen practice.
+ */
+export interface PracticeSelectRequired {
+  status: 'PRACTICE_SELECT_REQUIRED'
+  challengeToken: string
+  practices: Array<{ id: string; name: string }>
+}
+
+/**
+ * MFA (Manisha 2026-06-12 Access Control §6, HIPAA 45 CFR §164.312(d)) — when
+ * an MFA-enrolled provider/admin clears the first factor (and, if applicable,
+ * the practice selector) we do NOT issue tokens yet. We return this shape so
+ * the FE routes to the TOTP challenge page. The challenge token is a
+ * short-lived signed JWT carrying the verified userId + resolved
+ * activePracticeId; POST /mfa/challenge (or /mfa/recovery) exchanges it for
+ * the real token pair.
+ */
+export interface MfaRequired {
+  status: 'MFA_REQUIRED'
+  challengeToken: string
+}
+
+/**
+ * Invite activation for an admin-role user (Manisha 2026-06-12 §6). The
+ * account is created and made ACTIVE, but NO session is issued — admin sign-in
+ * must go through OTP (and then TOTP/MFA), so auto-logging them in from the
+ * invite link would bypass the second factor. The FE redirects to /sign-in
+ * instead. Patients still get a session (auto-login) on activation.
+ */
+export interface InviteSignInRequired {
+  status: 'SIGN_IN_REQUIRED'
+  roles: UserRole[]
+}
+
+/**
+ * Patient biometric second factor (WebAuthn / passkeys). When a patient who
+ * has registered a biometric device clears the first factor (OTP / magic-link)
+ * we do NOT issue tokens yet — we return this shape so the FE fetches the
+ * assertion options (POST /webauthn/authenticate/options) and completes the
+ * Face ID / fingerprint prompt. The challenge token is a short-lived signed JWT
+ * carrying the verified userId + the WebAuthn challenge; POST
+ * /webauthn/authenticate/verify exchanges it for the real token pair.
+ */
+export interface WebAuthnRequired {
+  status: 'WEBAUTHN_REQUIRED'
+  challengeToken: string
+}
+
+export type AuthVerifyResult =
+  | AuthResponse
+  | PracticeSelectRequired
+  | MfaRequired
+  | WebAuthnRequired
 
 // June 2026 — session context piped from controller → service to populate
 // AuthSession (concurrent-session limit + idle tracking). All optional —
@@ -47,6 +127,11 @@ export interface SessionContext {
   ipAddress?: string
   /** 'web' | 'mobile' — resolved by controller (x-device-platform → UA fallback). */
   deviceType?: string
+  /** Phase/practice-identity — the practice the session is acting as.
+   *  Single-practice users auto-set on sign-in; multi-practice users get a
+   *  selector challenge before tokens are issued. SUPER_ADMIN /
+   *  HEALPLACE_OPS / PATIENT sessions leave this null. */
+  activePracticeId?: string | null
 }
 
 interface MinimalUser {
@@ -105,6 +190,69 @@ const ADMIN_ROLES: readonly UserRole[] = [
 const IDLE_TIMEOUT_WEB_MS = 15 * 60_000
 const IDLE_TIMEOUT_MOBILE_MS = 5 * 60_000
 
+// Phase/practice-identity (Manisha 2026-06-12 Access Control §1) — roles
+// for which a practice context is REQUIRED. A user with one of these roles
+// who has zero PracticeProvider memberships cannot sign in (Forbidden). A
+// user with two or more memberships gets the selector challenge.
+// SUPER_ADMIN and HEALPLACE_OPS act org-wide and bypass the selector.
+//
+// COORDINATOR is INTENTIONALLY OMITTED — that role's membership lives on the
+// 1:1 PracticeCoordinator relation, NOT PracticeProvider. Including them here
+// caused every COORDINATOR sign-in to be blocked with "No practice membership"
+// (specs 35.4 / 35.5 / 37.* / 38.1). resolvePracticeContext() handles
+// COORDINATOR's auto-attribution from PracticeCoordinator below.
+const MULTI_PRACTICE_ROLES: readonly UserRole[] = [
+  UserRole.PROVIDER,
+  UserRole.MEDICAL_DIRECTOR,
+]
+
+// 5-min challenge token TTL — long enough for the patient to walk through
+// the selector page, short enough to bound replay risk if the token leaks.
+const PRACTICE_SELECT_CHALLENGE_TTL = '5m'
+
+// MFA (Manisha 2026-06-12 Access Control §6). Roles for which TOTP is the
+// mandatory second factor. Patients are intentionally excluded — their
+// (optional) biometric path is a later phase with its own table.
+const MFA_REQUIRED_ROLES: readonly UserRole[] = [
+  UserRole.PROVIDER,
+  UserRole.MEDICAL_DIRECTOR,
+  UserRole.COORDINATOR,
+  UserRole.HEALPLACE_OPS,
+  UserRole.SUPER_ADMIN,
+]
+
+// Short-lived MFA tokens. Challenge = post-first-factor, pre-token; enrollment
+// carries the pending (not-yet-persisted) secret across the start→complete
+// round-trip so we stay stateless across backend instances.
+const MFA_CHALLENGE_TTL = '5m'
+const MFA_ENROLL_TTL = '10m'
+
+// Failed-attempt lockout (Manisha 2026-06-12 §6). 5 fails / 15 min → temporary
+// lock (recovery code still works); 10 fails / 1 h → hard lock requiring admin
+// reset. Counted from the mfa_challenge_failed AuthLog rows.
+const MFA_SOFT_LOCK_THRESHOLD = 5
+const MFA_SOFT_LOCK_WINDOW_MS = 15 * 60_000
+const MFA_HARD_LOCK_THRESHOLD = 10
+const MFA_HARD_LOCK_WINDOW_MS = 60 * 60_000
+
+/** True if any of the user's roles makes TOTP mandatory. */
+function requiresMfa(roles: UserRole[]): boolean {
+  return roles.some((r) => MFA_REQUIRED_ROLES.includes(r))
+}
+
+// Patient biometric second factor (WebAuthn / passkeys). Optional + opt-in, so
+// there's no enforcement flag — the gate fires only when the patient has
+// registered at least one device. Short-lived tokens carry the challenge so
+// the ceremony stays stateless across backend instances.
+const WEBAUTHN_CHALLENGE_TTL = '5m'
+const WEBAUTHN_REGISTER_TTL = '10m'
+
+type PracticeResolution =
+  | { kind: 'auto'; activePracticeId: string }
+  | { kind: 'select'; practices: Array<{ id: string; name: string }> }
+  | { kind: 'none' }
+  | { kind: 'blocked' }
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -114,15 +262,28 @@ export class AuthService {
     private bcryptService: BcryptService,
     private emailService: EmailService,
     private geolocation: GeolocationService,
+    private mfaService: MfaService,
+    private webAuthnService: WebAuthnService,
   ) {}
 
   // ─── Token Issuance ─────────────────────────────────────────────────────────
 
-  async issueAccessToken(user: MinimalUser): Promise<string> {
+  async issueAccessToken(
+    user: MinimalUser,
+    activePracticeId?: string | null,
+  ): Promise<string> {
     const expiresIn = this.config.get<string>('JWT_ACCESS_EXPIRES_IN', '15m')
     // @ts-expect-error - NestJS JWT accepts string for expiresIn despite type definition
     return await this.jwtService.signAsync(
-      { sub: user.id, email: user.email, roles: user.roles },
+      {
+        sub: user.id,
+        email: user.email,
+        roles: user.roles,
+        // Phase/practice-identity — null for SUPER_ADMIN / HEALPLACE_OPS /
+        // PATIENT / no-practice users. Switching mints a fresh access
+        // token so the FE picks up the new context immediately.
+        activePracticeId: activePracticeId ?? null,
+      },
       { expiresIn },
     )
   }
@@ -160,6 +321,10 @@ export class AuthService {
           ipAddress: context?.ipAddress ?? null,
           geohash: this.geolocation.computeGeohash(context?.ipAddress ?? null),
           ipCountry: this.geolocation.lookupCountry(context?.ipAddress ?? null),
+          // Phase/practice-identity — set on sign-in for single-/auto-set
+          // and multi-practice (post-selector) paths; null for
+          // SUPER_ADMIN / HEALPLACE_OPS / PATIENT.
+          activePracticeId: context?.activePracticeId ?? null,
           expiresAt,
         },
       })
@@ -431,9 +596,1051 @@ export class AuthService {
     context?: SessionContext,
   ): Promise<TokenPair> {
     await this.enforceSessionLimit(user.id, user.roles)
-    const accessToken = await this.issueAccessToken(user)
+    const accessToken = await this.issueAccessToken(user, context?.activePracticeId ?? null)
     const refreshToken = await this.issueRefreshToken(user.id, context)
     return { accessToken, refreshToken }
+  }
+
+  /**
+   * Phase/practice-identity — determines what to do about the active
+   * practice context at sign-in time:
+   *   • 'auto'    — single PracticeProvider membership; auto-set that id.
+   *   • 'select'  — multiple memberships AND the user has at least one of
+   *                 the MULTI_PRACTICE_ROLES; caller must return a
+   *                 PRACTICE_SELECT_REQUIRED challenge.
+   *   • 'blocked' — has a MULTI_PRACTICE_ROLE but zero memberships; refuse
+   *                 sign-in (Forbidden).
+   *   • 'none'    — SUPER_ADMIN / HEALPLACE_OPS / PATIENT or any non-multi
+   *                 role; AuthSession.activePracticeId stays null.
+   * Reuses the same `prisma.practiceProvider.findMany` shape the prior
+   * RBAC work uses in patient-access.service.ts (Phase 1 commit a8111d6).
+   */
+  async resolvePracticeContext(
+    userId: string,
+    roles: UserRole[],
+  ): Promise<PracticeResolution> {
+    const isMultiPracticeRole = roles.some((r) =>
+      MULTI_PRACTICE_ROLES.includes(r),
+    )
+    const isOrgWide =
+      roles.includes(UserRole.SUPER_ADMIN) || roles.includes(UserRole.HEALPLACE_OPS)
+    // Org-wide roles bypass selector even if they happen to have PracticeProvider
+    // memberships — they act across the whole org. Patients + any non-multi
+    // role also bypass.
+    if (isOrgWide) return { kind: 'none' }
+
+    // COORDINATOR — at-most-one practice via the 1:1 PracticeCoordinator
+    // relation, never the multi-row PracticeProvider table. Auto-set the
+    // activePracticeId so their audit attribution (practiceContext) is
+    // populated, but never block sign-in or surface a selector. If the
+    // COORDINATOR row is missing, fall through to 'none' so legacy accounts
+    // can still sign in (the role-routing layer above gates what they can do).
+    if (roles.includes(UserRole.COORDINATOR)) {
+      const coord = await this.prisma.practiceCoordinator.findUnique({
+        where: { userId },
+        select: { practiceId: true },
+      })
+      if (coord) return { kind: 'auto', activePracticeId: coord.practiceId }
+      // No PracticeCoordinator row: don't block (only PROVIDER / MED_DIR get
+      // blocked for missing practice membership — Manisha 2026-06-12 §1
+      // applies to clinical-decision roles, not front-desk roles).
+      if (!isMultiPracticeRole) return { kind: 'none' }
+    }
+
+    if (!isMultiPracticeRole) return { kind: 'none' }
+
+    const memberships = await this.prisma.practiceProvider.findMany({
+      where: { userId },
+      select: { practiceId: true, practice: { select: { id: true, name: true } } },
+    })
+    if (memberships.length === 0) return { kind: 'blocked' }
+    if (memberships.length === 1) {
+      return { kind: 'auto', activePracticeId: memberships[0].practiceId }
+    }
+    return {
+      kind: 'select',
+      practices: memberships.map((m) => ({ id: m.practice.id, name: m.practice.name })),
+    }
+  }
+
+  /**
+   * Sign a short-lived JWT carrying the verified userId so the FE selector
+   * page can echo it back without re-doing OTP verification. The `kind`
+   * claim narrows accepted tokens to ones we issued for THIS flow — a
+   * regular access token can't be replayed as a challenge.
+   */
+  private async signPracticeSelectChallenge(userId: string): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: userId, kind: 'practice_select' },
+      { expiresIn: PRACTICE_SELECT_CHALLENGE_TTL },
+    )
+  }
+
+  /**
+   * Exchange a practice-select challenge for the real token pair. Verifies
+   * the challenge JWT (TTL + kind), confirms the chosen practiceId is in
+   * the user's memberships, then issues tokens with `activePracticeId` set
+   * on the new AuthSession row.
+   */
+  async selectPractice(
+    challengeToken: string,
+    practiceId: string,
+    context?: SessionContext,
+  ): Promise<AuthResponse | MfaRequired> {
+    let payload: { sub: string; kind: string }
+    try {
+      payload = await this.jwtService.verifyAsync(challengeToken)
+    } catch {
+      throw new UnauthorizedException('Practice-select challenge invalid or expired')
+    }
+    if (payload.kind !== 'practice_select') {
+      throw new UnauthorizedException('Practice-select challenge invalid or expired')
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: {
+        id: true, email: true, name: true, roles: true,
+        onboardingStatus: true, accountStatus: true,
+      },
+    })
+    if (!user) throw new UnauthorizedException('User not found')
+    this.assertAccountActive(user)
+    const membership = await this.prisma.practiceProvider.findUnique({
+      where: { practiceId_userId: { practiceId, userId: user.id } },
+      select: { id: true },
+    })
+    if (!membership) {
+      throw new ForbiddenException('Not a member of that practice')
+    }
+    // MFA gate (Manisha 2026-06-12 §6) — multi-practice provider/admin path.
+    // Now that the practice is chosen, an enrolled user is challenged before
+    // tokens; the resolved practiceId rides inside the challenge token.
+    if (await this.shouldChallengeMfa(user.id, user.roles)) {
+      const mfaChallengeToken = await this.signMfaChallenge(user.id, practiceId)
+      return { status: 'MFA_REQUIRED', challengeToken: mfaChallengeToken }
+    }
+    const tokens = await this.issueTokenPair(user, {
+      ...context,
+      activePracticeId: practiceId,
+    })
+    await this.logAuthEvent({
+      event: 'practice_selected',
+      userId: user.id,
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: { practiceId },
+      practiceContext: practiceId,
+      success: true,
+    })
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    const mfaEnrollmentRequired = await this.shouldForceMfaEnrollment(
+      user.id,
+      user.roles,
+    )
+    return { ...resp, activePracticeId: practiceId, mfaEnrollmentRequired }
+  }
+
+  /**
+   * Mid-session practice switch. Updates the active AuthSession's
+   * `activePracticeId` (no new tokens issued — refresh-token stays the
+   * same; new context takes effect on the next request via the JWT
+   * strategy's per-request AuthSession lookup). Writes an AuthLog row.
+   */
+  /**
+   * Controller-friendly wrapper around `switchPractice`. Resolves the raw
+   * refresh-token cookie value to its RefreshToken row (and thereby to the
+   * paired AuthSession), then delegates. Throws Unauthorized if the cookie
+   * doesn't match an active refresh-token for `userId` (defends against a
+   * stale cookie left over from a revoked session).
+   */
+  async switchPracticeByRefreshToken(
+    userId: string,
+    rawRefreshToken: string,
+    practiceId: string,
+    context?: SessionContext,
+  ): Promise<{ activePracticeId: string; accessToken: string }> {
+    const tokenHash = sha256(rawRefreshToken)
+    const existing = await this.prisma.refreshToken.findFirst({
+      where: { tokenHash, userId, revokedAt: null },
+      select: { id: true },
+    })
+    if (!existing) {
+      throw new UnauthorizedException('Refresh token invalid or revoked')
+    }
+    return this.switchPractice(userId, existing.id, practiceId, context)
+  }
+
+  async switchPractice(
+    userId: string,
+    refreshTokenId: string,
+    practiceId: string,
+    context?: SessionContext,
+  ): Promise<{ activePracticeId: string; accessToken: string }> {
+    const membership = await this.prisma.practiceProvider.findUnique({
+      where: { practiceId_userId: { practiceId, userId } },
+      select: { id: true },
+    })
+    if (!membership) {
+      throw new ForbiddenException('Not a member of that practice')
+    }
+    const prior = await this.prisma.authSession.findUnique({
+      where: { refreshTokenId },
+      select: { activePracticeId: true },
+    })
+    const session = await this.prisma.authSession.update({
+      where: { refreshTokenId },
+      data: { activePracticeId: practiceId },
+      select: {
+        user: {
+          select: {
+            id: true, email: true, name: true, roles: true,
+            onboardingStatus: true, accountStatus: true,
+          },
+        },
+      },
+    })
+    // Mint a fresh access token carrying the new activePracticeId claim
+    // so the FE sees the new context on its very next request — no need
+    // to wait for the next refresh. Refresh token itself doesn't rotate
+    // (the user is still in the same session, just acting differently).
+    const accessToken = await this.issueAccessToken(session.user, practiceId)
+    await this.logAuthEvent({
+      event: 'practice_switched',
+      userId,
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: { fromPracticeId: prior?.activePracticeId ?? null, toPracticeId: practiceId },
+      practiceContext: practiceId,
+      success: true,
+    })
+    return { activePracticeId: practiceId, accessToken }
+  }
+
+  // ─── MFA — TOTP second factor (Manisha 2026-06-12 §6) ─────────────────────
+
+  /** Whether this user must clear a TOTP challenge before tokens are issued —
+   *  true only for MFA-required roles that have completed enrollment. Un-
+   *  enrolled users sign in normally; the force-enrollment guard (gated by
+   *  MFA_ENFORCEMENT_ENABLED) pushes them to enroll afterward. */
+  private async shouldChallengeMfa(
+    userId: string,
+    roles: UserRole[],
+  ): Promise<boolean> {
+    if (!requiresMfa(roles)) return false
+    const cred = await this.prisma.totpCredential.findUnique({
+      where: { userId },
+      select: { enrolledAt: true },
+    })
+    return cred?.enrolledAt != null
+  }
+
+  /** Whether enforcement is on and this MFA-required user has NOT enrolled —
+   *  i.e. they should be redirected to TOTP setup immediately after sign-in.
+   *  Mirrors the MfaRequiredGuard's runtime check, but evaluated at verify
+   *  time so the FE redirects up front instead of after a 403 round-trip. */
+  private async shouldForceMfaEnrollment(
+    userId: string,
+    roles: UserRole[],
+  ): Promise<boolean> {
+    if (this.config.get<string>('MFA_ENFORCEMENT_ENABLED') !== 'true') {
+      return false
+    }
+    if (!requiresMfa(roles)) return false
+    const cred = await this.prisma.totpCredential.findUnique({
+      where: { userId },
+      select: { enrolledAt: true },
+    })
+    return cred?.enrolledAt == null
+  }
+
+  private async signMfaChallenge(
+    userId: string,
+    activePracticeId: string | null,
+  ): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: userId, kind: 'mfa_challenge', activePracticeId: activePracticeId ?? null },
+      { expiresIn: MFA_CHALLENGE_TTL },
+    )
+  }
+
+  private async verifyMfaChallenge(
+    token: string,
+  ): Promise<{ userId: string; activePracticeId: string | null }> {
+    let payload: { sub: string; kind: string; activePracticeId?: string | null }
+    try {
+      payload = await this.jwtService.verifyAsync(token)
+    } catch {
+      throw new UnauthorizedException('MFA challenge invalid or expired')
+    }
+    if (payload.kind !== 'mfa_challenge') {
+      throw new UnauthorizedException('MFA challenge invalid or expired')
+    }
+    return { userId: payload.sub, activePracticeId: payload.activePracticeId ?? null }
+  }
+
+  private async signEnrollmentToken(
+    userId: string,
+    secret: string,
+  ): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: userId, kind: 'mfa_enroll', secret },
+      { expiresIn: MFA_ENROLL_TTL },
+    )
+  }
+
+  private async verifyEnrollmentToken(
+    token: string,
+    expectedUserId: string,
+  ): Promise<string> {
+    let payload: { sub: string; kind: string; secret: string }
+    try {
+      payload = await this.jwtService.verifyAsync(token)
+    } catch {
+      throw new BadRequestException('Enrollment session expired — restart MFA setup')
+    }
+    if (payload.kind !== 'mfa_enroll' || payload.sub !== expectedUserId) {
+      throw new BadRequestException('Enrollment session invalid — restart MFA setup')
+    }
+    return payload.secret
+  }
+
+  /** Enrollment step 1 — generate a secret + QR. The secret is NOT persisted;
+   *  it rides back inside a signed enrollment token (the QR already exposes it
+   *  to the client, so this leaks nothing new) and is stored only once the
+   *  first code is verified in completeTotpEnrollment. Stateless, so it works
+   *  across multiple backend instances. */
+  async startTotpEnrollment(
+    userId: string,
+    context?: SessionContext,
+  ): Promise<{
+    provisioningUri: string
+    qrCodeDataUrl: string
+    enrollmentToken: string
+  }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, roles: true },
+    })
+    if (!user) throw new NotFoundException('User not found')
+    if (!requiresMfa(user.roles)) {
+      throw new ForbiddenException('MFA enrollment does not apply to this account')
+    }
+    const issuer = this.config.get<string>('MFA_TOTP_ISSUER', 'Cardioplace')
+    const secret = this.mfaService.generateSecret()
+    const provisioningUri = this.mfaService.buildProvisioningUri(
+      user.email ?? userId,
+      secret,
+      issuer,
+    )
+    const qrCodeDataUrl = await this.mfaService.buildQrDataUrl(provisioningUri)
+    const enrollmentToken = await this.signEnrollmentToken(userId, secret)
+    await this.logAuthEvent({
+      event: 'mfa_enrollment_started',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return { provisioningUri, qrCodeDataUrl, enrollmentToken }
+  }
+
+  /** Enrollment step 2 — verify the first code, persist the encrypted secret +
+   *  hashed recovery codes, mark enrolled. Returns the 10 recovery codes ONCE
+   *  (plaintext, never stored). */
+  async completeTotpEnrollment(
+    userId: string,
+    enrollmentToken: string,
+    code: string,
+    context?: SessionContext,
+  ): Promise<{ recoveryCodes: string[] }> {
+    const secret = await this.verifyEnrollmentToken(enrollmentToken, userId)
+    if (!this.mfaService.verifyCode(secret, code)) {
+      await this.logAuthEvent({
+        event: 'mfa_enrollment_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'invalid_code',
+      })
+      throw new BadRequestException(
+        'That code is incorrect — check your authenticator app and try again',
+      )
+    }
+    const { plain, hashes } = await this.mfaService.generateRecoveryCodes()
+    const secretEncrypted = this.mfaService.encryptSecret(secret)
+    const now = new Date()
+    await this.prisma.$transaction(async (tx) => {
+      await tx.totpCredential.upsert({
+        where: { userId },
+        create: { userId, secretEncrypted, enrolledAt: now },
+        update: { secretEncrypted, enrolledAt: now, mfaResetByAdminAt: null },
+      })
+      // Replace any prior unused codes (covers a recovery-forced re-enrollment).
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId, usedAt: null } })
+      await tx.mfaRecoveryCode.createMany({
+        data: hashes.map((codeHash) => ({ userId, codeHash })),
+      })
+    })
+    await this.logAuthEvent({
+      event: 'mfa_enrollment_completed',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return { recoveryCodes: plain }
+  }
+
+  /** Generate a fresh set of recovery codes for an already-enrolled user,
+   *  invalidating every prior code. Returns the new codes ONCE (plaintext,
+   *  never stored). Reached from the profile "Security" surface. */
+  async regenerateRecoveryCodes(
+    userId: string,
+    context?: SessionContext,
+  ): Promise<{ recoveryCodes: string[] }> {
+    const cred = await this.prisma.totpCredential.findUnique({
+      where: { userId },
+      select: { enrolledAt: true },
+    })
+    if (cred?.enrolledAt == null) {
+      throw new BadRequestException(
+        'Set up two-factor authentication before generating recovery codes',
+      )
+    }
+    const { plain, hashes } = await this.mfaService.generateRecoveryCodes()
+    await this.prisma.$transaction(async (tx) => {
+      // Invalidate ALL prior codes (used + unused) — the new set fully replaces
+      // them so an old printout can never be reused.
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId } })
+      await tx.mfaRecoveryCode.createMany({
+        data: hashes.map((codeHash) => ({ userId, codeHash })),
+      })
+    })
+    await this.logAuthEvent({
+      event: 'mfa_recovery_regenerated',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return { recoveryCodes: plain }
+  }
+
+  private async countRecentFailedMfa(
+    userId: string,
+    sinceMs: number,
+  ): Promise<number> {
+    return this.prisma.authLog.count({
+      where: {
+        userId,
+        event: 'mfa_challenge_failed',
+        createdAt: { gt: new Date(Date.now() - sinceMs) },
+      },
+    })
+  }
+
+  /** Throw if the user is currently locked out. Hard lock (10/h) demands an
+   *  admin reset; soft lock (5/15min) is temporary (recovery code still works). */
+  private async assertNotMfaLocked(userId: string): Promise<void> {
+    if (
+      (await this.countRecentFailedMfa(userId, MFA_HARD_LOCK_WINDOW_MS)) >=
+      MFA_HARD_LOCK_THRESHOLD
+    ) {
+      await this.logAuthEvent({
+        event: 'mfa_locked',
+        userId,
+        method: 'otp',
+        metadata: { tier: 'hard' },
+        success: false,
+        errorCode: 'mfa_locked_admin',
+      })
+      throw new ForbiddenException({
+        message:
+          'Too many failed attempts. Contact an administrator to reset your MFA.',
+        errorCode: 'mfa_locked_admin',
+      })
+    }
+    if (
+      (await this.countRecentFailedMfa(userId, MFA_SOFT_LOCK_WINDOW_MS)) >=
+      MFA_SOFT_LOCK_THRESHOLD
+    ) {
+      throw new ForbiddenException({
+        message:
+          'Too many attempts. Wait a few minutes or use a recovery code.',
+        errorCode: 'mfa_locked_temporary',
+      })
+    }
+  }
+
+  private async loadActiveUser(userId: string): Promise<MinimalUser> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        roles: true,
+        onboardingStatus: true,
+        accountStatus: true,
+      },
+    })
+    if (!user) throw new UnauthorizedException('User not found')
+    this.assertAccountActive(user)
+    return user
+  }
+
+  /** Exchange an MFA challenge + 6-digit code for the real token pair. */
+  async mfaChallenge(
+    challengeToken: string,
+    code: string,
+    context?: SessionContext,
+  ): Promise<AuthResponse> {
+    const { userId, activePracticeId } =
+      await this.verifyMfaChallenge(challengeToken)
+    await this.assertNotMfaLocked(userId)
+    const cred = await this.prisma.totpCredential.findUnique({
+      where: { userId },
+      select: { secretEncrypted: true, enrolledAt: true },
+    })
+    if (!cred?.enrolledAt || !cred.secretEncrypted) {
+      throw new BadRequestException('MFA is not set up for this account')
+    }
+    const secret = this.mfaService.decryptSecret(cred.secretEncrypted)
+    if (!this.mfaService.verifyCode(secret, code)) {
+      await this.logAuthEvent({
+        event: 'mfa_challenge_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        practiceContext: activePracticeId,
+        success: false,
+        errorCode: 'invalid_code',
+      })
+      throw new UnauthorizedException('Invalid code')
+    }
+    const user = await this.loadActiveUser(userId)
+    const tokens = await this.issueTokenPair(user, { ...context, activePracticeId })
+    await this.logAuthEvent({
+      event: 'mfa_challenge_succeeded',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      practiceContext: activePracticeId,
+      success: true,
+    })
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    return { ...resp, activePracticeId }
+  }
+
+  /** Sign in with a one-time recovery code. Standard backup-login behaviour:
+   *  the code is burned (one-time) but the authenticator is left intact — no
+   *  reset, no forced re-enrollment. A user who has actually lost their app
+   *  re-enrolls themselves from settings; losing the codes too is an admin
+   *  reset. (Manisha 2026-06-12 §6.) */
+  async mfaRecovery(
+    challengeToken: string,
+    recoveryCode: string,
+    context?: SessionContext,
+  ): Promise<AuthResponse> {
+    const { userId, activePracticeId } =
+      await this.verifyMfaChallenge(challengeToken)
+    const unused = await this.prisma.mfaRecoveryCode.findMany({
+      where: { userId, usedAt: null },
+      select: { id: true, codeHash: true },
+    })
+    let matchedId: string | null = null
+    for (const row of unused) {
+      if (await this.mfaService.verifyRecoveryCode(recoveryCode, row.codeHash)) {
+        matchedId = row.id
+        break
+      }
+    }
+    if (!matchedId) {
+      await this.logAuthEvent({
+        event: 'mfa_challenge_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        metadata: { via: 'recovery_code' },
+        practiceContext: activePracticeId,
+        success: false,
+        errorCode: 'invalid_recovery_code',
+      })
+      throw new UnauthorizedException('Invalid or already-used recovery code')
+    }
+    await this.prisma.mfaRecoveryCode.update({
+      where: { id: matchedId },
+      data: { usedAt: new Date() },
+    })
+    const user = await this.loadActiveUser(userId)
+    const tokens = await this.issueTokenPair(user, { ...context, activePracticeId })
+    await this.logAuthEvent({
+      event: 'mfa_recovery_code_used',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      practiceContext: activePracticeId,
+      success: true,
+    })
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    return { ...resp, activePracticeId }
+  }
+
+  /** Admin MFA reset — SUPER_ADMIN / HEALPLACE_OPS only; never self-reset.
+   *  Clears the secret + enrollment, deletes unused recovery codes, stamps
+   *  mfaResetByAdminAt, audits with resetter + reason, and emails the user. */
+  async adminResetMfa(
+    actorId: string,
+    targetUserId: string,
+    reason: string,
+    context?: SessionContext,
+  ): Promise<{ message: string }> {
+    if (actorId === targetUserId) {
+      throw new ForbiddenException(
+        'You cannot reset your own MFA — ask another administrator',
+      )
+    }
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, email: true, name: true },
+    })
+    if (!target) throw new NotFoundException('User not found')
+    await this.prisma.$transaction(async (tx) => {
+      // Keep the row (preserves mfaResetByAdminAt for audit); blank the secret
+      // + clear enrolledAt so the next sign-in routes through enrollment.
+      await tx.totpCredential.updateMany({
+        where: { userId: targetUserId },
+        data: { secretEncrypted: '', enrolledAt: null, mfaResetByAdminAt: new Date() },
+      })
+      await tx.mfaRecoveryCode.deleteMany({
+        where: { userId: targetUserId, usedAt: null },
+      })
+    })
+    await this.logAuthEvent({
+      event: 'mfa_reset_by_admin',
+      userId: targetUserId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: { resetBy: actorId, reason },
+      success: true,
+    })
+    if (target.email) {
+      await this.emailService.sendEmail(
+        target.email,
+        'Your Cardioplace two-factor authentication was reset',
+        mfaResetEmailHtml(target.name ?? null),
+      )
+    }
+    return {
+      message:
+        'MFA reset. The user will set up two-factor authentication again on next sign-in.',
+    }
+  }
+
+  // ─── WebAuthn — patient biometric second factor (Face ID / fingerprint) ─────
+  //
+  // OPTIONAL, opt-in from patient settings. OTP / magic-link stays the first
+  // factor; this only adds a second step once a patient has registered a
+  // device. Patients with no registered credential are completely unaffected,
+  // so this doesn't change sign-in for anyone else. Registration requires an
+  // existing session (JwtAuthGuard), so a not-yet-signed-in user is never
+  // shown setup — they enable it later from settings.
+
+  /** Whether this sign-in must clear a biometric second factor — true only for
+   *  a PATIENT who has registered at least one device. */
+  private async shouldChallengeWebAuthn(
+    userId: string,
+    roles: UserRole[],
+  ): Promise<boolean> {
+    if (!roles.includes(UserRole.PATIENT)) return false
+    const count = await this.prisma.webAuthnCredential.count({
+      where: { userId },
+    })
+    return count > 0
+  }
+
+  private async signWebAuthnAuthToken(
+    userId: string,
+    challenge: string,
+    activePracticeId: string | null,
+  ): Promise<string> {
+    return this.jwtService.signAsync(
+      {
+        sub: userId,
+        kind: 'webauthn_auth',
+        challenge,
+        activePracticeId: activePracticeId ?? null,
+      },
+      { expiresIn: WEBAUTHN_CHALLENGE_TTL },
+    )
+  }
+
+  private async verifyWebAuthnAuthToken(token: string): Promise<{
+    userId: string
+    challenge: string
+    activePracticeId: string | null
+  }> {
+    let payload: {
+      sub: string
+      kind: string
+      challenge: string
+      activePracticeId?: string | null
+    }
+    try {
+      payload = await this.jwtService.verifyAsync(token)
+    } catch {
+      throw new UnauthorizedException('Biometric challenge invalid or expired')
+    }
+    if (payload.kind !== 'webauthn_auth') {
+      throw new UnauthorizedException('Biometric challenge invalid or expired')
+    }
+    return {
+      userId: payload.sub,
+      challenge: payload.challenge,
+      activePracticeId: payload.activePracticeId ?? null,
+    }
+  }
+
+  private async signWebAuthnRegToken(
+    userId: string,
+    challenge: string,
+  ): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: userId, kind: 'webauthn_reg', challenge },
+      { expiresIn: WEBAUTHN_REGISTER_TTL },
+    )
+  }
+
+  private async verifyWebAuthnRegToken(
+    token: string,
+    expectedUserId: string,
+  ): Promise<string> {
+    let payload: { sub: string; kind: string; challenge: string }
+    try {
+      payload = await this.jwtService.verifyAsync(token)
+    } catch {
+      throw new BadRequestException(
+        'Biometric setup expired — start setup again',
+      )
+    }
+    if (payload.kind !== 'webauthn_reg' || payload.sub !== expectedUserId) {
+      throw new BadRequestException('Biometric setup invalid — start again')
+    }
+    return payload.challenge
+  }
+
+  /** Sign-in gate helper — mint the challenge token returned as
+   *  WEBAUTHN_REQUIRED. The actual assertion options are fetched separately
+   *  (webAuthnAuthenticationOptions) so the OTP and magic-link paths share one
+   *  small response shape. */
+  private async startWebAuthnAuthentication(
+    userId: string,
+    activePracticeId: string | null,
+  ): Promise<string> {
+    const challenge = this.webAuthnService.randomChallenge()
+    return this.signWebAuthnAuthToken(userId, challenge, activePracticeId)
+  }
+
+  /** Build the navigator.credentials.get() options for a pending second factor.
+   *  allowCredentials is the patient's registered devices, so the browser only
+   *  prompts on a device that holds one of them. */
+  async webAuthnAuthenticationOptions(challengeToken: string) {
+    const { userId, challenge } =
+      await this.verifyWebAuthnAuthToken(challengeToken)
+    const creds = await this.prisma.webAuthnCredential.findMany({
+      where: { userId },
+      select: { credentialId: true, transports: true },
+    })
+    if (creds.length === 0) {
+      throw new BadRequestException('No biometric devices registered')
+    }
+    return this.webAuthnService.buildAuthenticationOptions({
+      challenge,
+      allowCredentials: creds.map((c) => ({
+        id: c.credentialId,
+        transports: c.transports as AuthenticatorTransportFuture[],
+      })),
+    })
+  }
+
+  /** Complete the biometric second factor — verify the assertion, bump the
+   *  signature counter, and issue the real token pair. */
+  async webAuthnAuthenticate(
+    challengeToken: string,
+    response: AuthenticationResponseJSON,
+    context?: SessionContext,
+  ): Promise<AuthResponse> {
+    const { userId, challenge, activePracticeId } =
+      await this.verifyWebAuthnAuthToken(challengeToken)
+    const cred = await this.prisma.webAuthnCredential.findUnique({
+      where: { credentialId: response.id },
+    })
+    if (!cred || cred.userId !== userId) {
+      await this.logAuthEvent({
+        event: 'webauthn_auth_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        practiceContext: activePracticeId,
+        success: false,
+        errorCode: 'unknown_credential',
+      })
+      throw new UnauthorizedException('Biometric device not recognized')
+    }
+    let verification: Awaited<
+      ReturnType<WebAuthnService['verifyAuthentication']>
+    >
+    try {
+      verification = await this.webAuthnService.verifyAuthentication({
+        response,
+        challenge,
+        credential: {
+          id: cred.credentialId,
+          publicKey: cred.publicKey,
+          counter: cred.counter,
+          transports: cred.transports as AuthenticatorTransportFuture[],
+        },
+      })
+    } catch {
+      verification = { verified: false } as typeof verification
+    }
+    if (!verification.verified) {
+      await this.logAuthEvent({
+        event: 'webauthn_auth_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        practiceContext: activePracticeId,
+        success: false,
+        errorCode: 'assertion_failed',
+      })
+      throw new UnauthorizedException('Biometric verification failed')
+    }
+    // Persist the new signature counter (replay-protection) + last-used stamp.
+    await this.prisma.webAuthnCredential.update({
+      where: { id: cred.id },
+      data: {
+        counter: verification.authenticationInfo.newCounter,
+        lastUsedAt: new Date(),
+      },
+    })
+    const user = await this.loadActiveUser(userId)
+    const tokens = await this.issueTokenPair(user, {
+      ...context,
+      activePracticeId,
+    })
+    await this.logAuthEvent({
+      event: 'webauthn_auth_succeeded',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      practiceContext: activePracticeId,
+      success: true,
+    })
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    return { ...resp, activePracticeId }
+  }
+
+  /** Graceful lost-device recovery. The challenge token proves a fresh
+   *  first-factor pass (OTP / magic-link), so a patient who can no longer use
+   *  their biometric (lost / wiped device) can remove it and sign in. This is
+   *  acceptable because email/OTP is the account-recovery root for patients;
+   *  it prevents a permanent lockout that a device-bound second factor would
+   *  otherwise create. */
+  async webAuthnRecoverDisable(
+    challengeToken: string,
+    context?: SessionContext,
+  ): Promise<AuthResponse> {
+    const { userId, activePracticeId } =
+      await this.verifyWebAuthnAuthToken(challengeToken)
+    await this.prisma.webAuthnCredential.deleteMany({ where: { userId } })
+    const user = await this.loadActiveUser(userId)
+    const tokens = await this.issueTokenPair(user, {
+      ...context,
+      activePracticeId,
+    })
+    await this.logAuthEvent({
+      event: 'webauthn_recovery_disabled',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      practiceContext: activePracticeId,
+      success: true,
+    })
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    return { ...resp, activePracticeId }
+  }
+
+  /** Settings — start biometric registration (patient only). Returns the
+   *  create() options + a stateless registration token carrying the challenge.
+   *  The secret material never touches the server until verify. */
+  async startWebAuthnRegistration(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, name: true, roles: true },
+    })
+    if (!user) throw new NotFoundException('User not found')
+    if (!user.roles.includes(UserRole.PATIENT)) {
+      throw new ForbiddenException(
+        'Biometric sign-in is only available for patient accounts',
+      )
+    }
+    const existing = await this.prisma.webAuthnCredential.findMany({
+      where: { userId },
+      select: { credentialId: true, transports: true },
+    })
+    const challenge = this.webAuthnService.randomChallenge()
+    const options = await this.webAuthnService.buildRegistrationOptions({
+      userId,
+      userName: user.email ?? userId,
+      userDisplayName: user.name ?? user.email ?? 'Patient',
+      challenge,
+      excludeCredentials: existing.map((c) => ({
+        id: c.credentialId,
+        transports: c.transports as AuthenticatorTransportFuture[],
+      })),
+    })
+    const registrationToken = await this.signWebAuthnRegToken(userId, challenge)
+    await this.logAuthEvent({
+      event: 'webauthn_registration_started',
+      userId,
+      method: 'otp',
+      success: true,
+    })
+    return { options, registrationToken }
+  }
+
+  /** Settings — finish registration: verify the attestation and persist the
+   *  credential. The patient can now use biometric as a second factor. */
+  async completeWebAuthnRegistration(
+    userId: string,
+    registrationToken: string,
+    response: RegistrationResponseJSON,
+    deviceName: string | undefined,
+    context?: SessionContext,
+  ): Promise<{ id: string; deviceName: string | null }> {
+    const challenge = await this.verifyWebAuthnRegToken(
+      registrationToken,
+      userId,
+    )
+    let verification: Awaited<ReturnType<WebAuthnService['verifyRegistration']>>
+    try {
+      verification = await this.webAuthnService.verifyRegistration({
+        response,
+        challenge,
+      })
+    } catch {
+      verification = { verified: false } as typeof verification
+    }
+    if (!verification.verified || !verification.registrationInfo) {
+      await this.logAuthEvent({
+        event: 'webauthn_registration_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'attestation_failed',
+      })
+      throw new BadRequestException('Biometric setup could not be verified')
+    }
+    const info = verification.registrationInfo
+    // Guard the unique constraint with a friendly message (same device already
+    // registered, possibly to another account).
+    const dup = await this.prisma.webAuthnCredential.findUnique({
+      where: { credentialId: info.credential.id },
+      select: { id: true },
+    })
+    if (dup) {
+      throw new BadRequestException('This device is already registered')
+    }
+    const saved = await this.prisma.webAuthnCredential.create({
+      data: {
+        userId,
+        credentialId: info.credential.id,
+        publicKey: this.webAuthnService.encodePublicKey(info.credential.publicKey),
+        counter: info.credential.counter,
+        transports: info.credential.transports ?? [],
+        deviceType: info.credentialDeviceType,
+        backedUp: info.credentialBackedUp,
+        deviceName: deviceName?.trim() || null,
+      },
+      select: { id: true, deviceName: true },
+    })
+    await this.logAuthEvent({
+      event: 'webauthn_registration_completed',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return saved
+  }
+
+  /** Settings — list the patient's registered biometric devices. */
+  async listWebAuthnCredentials(userId: string): Promise<
+    Array<{
+      id: string
+      deviceName: string | null
+      deviceType: string | null
+      backedUp: boolean
+      createdAt: Date
+      lastUsedAt: Date | null
+    }>
+  > {
+    return this.prisma.webAuthnCredential.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        deviceName: true,
+        deviceType: true,
+        backedUp: true,
+        createdAt: true,
+        lastUsedAt: true,
+      },
+    })
+  }
+
+  /** Settings — remove a registered device (disable biometric on it). When the
+   *  last one is removed, the patient simply signs in with OTP again. */
+  async deleteWebAuthnCredential(
+    userId: string,
+    id: string,
+    context?: SessionContext,
+  ): Promise<{ removed: true }> {
+    const res = await this.prisma.webAuthnCredential.deleteMany({
+      where: { id, userId },
+    })
+    if (res.count === 0) {
+      throw new NotFoundException('Device not found')
+    }
+    await this.logAuthEvent({
+      event: 'webauthn_credential_removed',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return { removed: true }
   }
 
   private buildAuthResponse(
@@ -478,6 +1685,10 @@ export class AuthService {
     metadata?: Record<string, unknown>
     success: boolean
     errorCode?: string
+    /** Phase/practice-identity — the activePracticeId on the actor's
+     *  AuthSession at event time. NULL for org-wide roles and pre-policy
+     *  events. */
+    practiceContext?: string | null
   }): Promise<void> {
     try {
       await this.prisma.authLog.create({
@@ -494,6 +1705,7 @@ export class AuthService {
             : null,
           success: params.success,
           errorCode: params.errorCode ?? null,
+          practiceContext: params.practiceContext ?? null,
         },
       })
     } catch (error) {
@@ -1034,7 +2246,7 @@ export class AuthService {
       appContext?: 'admin' | 'patient'
       deviceType?: string
     },
-  ): Promise<AuthResponse> {
+  ): Promise<AuthVerifyResult> {
     if (!email?.trim()) {
       throw new BadRequestException('Email is required')
     }
@@ -1183,13 +2395,62 @@ export class AuthService {
       success: true,
     })
 
+    // Phase/practice-identity — resolve practice context BEFORE issuing
+    // tokens. A multi-practice provider gets a challenge token, not the
+    // real token pair; they must POST /auth/select-practice to choose
+    // which one they're acting as.
+    const resolution = await this.resolvePracticeContext(user.id, user.roles)
+    if (resolution.kind === 'blocked') {
+      throw new ForbiddenException(
+        'No practice membership — contact your admin to be added to a practice before signing in.',
+      )
+    }
+    if (resolution.kind === 'select') {
+      const challengeToken = await this.signPracticeSelectChallenge(user.id)
+      return {
+        status: 'PRACTICE_SELECT_REQUIRED',
+        challengeToken,
+        practices: resolution.practices,
+      }
+    }
+    const activePracticeId =
+      resolution.kind === 'auto' ? resolution.activePracticeId : null
+
+    // MFA gate (Manisha 2026-06-12 §6) — an MFA-enrolled provider/admin does
+    // NOT get tokens here; they get a challenge carrying the resolved practice
+    // context. The multi-practice path is gated later in selectPractice (after
+    // the selector), so it isn't reachable in this auto/none branch.
+    if (await this.shouldChallengeMfa(user.id, user.roles)) {
+      const challengeToken = await this.signMfaChallenge(user.id, activePracticeId)
+      return { status: 'MFA_REQUIRED', challengeToken }
+    }
+
+    // Patient biometric second factor (WebAuthn) — if this patient has
+    // registered a device, require the Face ID / fingerprint assertion before
+    // tokens. Patients without a registered device are unaffected.
+    if (await this.shouldChallengeWebAuthn(user.id, user.roles)) {
+      const challengeToken = await this.startWebAuthnAuthentication(
+        user.id,
+        activePracticeId,
+      )
+      return { status: 'WEBAUTHN_REQUIRED', challengeToken }
+    }
+
     const tokens = await this.issueTokenPair(user, {
       userAgent: context?.userAgent,
       deviceId: context?.deviceId,
       ipAddress: context?.ipAddress,
       deviceType: context?.deviceType,
+      activePracticeId,
     })
-    return this.buildAuthResponse(tokens, user, 'otp')
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    // Force-enrollment signal — tokens ARE issued (enrollment needs a session)
+    // but the FE redirects straight to TOTP setup instead of the dashboard.
+    const mfaEnrollmentRequired = await this.shouldForceMfaEnrollment(
+      user.id,
+      user.roles,
+    )
+    return { ...resp, activePracticeId, mfaEnrollmentRequired }
   }
 
   // ─── Device Tracking ────────────────────────────────────────────────────────
@@ -1300,7 +2561,10 @@ export class AuthService {
 
   // ─── Profile — Get ────────────────────────────────────────────────────────────
 
-  async getProfile(userId: string) {
+  async getProfile(
+    userId: string,
+    ctx?: { practiceId: string | null },
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -1328,6 +2592,69 @@ export class AuthService {
       throw new NotFoundException('User not found')
     }
 
+    // MFA status for the profile "Security" surface. mfaEnabled mirrors the
+    // shouldChallengeMfa check (a TotpCredential row with enrolledAt set);
+    // mfaRequired tells the FE whether the role is under the enforced-MFA
+    // policy (so it can show "Required" and hide any disable affordance).
+    const totpCred = await this.prisma.totpCredential.findUnique({
+      where: { userId },
+      select: { enrolledAt: true },
+    })
+    const mfaEnabled = totpCred?.enrolledAt != null
+    const mfaRequired = requiresMfa(user.roles)
+
+    // Phase/practice-identity rehydrate fix (Manisha 2026-06-12 §1, smoke
+    // 2026-06-18) — surface activePracticeId + activePractice + the user's
+    // available memberships so admin's rehydrate() can restore practice
+    // context after a browser refresh. Without these fields, F5 dropped
+    // every PROVIDER/MED_DIR/COORDINATOR into the ZeroPracticeModal even
+    // though their AuthSession + JWT still carried activePracticeId.
+    //
+    // Probe BOTH membership relations — the dual-relation pattern mirrors
+    // resolvePracticeContext() and JwtStrategy.validate(). COORDINATOR
+    // membership is 1:1 on PracticeCoordinator; PROVIDER / MED_DIR is 1:N
+    // on PracticeProvider. SUPER_ADMIN / HEALPLACE_OPS are unscoped and
+    // get null/[].
+    const isOrgWide =
+      user.roles.includes(UserRole.SUPER_ADMIN) ||
+      user.roles.includes(UserRole.HEALPLACE_OPS)
+    const isCoordinator = user.roles.includes(UserRole.COORDINATOR)
+    const activePracticeIdFromCtx = ctx?.practiceId ?? null
+
+    let availablePractices: Array<{ id: string; name: string }> = []
+    if (!isOrgWide) {
+      const [providerRows, coordinatorRow] = await Promise.all([
+        this.prisma.practiceProvider.findMany({
+          where: { userId: user.id },
+          select: { practice: { select: { id: true, name: true } } },
+        }),
+        isCoordinator
+          ? this.prisma.practiceCoordinator.findUnique({
+              where: { userId: user.id },
+              select: { practice: { select: { id: true, name: true } } },
+            })
+          : Promise.resolve(null),
+      ])
+      const seen = new Set<string>()
+      for (const r of providerRows) {
+        if (r.practice && !seen.has(r.practice.id)) {
+          availablePractices.push(r.practice)
+          seen.add(r.practice.id)
+        }
+      }
+      if (coordinatorRow?.practice && !seen.has(coordinatorRow.practice.id)) {
+        availablePractices.push(coordinatorRow.practice)
+      }
+    }
+    // activePractice is the row matching the JWT's activePracticeId — if
+    // the JWT carries a stale id (practice deleted after sign-in) we
+    // return null + leave the FE to surface the ZeroPracticeModal
+    // correctly (this case = genuinely no practice).
+    const activePractice =
+      activePracticeIdFromCtx
+        ? availablePractices.find((p) => p.id === activePracticeIdFromCtx) ?? null
+        : null
+
     return {
       id: user.id,
       email: user.email,
@@ -1344,6 +2671,14 @@ export class AuthService {
       timezone: user.timezone,
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
+      // MFA status (additive) — drives the profile Security pill.
+      mfaEnabled,
+      mfaRequired,
+      // Practice-identity rehydrate fields (additive — pre-fix consumers
+      // ignore them).
+      activePracticeId: activePractice ? activePractice.id : null,
+      activePractice,
+      availablePractices,
     }
   }
 
@@ -1439,7 +2774,7 @@ export class AuthService {
       timezone?: string
       deviceType?: string
     },
-  ): Promise<AuthResponse> {
+  ): Promise<AuthVerifyResult> {
     if (!token?.trim()) {
       throw new BadRequestException('Token is required')
     }
@@ -1523,13 +2858,49 @@ export class AuthService {
       success: true,
     })
 
+    // Phase/practice-identity — same selector branch as verifyOtp.
+    const resolution = await this.resolvePracticeContext(user.id, user.roles)
+    if (resolution.kind === 'blocked') {
+      throw new ForbiddenException(
+        'No practice membership — contact your admin to be added to a practice before signing in.',
+      )
+    }
+    if (resolution.kind === 'select') {
+      const challengeToken = await this.signPracticeSelectChallenge(user.id)
+      return {
+        status: 'PRACTICE_SELECT_REQUIRED',
+        challengeToken,
+        practices: resolution.practices,
+      }
+    }
+    const activePracticeId =
+      resolution.kind === 'auto' ? resolution.activePracticeId : null
+
+    // MFA gate — symmetric with verifyOtp. An enrolled provider/admin gets a
+    // challenge instead of tokens (patients have no TOTP, so this no-ops them).
+    if (await this.shouldChallengeMfa(user.id, user.roles)) {
+      const mfaChallengeToken = await this.signMfaChallenge(user.id, activePracticeId)
+      return { status: 'MFA_REQUIRED', challengeToken: mfaChallengeToken }
+    }
+
+    // Patient biometric second factor (WebAuthn) — symmetric with verifyOtp.
+    if (await this.shouldChallengeWebAuthn(user.id, user.roles)) {
+      const webAuthnChallengeToken = await this.startWebAuthnAuthentication(
+        user.id,
+        activePracticeId,
+      )
+      return { status: 'WEBAUTHN_REQUIRED', challengeToken: webAuthnChallengeToken }
+    }
+
     const tokens = await this.issueTokenPair(user, {
       userAgent: context?.userAgent,
       deviceId: context?.deviceId,
       ipAddress: context?.ipAddress,
       deviceType: context?.deviceType,
+      activePracticeId,
     })
-    return this.buildAuthResponse(tokens, user, 'magic_link')
+    const resp = this.buildAuthResponse(tokens, user, 'magic_link')
+    return { ...resp, activePracticeId }
   }
 
   // ─── Admin-app role gate ────────────────────────────────────────────────────
@@ -1620,7 +2991,7 @@ export class AuthService {
       timezone?: string
       deviceType?: string
     },
-  ): Promise<AuthResponse> {
+  ): Promise<AuthResponse | InviteSignInRequired> {
     if (!rawToken?.trim()) {
       throw new BadRequestException('Token is required')
     }
@@ -1809,6 +3180,16 @@ export class AuthService {
       userAgent: context?.userAgent,
       via: 'invite_accept',
     })
+
+    // Admin-role invitees do NOT get an auto-login session — they sign in via
+    // OTP (then TOTP/MFA) so the second factor isn't bypassed. The account is
+    // already created + ACTIVE above; the FE redirects them to /sign-in.
+    const isAdminInvite = result.user.roles.some((r) =>
+      AuthService.ADMIN_ALLOWED_ROLES.includes(r),
+    )
+    if (isAdminInvite) {
+      return { status: 'SIGN_IN_REQUIRED', roles: result.user.roles }
+    }
 
     const tokens = await this.issueTokenPair(result.user, {
       userAgent: context?.userAgent,

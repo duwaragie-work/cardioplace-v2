@@ -1,0 +1,208 @@
+'use client';
+
+/**
+ * Phase/practice-identity (Manisha 2026-06-12 Access Control §1).
+ *
+ * Renders the practice selector when a multi-practice provider has just
+ * verified their OTP / magic-link credentials but hasn't yet picked WHICH
+ * practice they're acting as. The verify endpoint returned a short-lived
+ * challenge token (5-min TTL); POSTing it here with the chosen practiceId
+ * exchanges it for the real token pair and the activePracticeId persists
+ * on the new AuthSession.
+ *
+ * Zero-state: a stale URL or a refresh past the 5-min TTL lands here with
+ * no challenge — show "session expired, please sign in again" + a link.
+ */
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth, type AdminAuthResponse } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { MFA_CHALLENGE_STORAGE_KEY } from '@/lib/services/mfa.service';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+
+type Challenge = {
+  challengeToken: string;
+  practices: Array<{ id: string; name: string }>;
+};
+
+function readChallenge(): Challenge | null {
+  if (typeof window === 'undefined') return null;
+  // Prefer sessionStorage (set by sign-in page on the verify response).
+  try {
+    const raw = sessionStorage.getItem('cp_admin_practice_challenge');
+    if (raw) return JSON.parse(raw) as Challenge;
+  } catch {
+    /* sessionStorage unavailable — fall through */
+  }
+  // Fallback to URL params (magic-link redirect path).
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const challengeToken = params.get('challengeToken');
+    const practicesRaw = params.get('practices');
+    if (challengeToken && practicesRaw) {
+      return {
+        challengeToken,
+        practices: JSON.parse(practicesRaw) as Challenge['practices'],
+      };
+    }
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
+export default function SelectPracticePage() {
+  const router = useRouter();
+  const { login } = useAuth();
+  const { t } = useLanguage();
+  const [challenge, setChallenge] = useState<Challenge | null>(null);
+  const [submitting, setSubmitting] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setChallenge(readChallenge());
+  }, []);
+
+  if (challenge === null) {
+    // First render before useEffect runs.
+    return null;
+  }
+
+  if (!challenge.challengeToken) {
+    return (
+      <main className="min-h-screen flex items-center justify-center px-4">
+        <div className="max-w-md text-center">
+          <h1 className="text-2xl font-semibold mb-3">
+            {t('signIn.selectPractice.expired.title')}
+          </h1>
+          <p className="text-gray-600 mb-6">
+            {t('signIn.selectPractice.expired.body')}
+          </p>
+          <a
+            href="/sign-in"
+            className="inline-block rounded-lg bg-purple-600 px-5 py-2.5 text-white"
+          >
+            {t('signIn.selectPractice.expired.back')}
+          </a>
+        </div>
+      </main>
+    );
+  }
+
+  async function selectPractice(practiceId: string) {
+    if (submitting || !challenge) return;
+    setSubmitting(practiceId);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/v2/auth/select-practice`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          challengeToken: challenge.challengeToken,
+          practiceId,
+        }),
+      });
+      const data = (await res.json()) as AdminAuthResponse & {
+        message?: string;
+        status?: string;
+        challengeToken?: string;
+        mfaEnrollmentRequired?: boolean;
+      };
+      if (!res.ok) {
+        throw new Error(data?.message ?? t('signIn.selectPractice.error'));
+      }
+      try {
+        sessionStorage.removeItem('cp_admin_practice_challenge');
+      } catch {
+        /* sessionStorage unavailable */
+      }
+      // MFA (Manisha 2026-06-12 §6) — an enrolled multi-practice provider gets
+      // a challenge after picking a practice; hand off to the second-factor
+      // page instead of issuing tokens here.
+      if (data.status === 'MFA_REQUIRED' && data.challengeToken) {
+        try {
+          sessionStorage.setItem(
+            MFA_CHALLENGE_STORAGE_KEY,
+            JSON.stringify({ challengeToken: data.challengeToken }),
+          );
+        } catch {
+          /* sessionStorage unavailable — challenge page falls back to URL */
+        }
+        router.push('/sign-in/mfa-challenge');
+        return;
+      }
+      login(data);
+      // Forced enrollment after the practice pick — same handoff as the OTP
+      // sign-in page; go to the chrome-free setup page, not the dashboard.
+      if (data.mfaEnrollmentRequired) {
+        router.push('/sign-in/mfa-enroll?required=1');
+        return;
+      }
+      router.push('/dashboard');
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : t('signIn.selectPractice.error'),
+      );
+      setSubmitting(null);
+    }
+  }
+
+  return (
+    <main
+      id="main"
+      tabIndex={-1}
+      className="min-h-screen bg-white px-4 py-12 flex items-start justify-center"
+    >
+      <div className="w-full max-w-xl">
+        <h1 className="text-3xl font-semibold text-gray-900 mb-2">
+          {t('signIn.selectPractice.title')}
+        </h1>
+        <p className="text-gray-600 mb-8">{t('signIn.selectPractice.intro')}</p>
+
+        {error && (
+          <div
+            role="alert"
+            className="mb-6 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700"
+          >
+            {error}
+          </div>
+        )}
+
+        <ul className="space-y-3">
+          {challenge.practices.map((p) => {
+            const isSubmitting = submitting === p.id;
+            return (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onClick={() => void selectPractice(p.id)}
+                  disabled={submitting !== null}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-5 py-4 text-left transition hover:border-purple-400 hover:bg-purple-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-gray-900">{p.name}</span>
+                    <span className="text-sm text-gray-500">
+                      {isSubmitting
+                        ? t('signIn.selectPractice.signingIn')
+                        : `${t('signIn.selectPractice.continue')} →`}
+                    </span>
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
+        <p className="mt-8 text-sm text-gray-500">
+          <a href="/sign-in" className="text-purple-700 underline">
+            {t('signIn.selectPractice.contactAdmin')}
+          </a>
+        </p>
+      </div>
+    </main>
+  );
+}
