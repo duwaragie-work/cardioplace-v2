@@ -1318,6 +1318,71 @@ describe('AuthService', () => {
       )
     })
 
+    // Phase/practice-identity rehydrate-fix root cause (smoke 2026-06-18).
+    // Before the fix, rotateRefreshToken minted the new access token with
+    // `issueAccessToken(existing.user)` — NO second argument — so the JWT's
+    // activePracticeId claim was always null after a refresh. Every browser
+    // refresh silently stripped the practice context: the FE's rehydrate()
+    // got a JWT with activePracticeId=null, /auth/profile via
+    // @ActiveContext() resolved null, getProfile returned activePractice=null
+    // → ZeroPracticeModal fired. Symptom was hidden because spec 37 (the
+    // regression Playwright) had a "trivial pass" — modal-absent assertions
+    // passed on /sign-in (where the FE bounced) too. Fix: thread the
+    // session's activePracticeId into the new access token so it survives
+    // rotation.
+    it('preserves the AuthSession activePracticeId on the new access token (rehydrate fix root cause)', async () => {
+      const issueAccessSpy = jest.spyOn(service, 'issueAccessToken')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue({
+        id: 'old-token',
+        userId: mockUser.id,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        user: mockUser,
+        authSession: {
+          id: 'session-1',
+          userAgent: 'ua',
+          ipAddress: '1.2.3.4',
+          deviceId: 'd1',
+          deviceType: 'web',
+          lastActivityAt: new Date(),
+          // The point of this test — rotation must propagate this claim.
+          activePracticeId: 'seed-cedar-hill',
+        },
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'new-token',
+      })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({})
+
+      await service.rotateRefreshToken('raw-token', {})
+
+      expect(issueAccessSpy).toHaveBeenCalledWith(mockUser, 'seed-cedar-hill')
+      issueAccessSpy.mockRestore()
+    })
+
+    it('legacy refresh token with no AuthSession → access token has null activePracticeId (no claim to preserve)', async () => {
+      const issueAccessSpy = jest.spyOn(service, 'issueAccessToken')
+      ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue({
+        id: 'legacy-no-session',
+        userId: mockUser.id,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        user: mockUser,
+        authSession: null,
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'new-token',
+      })
+      ;(prisma.refreshToken.update as jest.Mock).mockResolvedValue({})
+      ;(prisma.authSession.create as jest.Mock).mockResolvedValue({})
+
+      await service.rotateRefreshToken('raw-token', {})
+
+      expect(issueAccessSpy).toHaveBeenCalledWith(mockUser, null)
+      issueAccessSpy.mockRestore()
+    })
+
     it('legacy refresh token with no AuthSession — creates one on rotate (defensive)', async () => {
       ;(prisma.refreshToken.findFirst as jest.Mock).mockResolvedValue({
         id: 'legacy-token',

@@ -391,7 +391,21 @@ export class AuthService {
       })
     }
 
-    const accessToken = await this.issueAccessToken(existing.user)
+    // Phase/practice-identity rehydrate-fix root cause (smoke 2026-06-18) —
+    // the new access token MUST carry the AuthSession's activePracticeId
+    // claim. Without it, every browser refresh quietly strips the practice
+    // context: the FE's rehydrate() got a JWT with activePracticeId=null,
+    // /auth/profile via @ActiveContext() got null, getProfile resolved
+    // activePractice=null, ZeroPracticeModal fired (or for the multi-
+    // practice provider's audited writes, practiceContext silently NULL'd).
+    // The AuthSession row preserves activePracticeId across rotation —
+    // the rotation just wasn't propagating it to the new JWT. Source of
+    // truth is the (now-just-updated) session; legacy refresh tokens with
+    // no paired session simply get null (no practice context to preserve).
+    const accessToken = await this.issueAccessToken(
+      existing.user,
+      existing.authSession?.activePracticeId ?? null,
+    )
 
     await this.logAuthEvent({
       event: 'refresh_success',
