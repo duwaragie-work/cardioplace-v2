@@ -32,6 +32,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   // sidebar/top bar would just bounce them back to /sign-in).
   if (
     PUBLIC_PATHS.has(pathname) ||
+    pathname.startsWith('/sign-in/') ||   // pre-session sub-routes like /sign-in/select-practice
     pathname.startsWith('/auth/') ||
     pathname.startsWith('/activate/')
   ) {
