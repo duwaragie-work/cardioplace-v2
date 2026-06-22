@@ -5,7 +5,9 @@
  * (simulating voice), verifies transcripts + tool events, and
  * judges response quality. All results logged to LangSmith.
  *
- * Requires: GOOGLE_API_KEY, DATABASE_URL, JWT_ACCESS_SECRET.
+ * Requires: DATABASE_URL, JWT_ACCESS_SECRET, AND ONE OF:
+ *   • GOOGLE_API_KEY                                      (AI Studio path)
+ *   • GEMINI_PROVIDER=vertex + GOOGLE_CLOUD_PROJECT       (Vertex AI path)
  *           Voice runs in-process via @google/genai's Live API; no
  *           separate ADK service is needed.
  * Optional: LANGSMITH_API_KEY, LANGSMITH_PROJECT, OTEL_EXPORTER_OTLP_ENDPOINT
@@ -17,7 +19,13 @@ import { io, Socket as ClientSocket } from 'socket.io-client'
 import { JudgeService, EvalResult } from './judge.service.js'
 import { setupTestApp, teardownTestApp, getBaseUrl, TestContext } from './test-helpers.js'
 
-const skip = !process.env.GOOGLE_API_KEY
+// Skip iff neither provider's credentials are available. Mirrors the
+// runtime provider selection in `backend/src/gemini/google-genai-client.factory.ts`.
+const hasAiStudioCreds = Boolean(process.env.GOOGLE_API_KEY)
+const hasVertexCreds =
+  (process.env.GEMINI_PROVIDER ?? '').toLowerCase() === 'vertex' &&
+  Boolean(process.env.GOOGLE_CLOUD_PROJECT)
+const skip = !hasAiStudioCreds && !hasVertexCreds
 const descr = skip ? describe.skip : describe
 
 function waitFor(fn: () => boolean, ms = 30_000, poll = 500): Promise<void> {
