@@ -23,7 +23,7 @@ import { useAuth, type OtpVerifyResponse } from '@/lib/auth-context';
 import {
   WEBAUTHN_CHALLENGE_STORAGE_KEY,
   authenticateBiometric,
-  recoverDisableBiometric,
+  continueWithEmailCode,
 } from '@/lib/services/webauthn.service';
 import LandingHeader from '@/components/cardio/LandingHeader';
 import LandingFooter from '@/components/cardio/LandingFooter';
@@ -61,7 +61,7 @@ export default function BiometricSignInPage() {
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [recovering, setRecovering] = useState(false);
+  const [fallingBack, setFallingBack] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showFallback, setShowFallback] = useState(false);
   const autoTried = useRef(false);
@@ -107,16 +107,18 @@ export default function BiometricSignInPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, challengeToken]);
 
-  async function handleRecover() {
-    if (recovering || !challengeToken) return;
-    setRecovering(true);
+  async function handleEmailCodeFallback() {
+    if (fallingBack || !challengeToken) return;
+    setFallingBack(true);
     setError(null);
     try {
-      const data = await recoverDisableBiometric(challengeToken);
+      // Sign in with the already-verified email code. Does NOT remove any
+      // passkey — the patient's other devices keep biometric.
+      const data = await continueWithEmailCode(challengeToken);
       finishLogin(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not sign you in.');
-      setRecovering(false);
+      setFallingBack(false);
     }
   }
 
@@ -184,7 +186,7 @@ export default function BiometricSignInPage() {
                 type="button"
                 data-testid="biometric-prompt-btn"
                 onClick={() => void runBiometric()}
-                disabled={busy || recovering}
+                disabled={busy || fallingBack}
                 className="w-full h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-2"
               >
                 {busy ? (
@@ -203,23 +205,22 @@ export default function BiometricSignInPage() {
               {showFallback && (
                 <div className="mt-6 border-t border-[#f0e6fa] pt-5 text-left">
                   <p className="text-[#6b7280] text-sm mb-3">
-                    Can&apos;t use biometric on this device?
+                    Don&apos;t have Face ID / fingerprint on this device?
                   </p>
                   <button
                     type="button"
-                    data-testid="biometric-recover-btn"
-                    onClick={() => void handleRecover()}
-                    disabled={recovering || busy}
+                    data-testid="biometric-fallback-btn"
+                    onClick={() => void handleEmailCodeFallback()}
+                    disabled={fallingBack || busy}
                     className="w-full h-12 rounded-full border border-[#7B00E0] font-semibold text-[#7B00E0] hover:bg-[#7B00E0]/5 transition-colors disabled:opacity-50 cursor-pointer inline-flex items-center justify-center gap-2"
                   >
-                    {recovering && <Loader2 className="w-4 h-4 animate-spin" />}
-                    {recovering
-                      ? 'Signing you in…'
-                      : 'Turn off biometric and sign in'}
+                    {fallingBack && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {fallingBack ? 'Signing you in…' : 'Continue with email code'}
                   </button>
                   <p className="text-[#9ca3af] text-xs mt-2">
-                    This removes Face ID / fingerprint from your account. You can
-                    set it up again later from Settings.
+                    You&apos;ll sign in with your email code. Your other devices
+                    keep Face ID / fingerprint. You can set it up on this device
+                    later from Settings.
                   </p>
                 </div>
               )}
