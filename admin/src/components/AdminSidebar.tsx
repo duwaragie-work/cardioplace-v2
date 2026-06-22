@@ -81,6 +81,8 @@ const PRIMARY_NAV: NavItem[] = [
   // phase/24 — monthly practice analytics. Oversight surface — visible
   // to MEDICAL_DIRECTOR (scoped to own practice), HEALPLACE_OPS, and
   // SUPER_ADMIN. PROVIDER + COORDINATOR don't see it.
+  // phase/24 + phase/25 — practice analytics. The Reports page hosts both
+  // the Monthly report and the 90-day Adherence report as tabs.
   {
     href: '/reports',
     label: 'Reports',
