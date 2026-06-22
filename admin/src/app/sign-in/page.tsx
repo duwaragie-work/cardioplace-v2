@@ -6,6 +6,7 @@ import { useAuth, type AdminAuthResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { hasAdminRole } from "@/lib/roleGates";
 import { getOrCreateDeviceId } from "@/lib/device";
+import { MFA_CHALLENGE_STORAGE_KEY } from "@/lib/services/mfa.service";
 
 // Where a rehydrated NON-admin user (the shared API refresh-token cookie can
 // resolve a PATIENT profile on the admin origin) gets sent — their own app.
@@ -14,6 +15,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import type { TranslationKey } from "@/i18n";
 import LandingHeader from "@/components/LandingHeader";
 import LandingFooter from "@/components/LandingFooter";
+import SessionExpiredBanner from "@/components/auth/SessionExpiredBanner";
 
 const OTP_LENGTH = 6;
 
@@ -74,10 +76,19 @@ export default function RegisterPage() {
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const resendTimerRef = useRef<number | null>(null);
+  // When we're handing off to forced MFA enrollment we call login() (to set
+  // the session) but must NOT let the "already-signed-in → dashboard" effect
+  // below fire — it would race our push to /sign-in/mfa-enroll and flash the
+  // dashboard. A ref updates synchronously and is read on the next render.
+  const skipAuthedRedirect = useRef(false);
   // Admin app is OTP-only — magic-link mode was removed.
 
   const [showOtp, setShowOtp] = useState(false);
   const [mounted, setMounted] = useState(false);
+  // Set after an admin invitee activates their account — they're sent here
+  // (instead of auto-logged-in) to sign in with OTP. We prefill their email
+  // and show a one-line "account activated" notice.
+  const [justActivated, setJustActivated] = useState(false);
   const emailTrimmed = email.trim();
   const emailIsValid = useMemo(() => isEmailValid(emailTrimmed), [emailTrimmed]);
   // Inline-validation hint: only show "invalid email" once the user has
@@ -91,8 +102,23 @@ export default function RegisterPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
 
+  // Read the post-activation handoff params (?activated=1&email=…) from the
+  // URL on mount. Done via window.location to avoid a useSearchParams Suspense
+  // boundary; client-only so it never runs during SSR.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('activated') !== '1') return;
+    const email = params.get('email');
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setJustActivated(true);
+    if (email) setEmail(email);
+  }, []);
+
   useEffect(() => {
     if (isLoading || !user) return;
+    // Forced-enrollment handoff in progress — let handleVerifyOtp's push to
+    // /sign-in/mfa-enroll win instead of redirecting to the dashboard.
+    if (skipAuthedRedirect.current) return;
     // A live session resolved. If it carries an admin-tier role, go to the
     // admin dashboard. If NOT (e.g. a PATIENT whose shared API refresh-token
     // cookie rehydrated here), cross-redirect to the patient app instead of
@@ -208,7 +234,53 @@ export default function RegisterPage() {
         setErrorKey(backendMsgToKey(data.message) ?? 'register.verificationFailed');
         throw new Error(data.message || "Verification failed.");
       }
+      // Phase/practice-identity (Manisha 2026-06-12 §1) — multi-practice
+      // provider must pick which practice they're acting as before tokens
+      // are issued. Stash the challenge + the choices in sessionStorage
+      // (survives a refresh; tab-scoped) and route to the selector page.
+      if (data && data.status === 'PRACTICE_SELECT_REQUIRED') {
+        try {
+          sessionStorage.setItem(
+            'cp_admin_practice_challenge',
+            JSON.stringify({
+              challengeToken: data.challengeToken,
+              practices: data.practices,
+            }),
+          );
+        } catch {
+          // sessionStorage unavailable (private mode etc.) — fall back to
+          // URL params; the selector page reads both.
+        }
+        router.push('/sign-in/select-practice');
+        return;
+      }
+      // MFA (Manisha 2026-06-12 §6) — an enrolled provider/admin gets a
+      // challenge token instead of tokens. Stash it (tab-scoped) and route to
+      // the second-factor page, mirroring the practice-select handoff above.
+      if (data && data.status === 'MFA_REQUIRED') {
+        try {
+          sessionStorage.setItem(
+            MFA_CHALLENGE_STORAGE_KEY,
+            JSON.stringify({ challengeToken: data.challengeToken }),
+          );
+        } catch {
+          // sessionStorage unavailable — the challenge page reads URL params too.
+        }
+        router.push('/sign-in/mfa-challenge');
+        return;
+      }
+      // Forced enrollment (MFA_ENFORCEMENT_ENABLED on + not yet enrolled) —
+      // set the guard BEFORE login() so the "already-signed-in → dashboard"
+      // effect skips this case, then route to the chrome-free setup page.
+      // Tokens were issued, so the session keeps the enroll endpoints working;
+      // we just don't flash the dashboard on the way.
+      const forceEnroll = !!(data && data.mfaEnrollmentRequired);
+      if (forceEnroll) skipAuthedRedirect.current = true;
       login(data as AdminAuthResponse);
+      if (forceEnroll) {
+        router.push("/sign-in/mfa-enroll?required=1");
+        return;
+      }
       router.push("/dashboard");
     } catch (err) {
       setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.invalidOtp');
@@ -221,7 +293,8 @@ export default function RegisterPage() {
     <Suspense>
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <main id="main" tabIndex={-1} className="lg:min-h-screen pt-24 lg:pt-[64px] pb-10 lg:pb-0 flex items-start lg:items-center justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" tabIndex={-1} className="lg:min-h-screen pt-24 lg:pt-[64px] pb-10 lg:pb-0 flex flex-col items-stretch lg:items-center justify-start lg:justify-center px-4 sm:px-6 lg:px-12">
+      <SessionExpiredBanner />
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}
@@ -238,6 +311,23 @@ export default function RegisterPage() {
                 {t('register.enterEmail')}
               </p>
             </div>
+
+            {/* Post-activation notice — admin invitees land here to sign in. */}
+            {justActivated && (
+              <div
+                className="mb-6 w-full max-w-105 flex items-start gap-2.5 rounded-xl px-4 py-3 text-sm"
+                style={{
+                  backgroundColor: 'var(--brand-success-green-light, #DCFCE7)',
+                  color: 'var(--brand-success-green, #166534)',
+                }}
+                role="status"
+              >
+                <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  Your account is activated. Sign in with your email to continue.
+                </span>
+              </div>
+            )}
 
 
             {/* Form */}

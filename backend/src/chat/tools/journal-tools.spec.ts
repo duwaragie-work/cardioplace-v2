@@ -158,15 +158,16 @@ describe('journal-tools', () => {
     // evaluate_reading (chatbot can ask the rule engine what a given
     // BP/HR reading means for this patient, returning the canonical
     // patient-tier message).
-    it('should return 11 tool declarations', () => {
+    it('should return 12 tool declarations', () => {
       const declarations = getJournalToolDeclarations()
-      expect(declarations).toHaveLength(11)
+      expect(declarations).toHaveLength(12)
       expect(declarations.map((d) => d.name).sort()).toEqual([
         'check_intake_status',
         'delete_checkin',
         'evaluate_reading',
         'finalize_checkin',
         'flag_emergency',
+        'flag_reading_error',
         'get_recent_readings',
         'log_medication_adherence',
         'log_symptom_quick',
@@ -244,6 +245,11 @@ describe('journal-tools', () => {
       findAll: jest.fn<any>(),
       update: jest.fn<any>(),
       delete: jest.fn<any>(),
+      // Bug 60 — dispatcher reads this for the popup hasActiveMedications
+      // signal. Default to true (= patient has meds) so existing test
+      // assertions that don't care about this field stay green; the
+      // dedicated Bug 60 tests can override per-case.
+      hasActiveMedications: jest.fn<any>().mockResolvedValue(true),
     }
 
     // Lock the wall clock so `new Date().toISOString().slice(0, 10)` (used
@@ -1174,6 +1180,11 @@ describe('journal-tools', () => {
       findAll: jest.fn<any>(),
       update: jest.fn<any>(),
       delete: jest.fn<any>(),
+      // Bug 60 — dispatcher reads this for the popup hasActiveMedications
+      // signal. Default to true (= patient has meds) so existing test
+      // assertions that don't care about this field stay green; the
+      // dedicated Bug 60 tests can override per-case.
+      hasActiveMedications: jest.fn<any>().mockResolvedValue(true),
     }
     const ctx = {
       journalService: mockJournalService as any,
@@ -1360,6 +1371,217 @@ describe('journal-tools', () => {
       )
       const call = mockAlertEngine.evaluateAdHoc.mock.calls[0][0] as Record<string, any>
       expect(call.symptoms).toBeUndefined()
+    })
+  })
+
+  // ==========================================================================
+  // Phase/16 — submit_checkin new flags: close_session, confirms_entry_id,
+  // decline_confirmation (Nivakaran chat-v2 handoff 2026-06-17)
+  // ==========================================================================
+  describe('Phase/16 submit_checkin new flags', () => {
+    const mockJournalService = {
+      create: jest.fn<any>(),
+      findAll: jest.fn<any>(),
+      update: jest.fn<any>(),
+      delete: jest.fn<any>(),
+      hasActiveMedications: jest.fn<any>().mockResolvedValue(true),
+      finalizeUnconfirmedEmergency: jest.fn<any>(),
+    }
+
+    beforeAll(() => {
+      jest.useFakeTimers()
+      jest.setSystemTime(new Date('2026-06-17T16:00:00.000Z'))
+    })
+    afterAll(() => {
+      jest.useRealTimers()
+    })
+
+    beforeEach(() => {
+      jest.clearAllMocks()
+    })
+
+    const todayISO = '2026-06-17'
+
+    it('schema declares close_session, confirms_entry_id, decline_confirmation', () => {
+      const declarations = getJournalToolDeclarations()
+      const submit = declarations.find((d) => d.name === 'submit_checkin')!
+      const props = submit.parameters!.properties as Record<string, any>
+      expect(props).toHaveProperty('close_session')
+      expect(props).toHaveProperty('confirms_entry_id')
+      expect(props).toHaveProperty('decline_confirmation')
+      expect(props).toHaveProperty('session_id')
+    })
+
+    it('close_session=true threads into journalService.create as closeSession', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'j1', systolicBP: 130, diastolicBP: 85 },
+      })
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 85,
+          medication_taken: true,
+          symptoms: [],
+          close_session: true,
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ closeSession: true }),
+      )
+    })
+
+    it('close_session omitted on a single-reading (no session_id) defaults to true (Item 7 — handoff: "every chat-initiated entry defaults to closeSession: true")', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'j2', systolicBP: 130, diastolicBP: 85 },
+      })
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 85,
+          medication_taken: true,
+          symptoms: [],
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ closeSession: true }),
+      )
+    })
+
+    it('close_session omitted WITH session_id (Q3 multi-reading mid-batch) defaults to false', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'j2b', systolicBP: 130, diastolicBP: 85 },
+      })
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 85,
+          medication_taken: true,
+          symptoms: [],
+          session_id: 'q3-session-abc',
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ closeSession: false, sessionId: 'q3-session-abc' }),
+      )
+    })
+
+    it('explicit close_session=false overrides the single-reading default (model opt-out path)', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'j2c', systolicBP: 130, diastolicBP: 85 },
+      })
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 85,
+          medication_taken: true,
+          symptoms: [],
+          close_session: false,
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ closeSession: false }),
+      )
+    })
+
+    it('confirms_entry_id threads into the DTO trimmed', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'j3', systolicBP: 138, diastolicBP: 88 },
+      })
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '14:32',
+          systolic_bp: 138,
+          diastolic_bp: 88,
+          medication_taken: true,
+          symptoms: [],
+          confirms_entry_id: '  await-abc  ',
+          close_session: true,
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ confirmsEntryId: 'await-abc' }),
+      )
+    })
+
+    it('decline_confirmation=true bypasses create and routes to finalizeUnconfirmedEmergency', async () => {
+      mockJournalService.finalizeUnconfirmedEmergency.mockResolvedValue({
+        statusCode: 202,
+        message: 'Held entry resolved as UNCONFIRMED.',
+      })
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '14:32',
+          systolic_bp: 0,
+          diastolic_bp: 0,
+          medication_taken: true,
+          symptoms: [],
+          decline_confirmation: true,
+          confirms_entry_id: 'await-xyz',
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed.declined).toBe(true)
+      expect(mockJournalService.finalizeUnconfirmedEmergency).toHaveBeenCalledWith(
+        'user-1',
+        'await-xyz',
+      )
+      // The normal create path MUST NOT run for a decline.
+      expect(mockJournalService.create).not.toHaveBeenCalled()
+    })
+
+    it('decline_confirmation=true WITHOUT confirms_entry_id is rejected (no DB writes)', async () => {
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '14:32',
+          systolic_bp: 0,
+          diastolic_bp: 0,
+          medication_taken: true,
+          symptoms: [],
+          decline_confirmation: true,
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed.saved).toBe(false)
+      expect(parsed.reason).toBe('DECLINE_WITHOUT_ID')
+      expect(mockJournalService.create).not.toHaveBeenCalled()
+      expect(mockJournalService.finalizeUnconfirmedEmergency).not.toHaveBeenCalled()
     })
   })
 })

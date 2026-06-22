@@ -808,6 +808,28 @@ const en = {
   'timeline.filter.readings': 'Readings',
   'alerts.badge.thresholdPending':
     'Patient threshold pending — set personalized threshold and review alert',
+  // --- Phase/practice-identity — sign-in selector + top-bar switcher chip ---
+  // (Manisha 2026-06-12 Access Control §1). Pending Manisha sign-off on wording.
+  'signIn.selectPractice.title': "Which practice are you acting as?",
+  'signIn.selectPractice.intro':
+    "You're a member of more than one practice. Pick the one you'll be working in for this session — every action you take will be audited under the practice you choose. You can switch later from the top bar.",
+  'signIn.selectPractice.continue': 'Continue',
+  'signIn.selectPractice.signingIn': 'Signing in…',
+  'signIn.selectPractice.contactAdmin':
+    'Not seeing the right practice? Sign out and contact your admin.',
+  'signIn.selectPractice.error': 'Unable to select practice',
+  'signIn.selectPractice.expired.title': 'Sign-in session expired',
+  'signIn.selectPractice.expired.body':
+    'For your security, the practice-selection step has a 5-minute window. Please sign in again to continue.',
+  'signIn.selectPractice.expired.back': 'Back to sign in',
+  'signIn.zeroPractice.title': 'No practice membership',
+  'signIn.zeroPractice.body':
+    "You aren't a member of any practice yet. Contact your admin to be added before signing in.",
+  'topBar.actingAs.label': 'Acting as',
+  'topBar.actingAs.switchTo': 'Switch practice',
+  'topBar.actingAs.switching': 'Switching…',
+  'topBar.actingAs.switched': 'Now acting as',
+  'topBar.actingAs.current': 'Current',
 } as const;
 
 export type TranslationKey = keyof typeof en;

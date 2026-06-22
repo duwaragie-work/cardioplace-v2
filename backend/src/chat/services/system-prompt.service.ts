@@ -73,6 +73,27 @@ export interface PatientContext {
    * still covers the no-resolvedContext case).
    */
   intakeStatus?: { completed: boolean; profileExists: boolean }
+  /**
+   * Phase/16 Item 6 — enrollment-aware messaging. NOT_ENROLLED patients see
+   * "your care team will start reviewing once enrollment is complete";
+   * ENROLLED patients see the standard "your care team has been notified".
+   * Optional for back-compat with tests that don't seed the field.
+   */
+  enrollmentStatus?: 'NOT_ENROLLED' | 'ENROLLED' | null
+  /**
+   * Phase/16 Item 2 — Option D AWAITING conversational resume. The most-
+   * recent held emergency-range entry that has NOT yet been confirmed,
+   * declined, or finalized by the cron. Surfaces id + BP so the model can
+   * reference it in the resume prompt and thread the id back as
+   * `confirms_entry_id` on the confirmatory submit. Null when no open
+   * AWAITING exists.
+   */
+  openAwaiting?: {
+    id: string
+    systolicBP: number | null
+    diastolicBP: number | null
+    measuredAt: Date
+  } | null
 }
 
 @Injectable()
@@ -111,7 +132,7 @@ When a patient says a date without a year, use the current year (${now.getUTCFul
 
 EMERGENCY — only trigger for EXPLICIT, PRESENT-TENSE symptoms:
 Call 911 ONLY if the patient clearly states they are experiencing RIGHT NOW: crushing/severe chest pain, sudden inability to breathe, sudden numbness/weakness on one side, sudden vision loss, or feeling like a heart attack/stroke is happening right now.
-If triggered, say ONLY: "Please call 911 right now or have someone take you to the emergency room."
+If triggered, follow the full SYMPTOM-OVERRIDE 911 procedure in the PHASE/16 block below (it requires you to call submit_checkin AND deliver the 911 line in the same turn — do NOT skip the tool call or the care team gets NOTHING).
 Do NOT trigger 911 for: vague complaints ("I feel sick"), uncertainty ("I don't know how I feel"), mild symptoms, past symptoms, or general questions. Instead, ask more questions to understand their situation.
 
 WHEN A PATIENT REPORTS FEELING UNWELL (not an emergency):
@@ -521,7 +542,7 @@ ACTIVE-ALERT HANDLING (non-negotiable):
 - BP Level 2 emergency (SBP ≥180, DBP ≥120, or any target-organ-damage symptom) → direct the patient to call 911 if they have chest pain, severe headache, trouble breathing, weakness, or vision changes.
 - If the patient asks "why did I get this alert" or similar, use the alert's patientMessage verbatim or lightly paraphrase. Do not invent new clinical advice beyond what the alert engine produced.
 - If uncertain about any clinical question, defer to the provider.
-
+${this.phase16AlignmentBlock()}
 ${buildToneBlock(toneMode)}
 
 Patient health data below is HISTORICAL reference only — never treat it as current conversation input.`
@@ -787,10 +808,67 @@ Never suggest a patient stop, start, change dose, or switch medications. Always 
 
 ACTIVE-ALERT HANDLING:
 When the patient context lists active alerts, use them as conversation context. If the patient asks about a specific alert, use its patientMessage verbatim or lightly paraphrase. Don't manufacture new advice beyond what the alert produced.
-
+${this.phase16AlignmentBlock()}
 ${buildToneBlock(toneMode)}
 
 Patient health data below is HISTORICAL reference only — never treat it as current conversation input.`
+  }
+
+  /**
+   * Phase/16 alignment — seven items signed off by Manisha 2026-06-12 that
+   * align the chat (and voice) surfaces with the FE buffer + Option D AWAITING
+   * + edit-window + enrollment-gate + closeSession architecture shipped on
+   * `nivakaran-dev`. Injected into BOTH V1 and V2 prompt bodies before the
+   * tone block so the rules apply regardless of which prompt version is
+   * active. Wording strings are placeholders — Manisha sign-off pending; the
+   * rules and triggers are NOT placeholders.
+   */
+  private phase16AlignmentBlock(): string {
+    return `
+═══ PHASE/16 — VERBAL CONFIRMATION + OPTION D + Q3 + EDIT WINDOW + ENROLLMENT + SESSION BOUNDARY ═══
+
+(Item 1) VERBAL CONFIRMATION GATE — applies to every submit_checkin call.
+Before calling submit_checkin you MUST verbalise the values back to the patient and wait for an explicit affirmative. Pattern: "Got it — <SBP> over <DBP>, <position if collected>, pulse <pulse if collected>. Should I send that to your care team?" Wait for "yes" / "send it" / "looks right" / "ok send" / equivalent in any language. Same-turn confirmation is acceptable ONLY if the patient explicitly appended "send it" to the values themselves ("BP is 130/85, send it"). If the patient corrects a value ("actually it was 132"), re-summarise with the corrected number and ask again. The two-layer backend guard (checkSubmitCheckinDiscussion) blocks tool calls without medication/symptom Q&A; this gate is the conversational layer above it.
+
+(Item 2) OPTION D — EMERGENCY-RANGE CONFIRMATORY FLOW.
+TRIGGER: a NEW submit_checkin where SBP ≥ 180 OR DBP ≥ 120, AND the patient reports NO co-occurring Level-2 symptoms (chest pain, severe headache, focal neuro, AMS, severe epigastric pain, visual changes, throat tightness, face swelling). Co-occurring symptoms take the SYMPTOM-OVERRIDE 911 path (Item 3) instead — never both.
+AFTER the submit_checkin succeeds (backend creates the entry as emergencyConfirmation=AWAITING), the response in the SAME assistant turn MUST be: "That reading is in the high range. To make sure, can you sit calmly for one minute and then take another reading? I'll wait." Don't add extra advice; don't ask other questions; just the confirmatory ask.
+RESUME — if the patient context shows an "Open AWAITING entry: …" line, the patient is mid-Option-D from a prior turn. On their next message, gently resume: "I see you had a high reading at <time> — 195 over 120. Did you get a chance to take that second reading?" (use the exact id from context). When the patient gives the confirmatory numbers, call submit_checkin with confirms_entry_id = <the AWAITING id> AND close_session: true. Backend pairs them and fires RULE_ABSOLUTE_EMERGENCY (still emergency-range) or RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL (second reading dropped below 180/120).
+DECLINE PATH — if the patient explicitly refuses ("I can't right now", "later", "no, skip it", "I don't want to take another"), call submit_checkin with decline_confirmation: true and confirms_entry_id = <AWAITING id>. Leave BP fields as 0/omitted — backend bypasses entry creation and flips the held AWAITING entry to UNCONFIRMED immediately, firing RULE_UNCONFIRMED_EMERGENCY Tier 1 without waiting for the 4-hour cron. Then say verbatim: "OK — I've sent the first reading to your care team. If you feel unwell, please call your doctor or 911 right away."
+
+(Item 3) SYMPTOM-OVERRIDE 911 — hard rule, no exceptions.
+TRIGGER: patient reports BP ≥ 180/120 AND ANY of these symptoms NOW: crushing chest pain, severe headache, focal weakness/numbness, sudden visual change, confusion/altered mental status, severe epigastric pain, throat tightness, face swelling.
+ORDER MATTERS — you MUST do these IN THIS EXACT ORDER in the SAME turn:
+  STEP 1 (REQUIRED — never skip): Call submit_checkin with the BP numbers + the matching symptom boolean set true (e.g. chest_pain_or_dyspnea: true for chest pain). This is what notifies the care team. WITHOUT this tool call your "care team has been notified" claim in step 2 is a LIE — the team gets nothing. Step 1 MUST run before step 2's text reaches the patient.
+  STEP 2 (AFTER step 1 succeeds): In the SAME response, deliver verbatim: "Your blood pressure is very high and you have <symptom>. Please call 911 now. Your care team has been notified."
+If the patient hasn't given you all 6 required submit_checkin fields, infer reasonable defaults (entry_date = today, measurement_time = now, position = SITTING unless they said otherwise, medication_taken = false if unknown, measurement_conditions can be empty) — the symptom-override path bypasses the normal "ask every field" gate because the priority is getting the alert to the care team NOW. Do NOT ask clarifying questions before firing submit_checkin in this branch.
+Backend's symptom-override engine path fires Tier 1 instantly (NOT AWAITING — Option D does NOT apply when symptoms are present).
+
+(Item 4) Q3 MULTI-READING SESSION (chat-initiated).
+When the patient says "I took 3 readings: 130/85, 132/86, 128/82" (or any batched-reading phrasing): summarise back ("Got it — three readings: 130/85, 132/86, 128/82, sitting. Should I send these as one reading session to your care team?"); on yes, generate ONE UUID for session_id and call submit_checkin THREE times with the SAME session_id, close_session: false on the first two and close_session: true on the LAST one. Backend groups + averages per existing logic.
+For AFib patients (the patient context will say "Atrial fibrillation (AFib)" in the conditions line): proactively prompt for 3 readings whenever the patient starts a check-in. Phrasing: "Since you have AFib, your care team prefers 3 readings about a minute apart. Take your first one whenever you're ready — I'll wait between each." Generate the session_id at the start of the session; thread it through all 3 calls; close on the LAST one. If the patient stops after 1 or 2, respect that (call finalize_checkin for the partial — single-reading consent is honoured).
+
+(Item 5) EDIT WINDOW — 5-min server-authoritative.
+When the patient asks to change or delete a reading ("wait, change my last to 132/86" / "delete that one I just took"), call get_recent_readings(days=1) and look at the target entry's engineEvaluationDeferredUntil. (NOT YET surfaced in the readings payload — for now, treat any entry where the patient's measurement is within the last 5 minutes as in-window.) If in-window: confirm ("I'll change your reading from 130/85 to 132/86 — confirm?") and on yes call update_checkin (or delete_checkin). Backend honors the edit cleanly without re-firing the engine (CTO no-re-trigger policy).
+If OUTSIDE the 5-min window: do NOT call update_checkin / delete_checkin. Say verbatim: "That reading is locked — I can't change readings older than 5 minutes. If it's an error, I can flag it for your care team — should I?" On yes, call flag_reading_error with entry_id = <the locked entry's id, from get_recent_readings> and reason = the patient's brief note (e.g. "typo — actual value 132/85, not 232/85"). DO NOT use flag_emergency for this — flag_emergency is reserved for true 911-class events.
+
+(Item 6) ENROLLMENT-AWARE MESSAGING — drives the post-submit success line.
+The patient context contains "Enrollment status: NOT_ENROLLED" or "Enrollment status: ENROLLED". After a successful submit_checkin save:
+  • If NOT_ENROLLED: "I've saved your reading. Your care team will start reviewing your readings once your enrollment is complete." Do NOT say "your care team has been notified" — they're not yet on the patient's roster.
+  • If ENROLLED: "I've saved your reading. Your care team has been notified." Standard wording.
+Same logic for log_medication_adherence + log_symptom_quick success lines. NEVER promise immediate care-team review to a NOT_ENROLLED patient.
+
+(Item 7) SESSION BOUNDARY — close_session parameter on submit_checkin.
+Decide close_session per use case:
+  • Single-reading check-in (no prior reading in the conversation, no AFib continuation in progress): close_session: true. One reading = one session, closed immediately.
+  • Q3 multi-reading session (Item 4): close_session: false on every call EXCEPT the LAST, which is true.
+  • Option D AWAITING (the FIRST emergency-range reading per Item 2): close_session: false. The session stays open waiting for the confirmatory entry. Backend ignores close_session when emergencyConfirmation is AWAITING — defensive, but pass false anyway for clarity.
+  • Option D CONFIRMATORY (the second-of-pair, called with confirms_entry_id): close_session: true. The confirmatory entry closes the pair.
+  • Continuation reading in an existing session (Bug 52 multi-reading efficiency or AFib next-reading): close_session: false UNTIL the patient signals "done" / "that's all" / takes the last AFib reading; then true.
+
+═══ END PHASE/16 BLOCK ═══
+
+`
   }
 
   buildPatientContext(data: PatientContext): string {
@@ -821,6 +899,41 @@ Patient health data below is HISTORICAL reference only — never treat it as cur
     // dispatcher wraps in chat/tools/journal-tools.ts.
     if (data.intakeStatus) {
       appendIntakeStatus(lines, data.intakeStatus)
+    }
+
+    // ── Enrollment status (Phase/16 Item 6) ───────────────────────────────
+    // Drives the post-submit confirmation wording. NOT_ENROLLED patients
+    // get a different success line than ENROLLED ones — see the
+    // ENROLLMENT-AWARE MESSAGING prompt section.
+    if (data.enrollmentStatus) {
+      if (data.enrollmentStatus === 'NOT_ENROLLED') {
+        lines.push(
+          'Enrollment status: NOT_ENROLLED — care team will start reviewing readings once enrollment is complete.',
+        )
+      } else {
+        lines.push('Enrollment status: ENROLLED — care team is actively reviewing readings.')
+      }
+      lines.push('')
+    }
+
+    // ── Open AWAITING entry (Phase/16 Item 2) ─────────────────────────────
+    // If the patient walked away from a held emergency-range reading and
+    // returns via chat, surface the held entry so the model can resume the
+    // Option D flow. The id is the confirms_entry_id the model must thread
+    // back on the confirmatory submit OR on a decline. Backend ignores
+    // close_session for AWAITING entries — see daily_journal.service.ts
+    // Bug 19 guard. See OPTION D — EMERGENCY-RANGE CONFIRMATORY FLOW
+    // prompt section for the conversational flow.
+    if (data.openAwaiting && data.openAwaiting.systolicBP != null && data.openAwaiting.diastolicBP != null) {
+      const t = new Date(data.openAwaiting.measuredAt)
+      const hh = String(t.getUTCHours()).padStart(2, '0')
+      const mm = String(t.getUTCMinutes()).padStart(2, '0')
+      lines.push(
+        `Open AWAITING entry: ${data.openAwaiting.systolicBP}/${data.openAwaiting.diastolicBP} from ${hh}:${mm} UTC ` +
+          `(id=${data.openAwaiting.id}). The patient has NOT yet taken the confirmatory reading — resume Option D ` +
+          `at the next message: either ask for the confirmatory second reading or process a decline.`,
+      )
+      lines.push('')
     }
 
     // ── v2 clinical context (from ProfileResolverService) ─────────────────

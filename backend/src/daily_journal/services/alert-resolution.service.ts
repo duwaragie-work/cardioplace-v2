@@ -49,7 +49,11 @@ export class AlertResolutionService {
     private readonly access: PatientAccessService,
   ) {}
 
-  async acknowledge(alertId: string, actor: ActorUser): Promise<{ acknowledgedAt: Date }> {
+  async acknowledge(
+    alertId: string,
+    actor: ActorUser,
+    ctx?: { practiceId: string | null },
+  ): Promise<{ acknowledgedAt: Date }> {
     const alert = await this.loadAlertOrThrow(alertId)
     // Role-scope check uses the alert's patient — same as every other
     // patient-detail mutation. PROVIDER must be in panel; MED_DIR must
@@ -62,6 +66,7 @@ export class AlertResolutionService {
       return { acknowledgedAt: alert.acknowledgedAt }
     }
     const now = new Date()
+    const actorPracticeContext = ctx?.practiceId ?? null
     await this.prisma.deviationAlert.update({
       where: { id: alertId },
       data: {
@@ -71,12 +76,16 @@ export class AlertResolutionService {
         // /provider/alerts/:id/acknowledge path); was omitted so the audit
         // footer showed "Acknowledged" with no name.
         acknowledgedByUserId: actor.id,
+        // Phase/practice-identity (Manisha 2026-06-12 §1, HIPAA 45 CFR
+        // §164.312(a)(2)(i)) — capture WHICH practice the actor was
+        // acting under at ack time.
+        actorPracticeContext,
       },
     })
     // Mark open escalation events acknowledged so the cron skips them.
     await this.prisma.escalationEvent.updateMany({
       where: { alertId, acknowledgedAt: null, resolvedAt: null },
-      data: { acknowledgedAt: now, acknowledgedBy: actor.id },
+      data: { acknowledgedAt: now, acknowledgedBy: actor.id, actorPracticeContext },
     })
     this.logger.log(`Alert ${alertId} acknowledged by ${actor.id}`)
     return { acknowledgedAt: now }
@@ -90,7 +99,10 @@ export class AlertResolutionService {
       resolutionRationale?: string
       resolutionDetails?: Record<string, unknown>
     },
+    ctx?: { practiceId: string | null },
   ): Promise<{ status: string; resolvedAt: Date | null; retryScheduledFor?: Date }> {
+    const actorPracticeContext = ctx?.practiceId ?? null
+    void actorPracticeContext // referenced inside the write blocks below
     const alert = await this.loadAlertOrThrow(alertId)
     await this.access.assertCanAccessPatient(actor, alert.userId)
     const actionDef = RESOLUTION_CATALOG[dto.resolutionAction]
@@ -133,7 +145,7 @@ export class AlertResolutionService {
     // generic terminal-resolve path because several actions either keep the
     // alert OPEN or carry transactional side-effects.
     if (allowed === 'TIER_1_ANGIOEDEMA') {
-      return this.resolveAngioedema(alert, actor, dto, actionDef, resolutionDetails, now)
+      return this.resolveAngioedema(alert, actor, dto, actionDef, resolutionDetails, now, actorPracticeContext)
     }
 
     // 3. Special case — BP L2 #6 retry: leave alert OPEN, schedule a T+4h
@@ -156,6 +168,7 @@ export class AlertResolutionService {
           resolutionAction: dto.resolutionAction,
           resolutionRationale: dto.resolutionRationale ?? null,
           resolvedBy: actor.id,
+          actorPracticeContext,
         },
       })
       const retryScheduledFor = new Date(
@@ -185,6 +198,7 @@ export class AlertResolutionService {
         resolutionAction: dto.resolutionAction,
         resolutionRationale: dto.resolutionRationale ?? null,
         resolvedBy: actor.id,
+        actorPracticeContext,
         ...(resolutionDetails
           ? { resolutionDetails: resolutionDetails as Prisma.InputJsonValue }
           : {}),
@@ -192,7 +206,7 @@ export class AlertResolutionService {
     })
     await this.prisma.escalationEvent.updateMany({
       where: { alertId, resolvedAt: null },
-      data: { resolvedAt: now, resolvedBy: actor.id },
+      data: { resolvedAt: now, resolvedBy: actor.id, actorPracticeContext },
     })
 
     // 5. Patient notification — let the patient know an action was taken so
@@ -253,6 +267,7 @@ export class AlertResolutionService {
     actionDef: (typeof RESOLUTION_CATALOG)[ResolutionAction],
     resolutionDetails: Record<string, unknown> | null,
     now: Date,
+    actorPracticeContext: string | null = null,
   ): Promise<{ status: string; resolvedAt: Date | null }> {
     const detailsData = resolutionDetails
       ? { resolutionDetails: resolutionDetails as Prisma.InputJsonValue }
@@ -271,6 +286,7 @@ export class AlertResolutionService {
           resolutionAction: dto.resolutionAction,
           resolutionRationale: dto.resolutionRationale ?? null,
           resolvedBy: actor.id,
+          actorPracticeContext,
           ...detailsData,
         },
       })
@@ -314,7 +330,7 @@ export class AlertResolutionService {
         }),
         this.prisma.escalationEvent.updateMany({
           where: { alertId: alert.id, resolvedAt: null },
-          data: { resolvedAt: now, resolvedBy: actor.id },
+          data: { resolvedAt: now, resolvedBy: actor.id, actorPracticeContext },
         }),
         // #84 — discontinuing every live ACE/ARB here is a STRONGER outcome
         // than the PROVIDER_DIRECTED_HOLD retro-upgrade (discontinued meds drop
@@ -360,7 +376,7 @@ export class AlertResolutionService {
     })
     await this.prisma.escalationEvent.updateMany({
       where: { alertId: alert.id, resolvedAt: null },
-      data: { resolvedAt: now, resolvedBy: actor.id },
+      data: { resolvedAt: now, resolvedBy: actor.id, actorPracticeContext },
     })
     this.logger.log(
       `Angioedema alert ${alert.id} resolved by ${actor.id} via ${dto.resolutionAction}`,

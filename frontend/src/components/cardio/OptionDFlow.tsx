@@ -24,6 +24,7 @@ import { AlertTriangle, Activity, Phone } from 'lucide-react';
 import { SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared';
 import { useLanguage } from '@/contexts/LanguageContext';
 import MicButton from '@/components/intake/MicButton';
+import AudioButton from '@/components/intake/AudioButton';
 
 export type OptionDSecondReading = {
   systolicBP: number;
@@ -58,6 +59,13 @@ export function OptionDFlow({
 }) {
   const { t } = useLanguage();
   const [phase, setPhase] = useState<Phase>('screenA');
+  // Bug 26 — Screen C copy depends on how the flow resolved:
+  //   'confirmedNormal' = a sub-emergency second reading (reassure)
+  //   'declined'        = the patient couldn't retake (UNCONFIRMED, the original
+  //                       Screen C purpose). A still-emergency second reading
+  //                       never reaches Screen C — CheckIn routes it to the 911
+  //                       alert instead (see onSubmitSecond).
+  const [outcome, setOutcome] = useState<'declined' | 'confirmedNormal'>('declined');
   const [sys, setSys] = useState('');
   const [dia, setDia] = useState('');
   const [pulse, setPulse] = useState('');
@@ -93,6 +101,7 @@ export function OptionDFlow({
       // Non-fatal — the server cron still finalizes the held reading.
     } finally {
       setBusy(false);
+      setOutcome('declined');
       setPhase('screenC');
     }
   }
@@ -113,7 +122,19 @@ export function OptionDFlow({
     setBusy(true);
     try {
       await onSubmitSecond({ systolicBP: s, diastolicBP: d, pulse: p });
-      onDone();
+      // Bug 26 — a sub-emergency second reading is the CONFIRMED_NORMAL outcome:
+      // show the reassurance Screen C instead of bouncing straight to /dashboard
+      // (the patient had no idea their follow-up looked better). A still-emergency
+      // second reading (≥180/120) is already routed to the 911 alert inside
+      // onSubmitSecond, so let onDone() hand off to it.
+      const stillEmergency = s >= 180 || d >= 120;
+      if (stillEmergency) {
+        onDone();
+      } else {
+        setBusy(false);
+        setOutcome('confirmedNormal');
+        setPhase('screenC');
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : t('checkin.err.submit'));
       setBusy(false);
@@ -158,15 +179,28 @@ export function OptionDFlow({
               >
                 <AlertTriangle className="w-8 h-8" style={{ color: 'var(--brand-warning-amber-text)' }} aria-hidden="true" />
               </div>
-              <h2
-                id="optiond-title"
-                ref={headingRef}
-                tabIndex={-1}
-                className="text-[1.25rem] font-bold leading-tight outline-none"
-                style={{ color: 'var(--brand-text-primary)' }}
-              >
-                {t('checkin.optionD.screenA.title')}
-              </h2>
+              <div className="flex items-center justify-center gap-2">
+                <h2
+                  id="optiond-title"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-[1.25rem] font-bold leading-tight outline-none"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {t('checkin.optionD.screenA.title')}
+                </h2>
+                <div className="shrink-0">
+                  <AudioButton
+                    size="sm"
+                    text={[
+                      t('checkin.optionD.screenA.title'),
+                      t('checkin.optionD.screenA.body').replace('{bp}', bpLabel),
+                      t('checkin.optionD.screenA.retake'),
+                      t('checkin.optionD.screenA.cantNow'),
+                    ].join('. ')}
+                  />
+                </div>
+              </div>
               <p className="text-[0.9375rem] mt-3 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
                 {t('checkin.optionD.screenA.body').replace('{bp}', bpLabel)}
               </p>
@@ -202,15 +236,28 @@ export function OptionDFlow({
               >
                 <Activity className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} aria-hidden="true" />
               </div>
-              <h2
-                id="optiond-title"
-                ref={headingRef}
-                tabIndex={-1}
-                className="text-[1.125rem] font-bold leading-tight outline-none"
-                style={{ color: 'var(--brand-text-primary)' }}
-              >
-                {t('checkin.optionD.screenB.title')}
-              </h2>
+              <div className="flex items-start gap-2">
+                <h2
+                  id="optiond-title"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-[1.125rem] font-bold leading-tight outline-none"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {t('checkin.optionD.screenB.title')}
+                </h2>
+                <div className="shrink-0 mt-0.5">
+                  <AudioButton
+                    size="sm"
+                    text={[
+                      t('checkin.optionD.screenB.title'),
+                      t('checkin.optionD.screenB.body'),
+                      t('checkin.optionD.screenB.submit'),
+                      t('checkin.optionD.screenB.cantNow'),
+                    ].join('. ')}
+                  />
+                </div>
+              </div>
               <p className="text-[0.875rem] mt-2 mb-5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('checkin.optionD.screenB.body')}
               </p>
@@ -260,19 +307,22 @@ export function OptionDFlow({
                   <label htmlFor="optiond-pulse" className="block text-[0.75rem] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
                     {t('readings.pulseLabel')}
                   </label>
-                  <input
-                    id="optiond-pulse"
-                    data-testid="optiond-pulse"
-                    type="number"
-                    inputMode="numeric"
-                    placeholder={t('readings.pulsePlaceholder')}
-                    value={pulse}
-                    min={30}
-                    max={220}
-                    onChange={(e) => setPulse(e.target.value)}
-                    className="w-full h-12 px-3 rounded-xl border text-[1rem] outline-none"
-                    style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
-                  />
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="optiond-pulse"
+                      data-testid="optiond-pulse"
+                      type="number"
+                      inputMode="numeric"
+                      placeholder={t('readings.pulsePlaceholder')}
+                      value={pulse}
+                      min={30}
+                      max={220}
+                      onChange={(e) => setPulse(e.target.value)}
+                      className="flex-1 h-12 px-3 rounded-xl border text-[1rem] outline-none min-w-0"
+                      style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+                    />
+                    <MicButton inputId="optiond-pulse" numeric onTranscript={(txt) => setPulse(txt)} />
+                  </div>
                 </div>
               </div>
 
@@ -309,17 +359,47 @@ export function OptionDFlow({
 
           {phase === 'screenC' && (
             <>
-              <h2
-                id="optiond-title"
-                ref={headingRef}
-                tabIndex={-1}
-                className="text-[1.125rem] font-bold leading-tight outline-none"
-                style={{ color: 'var(--brand-text-primary)' }}
-              >
-                {t('checkin.optionD.screenC.title')}
-              </h2>
+              <div className="flex items-center justify-center gap-2">
+                <h2
+                  id="optiond-title"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  data-testid="optiond-screenc-title"
+                  className="text-[1.125rem] font-bold leading-tight outline-none"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {t(
+                    outcome === 'confirmedNormal'
+                      ? 'checkin.optionD.confirmedNormal.title'
+                      : 'checkin.optionD.screenC.title',
+                  )}
+                </h2>
+                <div className="shrink-0">
+                  <AudioButton
+                    size="sm"
+                    text={[
+                      t(
+                        outcome === 'confirmedNormal'
+                          ? 'checkin.optionD.confirmedNormal.title'
+                          : 'checkin.optionD.screenC.title',
+                      ),
+                      t(
+                        outcome === 'confirmedNormal'
+                          ? 'checkin.optionD.confirmedNormal.body'
+                          : 'checkin.optionD.screenC.body',
+                      ),
+                      t('checkin.optionD.screenC.safetyFooter'),
+                      t('checkin.optionD.screenC.done'),
+                    ].join('. ')}
+                  />
+                </div>
+              </div>
               <p className="text-[0.9375rem] mt-3 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
-                {t('checkin.optionD.screenC.body')}
+                {t(
+                  outcome === 'confirmedNormal'
+                    ? 'checkin.optionD.confirmedNormal.body'
+                    : 'checkin.optionD.screenC.body',
+                )}
               </p>
               <div
                 data-testid="optiond-safety-footer"

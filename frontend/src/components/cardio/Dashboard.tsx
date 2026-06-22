@@ -20,7 +20,12 @@ import type { TranslationKey } from '@/i18n';
 import { getJournalEntries, getNotifications, getAlerts, getJournalStats, type AlertTier } from '@/lib/services/journal.service';
 import { getAlertPresentation } from '@/components/alerts/alert-presentation';
 import { getMyPatientProfile, getMyMedications, type PatientProfileDto } from '@/lib/services/intake.service';
-import { getMyThreshold, type PatientThresholdDto } from '@/lib/services/threshold.service';
+import {
+  getMyThreshold,
+  getMyEffectiveThreshold,
+  type PatientThresholdDto,
+  type EffectiveThreshold,
+} from '@/lib/services/threshold.service';
 import { loadDraft, hasDraft, stepProgress } from '@/lib/intake/draft';
 import ActionRequiredCard from '@/components/intake/ActionRequiredCard';
 import MonthlyMedReask from '@/components/intake/MonthlyMedReask';
@@ -133,6 +138,9 @@ export default function Dashboard() {
   // Flow D state — full profile (for D1 verification badge) + threshold (D2 + D4 colors).
   const [profile, setProfile] = useState<PatientProfileDto | null>(null);
   const [threshold, setThreshold] = useState<PatientThresholdDto | null>(null);
+  // Item C / Bug 24 — the effective alert threshold (pregnancy/HFrEF/CAD
+  // overrides applied) the engine actually uses, for the goal card.
+  const [effectiveThreshold, setEffectiveThreshold] = useState<EffectiveThreshold | null>(null);
   // E4 — track whether the patient has any active medications so we don't
   // pop the monthly re-ask modal for someone who reported zero meds.
   const [hasMeds, setHasMeds] = useState(false);
@@ -146,16 +154,18 @@ export default function Dashboard() {
     let cancelled = false;
     (async () => {
       try {
-        const [p, t, m] = await Promise.all([
+        const [p, t, m, eff] = await Promise.all([
           getMyPatientProfile().catch(() => null),
           getMyThreshold().catch(() => null),
           // Only check meds if profile exists — saves a 404-then-empty round trip
           // for patients who haven't completed clinical intake yet.
           getMyMedications().catch(() => []),
+          getMyEffectiveThreshold().catch(() => null),
         ]);
         if (cancelled) return;
         setProfile(p);
         setThreshold(t);
+        setEffectiveThreshold(eff);
         setHasMeds(Array.isArray(m) && m.some((med) => !med.discontinuedAt));
 
         // Without a server-side completion field, the localStorage draft
@@ -413,22 +423,36 @@ export default function Dashboard() {
     }
   })();
 
-  // D2 threshold display helpers
-  const hasBpThreshold = !!(threshold && (threshold.sbpUpperTarget || threshold.dbpUpperTarget));
-  // #89 — graceful partial-threshold display. The old `${sbp ?? '—'}/${dbp ?? '—'}`
-  // surfaced a bare em-dash ("Below 140/— mmHg") a patient can't parse. Show
-  // only the axis that's set; flag diastolic-only so it isn't read as systolic.
-  const sbpUpperT = threshold?.sbpUpperTarget ?? null;
-  const dbpUpperT = threshold?.dbpUpperTarget ?? null;
-  const thresholdIsDiastolicOnly = sbpUpperT == null && dbpUpperT != null;
-  const thresholdTargetText =
-    sbpUpperT != null && dbpUpperT != null
-      ? `${sbpUpperT}/${dbpUpperT}`
-      : sbpUpperT != null
-        ? `${sbpUpperT}`
-        : dbpUpperT != null
-          ? `${dbpUpperT}`
-          : null;
+  // D2 threshold display helpers.
+  // Item C / Bug 24 — show the EFFECTIVE goal (pregnancy/HFrEF/CAD override
+  // applied), not the raw custom threshold, so a pregnant patient with a custom
+  // 176/120 sees "Below 140/90" (her real alert point) instead of 176/120 +
+  // "alerts begin at 196". Render the card when she has a custom threshold OR an
+  // override is in force; standard patients with neither stay uncluttered.
+  const hasBpThreshold =
+    !!(threshold && (threshold.sbpUpperTarget || threshold.dbpUpperTarget)) ||
+    effectiveThreshold?.overrideReason != null;
+  const thresholdIsDiastolicOnly = false; // effective threshold always carries both axes
+  const thresholdTargetText = effectiveThreshold
+    ? `${effectiveThreshold.sbpGoal}/${effectiveThreshold.dbpGoal}`
+    : null;
+  // The "alerts begin at" caption: override reason (no tolerance) vs the
+  // standard/personalized goal + tolerance band.
+  const goalCaption: string | null = (() => {
+    if (!effectiveThreshold) return null;
+    const { sbpHighAlertThreshold, dbpHighAlertThreshold, sbpGoal, toleranceMmHg, overrideReason } =
+      effectiveThreshold;
+    const both = `${sbpHighAlertThreshold}/${dbpHighAlertThreshold}`;
+    if (overrideReason === 'pregnancy')
+      return t('dashboard.goalOverridePregnancy').replace('{value}', both);
+    if (overrideReason === 'hfref')
+      return t('dashboard.goalOverrideHfref').replace('{value}', both);
+    if (overrideReason === 'cad')
+      return t('dashboard.goalOverrideCad').replace('{value}', both);
+    if (toleranceMmHg > 0)
+      return t('dashboard.goalTolerance').replace('{value}', String(sbpGoal + toleranceMmHg));
+    return null;
+  })();
   const thresholdSetAt = threshold?.setAt
     ? new Date(threshold.setAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : null;
@@ -793,19 +817,18 @@ export default function Dashboard() {
                   {thresholdSetAt ? ` · ${thresholdSetAt}` : ''}
                 </span>
               </p>
-              {/* PERSONALIZED +20 tolerance band (CLINICAL_SPEC §4.1) — alerts
-                  begin 20 mmHg above the goal, not at the goal. Explain it so a
-                  reading just over the goal doesn't read as a missed alert. */}
-              {threshold?.sbpUpperTarget != null && (
+              {/* Item C / Bug 24 — "alerts begin at" caption from the EFFECTIVE
+                  threshold: an override (pregnancy/HFrEF/CAD) states the real
+                  alert point with no tolerance; otherwise the goal + tolerance
+                  band so a reading just over the goal doesn't read as a missed
+                  alert. */}
+              {goalCaption && (
                 <p
                   data-testid="dashboard-goal-tolerance"
                   className="text-[0.71875rem] mt-0.5"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
-                  {t('dashboard.goalTolerance').replace(
-                    '{value}',
-                    String(threshold.sbpUpperTarget + 20),
-                  )}
+                  {goalCaption}
                 </p>
               )}
             </div>

@@ -80,6 +80,10 @@ describe('ChatService.buildPatientSystemPrompt() — phase/16', () => {
     prisma = {
       journalEntry: {
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+        // Phase/16 — chat.service buildPatientSystemPrompt now also queries
+        // for the most-recent open AWAITING entry (Option D resume). Default
+        // to null so tests not specifically exercising that flow stay quiet.
+        findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
       },
       deviationAlert: {
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),

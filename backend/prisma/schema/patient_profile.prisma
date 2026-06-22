@@ -6,9 +6,9 @@ model PatientProfile {
   gender   Gender?
   heightCm Int?
 
-  isPregnant          Boolean   @default(false)
-  pregnancyDueDate    DateTime?
-  historyHDP Boolean   @default(false)
+  isPregnant       Boolean   @default(false)
+  pregnancyDueDate DateTime?
+  historyHDP       Boolean   @default(false)
 
   hasHeartFailure       Boolean          @default(false)
   heartFailureType      HeartFailureType @default(NOT_APPLICABLE)

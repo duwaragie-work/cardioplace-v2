@@ -1,10 +1,10 @@
 model EscalationEvent {
-  id                 String           @id @default(uuid())
+  id                 String          @id @default(uuid())
   alertId            String
   userId             String
   escalationLevel    EscalationLevel
   reason             String?
-  triggeredAt        DateTime         @default(now())
+  triggeredAt        DateTime        @default(now())
   notificationSentAt DateTime?
 
   ladderStep          LadderStep?
@@ -20,14 +20,21 @@ model EscalationEvent {
   // Phase/7 — BP L2 resolution action #6 (Unable to reach patient — will retry)
   // writes a new EscalationEvent with scheduledFor=now+4h + triggeredByResolution=true.
   // The cron scanner dispatches at scheduledFor instead of computing from ladder offset.
-  scheduledFor           DateTime?
-  triggeredByResolution  Boolean   @default(false)
+  scheduledFor          DateTime?
+  triggeredByResolution Boolean   @default(false)
 
   // Phase 2 — Finding 5: explicit system-vs-human dispatch attribution
   // (JCAHO). true = auto-dispatched by the escalation scheduler (cron) with
   // no human actor; false = scheduled by an admin action (BP_L2 retry).
   // Replaces the prior admin-UI heuristic with a persisted, queryable fact.
-  dispatchedBySystem     Boolean   @default(false)
+  dispatchedBySystem Boolean @default(false)
+
+  // June 2026 — practice-context attribution (Manisha 2026-06-12 Access
+  // Control §1, HIPAA 45 CFR §164.312(a)(2)(i)). The activePracticeId on
+  // the actor's AuthSession at the time of acknowledge/resolve. NULL for
+  // cron-dispatched ladders (dispatchedBySystem=true) and pre-policy
+  // events. Indexed for "audit by practice" queries.
+  actorPracticeContext String?
 
   alert         DeviationAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -36,6 +43,7 @@ model EscalationEvent {
   @@index([alertId, triggeredAt(sort: Desc)])
   @@index([userId, triggeredAt(sort: Desc)])
   @@index([scheduledFor])
+  @@index([actorPracticeContext, triggeredAt(sort: Desc)])
 }
 
 enum LadderStep {

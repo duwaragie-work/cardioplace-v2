@@ -48,6 +48,7 @@ import {
   type RejectedReading,
 } from '@/lib/services/provider.service';
 import { getPatientMedications, getPatientProfile } from '@/lib/services/patient-detail.service';
+import { hasLargeDiscrepancy } from '@cardioplace/shared';
 import { useAuth } from '@/lib/auth-context';
 import { canManageReadings } from '@/lib/roleGates';
 import AddEditReadingModal, {
@@ -514,6 +515,36 @@ function SessionGroupCard({
   const times = group.entries.map((e) => new Date(e.measuredAt).getTime());
   const first = new Date(Math.min(...times)).toISOString();
   const last = new Date(Math.max(...times)).toISOString();
+
+  // Item B — Option D first-of-pair + CONFIRMATORY pair. When the two BPs differ
+  // a lot, surface a provider-side "Large discrepancy" flag: the first reading
+  // may be a measurement error or transient spike rather than a true episode.
+  // NOTE: on confirmation the backend CLEARS the first reading's
+  // emergencyConfirmation back to null (it's now a resolved historical reading),
+  // so find the CONFIRMATORY entry first, then its first-of-pair via
+  // confirmsEntryId — don't look for a lingering 'AWAITING'.
+  const confirmatory = group.entries.find(
+    (e) =>
+      e.emergencyConfirmation === 'CONFIRMATORY' &&
+      e.systolicBP != null &&
+      e.diastolicBP != null,
+  );
+  const awaiting = confirmatory
+    ? group.entries.find(
+        (e) =>
+          e.id === confirmatory.confirmsEntryId &&
+          e.systolicBP != null &&
+          e.diastolicBP != null,
+      )
+    : undefined;
+  const largeDiscrepancy =
+    awaiting != null &&
+    confirmatory != null &&
+    hasLargeDiscrepancy(
+      { systolicBP: awaiting.systolicBP!, diastolicBP: awaiting.diastolicBP! },
+      { systolicBP: confirmatory.systolicBP!, diastolicBP: confirmatory.diastolicBP! },
+    );
+
   return (
     <div
       data-testid={`admin-readings-session-${group.sessionId}`}
@@ -530,6 +561,20 @@ function SessionGroupCard({
       >
         <Clock className="w-3 h-3" />
         Session: {group.entries.length} readings · {formatTime(first)} – {formatTime(last)}
+        {largeDiscrepancy && awaiting && confirmatory && (
+          <span
+            data-testid="admin-readings-discrepancy-badge"
+            className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+            style={{
+              backgroundColor: 'var(--brand-warning-amber-light)',
+              color: 'var(--brand-warning-amber-text)',
+            }}
+            title={`First reading ${awaiting.systolicBP}/${awaiting.diastolicBP}, second reading ${confirmatory.systolicBP}/${confirmatory.diastolicBP}. Possible measurement error or transient spike — review with patient.`}
+          >
+            <AlertTriangle className="w-3 h-3" />
+            Large discrepancy
+          </span>
+        )}
       </div>
       <div className="px-2 pb-2 space-y-2">
         {group.entries.map((e) => (

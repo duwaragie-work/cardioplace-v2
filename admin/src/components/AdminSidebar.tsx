@@ -17,6 +17,7 @@ import {
   Building2,
   UserPlus,
   ClipboardList,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -97,6 +98,14 @@ const SECONDARY_NAV: NavItem[] = [
     label: 'Alerts',
     icon: Bell,
     show: (roles) => !isCoordinatorOnly(roles),
+  },
+  // Account-level settings (security / 2FA today). Available to every
+  // signed-in staff role, including COORDINATOR.
+  {
+    href: '/settings',
+    label: 'Settings',
+    icon: Settings,
+    matchPrefix: true,
   },
 ];
 

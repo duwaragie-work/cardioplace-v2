@@ -949,6 +949,11 @@ export class ProviderService {
           // Manisha 5/24 Q1 — narrow pulse pressure (<15) recorded at entry as a
           // possible measurement artifact. Physician-only flag, no patient tier.
           narrowPpArtifact: entry.narrowPpArtifact,
+          // Option D (Item B) — the AWAITING first-of-pair / CONFIRMATORY
+          // second-reading state lets the Readings tab pair them up and flag a
+          // large BP discrepancy between the two for provider review.
+          emergencyConfirmation: entry.emergencyConfirmation,
+          confirmsEntryId: entry.confirmsEntryId,
           failedConditions,
           teachBackAnswer: entry.teachBackAnswer,
           teachBackCorrect: entry.teachBackCorrect,

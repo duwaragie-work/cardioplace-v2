@@ -10,6 +10,7 @@ import {
   Req,
 } from '@nestjs/common'
 import type { Request } from 'express'
+import { ActiveContext } from '../auth/decorators/active-context.decorator.js'
 import { Roles } from '../auth/decorators/roles.decorator.js'
 import { PatientAccessService } from '../common/patient-access.service.js'
 import { UserRole } from '../generated/prisma/enums.js'
@@ -53,11 +54,13 @@ export class AdminIntakeController {
     @Req() req: AuthedReq,
     @Param('id') patientUserId: string,
     @Body() dto: VerifyProfileDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.verifyProfile(
       { id: req.user.id, roles: req.user.roles },
       patientUserId,
       dto,
+      ctx,
     )
   }
 
@@ -68,11 +71,13 @@ export class AdminIntakeController {
     @Req() req: AuthedReq,
     @Param('id') patientUserId: string,
     @Body() dto: CorrectProfileDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.correctProfile(
       { id: req.user.id, roles: req.user.roles },
       patientUserId,
       dto,
+      ctx,
     )
   }
 
@@ -83,11 +88,13 @@ export class AdminIntakeController {
     @Req() req: AuthedReq,
     @Param('id') patientUserId: string,
     @Body() dto: { field: string; rationale?: string },
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.rejectProfileField(
       { id: req.user.id, roles: req.user.roles },
       patientUserId,
       dto,
+      ctx,
     )
   }
 
@@ -100,11 +107,13 @@ export class AdminIntakeController {
     @Req() req: AuthedReq,
     @Param('id') patientUserId: string,
     @Body() dto: { field: string; rationale?: string },
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.confirmProfileField(
       { id: req.user.id, roles: req.user.roles },
       patientUserId,
       dto,
+      ctx,
     )
   }
 
@@ -116,11 +125,13 @@ export class AdminIntakeController {
     @Req() req: AuthedReq,
     @Param('id') patientUserId: string,
     @Body() dto: { fields: string[]; rationale?: string },
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.confirmProfileFields(
       { id: req.user.id, roles: req.user.roles },
       patientUserId,
       dto,
+      ctx,
     )
   }
 
@@ -131,11 +142,13 @@ export class AdminIntakeController {
     @Req() req: AuthedReq,
     @Param('id') medicationId: string,
     @Body() dto: VerifyMedicationDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.verifyMedication(
       { id: req.user.id, roles: req.user.roles },
       medicationId,
       dto,
+      ctx,
     )
   }
 
@@ -147,11 +160,13 @@ export class AdminIntakeController {
     @Req() req: AuthedReq,
     @Param('id') patientUserId: string,
     @Body() dto: AdminAddMedicationDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.adminAddMedication(
       { id: req.user.id, roles: req.user.roles },
       patientUserId,
       dto,
+      ctx,
     )
   }
 
@@ -163,11 +178,13 @@ export class AdminIntakeController {
     @Req() req: AuthedReq,
     @Param('id') medicationId: string,
     @Body() dto: AdminEditMedicationDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.adminEditMedication(
       { id: req.user.id, roles: req.user.roles },
       medicationId,
       dto,
+      ctx,
     )
   }
 

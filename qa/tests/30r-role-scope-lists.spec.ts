@@ -14,7 +14,14 @@ import { byTestId, T } from '../helpers/selectors.js'
  * assertion ("PROVIDER does NOT see patient X") is impossible without a
  * second practice / unassigned patient — that needs seed expansion or a new
  * test-control endpoint. The hard scope-filter LOGIC is already covered by
- * the 32 unit cases in backend/src/common/patient-access.service.spec.ts.
+ * the unit cases in backend/src/common/patient-access.service.spec.ts.
+ *
+ * June 2026 update (Manisha 2026-06-12 Doc 3 Q2): PROVIDER now scopes by
+ * PracticeProvider membership (not primary/backup OR-clause). The seed
+ * positive paths below still pass — primaryProvider IS a member of the
+ * seed practice — so these list-renders-OK smokes are a regression net for
+ * the rewrite. The widened-visibility positive case (provider sees
+ * non-assigned in-practice patient) is in 31-practice-visibility-refactor.
  *
  * These specs therefore cover the INTEGRATION surface the unit tests can't:
  *   • the scoped list endpoint renders for every admin role (no 500/empty)

@@ -808,6 +808,27 @@ const es: Record<TranslationKey, string> = {
   'timeline.filter.readings': 'Lecturas', // EN: Readings
   'alerts.badge.thresholdPending':
     'Umbral del paciente pendiente — configure el umbral personalizado y revise la alerta', // EN: Patient threshold pending — set personalized threshold and review alert
+  // --- Phase/practice-identity — sign-in selector + top-bar switcher chip ---
+  'signIn.selectPractice.title': '¿Como qué consultorio actúas?', // EN: Which practice are you acting as?
+  'signIn.selectPractice.intro':
+    'Eres miembro de más de un consultorio. Elige aquél con el que trabajarás durante esta sesión — cada acción quedará registrada bajo el consultorio elegido. Puedes cambiarlo más tarde desde la barra superior.', // EN: You're a member of more than one practice...
+  'signIn.selectPractice.continue': 'Continuar', // EN: Continue
+  'signIn.selectPractice.signingIn': 'Iniciando sesión…', // EN: Signing in…
+  'signIn.selectPractice.contactAdmin':
+    '¿No ves el consultorio correcto? Cierra sesión y comunícate con tu administrador.', // EN: Not seeing the right practice?...
+  'signIn.selectPractice.error': 'No se pudo seleccionar el consultorio', // EN: Unable to select practice
+  'signIn.selectPractice.expired.title': 'Sesión de inicio expirada', // EN: Sign-in session expired
+  'signIn.selectPractice.expired.body':
+    'Por seguridad, la selección de consultorio tiene una ventana de 5 minutos. Inicia sesión nuevamente para continuar.', // EN: For your security...5-minute window.
+  'signIn.selectPractice.expired.back': 'Volver a iniciar sesión', // EN: Back to sign in
+  'signIn.zeroPractice.title': 'Sin membresía de consultorio', // EN: No practice membership
+  'signIn.zeroPractice.body':
+    'Aún no eres miembro de ningún consultorio. Comunícate con tu administrador para que te añadan antes de iniciar sesión.', // EN: You aren't a member of any practice yet...
+  'topBar.actingAs.label': 'Actuando como', // EN: Acting as
+  'topBar.actingAs.switchTo': 'Cambiar de consultorio', // EN: Switch practice
+  'topBar.actingAs.switching': 'Cambiando…', // EN: Switching…
+  'topBar.actingAs.switched': 'Ahora actuando como', // EN: Now acting as
+  'topBar.actingAs.current': 'Actual', // EN: Current
 };
 
 export default es;

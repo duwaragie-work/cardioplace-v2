@@ -14,6 +14,7 @@ import { motion } from 'framer-motion';
 import { Clock, Pencil, Trash2, Plus, Check } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { remainingMs, type JournalDraft } from '@/lib/journalDraft';
+import AudioButton from '@/components/intake/AudioButton';
 
 const SESSION_MAX_READINGS = 3;
 
@@ -86,18 +87,40 @@ export function BufferReviewScreen({
   const left = remainingMs(draft);
   const canAddMore = draft.readings.length < SESSION_MAX_READINGS;
 
+  // Spoken summary of the whole review screen so a non-reader can hear the
+  // title, what it means, and each buffered reading before tapping "I'm good".
+  const audioSummary = [
+    t('checkin.buffer.title'),
+    t('checkin.buffer.subtitle'),
+    ...draft.readings.map((r, i) => {
+      const p = r.payload;
+      const pos = positionLabel(p.position, t);
+      const bp = `${p.systolicBP ?? '—'}/${p.diastolicBP ?? '—'} ${t('readings.mmHg')}`;
+      const pulse = p.pulse != null ? `, ${p.pulse} ${t('checkin.buffer.bpm')}` : '';
+      return (
+        `${t('checkin.buffer.reading').replace('{n}', String(i + 1))}: ${bp}${pulse}` +
+        (pos ? `, ${pos}` : '')
+      );
+    }),
+  ].join('. ');
+
   return (
     <div className="min-h-[calc(100dvh-4rem)] flex flex-col" style={{ backgroundColor: 'var(--brand-background)' }}>
       <main id="main" className="flex-1 w-full max-w-md mx-auto px-4 sm:px-6 py-6">
-        <h1
-          ref={headingRef}
-          tabIndex={-1}
-          data-testid="checkin-buffer-title"
-          className="text-[1.25rem] font-bold leading-tight outline-none"
-          style={{ color: 'var(--brand-text-primary)' }}
-        >
-          {t('checkin.buffer.title')}
-        </h1>
+        <div className="flex items-start gap-2">
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+            data-testid="checkin-buffer-title"
+            className="text-[1.25rem] font-bold leading-tight outline-none"
+            style={{ color: 'var(--brand-text-primary)' }}
+          >
+            {t('checkin.buffer.title')}
+          </h1>
+          <div className="shrink-0 mt-0.5">
+            <AudioButton size="sm" text={audioSummary} />
+          </div>
+        </div>
         <p className="text-[0.9375rem] mt-2 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {t('checkin.buffer.subtitle')}
         </p>

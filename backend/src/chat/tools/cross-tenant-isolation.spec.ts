@@ -407,9 +407,9 @@ describe('LLM privacy boundary (Part B.2)', () => {
 // ─── 7. Catalog assertion — guard didn't regress declarations ──────────────
 
 describe('Tool catalog still intact after security hardening', () => {
-  it('text catalog still exposes 11 tools (no accidental removals)', () => {
+  it('text catalog still exposes 12 tools (no accidental removals)', () => {
     const decls = getJournalToolDeclarations()
-    expect(decls).toHaveLength(11)
+    expect(decls).toHaveLength(12)
   })
 })
 

@@ -160,6 +160,16 @@ export class TestControlController {
     return { ok: true }
   }
 
+  @Post('auth-session/backdate')
+  @HttpCode(200)
+  async backdateAuthSessions(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.backdateAuthSessions(body.userId, body.deltaSeconds)
+  }
+
   @Post('medication/backdate-verified')
   @HttpCode(200)
   async backdateMedicationVerified(

@@ -22,7 +22,13 @@ import {
   getJournalEntries,
   updateJournalEntry,
   deleteJournalEntry,
+  ReadingTimeConflictError,
 } from '@/lib/services/journal.service';
+import {
+  resolveEditedMeasuredAt,
+  findMeasuredAtCollision,
+  isEditableBadgeVisible,
+} from '@/lib/readingEdit';
 import { getMyPatientProfile } from '@/lib/services/intake.service';
 import {
   listMyMedications,
@@ -365,7 +371,12 @@ type ReadingShape = {
   notes: string | null | undefined;
 };
 
-function humanizeReading(r: ReadingShape, t: TFn): string {
+/**
+ * Bug 60 — `hasActiveMedications` flag is threaded in so the spoken
+ * summary doesn't say "You took your medications" for 0-meds patients
+ * (whose `medicationTaken=true` is vacuously true per Bug 53).
+ */
+function humanizeReading(r: ReadingShape, t: TFn, hasActiveMedications: boolean = true): string {
   try {
     const parts: string[] = [];
     const dt = new Date(r.measuredAt);
@@ -404,8 +415,13 @@ function humanizeReading(r: ReadingShape, t: TFn): string {
       parts.push(`${weightSentencePieces.join(', ')}.`);
     }
 
-    if (r.medicationTaken === true) parts.push('You took your medications.');
-    else if (r.medicationTaken === false) parts.push('You missed at least one medication.');
+    // Bug 60 — 0-meds patients should NOT hear "You took your medications" —
+    // their medicationTaken=true is vacuously true per Bug 53. Skip the
+    // medication sentence entirely.
+    if (hasActiveMedications) {
+      if (r.medicationTaken === true) parts.push('You took your medications.');
+      else if (r.medicationTaken === false) parts.push('You missed at least one medication.');
+    }
 
     if (r.symptomCount > 0) {
       parts.push(
@@ -466,6 +482,7 @@ function EntrySkeleton() {
 function EntryCard({
   entry,
   heightCm,
+  hasActiveMedications,
   showSeconds = false,
   onView,
   onEdit,
@@ -475,6 +492,14 @@ function EntryCard({
   /** From PatientProfile.heightCm — fixed at intake. Used to compute BMI
    *  next to the weight chip. Optional — when missing, BMI is hidden. */
   heightCm: number | null;
+  /**
+   * Bug 60 — does the patient currently have ANY active medications on
+   * file? When false, suppress the "Meds: Taken / Missed" chip entirely —
+   * 0-meds patients have medicationTaken=true vacuously (per Bug 53 the
+   * bot skips the question and passes true to the required-field gate),
+   * so rendering "Meds: Taken" for them is misleading.
+   */
+  hasActiveMedications: boolean;
   /** Bug 15 — render HH:MM:SS instead of HH:MM when this reading shares its
    *  minute with another on the same day (disambiguates rapid same-minute
    *  submissions that would otherwise both show e.g. "15:11"). */
@@ -588,8 +613,7 @@ function EntryCard({
               grace period this reading hasn't been committed to the engine yet,
               so edits/deletes are "free". Informational only; edit/delete stay
               available after the window too. */}
-          {entry.engineEvaluationDeferredUntil &&
-            new Date(entry.engineEvaluationDeferredUntil).getTime() > Date.now() && (
+          {isEditableBadgeVisible(entry.engineEvaluationDeferredUntil, Date.now()) && (
               <span
                 data-testid={`reading-editable-${entry.id}`}
                 className="text-[0.625rem] px-1.5 py-0.5 rounded-full font-semibold"
@@ -755,7 +779,12 @@ function EntryCard({
                 BMI {bmi.toFixed(1)}
               </span>
             )}
-            {entry.medicationTaken != null && (
+            {/* Bug 60 — only render the medication chip when the patient
+                currently has at least one active medication. Otherwise
+                the chip would falsely claim "Meds: Taken" for 0-meds
+                patients (whose medicationTaken=true is vacuously true
+                per Bug 53). */}
+            {hasActiveMedications && entry.medicationTaken != null && (
               <span
                 className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium"
                 style={{
@@ -867,6 +896,7 @@ function EntryCard({
 function SessionCard({
   entries,
   heightCm,
+  hasActiveMedications,
   secondsIds,
   onView,
   onEdit,
@@ -874,6 +904,9 @@ function SessionCard({
 }: {
   entries: Entry[];
   heightCm: number | null;
+  /** Bug 60 — passed through to each EntryCard so 0-meds patients don't
+   *  see the misleading "Meds: Taken" chip. */
+  hasActiveMedications: boolean;
   /** Bug 15 — ids whose minute collides with another reading the same day,
    *  so the inner cards render HH:MM:SS. */
   secondsIds?: Set<string>;
@@ -969,6 +1002,7 @@ function SessionCard({
                   key={e.id}
                   entry={e}
                   heightCm={heightCm}
+                  hasActiveMedications={hasActiveMedications}
                   showSeconds={secondsIds?.has(e.id) ?? false}
                   onView={() => onView(e)}
                   onEdit={() => onEdit(e)}
@@ -1168,9 +1202,14 @@ function EditModal({
                 >
                   {t('checkin.time')}
                 </label>
+                {/* Bug 25 — step="1" exposes the SECONDS spinner so two
+                    readings can share a minute (e.g. 16:15:30 vs 16:15:00)
+                    without an unavoidable :00 collision. measuredTime is now
+                    HH:MM:SS. */}
                 <input
                   id="readings-edit-time"
                   type="time"
+                  step="1"
                   value={form.measuredTime}
                   onChange={(e) => onChange('measuredTime', e.target.value)}
                   className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none min-w-0"
@@ -1180,6 +1219,13 @@ function EditModal({
                     colorScheme: 'light',
                   }}
                 />
+                <p
+                  data-testid="edit-seconds-note"
+                  className="mt-1 text-[0.7rem] leading-snug"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                >
+                  {t('readings.edit.secondsNote')}
+                </p>
               </div>
             </div>
 
@@ -1628,12 +1674,16 @@ function EditModal({
           style={{ borderTop: '1px solid var(--brand-border)' }}
         >
           {error && (
-            <p
-              className="text-[0.78125rem] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
+            <div
+              role="alert"
+              className="flex items-center justify-center gap-2 text-[0.78125rem] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
               style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
             >
-              {error}
-            </p>
+              <span>{error}</span>
+              {/* Bug 25 — let the patient hear the message (e.g. the collision
+                  guidance) so it's understandable without reading. */}
+              <AudioButton size="sm" text={error} />
+            </div>
           )}
           <div className="flex gap-3">
             <button
@@ -2155,10 +2205,12 @@ export default function ReadingsPage() {
     const dd = String(dt.getDate()).padStart(2, '0');
     const hh = String(dt.getHours()).padStart(2, '0');
     const mi = String(dt.getMinutes()).padStart(2, '0');
+    // Bug 25 — seconds are now editable (step="1"), so seed them too.
+    const ss = String(dt.getSeconds()).padStart(2, '0');
 
     const populated: EditForm = {
       measuredDate: isValid ? `${yyyy}-${mm}-${dd}` : '',
-      measuredTime: isValid ? `${hh}:${mi}` : '',
+      measuredTime: isValid ? `${hh}:${mi}:${ss}` : '',
       position: entry.position ?? '',
       systolic: entry.systolicBP?.toString() ?? '',
       diastolic: entry.diastolicBP?.toString() ?? '',
@@ -2219,6 +2271,19 @@ export default function ReadingsPage() {
       setEditError(validation);
       return;
     }
+    // A BP reading can't be cleared to nothing. Pre-fix, emptying BOTH numbers
+    // passed validation but the empty values were never PATCHed, so the old BP
+    // silently stuck — a confusing no-op. If this entry was logged WITH a BP,
+    // require it to keep one. (Weight-/symptom-only entries that never had BP
+    // are unaffected — they may stay empty.)
+    if (
+      (editEntry.systolicBP != null || editEntry.diastolicBP != null) &&
+      !editForm.systolic &&
+      !editForm.diastolic
+    ) {
+      setEditError(t('readings.validate.bpBoth'));
+      return;
+    }
     // Per-medication: a med marked "No" must carry a reason — the backend
     // requires `reason` on every missedMedications entry.
     const missingReason = medications.some(
@@ -2230,14 +2295,34 @@ export default function ReadingsPage() {
       setEditError(t('readings.validate.missedReason'));
       return;
     }
+    // Bug 25 — resolve the final measuredAt preserving the original seconds when
+    // the minute is unchanged (the HH:MM picker can't show seconds), then reject
+    // a collision with an existing reading inline, before the PATCH. The page
+    // already holds the recent readings in memory, so the check is free; the
+    // backend 409 (catch below) is the safety net for a reading outside that set.
+    let finalMeasuredAt: string | undefined;
+    if (editForm.measuredDate && editForm.measuredTime) {
+      finalMeasuredAt = resolveEditedMeasuredAt(
+        editEntry.measuredAt,
+        editForm.measuredDate,
+        editForm.measuredTime,
+      );
+      const collision = findMeasuredAtCollision(
+        entries,
+        finalMeasuredAt,
+        editEntry.id,
+      );
+      if (collision) {
+        setEditError(t('readings.validate.timeCollision'));
+        return;
+      }
+    }
     setEditSaving(true);
     setEditError('');
     try {
       const payload: Parameters<typeof updateJournalEntry>[1] = {};
-      if (editForm.measuredDate && editForm.measuredTime) {
-        payload.measuredAt = new Date(
-          `${editForm.measuredDate}T${editForm.measuredTime}`,
-        ).toISOString();
+      if (finalMeasuredAt) {
+        payload.measuredAt = finalMeasuredAt;
       }
       if (editForm.position) payload.position = editForm.position;
       if (editForm.systolic) payload.systolicBP = parseInt(editForm.systolic, 10);
@@ -2330,7 +2415,13 @@ export default function ReadingsPage() {
       closeEdit();
       load();
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : 'Failed to save. Please try again.');
+      // Bug 25 Part C — backend 409 safety net (a collision the in-memory check
+      // missed, e.g. a reading outside the loaded window or a concurrent add).
+      if (err instanceof ReadingTimeConflictError) {
+        setEditError(t('readings.validate.timeCollision'));
+      } else {
+        setEditError(err instanceof Error ? err.message : 'Failed to save. Please try again.');
+      }
     } finally {
       setEditSaving(false);
     }
@@ -2487,6 +2578,7 @@ export default function ReadingsPage() {
                             key={bucket.sessionId ?? `proximity-${group.date}-${i}`}
                             entries={bucket.items}
                             heightCm={heightCm}
+                            hasActiveMedications={medications.length > 0}
                             secondsIds={secondsIds}
                             onView={(e) => setDetailEntry(e)}
                             onEdit={openEdit}
@@ -2497,6 +2589,7 @@ export default function ReadingsPage() {
                             key={bucket.items[0].id + (bucket.sessionId ?? `solo-${i}`)}
                             entry={bucket.items[0]}
                             heightCm={heightCm}
+                            hasActiveMedications={medications.length > 0}
                             showSeconds={secondsIds.has(bucket.items[0].id)}
                             onView={() => setDetailEntry(bucket.items[0])}
                             onEdit={() => openEdit(bucket.items[0])}

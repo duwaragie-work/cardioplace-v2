@@ -408,11 +408,14 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
       await expect(page.locator(byTestId(T.optionD.retake))).toBeVisible()
       await expect(page.getByText(/195\s*\/\s*120/)).toBeVisible()
 
-      // Take a (normal) confirmatory reading → flow finishes to the dashboard.
+      // Take a (normal) confirmatory reading → Bug 26: the confirmed-normal
+      // Screen C reassurance renders first, then its Done CTA → dashboard.
       await page.locator(byTestId(T.optionD.retake)).click()
       await page.locator(byTestId(T.optionD.systolic)).fill('128')
       await page.locator(byTestId(T.optionD.diastolic)).fill('82')
       await page.locator(byTestId(T.optionD.submitSecond)).click()
+      await expect(page.locator(byTestId('optiond-screenc-title'))).toBeVisible({ timeout: 15_000 })
+      await page.locator(byTestId(T.optionD.done)).click()
       await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
 
       // Back on /readings the original entry is released from AWAITING: the

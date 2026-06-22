@@ -14,12 +14,15 @@ export interface ActorUser {
  * this *specific* user allowed to touch *this* patient / practice."
  *
  * May 2026 access-scope decision — see docs/ACCESS_SCOPE.md §3 + §7.6.
+ * June 2026 update (Manisha 2026-06-12 Doc 3 Q2): PROVIDER now sees every
+ * patient in their practices (mirrors MEDICAL_DIRECTOR). Assignment still
+ * governs alert routing + escalation; only data visibility widened.
  * Scope rules:
  *   • SUPER_ADMIN, HEALPLACE_OPS → all patients / all practices.
  *   • MEDICAL_DIRECTOR → only patients whose assignment.practiceId is in
  *     the MD's PracticeMedicalDirector memberships.
- *   • PROVIDER → only patients whose assignment lists them as primary or
- *     backup provider.
+ *   • PROVIDER → only patients whose assignment.practiceId is in the
+ *     provider's PracticeProvider memberships.
  *
  * Throws ForbiddenException on deny (translated to HTTP 403 by Nest).
  * Callers should `await` this before reaching into Prisma to mutate.
@@ -59,8 +62,7 @@ export class PatientAccessService {
     if (
       actor.roles.includes(UserRole.PROVIDER) &&
       assignment &&
-      (assignment.primaryProviderId === actor.id ||
-        assignment.backupProviderId === actor.id)
+      (await this.providerInPractice(actor.id, assignment.practiceId))
     ) {
       return
     }
@@ -124,14 +126,10 @@ export class PatientAccessService {
     }
 
     if (actor.roles.includes(UserRole.PROVIDER)) {
+      const practiceIds = await this.practicesForProvider(actor.id)
       return {
         providerAssignmentAsPatient: {
-          is: {
-            OR: [
-              { primaryProviderId: actor.id },
-              { backupProviderId: actor.id },
-            ],
-          },
+          is: { practiceId: { in: practiceIds } },
         },
       }
     }
@@ -163,6 +161,25 @@ export class PatientAccessService {
 
   private async practicesHeadedBy(userId: string): Promise<string[]> {
     const rows = await this.prisma.practiceMedicalDirector.findMany({
+      where: { userId },
+      select: { practiceId: true },
+    })
+    return rows.map((r) => r.practiceId)
+  }
+
+  private async providerInPractice(
+    userId: string,
+    practiceId: string,
+  ): Promise<boolean> {
+    const row = await this.prisma.practiceProvider.findUnique({
+      where: { practiceId_userId: { practiceId, userId } },
+      select: { id: true },
+    })
+    return row !== null
+  }
+
+  private async practicesForProvider(userId: string): Promise<string[]> {
+    const rows = await this.prisma.practiceProvider.findMany({
       where: { userId },
       select: { practiceId: true },
     })

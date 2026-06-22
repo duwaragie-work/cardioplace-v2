@@ -141,6 +141,28 @@ export class TestControlService {
     })
   }
 
+  /**
+   * June 2026 — Phase 2 idle-timeout test driver. Backdate every active
+   * AuthSession.lastActivityAt for a user so the next refresh crosses the
+   * 15-min (web) / 5-min (mobile) idle gate without sleeping. Returns
+   * the number of sessions touched. Uses a raw UPDATE because
+   * lastActivityAt is mapped to `@updatedAt` and Prisma would otherwise
+   * stamp it back to now() on an `update`.
+   */
+  async backdateAuthSessions(
+    userId: string,
+    deltaSeconds: number,
+  ): Promise<{ updated: number }> {
+    const cutoff = new Date(Date.now() - deltaSeconds * 1000)
+    const result = await this.prisma.$executeRaw`
+      UPDATE "AuthSession"
+      SET "lastActivityAt" = ${cutoff}
+      WHERE "userId" = ${userId}
+        AND "expiresAt" > NOW()
+    `
+    return { updated: Number(result) }
+  }
+
   async backdateLastJournalEntry(userId: string, deltaSeconds: number): Promise<void> {
     const latest = await this.prisma.journalEntry.findFirst({
       where: { userId },

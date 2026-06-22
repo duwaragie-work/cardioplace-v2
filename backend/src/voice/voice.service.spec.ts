@@ -79,6 +79,10 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
     prisma = {
       journalEntry: {
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+        // Phase/16 — voice.service buildPatientContext now also queries for
+        // the most-recent open AWAITING entry (Option D resume). Default to
+        // null so unrelated tests stay quiet.
+        findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
       },
       deviationAlert: {
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),

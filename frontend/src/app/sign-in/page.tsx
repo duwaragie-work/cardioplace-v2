@@ -10,6 +10,8 @@ import type { TranslationKey } from "@/i18n";
 import { shouldShowOnboardingForUser } from "@/lib/onboarding";
 import LandingHeader from "@/components/cardio/LandingHeader";
 import LandingFooter from "@/components/cardio/LandingFooter";
+import SessionExpiredBanner from "@/components/auth/SessionExpiredBanner";
+import { WEBAUTHN_CHALLENGE_STORAGE_KEY } from "@/lib/services/webauthn.service";
 
 const OTP_LENGTH = 6;
 
@@ -275,6 +277,21 @@ export default function RegisterPage() {
         window.location.href = `${adminUrl}/auth/magic-link?${params.toString()}`;
         return;
       }
+      // Patient biometric second factor — a patient with a registered device
+      // gets a WebAuthn challenge instead of tokens. Stash the token and route
+      // to the biometric page (mirrors the admin TOTP-challenge handoff).
+      if (data && data.status === 'WEBAUTHN_REQUIRED') {
+        try {
+          sessionStorage.setItem(
+            WEBAUTHN_CHALLENGE_STORAGE_KEY,
+            JSON.stringify({ challengeToken: data.challengeToken }),
+          );
+        } catch {
+          // sessionStorage unavailable — the biometric page reads URL params too.
+        }
+        router.push('/sign-in/biometric');
+        return;
+      }
       login(data as OtpVerifyResponse);
       const userIdForSkip = data.userId !== undefined ? String(data.userId) : '';
       if (data.onboarding_required && shouldShowOnboardingForUser({ userId: userIdForSkip })) {
@@ -293,7 +310,8 @@ export default function RegisterPage() {
     <Suspense>
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <main id="main" className="min-h-[100dvh] pt-24 pb-10 flex items-center-safe justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" className="min-h-[100dvh] pt-24 pb-10 flex flex-col items-center-safe justify-center px-4 sm:px-6 lg:px-12">
+      <SessionExpiredBanner />
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}

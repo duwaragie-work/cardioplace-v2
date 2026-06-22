@@ -1,12 +1,12 @@
 model JournalEntry {
-  id                    String      @id @default(uuid())
-  userId                String
+  id                       String    @id @default(uuid())
+  userId                   String
   // Care-team actor who entered this reading on the patient's behalf via the
   // admin readings endpoints (source = ADMIN). Null on patient-entered rows.
   // SET NULL on user delete so the clinical reading survives staff-account
   // removal (the ProfileVerificationLog audit row keeps the actor id).
-  addedByUserId         String?
-  measuredAt            DateTime
+  addedByUserId            String?
+  measuredAt               DateTime
   // Manisha Backdated Readings sign-off 2026-06-06 — chunk A of backdating
   // implementation. Bucketed window between when the patient says they
   // measured (measuredAt) and when the system received the row (createdAt):
@@ -21,25 +21,25 @@ model JournalEntry {
   // Default REAL_TIME so existing rows (pre-migration) get a sensible value
   // without backfill. New rows are computed server-side in
   // DailyJournalService.create() from (now - measuredAt).
-  delayBand             DelayBand   @default(REAL_TIME)
-  systolicBP            Int?
-  diastolicBP           Int?
-  pulse                 Int?
-  weight                Decimal?
-  position              Position?
-  sessionId             String?
-  measurementConditions Json?
-  medicationTaken       Boolean?
+  delayBand                DelayBand @default(REAL_TIME)
+  systolicBP               Int?
+  diastolicBP              Int?
+  pulse                    Int?
+  weight                   Decimal?
+  position                 Position?
+  sessionId                String?
+  measurementConditions    Json?
+  medicationTaken          Boolean?
   // Phase/26 — patient explicitly flagged a medication as "not due yet" on
   // this entry. Lets the gap-alert cron and rule engine distinguish an
   // intentional gap from a missed dose. False default keeps existing rows
   // valid without backfill.
-  medicationScheduledLater Boolean  @default(false)
-  missedDoses           Int?        @default(0)
+  medicationScheduledLater Boolean   @default(false)
+  missedDoses              Int?      @default(0)
   // Per-medication miss detail, snapshot at time of entry so audit trail is
   // stable even if PatientMedication rows are later discontinued or renamed.
   // Shape: Array<{ medicationId, drugName, drugClass, reason, missedDoses }>.
-  missedMedications     Json?
+  missedMedications        Json?
   // Per-medication status snapshot for EVERY answered med (taken / missed /
   // scheduledLater), not just the missed ones. Lets the readings edit modal +
   // detail view reconstruct each med's exact answer on reopen — the aggregate
@@ -48,7 +48,7 @@ model JournalEntry {
   // it fall back to the heuristic rebuild. The rule engine still reads
   // medicationTaken + missedMedications, so this is UI-reconstruction only.
   // Shape: Array<{ medicationId, drugName, drugClass, taken, reason, missedDoses }>.
-  medicationStatuses    Json?
+  medicationStatuses       Json?
 
   severeHeadache       Boolean @default(false)
   visualChanges        Boolean @default(false)
@@ -160,9 +160,9 @@ enum Position {
 // Option D retake-to-confirm state (Manisha 2026-06-12 Q2). See JournalEntry
 // .emergencyConfirmation + docs/design/OPTION_D_AND_EDIT_WINDOW_DESIGN.md.
 enum EmergencyConfirmationState {
-  AWAITING     // first-of-pair emergency reading; held, awaiting confirmation
+  AWAITING // first-of-pair emergency reading; held, awaiting confirmation
   CONFIRMATORY // second-of-pair reading submitted to confirm/clear the first
-  UNCONFIRMED  // resolved: patient declined / window expired → Tier 1 flag
+  UNCONFIRMED // resolved: patient declined / window expired → Tier 1 flag
 }
 
 // Manisha Backdated Readings sign-off 2026-06-06 — bucketed lag between when
@@ -176,10 +176,10 @@ enum EmergencyConfirmationState {
 //   • patient: informational "recorded but won't trigger a real-time alert"
 //              note on HISTORICAL_ENTRY (Option B per the policy doc).
 enum DelayBand {
-  REAL_TIME         // < 5 min — normal current-session entry
-  NEAR_REAL_TIME    // 5 min - < 1 h — acceptable lag (forgot to log)
-  DELAYED_ENTRY     // 1 h - < 24 h — L2 911 CTA suppressed; provider-only flag
-  HISTORICAL_ENTRY  // >= 24 h — L2 not fired; excluded from CMS 99454 count
+  REAL_TIME // < 5 min — normal current-session entry
+  NEAR_REAL_TIME // 5 min - < 1 h — acceptable lag (forgot to log)
+  DELAYED_ENTRY // 1 h - < 24 h — L2 911 CTA suppressed; provider-only flag
+  HISTORICAL_ENTRY // >= 24 h — L2 not fired; excluded from CMS 99454 count
 }
 
 enum DeviationType {
