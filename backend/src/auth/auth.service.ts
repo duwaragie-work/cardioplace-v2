@@ -1456,6 +1456,38 @@ export class AuthService {
     return { ...resp, activePracticeId }
   }
 
+  /** Fallback sign-in for a device that doesn't hold one of the patient's
+   *  passkeys (e.g. a new phone, a different browser profile). Same model as
+   *  Binance / Google / Apple: use the passkey where you have it, fall back to
+   *  the email code where you don't. The challenge token already proves the
+   *  first factor (OTP / magic-link) passed, so we just issue tokens — and
+   *  crucially we DO NOT delete any passkey, so the patient's other devices
+   *  keep biometric. Removal stays an explicit action (Settings, or
+   *  webAuthnRecoverDisable for a true lost-device wipe). */
+  async webAuthnFallbackSignIn(
+    challengeToken: string,
+    context?: SessionContext,
+  ): Promise<AuthResponse> {
+    const { userId, activePracticeId } =
+      await this.verifyWebAuthnAuthToken(challengeToken)
+    const user = await this.loadActiveUser(userId)
+    const tokens = await this.issueTokenPair(user, {
+      ...context,
+      activePracticeId,
+    })
+    await this.logAuthEvent({
+      event: 'webauthn_fallback_otp',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      practiceContext: activePracticeId,
+      success: true,
+    })
+    const resp = this.buildAuthResponse(tokens, user, 'otp')
+    return { ...resp, activePracticeId }
+  }
+
   /** Graceful lost-device recovery. The challenge token proves a fresh
    *  first-factor pass (OTP / magic-link), so a patient who can no longer use
    *  their biometric (lost / wiped device) can remove it and sign in. This is

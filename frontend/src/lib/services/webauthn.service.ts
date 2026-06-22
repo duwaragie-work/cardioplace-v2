@@ -197,8 +197,33 @@ export async function authenticateBiometric(
   return verifyData as unknown as OtpVerifyResponse;
 }
 
-/** Graceful lost-device path: remove biometric and sign in with the already-
- *  verified first factor (the challenge token). Returns the auth response. */
+/** Fallback for a device without one of the patient's passkeys: sign in with
+ *  the email code alone (the challenge token already proved it). Does NOT
+ *  delete any passkey — the patient's other devices keep biometric. This is
+ *  the Binance / Google model: use the passkey where you have it, fall back to
+ *  the email code where you don't. */
+export async function continueWithEmailCode(
+  challengeToken: string,
+): Promise<OtpVerifyResponse> {
+  const res = await fetch(
+    `${API_URL}/api/v2/auth/webauthn/authenticate/fallback`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeToken }),
+    },
+  );
+  const data = await readJson(res);
+  if (!res.ok) {
+    throw new Error(messageFrom(data, 'Could not sign you in.'));
+  }
+  return data as unknown as OtpVerifyResponse;
+}
+
+/** Graceful lost-device path: remove ALL biometric and sign in. Use only for
+ *  an explicit "I lost my device" action — for the common new-device case use
+ *  {@link continueWithEmailCode}, which keeps existing passkeys. */
 export async function recoverDisableBiometric(
   challengeToken: string,
 ): Promise<OtpVerifyResponse> {

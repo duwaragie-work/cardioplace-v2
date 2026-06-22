@@ -418,6 +418,23 @@ export class AuthController {
   }
 
   @Public()
+  @Post('webauthn/authenticate/fallback')
+  async webAuthnAuthFallback(
+    @Body() dto: WebAuthnRecoverDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.webAuthnFallbackSignIn(
+      dto.challengeToken,
+      context,
+    )
+    this.issueSessionCookies(res, result)
+    await this.trackDevice(req, context, result.userId)
+    return result
+  }
+
+  @Public()
   @Post('webauthn/authenticate/recover')
   async webAuthnAuthRecover(
     @Body() dto: WebAuthnRecoverDto,

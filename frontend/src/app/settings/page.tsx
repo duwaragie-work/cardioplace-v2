@@ -278,8 +278,7 @@ export default function SettingsPage() {
               >
                 <Info className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>
-                  This device doesn&apos;t support Face ID or fingerprint
-                  sign-in. You can set it up on a phone or tablet that does.
+                  Face ID or fingerprint isn't available on this device. You can still sign in with your email code.
                 </span>
               </div>
             )}
