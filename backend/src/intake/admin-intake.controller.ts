@@ -25,7 +25,9 @@ import {
   AdminEditMedicationDto,
 } from './dto/admin-medication.dto.js'
 
-type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
+type AuthedReq = Request & {
+  user: { id: string; roles: UserRole[]; activePracticeId?: string | null }
+}
 
 // Admin-scoped intake surface.
 //   • READ — open to all four admin roles. HEALPLACE_OPS needs to view
@@ -57,7 +59,7 @@ export class AdminIntakeController {
     @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.verifyProfile(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
       dto,
       ctx,
@@ -74,7 +76,7 @@ export class AdminIntakeController {
     @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.correctProfile(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
       dto,
       ctx,
@@ -91,7 +93,7 @@ export class AdminIntakeController {
     @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.rejectProfileField(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
       dto,
       ctx,
@@ -110,7 +112,7 @@ export class AdminIntakeController {
     @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.confirmProfileField(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
       dto,
       ctx,
@@ -128,7 +130,7 @@ export class AdminIntakeController {
     @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.confirmProfileFields(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
       dto,
       ctx,
@@ -145,7 +147,7 @@ export class AdminIntakeController {
     @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.verifyMedication(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       medicationId,
       dto,
       ctx,
@@ -163,7 +165,7 @@ export class AdminIntakeController {
     @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.adminAddMedication(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
       dto,
       ctx,
@@ -181,7 +183,7 @@ export class AdminIntakeController {
     @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.intake.adminEditMedication(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       medicationId,
       dto,
       ctx,
@@ -194,7 +196,7 @@ export class AdminIntakeController {
     @Param('id') patientUserId: string,
   ) {
     await this.access.assertCanAccessPatient(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
     )
     return this.intake.listVerificationLogs(patientUserId)
@@ -210,7 +212,7 @@ export class AdminIntakeController {
     @Param('id') patientUserId: string,
   ) {
     await this.access.assertCanAccessPatient(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
     )
     return this.intake.getProfile(patientUserId)
@@ -222,7 +224,7 @@ export class AdminIntakeController {
     @Param('id') patientUserId: string,
   ) {
     await this.access.assertCanAccessPatient(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
     )
     // includeDiscontinued = true so the medications tab can show the full

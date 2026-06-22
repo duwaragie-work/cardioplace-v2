@@ -18,7 +18,9 @@ import { UserRole } from '../generated/prisma/enums.js'
 import { UpsertThresholdDto } from './dto/upsert-threshold.dto.js'
 import { ThresholdService } from './threshold.service.js'
 
-type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
+type AuthedReq = Request & {
+  user: { id: string; roles: UserRole[]; activePracticeId?: string | null }
+}
 
 // Thresholds are a clinical directive per CLINICAL_SPEC.
 //   • READ — open to all four admin roles (HEALPLACE_OPS sees the configured
@@ -51,7 +53,7 @@ export class ThresholdController {
     @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.service.create(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
       dto,
       ctx,
@@ -64,7 +66,7 @@ export class ThresholdController {
     @Param('userId') patientUserId: string,
   ) {
     await this.access.assertCanAccessPatient(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
     )
     return this.service.findByPatient(patientUserId)
@@ -79,7 +81,7 @@ export class ThresholdController {
     @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.service.update(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
       dto,
       ctx,
@@ -97,7 +99,7 @@ export class ThresholdController {
     @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.service.delete(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
       ctx,
     )

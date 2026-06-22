@@ -13,7 +13,9 @@ import { PatientAccessService } from '../common/patient-access.service.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { EnrollmentService } from './enrollment.service.js'
 
-type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
+type AuthedReq = Request & {
+  user: { id: string; roles: UserRole[]; activePracticeId?: string | null }
+}
 
 // May 2026 access-scope decision (docs/ACCESS_SCOPE.md):
 //   • Complete-onboarding is a clinical readiness call. PROVIDER added so
@@ -33,7 +35,7 @@ export class EnrollmentController {
   @HttpCode(HttpStatus.OK)
   complete(@Req() req: AuthedReq, @Param('userId') patientUserId: string) {
     return this.service.completeEnrollment(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
     )
   }
@@ -44,7 +46,7 @@ export class EnrollmentController {
     @Param('userId') patientUserId: string,
   ) {
     await this.access.assertCanAccessPatient(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
     )
     return this.service.check(patientUserId)
