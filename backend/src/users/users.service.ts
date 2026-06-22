@@ -925,6 +925,11 @@ export class UsersService {
             take: 1,
           },
           userInviteCreated: { select: { practiceId: true } },
+          // MFA enrollment state (Manisha 2026-06-12 §6) — drives the "Reset
+          // MFA" action: only shown for users who actually have an enrolled
+          // authenticator. enrolledAt is nulled on admin reset, so the button
+          // disappears after a reset (once the list refetches).
+          totpCredential: { select: { enrolledAt: true } },
         },
       }),
       this.prisma.user.count({ where: userWhere }),
@@ -937,6 +942,7 @@ export class UsersService {
       roles: u.roles,
       accountStatus: u.accountStatus,
       createdAt: u.createdAt,
+      mfaEnrolled: u.totpCredential?.enrolledAt != null,
       practiceId:
         u.providerAssignmentAsPatient?.practiceId ??
         u.practiceCoordinator?.practiceId ??

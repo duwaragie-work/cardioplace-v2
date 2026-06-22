@@ -11,6 +11,7 @@ import { shouldShowOnboardingForUser } from "@/lib/onboarding";
 import LandingHeader from "@/components/cardio/LandingHeader";
 import LandingFooter from "@/components/cardio/LandingFooter";
 import SessionExpiredBanner from "@/components/auth/SessionExpiredBanner";
+import { WEBAUTHN_CHALLENGE_STORAGE_KEY } from "@/lib/services/webauthn.service";
 
 const OTP_LENGTH = 6;
 
@@ -274,6 +275,21 @@ export default function RegisterPage() {
           roles: (data.roles as string[]).join(','),
         });
         window.location.href = `${adminUrl}/auth/magic-link?${params.toString()}`;
+        return;
+      }
+      // Patient biometric second factor — a patient with a registered device
+      // gets a WebAuthn challenge instead of tokens. Stash the token and route
+      // to the biometric page (mirrors the admin TOTP-challenge handoff).
+      if (data && data.status === 'WEBAUTHN_REQUIRED') {
+        try {
+          sessionStorage.setItem(
+            WEBAUTHN_CHALLENGE_STORAGE_KEY,
+            JSON.stringify({ challengeToken: data.challengeToken }),
+          );
+        } catch {
+          // sessionStorage unavailable — the biometric page reads URL params too.
+        }
+        router.push('/sign-in/biometric');
         return;
       }
       login(data as OtpVerifyResponse);

@@ -199,6 +199,20 @@ export function canManageUsers(input: RoleInput | UserInput): boolean {
   return has(input, ['COORDINATOR', 'HEALPLACE_OPS', 'SUPER_ADMIN'])
 }
 
+// ─── MFA admin reset (phase/26) ─────────────────────────────────────────────
+/**
+ * Whether the caller can reset another staff member's two-factor auth.
+ *   @Roles(SUPER_ADMIN, HEALPLACE_OPS)
+ *   backend/src/auth/auth.controller.ts  POST admin/mfa/reset/:userId
+ *
+ * The backend additionally blocks self-reset; the UI hides the action on the
+ * caller's own row. MFA only applies to staff roles, so the button is shown
+ * only for non-PATIENT targets.
+ */
+export function canResetUserMfa(input: RoleInput | UserInput): boolean {
+  return has(input, ['SUPER_ADMIN', 'HEALPLACE_OPS'])
+}
+
 // ─── Monthly reports (phase/24) ─────────────────────────────────────────────
 /**
  * Can read the Monthly Practice Analytics Report. Oversight document —

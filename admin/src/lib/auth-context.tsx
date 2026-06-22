@@ -45,6 +45,9 @@ export type AdminAuthResponse = {
   activePractice?: { id: string; name: string } | null;
   /** PR #90 Bug A — switchable memberships, mirrors /auth/profile. */
   availablePractices?: Array<{ id: string; name: string }>;
+  /** MFA — true when enforcement is on and this user hasn't enrolled TOTP. The
+   *  sign-in page redirects to /sign-in/mfa-enroll instead of the dashboard. */
+  mfaEnrollmentRequired?: boolean;
 };
 
 /** Phase/practice-identity — discriminated response shape returned by

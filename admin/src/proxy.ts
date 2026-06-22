@@ -97,7 +97,13 @@ function isCoordinatorOnly(roles: string[]): boolean {
 // in the admin app is clinical or operational chrome (Dashboard, Patients,
 // Practices, Alerts) that bounces them to /users.
 function isCoordinatorAllowed(pathname: string): boolean {
-  return pathname === '/users' || pathname.startsWith('/users/');
+  // /profile is every signed-in user's own-account page — allow it alongside
+  // the coordinator's /users surface.
+  return (
+    pathname === '/users' ||
+    pathname.startsWith('/users/') ||
+    pathname === '/profile'
+  );
 }
 
 export function proxy(request: NextRequest) {
