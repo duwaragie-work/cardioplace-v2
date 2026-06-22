@@ -1847,6 +1847,28 @@ describe('AuthService', () => {
       const data = (authLogCall![0] as { data: { practiceContext: string } }).data
       expect(data.practiceContext).toBe('p-b')
     })
+
+    it('PR #90 Bug A — response carries activePractice {id,name} + availablePractices', async () => {
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue({
+        id: 'pp-1',
+      })
+      ;(prisma.authSession.findUnique as jest.Mock).mockResolvedValue({
+        activePracticeId: 'p-a',
+      })
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({
+        user: provider,
+      })
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-a', name: 'Cedar Hill' } },
+        { practice: { id: 'p-b', name: 'BridgePoint' } },
+      ])
+      const result = await service.switchPractice('user-prov', 'token-1', 'p-b')
+      expect(result.activePractice).toEqual({ id: 'p-b', name: 'BridgePoint' })
+      expect(result.availablePractices).toEqual([
+        { id: 'p-a', name: 'Cedar Hill' },
+        { id: 'p-b', name: 'BridgePoint' },
+      ])
+    })
   })
 
   describe('selectPractice', () => {
@@ -1929,6 +1951,41 @@ describe('AuthService', () => {
       expect(authLogCall).toBeTruthy()
       const data = (authLogCall![0] as { data: { practiceContext: string } }).data
       expect(data.practiceContext).toBe('p-a')
+    })
+
+    it('PR #90 Bug A — response carries activePractice {id,name} + availablePractices', async () => {
+      setupHappyPath()
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practice: { id: 'p-a', name: 'Cedar Hill' } },
+        { practice: { id: 'p-b', name: 'BridgePoint' } },
+      ])
+      const result = await service.selectPractice('valid.jwt', 'p-a')
+      expect(result.activePractice).toEqual({ id: 'p-a', name: 'Cedar Hill' })
+      expect(result.availablePractices).toEqual([
+        { id: 'p-a', name: 'Cedar Hill' },
+        { id: 'p-b', name: 'BridgePoint' },
+      ])
+    })
+
+    it('PR #90 Bug A — SUPER_ADMIN-style org-wide select yields null activePractice + [] (edge case)', async () => {
+      // A SUPER_ADMIN never hits the selector, but assert the bundle stays
+      // null/[] for an org-wide role so the response shape is well-defined.
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        ...provider,
+        roles: [UserRole.SUPER_ADMIN],
+      })
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue({
+        id: 'pp-1',
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'token-fresh',
+      })
+      ;(prisma.authSession.create as jest.Mock).mockResolvedValue({
+        id: 'sess-fresh',
+      })
+      const result = await service.selectPractice('valid.jwt', 'p-a')
+      expect(result.activePractice).toBeNull()
+      expect(result.availablePractices).toEqual([])
     })
   })
 })
