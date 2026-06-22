@@ -25,6 +25,7 @@ describe('JwtStrategy.validate — practice membership probe', () => {
   it('no activePracticeId → never queries either relation, returns user verbatim', async () => {
     const prisma = {
       practiceProvider: { findUnique: jest.fn() },
+      practiceMedicalDirector: { findUnique: jest.fn() },
       practiceCoordinator: { findUnique: jest.fn() },
     }
     const strat = buildStrategy(prisma)
@@ -40,6 +41,7 @@ describe('JwtStrategy.validate — practice membership probe', () => {
       activePracticeId: null,
     })
     expect(prisma.practiceProvider.findUnique).not.toHaveBeenCalled()
+    expect(prisma.practiceMedicalDirector.findUnique).not.toHaveBeenCalled()
     expect(prisma.practiceCoordinator.findUnique).not.toHaveBeenCalled()
   })
 
@@ -47,6 +49,9 @@ describe('JwtStrategy.validate — practice membership probe', () => {
     const prisma = {
       practiceProvider: {
         findUnique: jest.fn().mockResolvedValue({ id: 'pp-1' } as any),
+      },
+      practiceMedicalDirector: {
+        findUnique: jest.fn().mockResolvedValue(null as any),
       },
       practiceCoordinator: {
         findUnique: jest.fn().mockResolvedValue(null as any),
@@ -66,10 +71,42 @@ describe('JwtStrategy.validate — practice membership probe', () => {
     })
   })
 
+  // PR #90 regression — a MED_DIR heads a practice via PracticeMedicalDirector,
+  // NOT PracticeProvider. Omitting that relation bounced every medicalDirector
+  // to /sign-in/select-practice?reason=membership-changed right after sign-in.
+  it('MEDICAL_DIRECTOR — no PracticeProvider row, PracticeMedicalDirector for the active practice → allowed', async () => {
+    const prisma = {
+      practiceProvider: {
+        findUnique: jest.fn().mockResolvedValue(null as any),
+      },
+      practiceMedicalDirector: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'pmd-1' } as any),
+      },
+      practiceCoordinator: {
+        findUnique: jest.fn().mockResolvedValue(null as any),
+      },
+    }
+    const strat = buildStrategy(prisma)
+    const result = await strat.validate({
+      sub: 'md-1',
+      email: 'md@admin.test',
+      roles: ['MEDICAL_DIRECTOR'] as any,
+      activePracticeId: 'p-cedar',
+    })
+    expect(result.activePracticeId).toBe('p-cedar')
+    expect(prisma.practiceMedicalDirector.findUnique).toHaveBeenCalledWith({
+      where: { practiceId_userId: { practiceId: 'p-cedar', userId: 'md-1' } },
+      select: { id: true },
+    })
+  })
+
   // Regression — this is the COORDINATOR path that was previously 401'd.
   it('COORDINATOR — no PracticeProvider row, PracticeCoordinator points at the active practice → allowed', async () => {
     const prisma = {
       practiceProvider: {
+        findUnique: jest.fn().mockResolvedValue(null as any),
+      },
+      practiceMedicalDirector: {
         findUnique: jest.fn().mockResolvedValue(null as any),
       },
       practiceCoordinator: {
@@ -100,6 +137,9 @@ describe('JwtStrategy.validate — practice membership probe', () => {
       practiceProvider: {
         findUnique: jest.fn().mockResolvedValue(null as any),
       },
+      practiceMedicalDirector: {
+        findUnique: jest.fn().mockResolvedValue(null as any),
+      },
       practiceCoordinator: {
         findUnique: jest.fn().mockResolvedValue({ practiceId: 'p-bridge' } as any),
       },
@@ -115,9 +155,10 @@ describe('JwtStrategy.validate — practice membership probe', () => {
     ).rejects.toThrow(UnauthorizedException)
   })
 
-  it('no membership in EITHER relation → PRACTICE_MEMBERSHIP_REVOKED', async () => {
+  it('no membership in ANY of the three relations → PRACTICE_MEMBERSHIP_REVOKED', async () => {
     const prisma = {
       practiceProvider: { findUnique: jest.fn().mockResolvedValue(null as any) },
+      practiceMedicalDirector: { findUnique: jest.fn().mockResolvedValue(null as any) },
       practiceCoordinator: { findUnique: jest.fn().mockResolvedValue(null as any) },
     }
     const strat = buildStrategy(prisma)

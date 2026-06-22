@@ -747,11 +747,7 @@ export class AuthService {
     })
     if (!user) throw new UnauthorizedException('User not found')
     this.assertAccountActive(user)
-    const membership = await this.prisma.practiceProvider.findUnique({
-      where: { practiceId_userId: { practiceId, userId: user.id } },
-      select: { id: true },
-    })
-    if (!membership) {
+    if (!(await this.isPracticeMember(user.id, practiceId))) {
       throw new ForbiddenException('Not a member of that practice')
     }
     // MFA gate (Manisha 2026-06-12 §6) — multi-practice provider/admin path.
@@ -844,11 +840,7 @@ export class AuthService {
     activePractice: { id: string; name: string } | null
     availablePractices: Array<{ id: string; name: string }>
   }> {
-    const membership = await this.prisma.practiceProvider.findUnique({
-      where: { practiceId_userId: { practiceId, userId } },
-      select: { id: true },
-    })
-    if (!membership) {
+    if (!(await this.isPracticeMember(userId, practiceId))) {
       throw new ForbiddenException('Not a member of that practice')
     }
     const prior = await this.prisma.authSession.findUnique({
@@ -904,6 +896,31 @@ export class AuthService {
    * pattern as resolvePracticeContext() and JwtStrategy.validate().
    * Org-wide roles (SUPER_ADMIN / HEALPLACE_OPS) get null/[].
    */
+  /**
+   * Whether `userId` holds membership in `practiceId` via EITHER the
+   * PracticeProvider (PROVIDER) or PracticeMedicalDirector (MED_DIR) relation.
+   * Gates select-practice / switch-practice. PR #90: a MED_DIR heads a
+   * practice via PracticeMedicalDirector, so probing only PracticeProvider
+   * wrongly rejected a multi-practice MED_DIR picking a practice they head.
+   * (COORDINATOR is 1:1 + auto-resolved, so it never reaches select/switch.)
+   */
+  private async isPracticeMember(
+    userId: string,
+    practiceId: string,
+  ): Promise<boolean> {
+    const [asProvider, asMedDir] = await Promise.all([
+      this.prisma.practiceProvider.findUnique({
+        where: { practiceId_userId: { practiceId, userId } },
+        select: { id: true },
+      }),
+      this.prisma.practiceMedicalDirector.findUnique({
+        where: { practiceId_userId: { practiceId, userId } },
+        select: { id: true },
+      }),
+    ])
+    return asProvider !== null || asMedDir !== null
+  }
+
   private async resolvePracticeBundle(
     user: { id: string; roles: UserRole[] },
     activePracticeId: string | null,

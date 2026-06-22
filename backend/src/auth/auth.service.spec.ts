@@ -133,10 +133,12 @@ describe('AuthService', () => {
         findUnique: jest.fn().mockResolvedValue(null),
       },
       // PR #90 — a MEDICAL_DIRECTOR's practice membership lives on
-      // PracticeMedicalDirector; resolvePracticeContext probes it so an MD who
-      // heads a practice (but isn't a provider-member) isn't blocked at sign-in.
+      // PracticeMedicalDirector; resolvePracticeContext + isPracticeMember probe
+      // it so an MD who heads a practice (but isn't a provider-member) isn't
+      // blocked at sign-in / select-practice / switch-practice.
       practiceMedicalDirector: {
         findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(null),
       },
       // MFA (Manisha 2026-06-12 §6). shouldChallengeMfa reads totpCredential
       // on the verifyOtp/selectPractice paths; default null = not enrolled =
@@ -1992,6 +1994,22 @@ describe('AuthService', () => {
         { id: 'p-b', name: 'BridgePoint' },
       ])
     })
+
+    it('PR #90 — MED_DIR who heads the target practice (PracticeMedicalDirector, no provider row) can switch', async () => {
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue(null)
+      ;(prisma.practiceMedicalDirector.findUnique as jest.Mock).mockResolvedValue({
+        id: 'pmd-1',
+      })
+      ;(prisma.authSession.findUnique as jest.Mock).mockResolvedValue({
+        activePracticeId: 'p-a',
+      })
+      ;(prisma.authSession.update as jest.Mock).mockResolvedValue({
+        user: provider,
+      })
+      const result = await service.switchPractice('md-1', 'token-1', 'p-b')
+      expect(result.activePracticeId).toBe('p-b')
+      expect(prisma.authSession.update).toHaveBeenCalled()
+    })
   })
 
   describe('selectPractice', () => {
@@ -2109,6 +2127,25 @@ describe('AuthService', () => {
       const result = await service.selectPractice('valid.jwt', 'p-a')
       expect(result.activePractice).toBeNull()
       expect(result.availablePractices).toEqual([])
+    })
+
+    it('PR #90 — MED_DIR who heads the chosen practice (PracticeMedicalDirector, no provider row) can select', async () => {
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        ...provider,
+        roles: [UserRole.MEDICAL_DIRECTOR],
+      })
+      ;(prisma.practiceProvider.findUnique as jest.Mock).mockResolvedValue(null)
+      ;(prisma.practiceMedicalDirector.findUnique as jest.Mock).mockResolvedValue({
+        id: 'pmd-1',
+      })
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        id: 'token-fresh',
+      })
+      ;(prisma.authSession.create as jest.Mock).mockResolvedValue({
+        id: 'sess-fresh',
+      })
+      const result = await service.selectPractice('valid.jwt', 'p-a')
+      expect(result.activePracticeId).toBe('p-a')
     })
   })
 })
