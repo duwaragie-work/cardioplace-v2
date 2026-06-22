@@ -57,6 +57,10 @@ model User {
   // null/empty for patients (their biometric arrives later in its own table).
   totpCredential   TotpCredential?
   mfaRecoveryCodes MfaRecoveryCode[]
+
+  // Patient biometric sign-in (WebAuthn / passkeys). Optional, patient-side;
+  // empty for provider/admin accounts. One row per registered device.
+  webAuthnCredentials WebAuthnCredential[]
 }
 
 enum UserRole {
