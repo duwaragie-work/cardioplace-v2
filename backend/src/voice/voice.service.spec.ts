@@ -106,16 +106,12 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
       ),
     }
     configService = {
-      // The Vertex-migration factory (buildGoogleGenAIClient) uses `get`
-      // for GOOGLE_API_KEY (not getOrThrow) so it can branch on
-      // GEMINI_PROVIDER before failing. Default mock returned `undefined`
-      // for unrecognized keys, which made the factory throw
-      // 'GOOGLE_API_KEY is not defined in environment' in every voice
-      // test that previously relied on the pre-migration getOrThrow.
-      // Stub a value here so the AI Studio branch (the default
-      // GEMINI_PROVIDER) constructs cleanly.
+      // Voice service constructs its Live client via the Vertex factory
+      // (buildGoogleGenAIClient). The factory reads GOOGLE_CLOUD_PROJECT
+      // and throws if unset, so stub a project here. GOOGLE_CLOUD_LOCATION
+      // defaults to us-central1 in the factory — no need to stub.
       get: jest.fn().mockImplementation((key: string, dflt?: string) => {
-        if (key === 'GOOGLE_API_KEY') return 'test-google-api-key'
+        if (key === 'GOOGLE_CLOUD_PROJECT') return 'test-gcp-project'
         return dflt
       }),
       getOrThrow: jest.fn().mockReturnValue('test-secret'),
