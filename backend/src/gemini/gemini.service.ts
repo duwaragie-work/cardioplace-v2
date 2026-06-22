@@ -3,6 +3,7 @@ import type { Content, FunctionDeclaration, GenerateContentResponse } from '@goo
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { LangSmithService } from '../common/langsmith.service.js'
+import { buildGoogleGenAIClient } from './google-genai-client.factory.js'
 
 const MAX_RETRIES = 5
 const BASE_DELAY_MS = 2000
@@ -164,14 +165,8 @@ export class GeminiService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    const apiKey = this.configService.get<string>('GOOGLE_API_KEY')
     this.chatModel = this.configService.get<string>('GEMINI_CHAT_MODEL') || 'gemini-2.5-flash'
-
-    if (!apiKey) {
-      throw new Error('GOOGLE_API_KEY is not defined in environment')
-    }
-
-    this.client = new GoogleGenAI({ apiKey })
+    this.client = buildGoogleGenAIClient(this.configService)
   }
 
   /**

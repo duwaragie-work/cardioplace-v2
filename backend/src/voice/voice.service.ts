@@ -21,6 +21,10 @@ import { ConversationHistoryService } from '../chat/services/conversation-histor
 import { SystemPromptService } from '../chat/services/system-prompt.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
+import {
+  buildGoogleGenAIClient,
+  resolveGeminiProvider,
+} from '../gemini/google-genai-client.factory.js'
 import { IntakeStatusService } from '../intake/intake-status.service.js'
 import { INTAKE_EVENTS, type IntakeUpdatedPayload } from '../intake/intake-events.js'
 import { JOURNAL_EVENTS } from '../daily_journal/constants/events.js'
@@ -193,11 +197,12 @@ export class VoiceService implements OnModuleDestroy {
 
   // Default to a Live-capable model. Override via GEMINI_VOICE_MODEL.
   private readonly voiceModel: string
-  // Dedicated GoogleGenAI client pinned to v1alpha for Live API. The shared
-  // `GeminiService.clientInstance` defaults to v1beta (for text/embeddings
-  // /OCR) where Live's bidiGenerateContent isn't exposed — caused the
-  // "model not found for API version v1beta" error. v1alpha is the
-  // documented Live endpoint on the Gemini Developer API (AI Studio key).
+  // Dedicated GoogleGenAI client pinned to the Live API's apiVersion. The
+  // shared `GeminiService.clientInstance` defaults to v1beta (for text /
+  // embeddings / OCR) where Live's bidiGenerateContent isn't exposed —
+  // caused the "model not found for API version v1beta" error.
+  // The Live apiVersion differs by provider — AI Studio: v1alpha; Vertex
+  // AI: v1beta1 — resolved in the constructor below.
   private readonly liveClient: GoogleGenAI
 
   constructor(
@@ -218,10 +223,17 @@ export class VoiceService implements OnModuleDestroy {
     this.voiceModel =
       this.config.get<string>('GEMINI_VOICE_MODEL') ??
       'gemini-2.5-flash-native-audio-preview-09-2025'
-    const apiKey = this.config.getOrThrow<string>('GOOGLE_API_KEY')
-    this.liveClient = new GoogleGenAI({
-      apiKey,
-      apiVersion: 'v1alpha',
+    // The Live API surface differs in apiVersion across providers:
+    //   • AI Studio (legacy default): v1alpha — the only published Live
+    //     endpoint on the Developer API.
+    //   • Vertex AI: v1beta1 — Vertex ships Live under v1beta1, not v1alpha.
+    // The factory branches on GEMINI_PROVIDER; we pass the right apiVersion
+    // per provider so the same `client.live.connect(...)` call below works
+    // on both. All other Live config (responseModalities, systemInstruction,
+    // speechConfig, tools) is identical across providers.
+    const provider = resolveGeminiProvider(this.config)
+    this.liveClient = buildGoogleGenAIClient(this.config, {
+      apiVersion: provider === 'vertex' ? 'v1beta1' : 'v1alpha',
     })
   }
 
