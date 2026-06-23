@@ -1634,14 +1634,14 @@ export class AuthService {
   /** Recovery-code sign-in — the ONLY fallback when a patient can't use their
    *  biometric on this device (e.g. a desktop passkey that can't travel to a
    *  phone). The challenge token proves the first factor (OTP / magic-link)
-   *  already passed. The used code is consumed, the whole set is regenerated
-   *  (so the patient always leaves with a fresh, known batch), and the new
-   *  codes ride back in the response to be shown + saved once. */
+   *  already passed. We consume ONLY the one code (the rest stay valid — no
+   *  wasteful regenerate), and return how many remain so the FE can tell the
+   *  patient. They regenerate from Settings when running low. */
   async webAuthnRecoverySignIn(
     challengeToken: string,
     recoveryCode: string,
     context?: SessionContext,
-  ): Promise<AuthResponse & { recoveryCodes: string[] }> {
+  ): Promise<AuthResponse & { recoveryRemaining: number }> {
     const { userId, activePracticeId } =
       await this.verifyWebAuthnAuthToken(challengeToken)
     const unused = await this.prisma.mfaRecoveryCode.findMany({
@@ -1668,12 +1668,14 @@ export class AuthService {
       })
       throw new UnauthorizedException('Invalid or already-used recovery code')
     }
+    // Burn only this one code; the others remain valid.
     await this.prisma.mfaRecoveryCode.update({
       where: { id: matchedId },
       data: { usedAt: new Date() },
     })
-    // Regenerate the full set so the patient leaves with a fresh batch.
-    const recoveryCodes = await this.issueRecoveryCodes(userId)
+    const recoveryRemaining = await this.prisma.mfaRecoveryCode.count({
+      where: { userId, usedAt: null },
+    })
     const user = await this.loadActiveUser(userId)
     const tokens = await this.issueTokenPair(user, {
       ...context,
@@ -1686,10 +1688,14 @@ export class AuthService {
       ipAddress: context?.ipAddress,
       userAgent: context?.userAgent,
       practiceContext: activePracticeId,
+      metadata: { remaining: recoveryRemaining },
       success: true,
     })
-    const resp = this.buildAuthResponse(tokens, user, 'otp')
-    return { ...resp, activePracticeId, recoveryCodes }
+    return {
+      ...this.buildAuthResponse(tokens, user, 'otp'),
+      activePracticeId,
+      recoveryRemaining,
+    }
   }
 
   /** Settings — how many backup codes remain + whether biometric is on. */

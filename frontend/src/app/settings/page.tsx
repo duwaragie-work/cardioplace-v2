@@ -359,7 +359,7 @@ export default function SettingsPage() {
           className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4"
           style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}
         >
-          <div className="relative w-full sm:max-w-md bg-white sm:rounded-3xl rounded-t-3xl max-h-[92dvh] overflow-y-auto p-5">
+          <div className="relative w-full sm:max-w-md bg-white sm:rounded-3xl rounded-t-3xl max-h-[92dvh] overflow-y-auto p-5 pt-14">
             <button
               type="button"
               onClick={() => setCodesToShow(null)}

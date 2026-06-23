@@ -18,7 +18,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Fingerprint, Loader2, ShieldCheck, KeyRound } from 'lucide-react';
+import { Fingerprint, Loader2, ShieldCheck, KeyRound, CheckCircle2 } from 'lucide-react';
 import { useAuth, type OtpVerifyResponse } from '@/lib/auth-context';
 import {
   WEBAUTHN_CHALLENGE_STORAGE_KEY,
@@ -27,7 +27,6 @@ import {
 } from '@/lib/services/webauthn.service';
 import LandingHeader from '@/components/cardio/LandingHeader';
 import LandingFooter from '@/components/cardio/LandingFooter';
-import RecoveryCodesPanel from '@/components/cardio/RecoveryCodesPanel';
 
 function readChallengeToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -55,7 +54,7 @@ function clearStoredChallenge() {
   }
 }
 
-type Mode = 'prompt' | 'recovery' | 'savecodes';
+type Mode = 'prompt' | 'recovery' | 'used';
 
 export default function BiometricSignInPage() {
   const router = useRouter();
@@ -69,7 +68,7 @@ export default function BiometricSignInPage() {
   const [error, setError] = useState<string | null>(null);
   const [showFallback, setShowFallback] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState('');
-  const [newCodes, setNewCodes] = useState<string[]>([]);
+  const [remaining, setRemaining] = useState<number | null>(null);
   const autoTried = useRef(false);
 
   useEffect(() => {
@@ -118,10 +117,10 @@ export default function BiometricSignInPage() {
       const data = await signInWithRecoveryCode(challengeToken, recoveryCode);
       clearStoredChallenge();
       login(data);
-      // The recovery sign-in regenerated the set — show the new codes once
-      // before continuing into the app.
-      setNewCodes(data.recoveryCodes ?? []);
-      setMode('savecodes');
+      // Only that one code was used — tell the patient how many remain, then
+      // let them continue (they can set up biometric on this device later).
+      setRemaining(data.recoveryRemaining ?? null);
+      setMode('used');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid recovery code.');
       setSubmitting(false);
@@ -165,31 +164,42 @@ export default function BiometricSignInPage() {
                 Back to sign in
               </a>
             </div>
-          ) : mode === 'savecodes' ? (
-            <div>
-              <div className="text-center mb-6">
-                <span
-                  className="inline-flex w-14 h-14 rounded-2xl items-center justify-center text-white mb-4"
-                  style={{
-                    background:
-                      'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
-                  }}
-                  aria-hidden
-                >
-                  <KeyRound className="w-7 h-7" />
-                </span>
-                <h1 className="text-2xl font-bold text-[#170c1d]">
-                  New recovery codes
-                </h1>
-                <p className="text-[#6b7280] mt-2 text-sm">
-                  You used a recovery code, so we made you a fresh set.
-                </p>
-              </div>
-              <RecoveryCodesPanel
-                codes={newCodes}
-                acknowledgeLabel="I’ve saved them — continue"
-                onAcknowledge={() => router.push('/dashboard')}
-              />
+          ) : mode === 'used' ? (
+            <div className="text-center">
+              <span
+                className="inline-flex w-16 h-16 rounded-2xl items-center justify-center text-white mb-5"
+                style={{
+                  background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+                }}
+                aria-hidden
+              >
+                <CheckCircle2 className="w-8 h-8" />
+              </span>
+              <h1 className="text-2xl font-bold text-[#170c1d] mb-2">
+                You&apos;re signed in
+              </h1>
+              <p className="text-[#6b7280] mb-2 text-sm">
+                You used a recovery code.
+                {remaining !== null && (
+                  <>
+                    {' '}
+                    <span className="font-semibold text-[#170c1d]">
+                      {remaining} of 10 left.
+                    </span>
+                  </>
+                )}
+              </p>
+              <p className="text-[#6b7280] mb-6 text-sm">
+                Tip: set up Face ID / fingerprint on this device from Settings so
+                you won&apos;t need a code next time.
+              </p>
+              <button
+                type="button"
+                onClick={() => router.push('/dashboard')}
+                className="w-full h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-base hover:bg-[#6600BC] transition-colors cursor-pointer"
+              >
+                Continue
+              </button>
             </div>
           ) : mode === 'recovery' ? (
             <div className="text-center">
