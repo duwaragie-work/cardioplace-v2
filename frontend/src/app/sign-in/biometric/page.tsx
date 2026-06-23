@@ -18,7 +18,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Fingerprint, Loader2, ShieldCheck, KeyRound, CheckCircle2 } from 'lucide-react';
+import { Fingerprint, Loader2, ShieldCheck, KeyRound, CheckCircle2, Bluetooth } from 'lucide-react';
 import { useAuth, type OtpVerifyResponse } from '@/lib/auth-context';
 import {
   WEBAUTHN_CHALLENGE_STORAGE_KEY,
@@ -391,6 +391,23 @@ export default function BiometricSignInPage() {
                   </>
                 )}
               </button>
+
+              {/* Cross-device hint — on a device without the passkey the browser
+                  shows a QR to scan with the phone that has it (needs Bluetooth). */}
+              <div
+                className="mt-4 flex items-start gap-2 rounded-lg px-3 py-2 text-[11.5px] text-left"
+                style={{
+                  backgroundColor: 'var(--brand-primary-purple-light, #F3E8FF)',
+                  color: 'var(--brand-primary-purple, #7B00E0)',
+                }}
+              >
+                <Bluetooth className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>
+                  On a new device you may see a <strong>QR code</strong> — scan it
+                  with the phone that has your Face ID / fingerprint.{' '}
+                  <strong>Keep Bluetooth ON on both devices.</strong>
+                </span>
+              </div>
 
               {showFallback && (
                 <div className="mt-6 border-t border-[#f0e6fa] pt-5">
