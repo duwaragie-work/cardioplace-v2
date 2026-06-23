@@ -18,12 +18,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Fingerprint, Loader2, ShieldCheck, KeyRound, CheckCircle2 } from 'lucide-react';
+import { Fingerprint, Loader2, ShieldCheck, KeyRound, CheckCircle2, Bluetooth } from 'lucide-react';
 import { useAuth, type OtpVerifyResponse } from '@/lib/auth-context';
 import {
   WEBAUTHN_CHALLENGE_STORAGE_KEY,
   authenticateBiometric,
   signInWithRecoveryCode,
+  isBiometricSupported,
+  registerBiometric,
 } from '@/lib/services/webauthn.service';
 import LandingHeader from '@/components/cardio/LandingHeader';
 import LandingFooter from '@/components/cardio/LandingFooter';
@@ -69,6 +71,8 @@ export default function BiometricSignInPage() {
   const [showFallback, setShowFallback] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState('');
   const [remaining, setRemaining] = useState<number | null>(null);
+  const [canSetupHere, setCanSetupHere] = useState(false);
+  const [settingUp, setSettingUp] = useState(false);
   const autoTried = useRef(false);
 
   useEffect(() => {
@@ -109,6 +113,22 @@ export default function BiometricSignInPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, challengeToken]);
 
+  async function handleSetupHere() {
+    if (settingUp) return;
+    setSettingUp(true);
+    setError(null);
+    try {
+      await registerBiometric('platform');
+      router.push('/dashboard');
+    } catch (err) {
+      const e = err as Error & { code?: string };
+      if (e.code !== 'cancelled') {
+        setError(e.message || 'Could not set up biometric on this device.');
+      }
+      setSettingUp(false);
+    }
+  }
+
   async function handleRecoverySubmit() {
     if (submitting || recoveryCode.trim().length < 8 || !challengeToken) return;
     setSubmitting(true);
@@ -117,9 +137,11 @@ export default function BiometricSignInPage() {
       const data = await signInWithRecoveryCode(challengeToken, recoveryCode);
       clearStoredChallenge();
       login(data);
-      // Only that one code was used — tell the patient how many remain, then
-      // let them continue (they can set up biometric on this device later).
+      // Only that one code was used — tell the patient how many remain.
       setRemaining(data.recoveryRemaining ?? null);
+      // Offer to set up biometric on THIS device (so no code next time), if it
+      // supports it. We're authenticated now (login above set the session).
+      setCanSetupHere(await isBiometricSupported());
       setMode('used');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid recovery code.');
@@ -189,17 +211,64 @@ export default function BiometricSignInPage() {
                   </>
                 )}
               </p>
-              <p className="text-[#6b7280] mb-6 text-sm">
-                Tip: set up Face ID / fingerprint on this device from Settings so
-                you won&apos;t need a code next time.
-              </p>
-              <button
-                type="button"
-                onClick={() => router.push('/dashboard')}
-                className="w-full h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-base hover:bg-[#6600BC] transition-colors cursor-pointer"
-              >
-                Continue
-              </button>
+              {error && (
+                <div
+                  role="alert"
+                  className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 text-left"
+                >
+                  {error}
+                </div>
+              )}
+
+              {canSetupHere ? (
+                <>
+                  <p className="text-[#6b7280] mb-6 text-sm">
+                    Set up Face ID / fingerprint on <strong>this device</strong>{' '}
+                    so you won&apos;t need a code next time.
+                  </p>
+                  <button
+                    type="button"
+                    data-testid="biometric-setup-here"
+                    onClick={() => void handleSetupHere()}
+                    disabled={settingUp}
+                    className="w-full h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-2"
+                  >
+                    {settingUp ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Setting up…
+                      </>
+                    ) : (
+                      <>
+                        <Fingerprint className="w-5 h-5" />
+                        Set up on this device
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/dashboard')}
+                    disabled={settingUp}
+                    className="mt-4 w-full text-center text-sm font-medium text-[#7B00E0] hover:underline cursor-pointer disabled:opacity-50"
+                  >
+                    Maybe later
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-[#6b7280] mb-6 text-sm">
+                    Tip: set up Face ID / fingerprint on a phone from Settings so
+                    you won&apos;t need a code next time.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/dashboard')}
+                    className="w-full h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-base hover:bg-[#6600BC] transition-colors cursor-pointer"
+                  >
+                    Continue
+                  </button>
+                </>
+              )}
             </div>
           ) : mode === 'recovery' ? (
             <div className="text-center">
@@ -322,6 +391,23 @@ export default function BiometricSignInPage() {
                   </>
                 )}
               </button>
+
+              {/* Cross-device hint — on a device without the passkey the browser
+                  shows a QR to scan with the phone that has it (needs Bluetooth). */}
+              <div
+                className="mt-4 flex items-start gap-2 rounded-lg px-3 py-2 text-[11.5px] text-left"
+                style={{
+                  backgroundColor: 'var(--brand-primary-purple-light, #F3E8FF)',
+                  color: 'var(--brand-primary-purple, #7B00E0)',
+                }}
+              >
+                <Bluetooth className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>
+                  On a new device you may see a <strong>QR code</strong> — scan it
+                  with the phone that has your Face ID / fingerprint.{' '}
+                  <strong>Keep Bluetooth ON on both devices.</strong>
+                </span>
+              </div>
 
               {showFallback && (
                 <div className="mt-6 border-t border-[#f0e6fa] pt-5">

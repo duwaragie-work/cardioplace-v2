@@ -1,4 +1,5 @@
 import {
+  IsIn,
   IsObject,
   IsOptional,
   IsString,
@@ -9,6 +10,15 @@ import type {
   AuthenticationResponseJSON,
   RegistrationResponseJSON,
 } from '@simplewebauthn/server'
+
+/** POST /v2/auth/webauthn/register/start — begin enrollment.
+ *  `mode` chooses the authenticator: 'platform' = this device's Face ID /
+ *  fingerprint (default); 'cross-platform' = another device via the QR flow. */
+export class WebAuthnRegisterStartDto {
+  @IsOptional()
+  @IsIn(['platform', 'cross-platform'])
+  mode?: 'platform' | 'cross-platform'
+}
 
 /** POST /v2/auth/webauthn/register/verify — finish biometric enrollment. */
 export class WebAuthnRegisterVerifyDto {

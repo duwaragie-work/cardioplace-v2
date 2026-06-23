@@ -73,6 +73,10 @@ export class WebAuthnService {
       id: string
       transports?: AuthenticatorTransportFuture[]
     }>
+    /** 'platform' = this device's built-in biometric (Face ID / Hello).
+     *  'cross-platform' = a roaming authenticator — used for "add another
+     *  device", where the browser offers the QR / use-a-phone flow. */
+    attachment?: 'platform' | 'cross-platform'
   }): Promise<PublicKeyCredentialCreationOptionsJSON> {
     return generateRegistrationOptions({
       rpName: this.rpName,
@@ -84,7 +88,7 @@ export class WebAuthnService {
       attestationType: 'none',
       excludeCredentials: opts.excludeCredentials,
       authenticatorSelection: {
-        authenticatorAttachment: 'platform',
+        authenticatorAttachment: opts.attachment ?? 'platform',
         residentKey: 'preferred',
         userVerification: 'required',
       },
