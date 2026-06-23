@@ -1770,10 +1770,20 @@ export class AuthService {
     }
   }
 
+  /** Max biometric devices a patient may register. */
+  private static readonly MAX_WEBAUTHN_DEVICES = 3
+
   /** Settings — start biometric registration (patient only). Returns the
    *  create() options + a stateless registration token carrying the challenge.
-   *  The secret material never touches the server until verify. */
-  async startWebAuthnRegistration(userId: string) {
+   *  The secret material never touches the server until verify.
+   *
+   *  `mode` picks the authenticator: 'platform' = this device's Face ID /
+   *  fingerprint; 'cross-platform' = another device via the browser's QR /
+   *  use-a-phone flow. Capped at MAX_WEBAUTHN_DEVICES total. */
+  async startWebAuthnRegistration(
+    userId: string,
+    mode: 'platform' | 'cross-platform' = 'platform',
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { email: true, name: true, roles: true },
@@ -1788,12 +1798,18 @@ export class AuthService {
       where: { userId },
       select: { credentialId: true, transports: true },
     })
+    if (existing.length >= AuthService.MAX_WEBAUTHN_DEVICES) {
+      throw new BadRequestException(
+        `You can register up to ${AuthService.MAX_WEBAUTHN_DEVICES} devices. Remove one first.`,
+      )
+    }
     const challenge = this.webAuthnService.randomChallenge()
     const options = await this.webAuthnService.buildRegistrationOptions({
       userId,
       userName: user.email ?? userId,
       userDisplayName: user.name ?? user.email ?? 'Patient',
       challenge,
+      attachment: mode,
       excludeCredentials: existing.map((c) => ({
         id: c.credentialId,
         transports: c.transports as AuthenticatorTransportFuture[],

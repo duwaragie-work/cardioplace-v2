@@ -44,6 +44,7 @@ import {
   WebAuthnAuthOptionsDto,
   WebAuthnAuthVerifyDto,
   WebAuthnRecoverySignInDto,
+  WebAuthnRegisterStartDto,
   WebAuthnRegisterVerifyDto,
 } from './dto/webauthn.dto.js'
 import { Roles } from './decorators/roles.decorator.js'
@@ -371,9 +372,12 @@ export class AuthController {
   // so these two routes rely on the default JwtAuthGuard and read req.user.
 
   @Post('webauthn/register/start')
-  async webAuthnRegisterStart(@Req() req: Request) {
+  async webAuthnRegisterStart(
+    @Body() dto: WebAuthnRegisterStartDto,
+    @Req() req: Request,
+  ) {
     const { id } = req.user as { id: string }
-    return this.authService.startWebAuthnRegistration(id)
+    return this.authService.startWebAuthnRegistration(id, dto.mode ?? 'platform')
   }
 
   @Post('webauthn/register/verify')

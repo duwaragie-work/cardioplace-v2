@@ -27,8 +27,11 @@ import {
   deleteBiometricCredential,
   getRecoveryStatus,
   regenerateRecoveryCodes,
+  getThisDeviceCredentialIds,
+  MAX_BIOMETRIC_DEVICES,
   type WebAuthnCredentialRow,
   type RecoveryStatus,
+  type RegisterMode,
 } from '@/lib/services/webauthn.service';
 import RecoveryCodesPanel from '@/components/cardio/RecoveryCodesPanel';
 
@@ -55,7 +58,8 @@ export default function SettingsPage() {
   const [credentials, setCredentials] = useState<WebAuthnCredentialRow[]>([]);
   const [recovery, setRecovery] = useState<RecoveryStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [enabling, setEnabling] = useState(false);
+  const [enabling, setEnabling] = useState<RegisterMode | null>(null);
+  const [thisDeviceIds, setThisDeviceIds] = useState<string[]>([]);
   const [regenerating, setRegenerating] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +79,7 @@ export default function SettingsPage() {
       setSupported(isSupported);
       setCredentials(creds);
       setRecovery(rec);
+      setThisDeviceIds(getThisDeviceCredentialIds());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load settings.');
     } finally {
@@ -87,18 +92,22 @@ export default function SettingsPage() {
     if (!isLoading && user) void load();
   }, [isLoading, user, load]);
 
-  async function handleEnable() {
+  async function handleAdd(mode: RegisterMode) {
     if (enabling) return;
-    setEnabling(true);
+    setEnabling(mode);
     setError(null);
     setNotice(null);
     try {
-      const result = await registerBiometric();
+      const result = await registerBiometric(mode);
       // First passkey → the backend returns recovery codes to save once.
       if (result.recoveryCodes && result.recoveryCodes.length > 0) {
         setCodesToShow(result.recoveryCodes);
       } else {
-        setNotice('Biometric sign-in is on for this device.');
+        setNotice(
+          mode === 'platform'
+            ? 'Biometric sign-in is on for this device.'
+            : 'Your other device was added.',
+        );
       }
       await load();
     } catch (err) {
@@ -107,7 +116,7 @@ export default function SettingsPage() {
         setError(e.message || 'Could not set up biometric.');
       }
     } finally {
-      setEnabling(false);
+      setEnabling(null);
     }
   }
 
@@ -149,6 +158,17 @@ export default function SettingsPage() {
   const hasBiometric = credentials.length > 0;
   const hasPhone = credentials.some((c) => looksLikePhone(c.deviceName));
   const nudgePhone = hasBiometric && !hasPhone;
+  const atMax = credentials.length >= MAX_BIOMETRIC_DEVICES;
+  // This device already has a platform passkey if any of its locally-remembered
+  // credential ids is still in the list.
+  const thisDeviceRegistered = credentials.some((c) =>
+    thisDeviceIds.includes(c.id),
+  );
+  // "Set up this device" — only when supported, not already done here, under cap.
+  const canAddThisDevice = supported && !thisDeviceRegistered && !atMax;
+  // "Add another device" (QR) — available whenever there's room, even on a
+  // device with no biometric of its own.
+  const canAddAnother = !atMax;
 
   return (
     <main id="main" className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
@@ -271,15 +291,30 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {supported ? (
+              {/* Max reached */}
+              {atMax && (
+                <div
+                  className="flex items-start gap-2.5 rounded-xl px-3 py-3 text-[13px]"
+                  style={{ backgroundColor: 'var(--brand-background, #FAFBFF)', color: 'var(--brand-text-muted)' }}
+                >
+                  <Info className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>
+                    You&apos;ve reached the maximum of {MAX_BIOMETRIC_DEVICES}{' '}
+                    devices. Remove one above to add another.
+                  </span>
+                </div>
+              )}
+
+              {/* Button 1 — set up THIS device (hidden once this device is done) */}
+              {canAddThisDevice && (
                 <button
                   type="button"
                   data-testid="settings-enable-biometric"
-                  onClick={() => void handleEnable()}
-                  disabled={enabling}
+                  onClick={() => void handleAdd('platform')}
+                  disabled={enabling !== null}
                   className="w-full h-12 rounded-full bg-[#7B00E0] font-semibold text-white text-sm hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-2"
                 >
-                  {enabling ? (
+                  {enabling === 'platform' ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
                       Setting up…
@@ -287,20 +322,53 @@ export default function SettingsPage() {
                   ) : (
                     <>
                       <Plus className="w-4 h-4" />
-                      {credentials.length > 0 ? 'Add this device' : 'Set up Face ID / fingerprint'}
+                      {hasBiometric ? 'Set up this device' : 'Set up Face ID / fingerprint'}
                     </>
                   )}
                 </button>
-              ) : (
+              )}
+
+              {/* "This device not supported" note — only when nothing else to show */}
+              {!supported && !thisDeviceRegistered && !atMax && (
                 <div
-                  className="flex items-start gap-2.5 rounded-xl px-3 py-3 text-[13px]"
+                  className="flex items-start gap-2.5 rounded-xl px-3 py-3 text-[13px] mb-3"
                   style={{ backgroundColor: 'var(--brand-background, #FAFBFF)', color: 'var(--brand-text-muted)' }}
                 >
                   <Info className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>
-                    Face ID or fingerprint isn&apos;t available on this device. You
-                    can set it up on a phone or tablet that has it.
+                    Face ID or fingerprint isn&apos;t available on this device —
+                    but you can still add a phone or tablet below.
                   </span>
+                </div>
+              )}
+
+              {/* Button 2 — add ANOTHER device via QR */}
+              {canAddAnother && (
+                <div className={canAddThisDevice ? 'mt-3' : ''}>
+                  <button
+                    type="button"
+                    data-testid="settings-add-another-device"
+                    onClick={() => void handleAdd('cross-platform')}
+                    disabled={enabling !== null}
+                    className="w-full h-12 rounded-full border border-[#7B00E0] font-semibold text-[#7B00E0] text-sm hover:bg-[#7B00E0]/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-2"
+                  >
+                    {enabling === 'cross-platform' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Waiting for the other device…
+                      </>
+                    ) : (
+                      <>
+                        <Smartphone className="w-4 h-4" />
+                        Add another device (phone / tablet)
+                      </>
+                    )}
+                  </button>
+                  <p className="text-[11.5px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
+                    On the next screen choose <strong>“use a phone or tablet”</strong>,
+                    then scan the QR with that device and confirm with its Face ID /
+                    fingerprint. Keep Bluetooth on.
+                  </p>
                 </div>
               )}
             </div>

@@ -80,6 +80,39 @@ export function describeThisDevice(): string {
 
 // ─── Registration (authenticated — from settings) ─────────────────────────────
 
+/** 'platform' = register THIS device's Face ID / fingerprint.
+ *  'cross-platform' = register ANOTHER device via the browser's QR flow. */
+export type RegisterMode = 'platform' | 'cross-platform';
+
+/** Max passkeys a patient can register. */
+export const MAX_BIOMETRIC_DEVICES = 3;
+
+/** localStorage of credential row-ids registered as THIS device's platform
+ *  passkey — lets Settings hide "Set up this device" once it's done. WebAuthn
+ *  doesn't tell the page which list entry is the current device, so we track it
+ *  ourselves on success. */
+const THIS_DEVICE_KEY = 'cp_patient_webauthn_this_device';
+
+export function getThisDeviceCredentialIds(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(THIS_DEVICE_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function markThisDeviceRegistered(credentialRowId: string) {
+  try {
+    const ids = new Set(getThisDeviceCredentialIds());
+    ids.add(credentialRowId);
+    localStorage.setItem(THIS_DEVICE_KEY, JSON.stringify([...ids]));
+  } catch {
+    /* localStorage unavailable — detection just falls back to showing the button */
+  }
+}
+
 export interface RegisterBiometricResult {
   id: string;
   deviceName: string | null;
@@ -89,16 +122,19 @@ export interface RegisterBiometricResult {
 }
 
 /**
- * Run the full enable-biometric ceremony: fetch options → prompt Face ID /
- * fingerprint → persist the credential. Throws a friendly Error on cancel or
- * failure. On the first passkey, the result carries the recovery codes.
+ * Run the full enable-biometric ceremony: fetch options → prompt → persist.
+ * `mode` 'platform' registers THIS device (Face ID / fingerprint); on success
+ * we remember it locally so the button can hide. `mode` 'cross-platform' lets
+ * the browser offer the QR / use-a-phone flow to register ANOTHER device.
+ * Throws a friendly Error on cancel/failure; first passkey carries recovery codes.
  */
 export async function registerBiometric(
+  mode: RegisterMode = 'platform',
   deviceName?: string,
 ): Promise<RegisterBiometricResult> {
   const startRes = await fetchWithAuth(
     `${API_URL}/api/v2/auth/webauthn/register/start`,
-    { method: 'POST', body: '{}' },
+    { method: 'POST', body: JSON.stringify({ mode }) },
   );
   const startData = await readJson(startRes);
   if (!startRes.ok) {
@@ -131,7 +167,12 @@ export async function registerBiometric(
   if (!verifyRes.ok) {
     throw new Error(messageFrom(verifyData, 'Biometric setup could not be saved.'));
   }
-  return verifyData as unknown as RegisterBiometricResult;
+  const result = verifyData as unknown as RegisterBiometricResult;
+  // Only a 'platform' passkey lives on THIS device — remember it so Settings
+  // can hide the "set up this device" button. A 'cross-platform' one was just
+  // created on a different device, so we don't mark it here.
+  if (mode === 'platform') markThisDeviceRegistered(result.id);
+  return result;
 }
 
 /** List the patient's registered biometric devices. */
