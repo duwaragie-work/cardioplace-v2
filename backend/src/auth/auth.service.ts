@@ -1914,6 +1914,7 @@ export class AuthService {
   async listWebAuthnCredentials(userId: string): Promise<
     Array<{
       id: string
+      credentialId: string
       deviceName: string | null
       deviceType: string | null
       backedUp: boolean
@@ -1921,11 +1922,14 @@ export class AuthService {
       lastUsedAt: Date | null
     }>
   > {
+    // credentialId is included so the FE can recognise "this device" (it's the
+    // same public id the browser returns on register/login; not a secret).
     return this.prisma.webAuthnCredential.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
+        credentialId: true,
         deviceName: true,
         deviceType: true,
         backedUp: true,
@@ -1933,6 +1937,33 @@ export class AuthService {
         lastUsedAt: true,
       },
     })
+  }
+
+  /** Settings — rename a registered device (cosmetic label only; not used in
+   *  any auth check). Scoped to the caller's own credentials. */
+  async renameWebAuthnCredential(
+    userId: string,
+    id: string,
+    deviceName: string,
+    context?: SessionContext,
+  ): Promise<{ id: string; deviceName: string }> {
+    const name = deviceName.trim()
+    const res = await this.prisma.webAuthnCredential.updateMany({
+      where: { id, userId },
+      data: { deviceName: name },
+    })
+    if (res.count === 0) {
+      throw new NotFoundException('Device not found')
+    }
+    await this.logAuthEvent({
+      event: 'webauthn_credential_renamed',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return { id, deviceName: name }
   }
 
   /** Settings — remove a registered device (disable biometric on it). When the

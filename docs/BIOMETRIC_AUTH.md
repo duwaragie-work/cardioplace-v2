@@ -216,6 +216,33 @@ the first passkey**).
 - If the only passkey so far is on a **laptop/desktop**, Settings shows the
   **"Add your phone too"** nudge (a desktop passkey can't travel to a phone).
 
+### Two registration modes + device limit (up to 3)
+
+`register/start` takes a **`mode`** that sets `authenticatorAttachment` in the
+options — so the same flow registers either *this* device or *another* one:
+
+| Mode | `authenticatorAttachment` | What the patient gets | Settings button |
+|---|---|---|---|
+| **`platform`** (default) | `'platform'` | **this** device's Face ID / fingerprint / Hello | **"Set up this device"** |
+| **`cross-platform`** | `'cross-platform'` | the browser offers the **QR / "use a phone"** flow → the passkey is created on **another** device | **"Add another device (phone / tablet)"** |
+
+- **Max 3 devices** — enforced server-side in `startWebAuthnRegistration`
+  (`MAX_WEBAUTHN_DEVICES = 3`); a 4th `start` is rejected.
+- **"Set up this device" hides itself** once this device is registered. WebAuthn
+  doesn't tell the page which list row is the current device, so the FE remembers
+  this device's **`credentialId`** in `localStorage`
+  (`cp_patient_webauthn_this_device`) — recorded on a successful `platform`
+  registration **and** on every successful biometric **login** on this device (so
+  devices registered before this tracking are recognised too). The device list
+  now returns each row's `credentialId` (a public id, not a secret), and Settings
+  hides the button when a remembered id is still in the list. A `cross-platform`
+  registration is **not** recorded (it lives on a different device); removing the
+  device un-hides the button (its id leaves the list).
+- **Bluetooth hint** — the `cross-platform` / QR flow needs Bluetooth on **both**
+  devices (the hybrid proximity check). Both the **"Add another device"** step
+  (Settings) and the **biometric sign-in page** show a hint to keep Bluetooth on.
+  It's only a message — the page can't read or toggle the system Bluetooth.
+
 ### What's stored in the DB
 
 `WebAuthnCredential` (one row **per device**, 1‑to‑many with `User`). Every
@@ -231,7 +258,7 @@ field except `deviceName` comes **from the device**, inside the attestation that
 | `transports` | how the authenticator can be reached (UI hint for next time) | the **device** reports it | `["internal"]`, `["internal","hybrid"]` |
 | `deviceType` | single-device key vs a synced passkey | the **verify result** (`credentialDeviceType`) | `"singleDevice"` / `"multiDevice"` |
 | `backedUp` | is it backed up to the cloud (iCloud / Google)? | the **verify result** (`credentialBackedUp`) | `true` / `false` |
-| `deviceName` | friendly label for the Settings list | **we** set it (`describeThisDevice()` sniffs the browser user-agent) | `"iPhone"`, `"Windows device"` |
+| `deviceName` | friendly label for the Settings list | **we** set it — `describeThisDevice()` (browser user-agent) for a `platform` passkey; a generic **"Phone or tablet"** for a `cross-platform` one (the browser can't identify the *other* device, so we can't tell iPhone vs Android). Patients can **rename** it in Settings | `"iPhone"`, `"Windows device"`, `"Phone or tablet"` |
 
 > **Why `counter` often stays 0:** synced passkeys (iCloud Keychain / Google,
 > i.e. `deviceType: "multiDevice"`, `backedUp: true`) deliberately **don't use
@@ -396,12 +423,20 @@ On `/sign-in/biometric`, `startAuthentication()` either:
 | controller: `issueSessionCookies` + `trackDevice` | finish the login |
 
 → returns `AuthResponse + recoveryRemaining`. Frontend shows **"You used a
-recovery code. N of 10 left."** + a tip to set up biometric on this device, then
-continues to the dashboard.
+recovery code. N of 10 left."**
 
 > **Design choice:** using a code consumes **only that one** (no auto-regenerate,
 > no re-display of a fresh set) — the remaining codes keep working, and the
 > patient regenerates from Settings when running low.
+
+### Offer to set up biometric on this device
+
+The patient is now signed in on a device that **lacked** a passkey. So right on
+that confirmation screen, if `isBiometricSupported()` is true, we offer
+**"Set up on this device"** (a `platform` registration, no QR needed) plus a
+**"Maybe later"** link. This is the easiest moment to enroll the new device — it
+means no recovery code is needed next time on it. (If the device has no built-in
+biometric, we just show a tip to add a phone from Settings instead.)
 
 ---
 
@@ -412,10 +447,16 @@ All authenticated (`fetchWithAuth`), from `settings/page.tsx`.
 | Action | Endpoint → service | What happens |
 |---|---|---|
 | **List devices** | `GET /webauthn/credentials` → `listWebAuthnCredentials` | `findMany` the patient's passkeys for the device list |
+| **Set up this device** | `POST /webauthn/register/start { mode: 'platform' }` → Scenario 2 | registers the current device's biometric; button **hides** afterwards (localStorage tracking) |
+| **Add another device (QR)** | `POST /webauthn/register/start { mode: 'cross-platform' }` → Scenario 2 | browser shows the QR / "use a phone"; passkey is created on the **other** device. Shows the **Bluetooth hint** |
+| **Rename a device** | `PATCH /webauthn/credentials/:id { deviceName }` → `renameWebAuthnCredential` | cosmetic label only (1–40 chars, scoped to the patient's own credential, **not** used in any auth check). Lets a patient relabel "Phone or tablet" → "My Samsung" |
 | **Remove a device** | `DELETE /webauthn/credentials/:id` → `deleteWebAuthnCredential` | `deleteMany({ id, userId })` (a patient can only delete their own). Remove the **last** one → `count = 0` → next sign-in is plain OTP again (no gate) |
 | **Recovery status** | `GET /webauthn/recovery-codes` → `patientRecoveryStatus` | `{ remaining, hasBiometric }` for the "N of 10 left" line |
 | **Regenerate codes** | `POST /webauthn/recovery-codes/regenerate` → `regeneratePatientRecoveryCodes` → `issueRecoveryCodes` | **DB write (txn):** delete all + create 10 fresh hashes; returns the new codes → shown once in `RecoveryCodesPanel` |
-| **Add 2nd / 3rd device** | (same as Scenario 2 registration) | `completeWebAuthnRegistration` sees `count > 1` → **no** recovery codes returned (only the first passkey mints them) |
+
+Adding the **2nd / 3rd** device returns **no** recovery codes
+(`completeWebAuthnRegistration` only mints them on the first passkey). At **3
+devices** both add-buttons are hidden with a "maximum reached" note.
 
 The **"Add your phone too"** nudge appears when the patient has biometric but
 **no phone passkey** (heuristic on `deviceName`) — because a desktop passkey
@@ -461,5 +502,5 @@ codes again).
   signatures, and (hashed) recovery codes are stored.
 - **Audit events:** `webauthn_registration_started/completed/failed`,
   `webauthn_auth_succeeded/failed`, `webauthn_recovery_code_used/failed`,
-  `webauthn_recovery_codes_regenerated`, `webauthn_credential_removed`,
-  `webauthn_reset_by_admin`.
+  `webauthn_recovery_codes_regenerated`, `webauthn_credential_renamed`,
+  `webauthn_credential_removed`, `webauthn_reset_by_admin`.

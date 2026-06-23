@@ -55,6 +55,14 @@ export class WebAuthnAuthVerifyDto {
   response: AuthenticationResponseJSON
 }
 
+/** PATCH /v2/auth/webauthn/credentials/:id — rename a registered device. */
+export class WebAuthnRenameDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  deviceName: string
+}
+
 /** POST /v2/auth/webauthn/authenticate/recovery — recovery-code sign-in (the
  *  only fallback when biometric can't be used on this device). */
 export class WebAuthnRecoverySignInDto {

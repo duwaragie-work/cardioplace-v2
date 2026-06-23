@@ -31,6 +31,9 @@ export const WEBAUTHN_CHALLENGE_STORAGE_KEY = 'cp_patient_webauthn_challenge';
 
 export interface WebAuthnCredentialRow {
   id: string;
+  /** The authenticator's public credential id — lets the FE recognise "this
+   *  device" by matching it against the locally-remembered ids. */
+  credentialId: string;
   deviceName: string | null;
   deviceType: string | null;
   backedUp: boolean;
@@ -87,10 +90,11 @@ export type RegisterMode = 'platform' | 'cross-platform';
 /** Max passkeys a patient can register. */
 export const MAX_BIOMETRIC_DEVICES = 3;
 
-/** localStorage of credential row-ids registered as THIS device's platform
- *  passkey — lets Settings hide "Set up this device" once it's done. WebAuthn
- *  doesn't tell the page which list entry is the current device, so we track it
- *  ourselves on success. */
+/** localStorage of **credentialId**s that belong to THIS device — lets Settings
+ *  hide "Set up this device" once it's done. WebAuthn doesn't tell the page
+ *  which list entry is the current device, so we remember it ourselves: on a
+ *  successful platform registration AND on every successful biometric login on
+ *  this device (so already-registered devices are recognised too). */
 const THIS_DEVICE_KEY = 'cp_patient_webauthn_this_device';
 
 export function getThisDeviceCredentialIds(): string[] {
@@ -103,10 +107,11 @@ export function getThisDeviceCredentialIds(): string[] {
   }
 }
 
-function markThisDeviceRegistered(credentialRowId: string) {
+/** Remember a credentialId as belonging to this device. */
+function rememberThisDeviceCredential(credentialId: string) {
   try {
     const ids = new Set(getThisDeviceCredentialIds());
-    ids.add(credentialRowId);
+    ids.add(credentialId);
     localStorage.setItem(THIS_DEVICE_KEY, JSON.stringify([...ids]));
   } catch {
     /* localStorage unavailable — detection just falls back to showing the button */
@@ -152,6 +157,15 @@ export async function registerBiometric(
     throw toCeremonyError(err, 'register');
   }
 
+  // Name it. For a 'platform' passkey it's THIS device, so the user-agent is
+  // accurate. For 'cross-platform' the passkey was created on ANOTHER device
+  // (via QR) that the browser can't identify — so use a generic label, since
+  // sniffing the current browser would mislabel it (e.g. "Windows device" for
+  // a passkey that's actually on an Android phone).
+  const resolvedName =
+    deviceName ??
+    (mode === 'cross-platform' ? 'Phone or tablet' : describeThisDevice());
+
   const verifyRes = await fetchWithAuth(
     `${API_URL}/api/v2/auth/webauthn/register/verify`,
     {
@@ -159,7 +173,7 @@ export async function registerBiometric(
       body: JSON.stringify({
         registrationToken,
         response: attestation,
-        deviceName: deviceName ?? describeThisDevice(),
+        deviceName: resolvedName,
       }),
     },
   );
@@ -168,10 +182,10 @@ export async function registerBiometric(
     throw new Error(messageFrom(verifyData, 'Biometric setup could not be saved.'));
   }
   const result = verifyData as unknown as RegisterBiometricResult;
-  // Only a 'platform' passkey lives on THIS device — remember it so Settings
-  // can hide the "set up this device" button. A 'cross-platform' one was just
-  // created on a different device, so we don't mark it here.
-  if (mode === 'platform') markThisDeviceRegistered(result.id);
+  // Only a 'platform' passkey lives on THIS device — remember its credentialId
+  // so Settings can hide the "set up this device" button. A 'cross-platform'
+  // one was just created on a different device, so we don't mark it here.
+  if (mode === 'platform') rememberThisDeviceCredential(attestation.id);
   return result;
 }
 
@@ -187,6 +201,21 @@ export async function listBiometricCredentials(): Promise<
     throw new Error(messageFrom(data, 'Could not load your devices.'));
   }
   return (await res.json()) as WebAuthnCredentialRow[];
+}
+
+/** Rename a registered device (cosmetic label only). */
+export async function renameBiometricCredential(
+  id: string,
+  deviceName: string,
+): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API_URL}/api/v2/auth/webauthn/credentials/${encodeURIComponent(id)}`,
+    { method: 'PATCH', body: JSON.stringify({ deviceName: deviceName.trim() }) },
+  );
+  if (!res.ok) {
+    const data = await readJson(res);
+    throw new Error(messageFrom(data, 'Could not rename this device.'));
+  }
 }
 
 /** Remove (disable) a registered device. */
@@ -231,6 +260,9 @@ export async function authenticateBiometric(
   } catch (err) {
     throw toCeremonyError(err, 'authenticate');
   }
+  // This passkey is on THIS device — remember it so Settings recognises the
+  // device (covers devices registered before this tracking existed).
+  rememberThisDeviceCredential(assertion.id);
 
   const verifyRes = await fetch(
     `${API_URL}/api/v2/auth/webauthn/authenticate/verify`,

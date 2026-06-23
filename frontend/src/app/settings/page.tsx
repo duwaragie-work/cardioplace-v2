@@ -18,6 +18,8 @@ import {
   KeyRound,
   Smartphone,
   Bluetooth,
+  Pencil,
+  Check,
   X,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
@@ -26,6 +28,7 @@ import {
   registerBiometric,
   listBiometricCredentials,
   deleteBiometricCredential,
+  renameBiometricCredential,
   getRecoveryStatus,
   regenerateRecoveryCodes,
   getThisDeviceCredentialIds,
@@ -63,6 +66,9 @@ export default function SettingsPage() {
   const [thisDeviceIds, setThisDeviceIds] = useState<string[]>([]);
   const [regenerating, setRegenerating] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [savingRename, setSavingRename] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // When set, the recovery-codes overlay is shown (first setup / regenerate).
@@ -121,6 +127,34 @@ export default function SettingsPage() {
     }
   }
 
+  function startRename(id: string, current: string | null) {
+    setEditingId(id);
+    setEditName(current ?? '');
+    setError(null);
+    setNotice(null);
+  }
+
+  async function handleRename(id: string) {
+    const name = editName.trim();
+    if (!name || savingRename) {
+      setEditingId(null);
+      return;
+    }
+    setSavingRename(true);
+    setError(null);
+    try {
+      await renameBiometricCredential(id, name);
+      setCredentials((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, deviceName: name } : c)),
+      );
+      setEditingId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not rename device.');
+    } finally {
+      setSavingRename(false);
+    }
+  }
+
   async function handleRemove(id: string) {
     if (removingId) return;
     setRemovingId(id);
@@ -160,10 +194,10 @@ export default function SettingsPage() {
   const hasPhone = credentials.some((c) => looksLikePhone(c.deviceName));
   const nudgePhone = hasBiometric && !hasPhone;
   const atMax = credentials.length >= MAX_BIOMETRIC_DEVICES;
-  // This device already has a platform passkey if any of its locally-remembered
-  // credential ids is still in the list.
+  // This device already has a passkey if any of its locally-remembered
+  // credentialIds is still in the list (matched at register + biometric login).
   const thisDeviceRegistered = credentials.some((c) =>
-    thisDeviceIds.includes(c.id),
+    thisDeviceIds.includes(c.credentialId),
   );
   // "Set up this device" — only when supported, not already done here, under cap.
   const canAddThisDevice = supported && !thisDeviceRegistered && !atMax;
@@ -249,28 +283,83 @@ export default function SettingsPage() {
                     >
                       <ShieldCheck className="w-4 h-4 shrink-0" style={{ color: 'var(--brand-success-green, #16a34a)' }} />
                       <div className="min-w-0 flex-1">
-                        <p className="text-[13.5px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
-                          {c.deviceName || 'Registered device'}
-                        </p>
-                        <p className="text-[11.5px]" style={{ color: 'var(--brand-text-muted)' }}>
-                          Added {formatDate(c.createdAt)}
-                          {c.lastUsedAt ? ` · last used ${formatDate(c.lastUsedAt)}` : ''}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleRemove(c.id)}
-                        disabled={removingId === c.id}
-                        aria-label="Remove device"
-                        className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-alert-red-light)] disabled:opacity-50 cursor-pointer"
-                        style={{ color: 'var(--brand-alert-red)' }}
-                      >
-                        {removingId === c.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                        {editingId === c.id ? (
+                          <input
+                            autoFocus
+                            data-testid="settings-rename-input"
+                            value={editName}
+                            maxLength={40}
+                            onChange={(e) => setEditName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') { e.preventDefault(); void handleRename(c.id); }
+                              if (e.key === 'Escape') setEditingId(null);
+                            }}
+                            placeholder="Device name"
+                            className="w-full h-8 px-2 rounded-lg border border-[#e5d9f2] text-[13.5px] outline-none focus:ring-2 focus:ring-[#7B00E0]"
+                            style={{ color: 'var(--brand-text-primary)' }}
+                          />
                         ) : (
-                          <Trash2 className="w-4 h-4" />
+                          <>
+                            <p className="text-[13.5px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
+                              {c.deviceName || 'Registered device'}
+                            </p>
+                            <p className="text-[11.5px]" style={{ color: 'var(--brand-text-muted)' }}>
+                              Added {formatDate(c.createdAt)}
+                              {c.lastUsedAt ? ` · last used ${formatDate(c.lastUsedAt)}` : ''}
+                            </p>
+                          </>
                         )}
-                      </button>
+                      </div>
+                      {editingId === c.id ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void handleRename(c.id)}
+                            disabled={savingRename || !editName.trim()}
+                            aria-label="Save name"
+                            className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-primary-purple-light)] disabled:opacity-50 cursor-pointer"
+                            style={{ color: 'var(--brand-primary-purple)' }}
+                          >
+                            {savingRename ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingId(null)}
+                            disabled={savingRename}
+                            aria-label="Cancel"
+                            className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-gray-100 disabled:opacity-50 cursor-pointer"
+                            style={{ color: 'var(--brand-text-muted)' }}
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => startRename(c.id, c.deviceName)}
+                            aria-label="Rename device"
+                            className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-primary-purple-light)] cursor-pointer"
+                            style={{ color: 'var(--brand-text-muted)' }}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleRemove(c.id)}
+                            disabled={removingId === c.id}
+                            aria-label="Remove device"
+                            className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-alert-red-light)] disabled:opacity-50 cursor-pointer"
+                            style={{ color: 'var(--brand-alert-red)' }}
+                          >
+                            {removingId === c.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </button>
+                        </>
+                      )}
                     </li>
                   ))}
                 </ul>
