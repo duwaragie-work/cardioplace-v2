@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   KeyRound,
   Smartphone,
+  Bluetooth,
   X,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
@@ -364,11 +365,21 @@ export default function SettingsPage() {
                       </>
                     )}
                   </button>
-                  <p className="text-[11.5px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
-                    On the next screen choose <strong>“use a phone or tablet”</strong>,
-                    then scan the QR with that device and confirm with its Face ID /
-                    fingerprint. Keep Bluetooth on.
-                  </p>
+                  <div
+                    className="mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-[11.5px]"
+                    style={{
+                      backgroundColor: 'var(--brand-primary-purple-light)',
+                      color: 'var(--brand-primary-purple)',
+                    }}
+                  >
+                    <Bluetooth className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    <span>
+                      <strong>Turn Bluetooth ON on both devices first.</strong>{' '}
+                      Then on the next screen choose{' '}
+                      <strong>“use a phone or tablet”</strong>, scan the QR with
+                      that device, and confirm with its Face ID / fingerprint.
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
