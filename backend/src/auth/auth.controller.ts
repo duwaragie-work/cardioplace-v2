@@ -40,9 +40,10 @@ import {
   MfaRecoveryDto,
 } from './dto/mfa.dto.js'
 import {
+  AdminResetPatientBiometricDto,
   WebAuthnAuthOptionsDto,
   WebAuthnAuthVerifyDto,
-  WebAuthnRecoverDto,
+  WebAuthnRecoverySignInDto,
   WebAuthnRegisterVerifyDto,
 } from './dto/webauthn.dto.js'
 import { Roles } from './decorators/roles.decorator.js'
@@ -391,7 +392,7 @@ export class AuthController {
   }
 
   // Authentication runs pre-token (the patient only holds the short-lived
-  // challenge token), so options/verify/recover are Public.
+  // challenge token), so options / verify / recovery are Public.
 
   @Public()
   @Post('webauthn/authenticate/options')
@@ -417,33 +418,19 @@ export class AuthController {
     return result
   }
 
+  // Recovery-code sign-in — the only fallback when biometric can't be used on
+  // this device. Consumes a code, regenerates the set, issues the session.
   @Public()
-  @Post('webauthn/authenticate/fallback')
-  async webAuthnAuthFallback(
-    @Body() dto: WebAuthnRecoverDto,
+  @Post('webauthn/authenticate/recovery')
+  async webAuthnAuthRecovery(
+    @Body() dto: WebAuthnRecoverySignInDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const context = this.buildAuthContext(req)
-    const result = await this.authService.webAuthnFallbackSignIn(
+    const result = await this.authService.webAuthnRecoverySignIn(
       dto.challengeToken,
-      context,
-    )
-    this.issueSessionCookies(res, result)
-    await this.trackDevice(req, context, result.userId)
-    return result
-  }
-
-  @Public()
-  @Post('webauthn/authenticate/recover')
-  async webAuthnAuthRecover(
-    @Body() dto: WebAuthnRecoverDto,
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const context = this.buildAuthContext(req)
-    const result = await this.authService.webAuthnRecoverDisable(
-      dto.challengeToken,
+      dto.recoveryCode,
       context,
     )
     this.issueSessionCookies(res, result)
@@ -466,6 +453,41 @@ export class AuthController {
     return this.authService.deleteWebAuthnCredential(
       id,
       credentialRowId,
+      this.buildAuthContext(req),
+    )
+  }
+
+  // ─── Recovery codes (patient biometric backup) ──────────────────────────────
+
+  @Get('webauthn/recovery-codes')
+  async webAuthnRecoveryStatus(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.patientRecoveryStatus(id)
+  }
+
+  @Post('webauthn/recovery-codes/regenerate')
+  async webAuthnRegenerateRecovery(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.regeneratePatientRecoveryCodes(
+      id,
+      this.buildAuthContext(req),
+    )
+  }
+
+  // Admin support — wipe a patient's biometric + recovery codes when they've
+  // lost both (re-enrolls on next sign-in). SUPER_ADMIN / HEALPLACE_OPS only.
+  @Roles(UserRole.SUPER_ADMIN, UserRole.HEALPLACE_OPS)
+  @Post('admin/webauthn/reset/:userId')
+  async adminResetPatientBiometric(
+    @Param('userId') userId: string,
+    @Body() dto: AdminResetPatientBiometricDto,
+    @Req() req: Request,
+  ) {
+    const { id } = req.user as { id: string }
+    return this.authService.adminResetPatientBiometric(
+      id,
+      userId,
+      dto.reason,
       this.buildAuthContext(req),
     )
   }

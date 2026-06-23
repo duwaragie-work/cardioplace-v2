@@ -47,6 +47,9 @@ interface Props {
   /** Open the MFA-reset modal for a staff row. Omitted when the caller can't
    *  reset MFA — the action then never renders. */
   onResetMfaClick?: (row: { id: string; name: string }) => void;
+  /** Open the biometric-reset modal for a patient row. Omitted when the caller
+   *  can't reset — the action then never renders. */
+  onResetBiometricClick?: (row: { id: string; name: string }) => void;
   onReactivate: (id: string) => Promise<void> | void;
   onResendInvite: (inviteId: string) => Promise<void> | void;
   onRevokeInvite: (inviteId: string) => Promise<void> | void;
@@ -68,6 +71,8 @@ interface CombinedRow {
   invitedAt: string | null;
   /** True only for activated users with an enrolled TOTP authenticator. */
   mfaEnrolled: boolean;
+  /** True only for patients with a registered biometric passkey. */
+  biometricEnrolled: boolean;
   raw: UserRow | CoordinatorPatientRow | UserInviteRow;
 }
 
@@ -114,6 +119,7 @@ export default function UsersList({
   onPageChange,
   onDeactivateClick,
   onResetMfaClick,
+  onResetBiometricClick,
   onReactivate,
   onResendInvite,
   onRevokeInvite,
@@ -147,6 +153,9 @@ export default function UsersList({
         status: deriveStatus(u),
         invitedAt: isCoordinatorPatientRow(u) ? null : u.createdAt,
         mfaEnrolled: isCoordinatorPatientRow(u) ? false : u.mfaEnrolled === true,
+        biometricEnrolled: isCoordinatorPatientRow(u)
+          ? false
+          : u.biometricEnrolled === true,
         raw: u,
       }),
     );
@@ -161,6 +170,7 @@ export default function UsersList({
       status: 'INVITE_PENDING' as const,
       invitedAt: inv.invitedAt,
       mfaEnrolled: false,
+      biometricEnrolled: false,
       raw: inv,
     }));
     // Pending invites first so they don't get buried on page 1.
@@ -307,11 +317,23 @@ export default function UsersList({
                   row.mfaEnrolled &&
                   callerCanResetMfa &&
                   !!onResetMfaClick;
+                // Biometric reset — patient rows with a registered passkey.
+                const isPatientTarget =
+                  row.targetRoles.length > 0 &&
+                  row.targetRoles.every((r) => r === 'PATIENT');
+                const showResetBiometric =
+                  row.kind === 'user' &&
+                  !isSelf &&
+                  isPatientTarget &&
+                  row.biometricEnrolled &&
+                  callerCanResetMfa &&
+                  !!onResetBiometricClick;
                 const showUserDash =
                   row.kind === 'user' &&
                   !showDeactivate &&
                   !showReactivate &&
-                  !showResetMfa;
+                  !showResetMfa &&
+                  !showResetBiometric;
                 return (
                   <tr
                     key={`${row.kind}-${row.id}`}
@@ -455,6 +477,30 @@ export default function UsersList({
                             Reset MFA
                           </button>
                         )}
+                        {showResetBiometric && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onResetBiometricClick?.({
+                                id: row.id,
+                                name: row.name,
+                              })
+                            }
+                            disabled={isPending}
+                            aria-label="Reset biometric sign-in"
+                            title="Reset biometric sign-in"
+                            data-testid={`admin-user-reset-biometric-${row.email}`}
+                            className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                            style={{
+                              color: 'var(--brand-warning-amber, #B45309)',
+                              border:
+                                '1px solid var(--brand-warning-amber, #B45309)',
+                            }}
+                          >
+                            <KeyRound className="w-3 h-3" />
+                            Reset biometric
+                          </button>
+                        )}
                         {showUserDash && (
                           <span
                             className="text-[11px]"
@@ -515,6 +561,16 @@ export default function UsersList({
               row.mfaEnrolled &&
               callerCanResetMfa &&
               !!onResetMfaClick;
+            const isPatientTarget =
+              row.targetRoles.length > 0 &&
+              row.targetRoles.every((r) => r === 'PATIENT');
+            const showResetBiometric =
+              row.kind === 'user' &&
+              !isSelf &&
+              isPatientTarget &&
+              row.biometricEnrolled &&
+              callerCanResetMfa &&
+              !!onResetBiometricClick;
             return (
               <div
                 key={`card-${row.kind}-${row.id}`}
@@ -569,7 +625,8 @@ export default function UsersList({
                 {(row.kind === 'invite' ||
                   showDeactivate ||
                   showReactivate ||
-                  showResetMfa) && (
+                  showResetMfa ||
+                  showResetBiometric) && (
                   <div className="flex flex-wrap items-center gap-2">
                     {row.kind === 'invite' && (
                       <>
@@ -664,6 +721,25 @@ export default function UsersList({
                       >
                         <KeyRound className="w-3 h-3" />
                         Reset MFA
+                      </button>
+                    )}
+                    {showResetBiometric && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onResetBiometricClick?.({ id: row.id, name: row.name })
+                        }
+                        disabled={isPending}
+                        data-testid={`admin-user-reset-biometric-card-${row.email}`}
+                        className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                        style={{
+                          color: 'var(--brand-warning-amber, #B45309)',
+                          border:
+                            '1px solid var(--brand-warning-amber, #B45309)',
+                        }}
+                      >
+                        <KeyRound className="w-3 h-3" />
+                        Reset biometric
                       </button>
                     )}
                   </div>

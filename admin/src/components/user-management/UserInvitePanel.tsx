@@ -42,7 +42,7 @@ import {
 } from '@/lib/services/user-management.service';
 import { listPractices, type Practice } from '@/lib/services/practice.service';
 import { toast } from 'sonner';
-import { resetUserMfa } from '@/lib/services/mfa.service';
+import { resetUserMfa, resetPatientBiometric } from '@/lib/services/mfa.service';
 import { canResetUserMfa } from '@/lib/roleGates';
 import BulkInviteInline from './BulkInviteInline';
 import CSVUploadCard from './CSVUploadCard';
@@ -59,6 +59,11 @@ interface PendingDeactivate {
 }
 
 interface PendingResetMfa {
+  id: string;
+  name: string;
+}
+
+interface PendingResetBiometric {
   id: string;
   name: string;
 }
@@ -176,6 +181,8 @@ export default function UserInvitePanel() {
     useState<PendingDeactivate | null>(null);
   const [pendingResetMfa, setPendingResetMfa] =
     useState<PendingResetMfa | null>(null);
+  const [pendingResetBiometric, setPendingResetBiometric] =
+    useState<PendingResetBiometric | null>(null);
   const callerCanResetMfa = canResetUserMfa(user);
 
   async function handleResend(inviteId: string) {
@@ -245,6 +252,27 @@ export default function UserInvitePanel() {
     } catch (e) {
       showToast(
         e instanceof Error ? e.message : 'Could not reset MFA.',
+        'error',
+      );
+      throw e; // keep the modal open so the error shows
+    } finally {
+      setPendingRowId(null);
+    }
+  }
+
+  async function handleResetBiometric(reason: string) {
+    if (!pendingResetBiometric) return;
+    setPendingRowId(pendingResetBiometric.id);
+    try {
+      const { message } = await resetPatientBiometric(
+        pendingResetBiometric.id,
+        reason,
+      );
+      showToast(message || 'Biometric reset.');
+      await refresh();
+    } catch (e) {
+      showToast(
+        e instanceof Error ? e.message : 'Could not reset biometric.',
         'error',
       );
       throw e; // keep the modal open so the error shows
@@ -622,6 +650,11 @@ export default function UserInvitePanel() {
             ? (row) => setPendingResetMfa({ id: row.id, name: row.name })
             : undefined
         }
+        onResetBiometricClick={
+          callerCanResetMfa
+            ? (row) => setPendingResetBiometric({ id: row.id, name: row.name })
+            : undefined
+        }
         onReactivate={handleReactivate}
         onResendInvite={handleResend}
         onRevokeInvite={handleRevoke}
@@ -656,6 +689,15 @@ export default function UserInvitePanel() {
         name={pendingResetMfa?.name ?? ''}
         onClose={() => setPendingResetMfa(null)}
         onConfirm={handleResetMfa}
+      />
+      <ResetMfaModal
+        open={!!pendingResetBiometric}
+        name={pendingResetBiometric?.name ?? ''}
+        title={`Reset biometric for ${pendingResetBiometric?.name ?? 'this patient'}?`}
+        body="Their Face ID / fingerprint passkeys and recovery codes will be removed. They’ll set up biometric again on their next sign-in. This is recorded in the audit log."
+        confirmLabel="Reset biometric"
+        onClose={() => setPendingResetBiometric(null)}
+        onConfirm={handleResetBiometric}
       />
     </div>
   );
