@@ -1616,58 +1616,71 @@ export class AuthService {
     return { ...resp, activePracticeId }
   }
 
-  /** Fallback sign-in for a device that doesn't hold one of the patient's
-   *  passkeys (e.g. a new phone, a different browser profile). Same model as
-   *  Binance / Google / Apple: use the passkey where you have it, fall back to
-   *  the email code where you don't. The challenge token already proves the
-   *  first factor (OTP / magic-link) passed, so we just issue tokens — and
-   *  crucially we DO NOT delete any passkey, so the patient's other devices
-   *  keep biometric. Removal stays an explicit action (Settings, or
-   *  webAuthnRecoverDisable for a true lost-device wipe). */
-  async webAuthnFallbackSignIn(
-    challengeToken: string,
-    context?: SessionContext,
-  ): Promise<AuthResponse> {
-    const { userId, activePracticeId } =
-      await this.verifyWebAuthnAuthToken(challengeToken)
-    const user = await this.loadActiveUser(userId)
-    const tokens = await this.issueTokenPair(user, {
-      ...context,
-      activePracticeId,
+  /** Generate + persist a fresh set of recovery codes for a user, replacing
+   *  any prior ones. Returns the plaintext to show ONCE. Reuses the same
+   *  MfaRecoveryCode table + MfaService codec the provider TOTP path uses —
+   *  a patient is never also a provider, so the rows never collide. */
+  private async issueRecoveryCodes(userId: string): Promise<string[]> {
+    const { plain, hashes } = await this.mfaService.generateRecoveryCodes()
+    await this.prisma.$transaction(async (tx) => {
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId } })
+      await tx.mfaRecoveryCode.createMany({
+        data: hashes.map((codeHash) => ({ userId, codeHash })),
+      })
     })
-    await this.logAuthEvent({
-      event: 'webauthn_fallback_otp',
-      userId,
-      method: 'otp',
-      ipAddress: context?.ipAddress,
-      userAgent: context?.userAgent,
-      practiceContext: activePracticeId,
-      success: true,
-    })
-    const resp = this.buildAuthResponse(tokens, user, 'otp')
-    return { ...resp, activePracticeId }
+    return plain
   }
 
-  /** Graceful lost-device recovery. The challenge token proves a fresh
-   *  first-factor pass (OTP / magic-link), so a patient who can no longer use
-   *  their biometric (lost / wiped device) can remove it and sign in. This is
-   *  acceptable because email/OTP is the account-recovery root for patients;
-   *  it prevents a permanent lockout that a device-bound second factor would
-   *  otherwise create. */
-  async webAuthnRecoverDisable(
+  /** Recovery-code sign-in — the ONLY fallback when a patient can't use their
+   *  biometric on this device (e.g. a desktop passkey that can't travel to a
+   *  phone). The challenge token proves the first factor (OTP / magic-link)
+   *  already passed. The used code is consumed, the whole set is regenerated
+   *  (so the patient always leaves with a fresh, known batch), and the new
+   *  codes ride back in the response to be shown + saved once. */
+  async webAuthnRecoverySignIn(
     challengeToken: string,
+    recoveryCode: string,
     context?: SessionContext,
-  ): Promise<AuthResponse> {
+  ): Promise<AuthResponse & { recoveryCodes: string[] }> {
     const { userId, activePracticeId } =
       await this.verifyWebAuthnAuthToken(challengeToken)
-    await this.prisma.webAuthnCredential.deleteMany({ where: { userId } })
+    const unused = await this.prisma.mfaRecoveryCode.findMany({
+      where: { userId, usedAt: null },
+      select: { id: true, codeHash: true },
+    })
+    let matchedId: string | null = null
+    for (const row of unused) {
+      if (await this.mfaService.verifyRecoveryCode(recoveryCode, row.codeHash)) {
+        matchedId = row.id
+        break
+      }
+    }
+    if (!matchedId) {
+      await this.logAuthEvent({
+        event: 'webauthn_recovery_code_failed',
+        userId,
+        method: 'otp',
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        practiceContext: activePracticeId,
+        success: false,
+        errorCode: 'invalid_recovery_code',
+      })
+      throw new UnauthorizedException('Invalid or already-used recovery code')
+    }
+    await this.prisma.mfaRecoveryCode.update({
+      where: { id: matchedId },
+      data: { usedAt: new Date() },
+    })
+    // Regenerate the full set so the patient leaves with a fresh batch.
+    const recoveryCodes = await this.issueRecoveryCodes(userId)
     const user = await this.loadActiveUser(userId)
     const tokens = await this.issueTokenPair(user, {
       ...context,
       activePracticeId,
     })
     await this.logAuthEvent({
-      event: 'webauthn_recovery_disabled',
+      event: 'webauthn_recovery_code_used',
       userId,
       method: 'otp',
       ipAddress: context?.ipAddress,
@@ -1676,7 +1689,79 @@ export class AuthService {
       success: true,
     })
     const resp = this.buildAuthResponse(tokens, user, 'otp')
-    return { ...resp, activePracticeId }
+    return { ...resp, activePracticeId, recoveryCodes }
+  }
+
+  /** Settings — how many backup codes remain + whether biometric is on. */
+  async patientRecoveryStatus(
+    userId: string,
+  ): Promise<{ remaining: number; hasBiometric: boolean }> {
+    const [remaining, deviceCount] = await Promise.all([
+      this.prisma.mfaRecoveryCode.count({ where: { userId, usedAt: null } }),
+      this.prisma.webAuthnCredential.count({ where: { userId } }),
+    ])
+    return { remaining, hasBiometric: deviceCount > 0 }
+  }
+
+  /** Settings — regenerate the recovery codes (invalidates the old set). */
+  async regeneratePatientRecoveryCodes(
+    userId: string,
+    context?: SessionContext,
+  ): Promise<{ recoveryCodes: string[] }> {
+    const recoveryCodes = await this.issueRecoveryCodes(userId)
+    await this.logAuthEvent({
+      event: 'webauthn_recovery_codes_regenerated',
+      userId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      success: true,
+    })
+    return { recoveryCodes }
+  }
+
+  /** Admin support — reset a patient who lost BOTH their biometric devices and
+   *  their recovery codes. Wipes all passkeys + recovery codes so the patient
+   *  re-enrolls (and gets fresh codes) on next sign-in. Audited with the actor
+   *  + reason; the patient is emailed. SUPER_ADMIN / HEALPLACE_OPS only. */
+  async adminResetPatientBiometric(
+    actorId: string,
+    targetUserId: string,
+    reason: string,
+    context?: SessionContext,
+  ): Promise<{ message: string }> {
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, email: true, name: true, roles: true },
+    })
+    if (!target) throw new NotFoundException('User not found')
+    if (!target.roles.includes(UserRole.PATIENT)) {
+      throw new BadRequestException('This account is not a patient')
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.webAuthnCredential.deleteMany({ where: { userId: targetUserId } })
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId: targetUserId } })
+    })
+    await this.logAuthEvent({
+      event: 'webauthn_reset_by_admin',
+      userId: targetUserId,
+      method: 'otp',
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: { resetBy: actorId, reason },
+      success: true,
+    })
+    if (target.email) {
+      await this.emailService.sendEmail(
+        target.email,
+        'Your Cardioplace biometric sign-in was reset',
+        mfaResetEmailHtml(target.name ?? null),
+      )
+    }
+    return {
+      message:
+        'Biometric reset. The patient will set up Face ID / fingerprint again on next sign-in.',
+    }
   }
 
   /** Settings — start biometric registration (patient only). Returns the
@@ -1726,7 +1811,13 @@ export class AuthService {
     response: RegistrationResponseJSON,
     deviceName: string | undefined,
     context?: SessionContext,
-  ): Promise<{ id: string; deviceName: string | null }> {
+  ): Promise<{
+    id: string
+    deviceName: string | null
+    /** Present ONLY on the first passkey — the account-wide backup codes to
+     *  show + save once. Omitted when adding a 2nd/3rd device. */
+    recoveryCodes?: string[]
+  }> {
     const challenge = await this.verifyWebAuthnRegToken(
       registrationToken,
       userId,
@@ -1783,7 +1874,18 @@ export class AuthService {
       userAgent: context?.userAgent,
       success: true,
     })
-    return saved
+    // First passkey for this patient → mint the account-wide recovery codes
+    // (the only fallback if they later can't use biometric). count === 1 means
+    // the row we just created is the only one. Adding more devices later does
+    // NOT reset the codes.
+    const deviceCount = await this.prisma.webAuthnCredential.count({
+      where: { userId },
+    })
+    let recoveryCodes: string[] | undefined
+    if (deviceCount === 1) {
+      recoveryCodes = await this.issueRecoveryCodes(userId)
+    }
+    return { ...saved, recoveryCodes }
   }
 
   /** Settings — list the patient's registered biometric devices. */

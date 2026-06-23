@@ -16,9 +16,22 @@ interface Props {
   onClose: () => void;
   /** Reason is required (min 3 chars) — the button stays disabled until met. */
   onConfirm: (reason: string) => Promise<void>;
+  /** Optional copy overrides so this modal also serves the patient
+   *  "Reset biometric" support action (defaults frame it as two-factor). */
+  title?: string;
+  body?: string;
+  confirmLabel?: string;
 }
 
-export default function ResetMfaModal({ open, name, onClose, onConfirm }: Props) {
+export default function ResetMfaModal({
+  open,
+  name,
+  onClose,
+  onConfirm,
+  title,
+  body,
+  confirmLabel = 'Reset MFA',
+}: Props) {
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,16 +121,15 @@ export default function ResetMfaModal({ open, name, onClose, onConfirm }: Props)
                     className="text-[14px] font-bold leading-tight"
                     style={{ color: 'var(--brand-text-primary)' }}
                   >
-                    Reset two-factor for {name}?
+                    {title ?? `Reset two-factor for ${name}?`}
                   </h2>
                   <p
                     id="reset-mfa-body"
                     className="text-[11px] mt-1 leading-relaxed"
                     style={{ color: 'var(--brand-text-muted)' }}
                   >
-                    Their authenticator and recovery codes will be removed.
-                    They&apos;ll set up two-factor again on their next sign-in.
-                    This is recorded in the audit log.
+                    {body ??
+                      'Their authenticator and recovery codes will be removed. They’ll set up two-factor again on their next sign-in. This is recorded in the audit log.'}
                   </p>
                 </div>
               </div>
@@ -195,7 +207,7 @@ export default function ResetMfaModal({ open, name, onClose, onConfirm }: Props)
                     Resetting…
                   </>
                 ) : (
-                  'Reset MFA'
+                  confirmLabel
                 )}
               </button>
             </div>

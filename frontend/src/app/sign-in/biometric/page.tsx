@@ -1,32 +1,33 @@
 'use client';
 
 /**
- * Patient biometric second factor (Face ID / fingerprint).
+ * Patient biometric second factor (Face ID / fingerprint) — REQUIRED once a
+ * patient has set it up. First factor is the email code / magic link; this is
+ * the mandatory second factor.
  *
- * Reached after a patient with a registered device clears the first factor
- * (OTP / magic-link). That step returned { status: 'WEBAUTHN_REQUIRED',
- * challengeToken } instead of tokens; the sign-in page stashes the token (or
- * the magic-link redirect carries it in the URL) and routes here. We run the
- * WebAuthn assertion and, on success, exchange it for the real session.
+ * Reached after the first factor returns { status: 'WEBAUTHN_REQUIRED',
+ * challengeToken }. We run the WebAuthn assertion; on success we exchange it
+ * for the session.
  *
- * Graceful fallbacks:
- *   • Cancel / no passkey on this device → offer "try again" + "can't use it?
- *     remove biometric and sign in" (the challenge token already proves the
- *     first factor passed, so this can't be abused beyond OTP itself).
- *   • Expired / missing token → "sign in again".
+ * The ONLY fallback (no email bypass) is a one-time recovery code — used when
+ * biometric can't run on this device (e.g. a desktop passkey that can't travel
+ * to a phone). A recovery-code sign-in regenerates the set, which we show once
+ * before continuing. If the patient has lost both their devices and their
+ * codes, they must contact support (admin reset).
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Fingerprint, Loader2, ShieldCheck } from 'lucide-react';
+import { Fingerprint, Loader2, ShieldCheck, KeyRound } from 'lucide-react';
 import { useAuth, type OtpVerifyResponse } from '@/lib/auth-context';
 import {
   WEBAUTHN_CHALLENGE_STORAGE_KEY,
   authenticateBiometric,
-  continueWithEmailCode,
+  signInWithRecoveryCode,
 } from '@/lib/services/webauthn.service';
 import LandingHeader from '@/components/cardio/LandingHeader';
 import LandingFooter from '@/components/cardio/LandingFooter';
+import RecoveryCodesPanel from '@/components/cardio/RecoveryCodesPanel';
 
 function readChallengeToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -54,28 +55,30 @@ function clearStoredChallenge() {
   }
 }
 
+type Mode = 'prompt' | 'recovery' | 'savecodes';
+
 export default function BiometricSignInPage() {
   const router = useRouter();
   const { login } = useAuth();
 
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [mode, setMode] = useState<Mode>('prompt');
   const [busy, setBusy] = useState(false);
-  const [fallingBack, setFallingBack] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showFallback, setShowFallback] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [newCodes, setNewCodes] = useState<string[]>([]);
   const autoTried = useRef(false);
 
   useEffect(() => {
-    // One-shot read of the stashed challenge token on mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setChallengeToken(readChallengeToken());
     setReady(true);
   }, []);
 
-  function finishLogin(data: OtpVerifyResponse) {
-    clearStoredChallenge();
-    login(data);
+  function goToApp(data: OtpVerifyResponse) {
     const onboardingRequired =
       (data as { onboarding_required?: boolean }).onboarding_required === true;
     router.push(onboardingRequired ? '/onboarding' : '/dashboard');
@@ -87,38 +90,41 @@ export default function BiometricSignInPage() {
     setError(null);
     try {
       const data = await authenticateBiometric(challengeToken);
-      finishLogin(data);
+      clearStoredChallenge();
+      login(data);
+      goToApp(data);
     } catch (err) {
       const e = err as Error & { code?: string };
       setError(e.message || 'Biometric sign-in failed.');
-      // Cancel / no-passkey-on-this-device → surface the recovery options.
       setShowFallback(true);
       setBusy(false);
     }
   }
 
-  // Auto-prompt once on mount (most browsers still require the tap, but where
-  // a gesture isn't needed this saves a step). Failures just reveal the button.
+  // Auto-prompt once on mount.
   useEffect(() => {
-    if (ready && challengeToken && !autoTried.current) {
+    if (ready && challengeToken && mode === 'prompt' && !autoTried.current) {
       autoTried.current = true;
       void runBiometric();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, challengeToken]);
 
-  async function handleEmailCodeFallback() {
-    if (fallingBack || !challengeToken) return;
-    setFallingBack(true);
+  async function handleRecoverySubmit() {
+    if (submitting || recoveryCode.trim().length < 8 || !challengeToken) return;
+    setSubmitting(true);
     setError(null);
     try {
-      // Sign in with the already-verified email code. Does NOT remove any
-      // passkey — the patient's other devices keep biometric.
-      const data = await continueWithEmailCode(challengeToken);
-      finishLogin(data);
+      const data = await signInWithRecoveryCode(challengeToken, recoveryCode);
+      clearStoredChallenge();
+      login(data);
+      // The recovery sign-in regenerated the set — show the new codes once
+      // before continuing into the app.
+      setNewCodes(data.recoveryCodes ?? []);
+      setMode('savecodes');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not sign you in.');
-      setFallingBack(false);
+      setError(err instanceof Error ? err.message : 'Invalid recovery code.');
+      setSubmitting(false);
     }
   }
 
@@ -133,24 +139,19 @@ export default function BiometricSignInPage() {
         id="main"
         className="min-h-[100dvh] pt-24 pb-12 px-4 sm:px-6 flex items-start sm:items-center justify-center"
       >
-        <div className="w-full max-w-md text-center">
-          <span
-            className="inline-flex w-16 h-16 rounded-2xl items-center justify-center text-white mb-5"
-            style={{
-              background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
-              boxShadow: '0 4px 16px rgba(123,0,224,0.28)',
-            }}
-            aria-hidden
-          >
-            {expired ? (
-              <ShieldCheck className="w-8 h-8" />
-            ) : (
-              <Fingerprint className="w-8 h-8" />
-            )}
-          </span>
-
+        <div className="w-full max-w-md">
           {expired ? (
-            <>
+            <div className="text-center">
+              <span
+                className="inline-flex w-16 h-16 rounded-2xl items-center justify-center text-white mb-5"
+                style={{
+                  background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+                  boxShadow: '0 4px 16px rgba(123,0,224,0.28)',
+                }}
+                aria-hidden
+              >
+                <ShieldCheck className="w-8 h-8" />
+              </span>
               <h1 className="text-2xl font-bold text-[#170c1d] mb-2">
                 Your sign-in expired
               </h1>
@@ -163,9 +164,119 @@ export default function BiometricSignInPage() {
               >
                 Back to sign in
               </a>
-            </>
+            </div>
+          ) : mode === 'savecodes' ? (
+            <div>
+              <div className="text-center mb-6">
+                <span
+                  className="inline-flex w-14 h-14 rounded-2xl items-center justify-center text-white mb-4"
+                  style={{
+                    background:
+                      'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+                  }}
+                  aria-hidden
+                >
+                  <KeyRound className="w-7 h-7" />
+                </span>
+                <h1 className="text-2xl font-bold text-[#170c1d]">
+                  New recovery codes
+                </h1>
+                <p className="text-[#6b7280] mt-2 text-sm">
+                  You used a recovery code, so we made you a fresh set.
+                </p>
+              </div>
+              <RecoveryCodesPanel
+                codes={newCodes}
+                acknowledgeLabel="I’ve saved them — continue"
+                onAcknowledge={() => router.push('/dashboard')}
+              />
+            </div>
+          ) : mode === 'recovery' ? (
+            <div className="text-center">
+              <span
+                className="inline-flex w-16 h-16 rounded-2xl items-center justify-center text-white mb-5"
+                style={{
+                  background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+                }}
+                aria-hidden
+              >
+                <KeyRound className="w-8 h-8" />
+              </span>
+              <h1 className="text-2xl font-bold text-[#170c1d] mb-2">
+                Enter a recovery code
+              </h1>
+              <p className="text-[#6b7280] mb-6 text-sm">
+                Use one of the codes you saved when you set up Face ID /
+                fingerprint.
+              </p>
+
+              {error && (
+                <div
+                  role="alert"
+                  className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 text-left"
+                >
+                  {error}
+                </div>
+              )}
+
+              <input
+                data-testid="recovery-code-input"
+                type="text"
+                autoComplete="off"
+                value={recoveryCode}
+                onChange={(e) => setRecoveryCode(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void handleRecoverySubmit();
+                  }
+                }}
+                placeholder="XXXXX-XXXXX"
+                className="w-full h-14 px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-lg text-center tracking-[4px] uppercase text-[#171717] placeholder:text-[#737373] placeholder:tracking-normal focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+              />
+              <button
+                type="button"
+                data-testid="recovery-code-submit"
+                onClick={() => void handleRecoverySubmit()}
+                disabled={recoveryCode.trim().length < 8 || submitting}
+                className="mt-5 w-full h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-2"
+              >
+                {submitting && <Loader2 className="w-5 h-5 animate-spin" />}
+                {submitting ? 'Signing you in…' : 'Sign in with recovery code'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('prompt');
+                  setError(null);
+                }}
+                className="mt-5 w-full text-center text-sm font-medium text-[#7B00E0] hover:underline cursor-pointer inline-flex items-center justify-center gap-1.5"
+              >
+                <Fingerprint className="w-3.5 h-3.5" />
+                Back to Face ID / fingerprint
+              </button>
+
+              <p className="mt-6 text-xs text-[#9ca3af]">
+                Lost your codes and your device too?{' '}
+                <a href="/sign-in" className="text-[#7B00E0] hover:underline">
+                  Contact support
+                </a>{' '}
+                to reset your account.
+              </p>
+            </div>
           ) : (
-            <>
+            <div className="text-center">
+              <span
+                className="inline-flex w-16 h-16 rounded-2xl items-center justify-center text-white mb-5"
+                style={{
+                  background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+                  boxShadow: '0 4px 16px rgba(123,0,224,0.28)',
+                }}
+                aria-hidden
+              >
+                <Fingerprint className="w-8 h-8" />
+              </span>
               <h1 className="text-2xl font-bold text-[#170c1d] mb-2">
                 Confirm it&apos;s you
               </h1>
@@ -186,7 +297,7 @@ export default function BiometricSignInPage() {
                 type="button"
                 data-testid="biometric-prompt-btn"
                 onClick={() => void runBiometric()}
-                disabled={busy || fallingBack}
+                disabled={busy}
                 className="w-full h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-2"
               >
                 {busy ? (
@@ -203,25 +314,22 @@ export default function BiometricSignInPage() {
               </button>
 
               {showFallback && (
-                <div className="mt-6 border-t border-[#f0e6fa] pt-5 text-left">
+                <div className="mt-6 border-t border-[#f0e6fa] pt-5">
                   <p className="text-[#6b7280] text-sm mb-3">
-                    Don&apos;t have Face ID / fingerprint on this device?
+                    Can&apos;t use Face ID / fingerprint on this device?
                   </p>
                   <button
                     type="button"
-                    data-testid="biometric-fallback-btn"
-                    onClick={() => void handleEmailCodeFallback()}
-                    disabled={fallingBack || busy}
-                    className="w-full h-12 rounded-full border border-[#7B00E0] font-semibold text-[#7B00E0] hover:bg-[#7B00E0]/5 transition-colors disabled:opacity-50 cursor-pointer inline-flex items-center justify-center gap-2"
+                    data-testid="use-recovery-code-btn"
+                    onClick={() => {
+                      setMode('recovery');
+                      setError(null);
+                    }}
+                    className="w-full h-12 rounded-full border border-[#7B00E0] font-semibold text-[#7B00E0] hover:bg-[#7B00E0]/5 transition-colors cursor-pointer inline-flex items-center justify-center gap-2"
                   >
-                    {fallingBack && <Loader2 className="w-4 h-4 animate-spin" />}
-                    {fallingBack ? 'Signing you in…' : 'Continue with email code'}
+                    <KeyRound className="w-4 h-4" />
+                    Use a recovery code
                   </button>
-                  <p className="text-[#9ca3af] text-xs mt-2">
-                    You&apos;ll sign in with your email code. Your other devices
-                    keep Face ID / fingerprint. You can set it up on this device
-                    later from Settings.
-                  </p>
                 </div>
               )}
 
@@ -230,7 +338,7 @@ export default function BiometricSignInPage() {
                   Cancel and return to sign in
                 </a>
               </p>
-            </>
+            </div>
           )}
         </div>
       </main>

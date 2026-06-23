@@ -170,3 +170,23 @@ export async function resetUserMfa(
   }
   return data as unknown as { message: string };
 }
+
+/** Wipe a patient's biometric (Face ID / fingerprint) + recovery codes so they
+ *  re-enroll on next sign-in. For the lost-both support case. Reason audited. */
+export async function resetPatientBiometric(
+  userId: string,
+  reason: string,
+): Promise<{ message: string }> {
+  const res = await fetchWithAuth(
+    `${API_URL}/api/v2/auth/admin/webauthn/reset/${encodeURIComponent(userId)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    },
+  );
+  const data = await readJson(res);
+  if (!res.ok) {
+    throw new Error(messageFrom(data, 'Could not reset biometric for this user.'));
+  }
+  return data as unknown as { message: string };
+}

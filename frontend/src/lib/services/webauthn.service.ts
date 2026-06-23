@@ -80,12 +80,22 @@ export function describeThisDevice(): string {
 
 // ─── Registration (authenticated — from settings) ─────────────────────────────
 
+export interface RegisterBiometricResult {
+  id: string;
+  deviceName: string | null;
+  /** Present ONLY on the first passkey — the account-wide recovery codes to
+   *  show + save once. Omitted when adding a 2nd/3rd device. */
+  recoveryCodes?: string[];
+}
+
 /**
  * Run the full enable-biometric ceremony: fetch options → prompt Face ID /
  * fingerprint → persist the credential. Throws a friendly Error on cancel or
- * failure. Returns the saved credential's row id.
+ * failure. On the first passkey, the result carries the recovery codes.
  */
-export async function registerBiometric(deviceName?: string): Promise<string> {
+export async function registerBiometric(
+  deviceName?: string,
+): Promise<RegisterBiometricResult> {
   const startRes = await fetchWithAuth(
     `${API_URL}/api/v2/auth/webauthn/register/start`,
     { method: 'POST', body: '{}' },
@@ -121,7 +131,7 @@ export async function registerBiometric(deviceName?: string): Promise<string> {
   if (!verifyRes.ok) {
     throw new Error(messageFrom(verifyData, 'Biometric setup could not be saved.'));
   }
-  return (verifyData as { id: string }).id;
+  return verifyData as unknown as RegisterBiometricResult;
 }
 
 /** List the patient's registered biometric devices. */
@@ -197,50 +207,60 @@ export async function authenticateBiometric(
   return verifyData as unknown as OtpVerifyResponse;
 }
 
-/** Fallback for a device without one of the patient's passkeys: sign in with
- *  the email code alone (the challenge token already proved it). Does NOT
- *  delete any passkey — the patient's other devices keep biometric. This is
- *  the Binance / Google model: use the passkey where you have it, fall back to
- *  the email code where you don't. */
-export async function continueWithEmailCode(
+/** Recovery-code sign-in — the only fallback when biometric can't be used on
+ *  this device. Consumes a code and signs in. The response carries a freshly
+ *  regenerated set of codes (`recoveryCodes`) to show + save once. */
+export async function signInWithRecoveryCode(
   challengeToken: string,
-): Promise<OtpVerifyResponse> {
+  recoveryCode: string,
+): Promise<OtpVerifyResponse & { recoveryCodes: string[] }> {
   const res = await fetch(
-    `${API_URL}/api/v2/auth/webauthn/authenticate/fallback`,
+    `${API_URL}/api/v2/auth/webauthn/authenticate/recovery`,
     {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ challengeToken }),
+      body: JSON.stringify({ challengeToken, recoveryCode: recoveryCode.trim() }),
     },
   );
   const data = await readJson(res);
   if (!res.ok) {
-    throw new Error(messageFrom(data, 'Could not sign you in.'));
+    throw new Error(messageFrom(data, 'Invalid or already-used recovery code.'));
   }
-  return data as unknown as OtpVerifyResponse;
+  return data as unknown as OtpVerifyResponse & { recoveryCodes: string[] };
 }
 
-/** Graceful lost-device path: remove ALL biometric and sign in. Use only for
- *  an explicit "I lost my device" action — for the common new-device case use
- *  {@link continueWithEmailCode}, which keeps existing passkeys. */
-export async function recoverDisableBiometric(
-  challengeToken: string,
-): Promise<OtpVerifyResponse> {
-  const res = await fetch(
-    `${API_URL}/api/v2/auth/webauthn/authenticate/recover`,
-    {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ challengeToken }),
-    },
+// ─── Recovery codes management (authenticated — Settings) ─────────────────────
+
+export interface RecoveryStatus {
+  remaining: number;
+  hasBiometric: boolean;
+}
+
+/** How many backup codes remain + whether biometric is set up. */
+export async function getRecoveryStatus(): Promise<RecoveryStatus> {
+  const res = await fetchWithAuth(
+    `${API_URL}/api/v2/auth/webauthn/recovery-codes`,
+  );
+  if (!res.ok) {
+    const data = await readJson(res);
+    throw new Error(messageFrom(data, 'Could not load recovery status.'));
+  }
+  return (await res.json()) as RecoveryStatus;
+}
+
+/** Regenerate the recovery codes (invalidates the old set). Returns the new
+ *  codes to show + save once. */
+export async function regenerateRecoveryCodes(): Promise<string[]> {
+  const res = await fetchWithAuth(
+    `${API_URL}/api/v2/auth/webauthn/recovery-codes/regenerate`,
+    { method: 'POST', body: '{}' },
   );
   const data = await readJson(res);
   if (!res.ok) {
-    throw new Error(messageFrom(data, 'Could not sign you in.'));
+    throw new Error(messageFrom(data, 'Could not generate new recovery codes.'));
   }
-  return data as unknown as OtpVerifyResponse;
+  return (data as { recoveryCodes: string[] }).recoveryCodes;
 }
 
 /** Normalize a browser ceremony error into a friendly Error. A cancelled /

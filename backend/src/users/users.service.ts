@@ -930,6 +930,9 @@ export class UsersService {
           // authenticator. enrolledAt is nulled on admin reset, so the button
           // disappears after a reset (once the list refetches).
           totpCredential: { select: { enrolledAt: true } },
+          // Patient biometric (WebAuthn) — drives the "Reset biometric" support
+          // action, shown only for patients who have a registered passkey.
+          _count: { select: { webAuthnCredentials: true } },
         },
       }),
       this.prisma.user.count({ where: userWhere }),
@@ -943,6 +946,7 @@ export class UsersService {
       accountStatus: u.accountStatus,
       createdAt: u.createdAt,
       mfaEnrolled: u.totpCredential?.enrolledAt != null,
+      biometricEnrolled: u._count.webAuthnCredentials > 0,
       practiceId:
         u.providerAssignmentAsPatient?.practiceId ??
         u.practiceCoordinator?.practiceId ??

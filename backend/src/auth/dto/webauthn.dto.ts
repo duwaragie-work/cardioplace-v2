@@ -1,4 +1,10 @@
-import { IsObject, IsOptional, IsString, MaxLength } from 'class-validator'
+import {
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator'
 import type {
   AuthenticationResponseJSON,
   RegistrationResponseJSON,
@@ -39,10 +45,21 @@ export class WebAuthnAuthVerifyDto {
   response: AuthenticationResponseJSON
 }
 
-/** POST /v2/auth/webauthn/authenticate/recover — graceful lost-device path.
- *  The challenge token proves a fresh first-factor (OTP/magic-link) pass, so
- *  we remove the patient's biometric credentials and sign them in. */
-export class WebAuthnRecoverDto {
+/** POST /v2/auth/webauthn/authenticate/recovery — recovery-code sign-in (the
+ *  only fallback when biometric can't be used on this device). */
+export class WebAuthnRecoverySignInDto {
   @IsString()
   challengeToken: string
+
+  @IsString()
+  @MinLength(8)
+  recoveryCode: string
+}
+
+/** POST /v2/auth/admin/webauthn/reset/:userId — required, audited reason. */
+export class AdminResetPatientBiometricDto {
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason: string
 }
