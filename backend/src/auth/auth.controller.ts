@@ -46,6 +46,7 @@ import {
   WebAuthnRecoverySignInDto,
   WebAuthnRegisterStartDto,
   WebAuthnRegisterVerifyDto,
+  WebAuthnRenameDto,
 } from './dto/webauthn.dto.js'
 import { Roles } from './decorators/roles.decorator.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
@@ -446,6 +447,21 @@ export class AuthController {
   async webAuthnListCredentials(@Req() req: Request) {
     const { id } = req.user as { id: string }
     return this.authService.listWebAuthnCredentials(id)
+  }
+
+  @Patch('webauthn/credentials/:id')
+  async webAuthnRenameCredential(
+    @Param('id') credentialRowId: string,
+    @Body() dto: WebAuthnRenameDto,
+    @Req() req: Request,
+  ) {
+    const { id } = req.user as { id: string }
+    return this.authService.renameWebAuthnCredential(
+      id,
+      credentialRowId,
+      dto.deviceName,
+      this.buildAuthContext(req),
+    )
   }
 
   @Delete('webauthn/credentials/:id')
