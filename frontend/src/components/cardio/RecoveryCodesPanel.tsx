@@ -103,15 +103,16 @@ export default function RecoveryCodesPanel({
         </button>
       </div>
 
-      <label className="mt-5 flex items-start gap-2.5 cursor-pointer select-none">
+      <label className="mt-4 flex items-center justify-center gap-2 cursor-pointer select-none">
         <input
           type="checkbox"
           data-testid="recovery-codes-ack"
+          data-no-min-target
           checked={saved}
           onChange={(e) => setSaved(e.target.checked)}
-          className="mt-0.5 w-4 h-4 accent-[#7B00E0]"
+          className="block w-4 h-4 m-0 shrink-0 self-center align-middle accent-[#7B00E0]"
         />
-        <span className="text-sm text-gray-700">
+        <span className="text-xs text-gray-600 leading-none">
           I&apos;ve saved my recovery codes somewhere safe.
         </span>
       </label>

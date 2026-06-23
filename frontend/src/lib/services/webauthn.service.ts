@@ -208,12 +208,12 @@ export async function authenticateBiometric(
 }
 
 /** Recovery-code sign-in — the only fallback when biometric can't be used on
- *  this device. Consumes a code and signs in. The response carries a freshly
- *  regenerated set of codes (`recoveryCodes`) to show + save once. */
+ *  this device. Consumes ONLY the one code; the rest stay valid. The response
+ *  carries `recoveryRemaining` so we can tell the patient how many are left. */
 export async function signInWithRecoveryCode(
   challengeToken: string,
   recoveryCode: string,
-): Promise<OtpVerifyResponse & { recoveryCodes: string[] }> {
+): Promise<OtpVerifyResponse & { recoveryRemaining: number }> {
   const res = await fetch(
     `${API_URL}/api/v2/auth/webauthn/authenticate/recovery`,
     {
@@ -227,7 +227,7 @@ export async function signInWithRecoveryCode(
   if (!res.ok) {
     throw new Error(messageFrom(data, 'Invalid or already-used recovery code.'));
   }
-  return data as unknown as OtpVerifyResponse & { recoveryCodes: string[] };
+  return data as unknown as OtpVerifyResponse & { recoveryRemaining: number };
 }
 
 // ─── Recovery codes management (authenticated — Settings) ─────────────────────
