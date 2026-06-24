@@ -20,6 +20,7 @@ import { EmailService } from '../email/email.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { AuthService } from './auth.service.js'
 import { BcryptService } from './bcrypt.service.js'
+import { DisplayIdService } from '../users/display-id.service.js'
 import { GeolocationService } from './geolocation.service.js'
 import { MfaService } from './mfa.service.js'
 import { WebAuthnService } from './webauthn.service.js'
@@ -263,6 +264,17 @@ describe('AuthService', () => {
             verifyAuthentication: jest.fn(async () => ({ verified: false })),
             encodePublicKey: jest.fn(() => 'mock-pubkey'),
             decodePublicKey: jest.fn(() => new Uint8Array()),
+          },
+        },
+        {
+          // Stub that returns a deterministic canonical value so any spec
+          // that creates a user gets a stable displayId in the mock.
+          provide: DisplayIdService,
+          useValue: {
+            issue: jest.fn(async () => ({
+              value: 'CPPATTESTING0',
+              display: 'CP-PAT-TESTING-0',
+            })),
           },
         },
       ],

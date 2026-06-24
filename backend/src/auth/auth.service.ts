@@ -18,6 +18,7 @@ import {
   UserRole,
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { DisplayIdService } from '../users/display-id.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
 import { MfaService } from './mfa.service.js'
@@ -272,6 +273,7 @@ export class AuthService {
     private geolocation: GeolocationService,
     private mfaService: MfaService,
     private webAuthnService: WebAuthnService,
+    private displayIdService: DisplayIdService,
   ) {}
 
   // ─── Token Issuance ─────────────────────────────────────────────────────────
@@ -2475,16 +2477,31 @@ export class AuthService {
       }
     }
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: email ?? null,
-        name: name ?? null,
-        isVerified: emailVerified,
-        roles: [UserRole.PATIENT],
-        accounts: {
-          create: { provider, providerId, email },
+    // Wrap user creation + DisplayId issuance in one transaction so we
+    // never leak an orphan User without a permanent identifier.
+    // See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+    const user = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          email: email ?? null,
+          name: name ?? null,
+          isVerified: emailVerified,
+          roles: [UserRole.PATIENT],
+          accounts: {
+            create: { provider, providerId, email },
+          },
         },
-      },
+      })
+      const { value } = await this.displayIdService.issue(
+        tx,
+        created.id,
+        DisplayIdService.classFromRoles(created.roles),
+        'google_oauth',
+      )
+      return tx.user.update({
+        where: { id: created.id },
+        data: { displayId: value },
+      })
     })
     return user
   }
@@ -2682,12 +2699,26 @@ export class AuthService {
     })
 
     if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          email: normalizedEmail,
-          isVerified: true,
-          roles: [UserRole.PATIENT],
-        },
+      // Issue the permanent DisplayId in the same transaction as the user
+      // create — see docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+      user = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.user.create({
+          data: {
+            email: normalizedEmail,
+            isVerified: true,
+            roles: [UserRole.PATIENT],
+          },
+        })
+        const { value } = await this.displayIdService.issue(
+          tx,
+          created.id,
+          DisplayIdService.classFromRoles(created.roles),
+          'otp',
+        )
+        return tx.user.update({
+          where: { id: created.id },
+          data: { displayId: value },
+        })
       })
     } else if (!user.isVerified) {
       user = await this.prisma.user.update({
@@ -3150,12 +3181,26 @@ export class AuthService {
     })
 
     if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          email: record.email,
-          isVerified: true,
-          roles: [UserRole.PATIENT],
-        },
+      // Same DisplayId issuance pattern as OTP path — see
+      // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+      user = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.user.create({
+          data: {
+            email: record.email,
+            isVerified: true,
+            roles: [UserRole.PATIENT],
+          },
+        })
+        const { value } = await this.displayIdService.issue(
+          tx,
+          created.id,
+          DisplayIdService.classFromRoles(created.roles),
+          'magic_link',
+        )
+        return tx.user.update({
+          where: { id: created.id },
+          data: { displayId: value },
+        })
       })
     } else if (!user.isVerified) {
       user = await this.prisma.user.update({
@@ -3401,7 +3446,7 @@ export class AuthService {
           },
         })
       } else {
-        userRow = await tx.user.create({
+        const created = await tx.user.create({
           data: {
             email: fresh.email,
             name: fresh.name,
@@ -3409,6 +3454,19 @@ export class AuthService {
             roles: [fresh.role],
             onboardingStatus: OnboardingStatus.COMPLETED,
           },
+        })
+        // Issue DisplayId on the same transaction. Class derives from the
+        // invited role: PATIENT invites → PAT prefix; staff invites → STF.
+        // See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+        const { value } = await this.displayIdService.issue(
+          tx,
+          created.id,
+          DisplayIdService.classFromRoles(created.roles),
+          'invite_accept',
+        )
+        userRow = await tx.user.update({
+          where: { id: created.id },
+          data: { displayId: value },
         })
       }
 
