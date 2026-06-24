@@ -669,3 +669,64 @@ When the user types `482913`:
 ## One-line summary
 
 > Both the app and the server hold the **same secret** and read the **same clock**, so each independently computes `HMAC-SHA1(secret, time/30)` → 6 digits. They never exchange the code; they just both *know how to derive it*. The server checks ±1 step to forgive clock drift.
+
+---
+
+# Mental model (reusable recipe)
+
+A quick way to remember the whole thing — and a checklist to rebuild TOTP MFA in **any** project.
+
+## The 4 things you store
+
+1. **`secretEncrypted`** — the TOTP secret, encrypted at rest. The one secret per user.
+2. **`enrolledAt`** — a timestamp that means "MFA is on". Null = not set up.
+3. **recovery code hashes** — 10 bcrypt hashes, each with a `usedAt` (one-time use).
+4. **audit log rows** — every start/success/fail/reset (also powers lockout).
+
+## The 2 short-lived tokens (never stored)
+
+- **enrollment token** — carries the *pending* secret across setup (start → verify).
+- **challenge token** — carries `userId` across sign-in (first factor → second factor).
+
+> Both are just signed JWTs with a short TTL. They keep the server **stateless** — nothing pending is held in the DB.
+
+## The golden rules (the "why" in 5 lines)
+
+1. **Persist the secret only after the user proves one code** — never on "start".
+2. **Show recovery codes once**, store only hashes.
+3. **A code is never sent by the server** — both sides *derive* it from secret + time.
+4. **Always have a fallback ladder:** authenticator → recovery code → admin reset.
+5. **Audit + rate-limit** every attempt (failures drive the soft/hard lockout).
+
+## The lifecycle in one picture
+
+```
+ENROLL      start (secret in token, nothing saved)
+            → verify first code → save encrypted secret + 10 code hashes
+            → show 10 codes ONCE
+
+SIGN IN     first factor (OTP/password)
+            → enrolled?  → challenge token
+            → enter 6-digit code → derive & compare → issue session
+                 └ can't? → recovery code (burn one) → issue session
+
+RECOVER     lost app + codes → admin reset (wipe secret, force re-enroll)
+            running low on codes → regenerate (replace all 10)
+
+GATE        enforcement ON + role requires MFA + not enrolled
+            → block everything except the enroll endpoints → force setup
+```
+
+## Build checklist (drop into a new project)
+
+- [ ] Pick a TOTP lib (`otplib` / `pyotp` / …) + a QR lib.
+- [ ] Add storage: encrypted secret, `enrolledAt`, recovery-code hashes, audit log.
+- [ ] **Start enrollment** → generate secret → `otpauth://` URI → QR → sign enroll token. *(save nothing)*
+- [ ] **Complete enrollment** → verify token + first code → encrypt secret + create 10 code hashes → return codes once.
+- [ ] **Sign-in gate** → if enrolled, return a challenge token instead of a session.
+- [ ] **Verify challenge** → decrypt secret → `verify(code)` (allow ±1 step) → issue session.
+- [ ] **Recovery sign-in** → match a hash → mark `usedAt` → issue session.
+- [ ] **Regenerate codes** → delete ALL old → create 10 new → show once.
+- [ ] **Admin reset** → wipe secret + `enrolledAt` + codes → audit + notify → forces re-enroll.
+- [ ] **Lockout** → count recent failures → soft (wait) / hard (admin reset).
+- [ ] **Enforcement flag + guard** → block non-enrolled privileged users everywhere except enroll routes.
