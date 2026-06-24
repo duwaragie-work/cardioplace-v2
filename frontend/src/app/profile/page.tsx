@@ -142,12 +142,25 @@ type CommPref = 'TEXT_FIRST' | 'AUDIO_FIRST' | null;
 
 interface AuthProfileDto {
   id: string;
+  // Permanent public-facing identifier (CP-PAT-...). Shown on the
+  // account screen so patients can quote it on support calls. See
+  // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+  displayId: string | null;
   email: string | null;
   name: string | null;
   dateOfBirth: string | null;
   timezone: string | null;
   communicationPreference: CommPref;
   preferredLanguage: string | null;
+}
+
+/**
+ * Formats a canonical display ID ("CPPATK8M2R4N7") with hyphens
+ * ("CP-PAT-K8M2R4N-7"). Mirrors DisplayIdService.formatForDisplay.
+ */
+function formatDisplayId(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value;
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`;
 }
 
 async function fetchAuthProfile(): Promise<AuthProfileDto | null> {
@@ -892,6 +905,20 @@ export default function ProfilePage() {
             >
               <Row label={t('profile.nameLabel')} value={authProfile?.name || t('profile.notSet')} />
               <Row label={t('profile.email')} value={authProfile?.email ?? '—'} />
+              {authProfile?.displayId ? (
+                <Row
+                  label="Cardioplace ID"
+                  value={
+                    <span
+                      className="font-mono tracking-tight select-all"
+                      data-testid="profile-display-id"
+                      title="Quote this on support calls — it's permanent and unique to your account"
+                    >
+                      {formatDisplayId(authProfile.displayId)}
+                    </span>
+                  }
+                />
+              ) : null}
               <Row
                 label={t('profile.commPrefLabel')}
                 value={commPrefLabel(authProfile?.communicationPreference ?? null, t)}

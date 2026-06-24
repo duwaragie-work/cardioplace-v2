@@ -3022,6 +3022,10 @@ export class AuthService {
 
     return {
       id: user.id,
+      // Permanent public-facing identifier (CP-PAT-... / CP-STF-...).
+      // Patients quote this on support calls. See
+      // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+      displayId: user.displayId,
       email: user.email,
       name: user.name,
       roles: user.roles,
