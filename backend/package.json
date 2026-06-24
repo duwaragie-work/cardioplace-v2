@@ -63,6 +63,7 @@
     "class-validator": "^0.14.4",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.3.1",
+    "helmet": "^8.2.0",
     "langchain": "^1.2.21",
     "langsmith": "^0.5.16",
     "luxon": "^3.7.2",

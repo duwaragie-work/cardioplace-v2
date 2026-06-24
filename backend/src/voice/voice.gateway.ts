@@ -25,13 +25,35 @@ interface StartSessionPayload {
   clientTimezone?: string
 }
 
+/**
+ * Allowed WebSocket origins — mirrors the HTTP CORS allow-list in main.ts so
+ * voice stays in lockstep with normal API CORS across every environment.
+ * Read from env at connection time, so prod / dev / local each enforce their
+ * own `WEB_APP_URL` with no hardcoded domains.
+ */
+function voiceCorsAllowedOrigins(): string[] {
+  return (process.env.WEB_APP_URL ?? 'http://localhost:3000,http://localhost:3001')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+}
+
 @WebSocketGateway({
   namespace: '/voice',
   pingInterval: 10_000,
   pingTimeout: 15_000,
   cors: {
-    origin: (origin: string, callback: (err: Error | null, allow?: boolean) => void) => {
-      callback(null, true)
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      // No Origin header → non-browser client (e.g. native/mobile voice). These
+      // can't mount a CSRF-style cross-site attack, so allow them through.
+      if (!origin) {
+        callback(null, true)
+        return
+      }
+      callback(null, voiceCorsAllowedOrigins().includes(origin))
     },
     credentials: true,
   },
