@@ -60,6 +60,40 @@ export function escalationEmailHtml(
   `)
 }
 
+// First-touch welcome email sent after the user's permanent DisplayId is
+// issued. Tells the patient their Cardioplace ID so they can quote it when
+// calling support. Not sent to OTP/magic-link recipients on every sign-in
+// — only on first account creation. See
+// docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §5.
+export function welcomeEmailHtml(
+  recipientName: string,
+  displayId: string,
+  isPatient: boolean,
+): string {
+  const audienceLine = isPatient
+    ? `When you call support or your care team, quote your Cardioplace ID so we can find your account quickly:`
+    : `When coordinating with another Cardioplace user, quote your Cardioplace ID so support can find your account quickly:`
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #7B00E0; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Welcome
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">Welcome to Cardioplace${recipientName ? `, ${recipientName}` : ''}</h2>
+    <p style="color: #374151; line-height: 1.6;">${audienceLine}</p>
+    <p style="margin: 16px 0; padding: 14px 20px; background: #f5f3ff;
+              border: 1px solid #ddd6fe; border-radius: 8px;
+              font-family: ui-monospace, SFMono-Regular, monospace;
+              font-size: 18px; font-weight: 700; color: #4c1d95;
+              letter-spacing: 1px; text-align: center;">
+      ${displayId}
+    </p>
+    <p style="color: #6b7280; line-height: 1.6; font-size: 13px;">
+      This ID is permanent and tied to your account. Keep it somewhere handy.
+    </p>
+  `)
+}
+
 // Gap 5 — caregiver alert email. Carries ONLY the signed-off caregiverMessage
 // (HIPAA Minimum Necessary): no readings, no other conditions, no diagnosis.
 export function caregiverEmailHtml(
