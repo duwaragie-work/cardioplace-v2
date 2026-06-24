@@ -46,7 +46,14 @@ import AlertResolutionModal, { type ResolvableAlert } from './AlertResolutionMod
 // AlertCard accepts a PatientAlert structurally — this superset is still
 // assignable.
 type ProviderAlert = PatientAlert & {
-  patient: { id: string; name: string | null } | null;
+  patient: {
+    id: string;
+    name: string | null;
+    // Permanent public-facing identifier (CP-PAT-...). Surfaced on the
+    // alert row alongside the patient name. See
+    // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+    displayId: string | null;
+  } | null;
   followUpScheduledAt: string | null;
 };
 
@@ -543,6 +550,7 @@ export default function NotificationsScreen() {
                         onAcknowledge={() => void handleAcknowledge(a.id)}
                         ackInFlight={acking.has(a.id)}
                         patientName={a.patient?.name ?? 'Unknown'}
+                        patientDisplayId={a.patient?.displayId ?? null}
                         followUpScheduledAt={a.followUpScheduledAt}
                       />
                     </div>
