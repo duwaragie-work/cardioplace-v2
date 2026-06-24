@@ -1,5 +1,12 @@
 model User {
   id                      String                   @id @default(ulid())
+  // Human-readable public identifier, e.g. "CPPATK8M2R4N7" (canonical) /
+  // "CP-PAT-K8M2R4N-7" (display). Set once at account creation, never
+  // mutated. Source of truth is the DisplayId ledger; this column is a
+  // denormalized fast-path for joins/UI. Nullable for the additive
+  // migration window — a follow-up migration drops it to NOT NULL after
+  // backfill. See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+  displayId               String?                  @unique
   email                   String?                  @unique
   name                    String?
   pwdhash                 String?
@@ -61,6 +68,11 @@ model User {
   // Patient biometric sign-in (WebAuthn / passkeys). Optional, patient-side;
   // empty for provider/admin accounts. One row per registered device.
   webAuthnCredentials WebAuthnCredential[]
+
+  // Back-relation for the DisplayId ledger row. Always at most one row
+  // (DisplayId.userId is @unique). Tombstoned rows (userId = NULL) are
+  // not reachable from this side.
+  displayIdLedger DisplayId?
 }
 
 enum UserRole {
