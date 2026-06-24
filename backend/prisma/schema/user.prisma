@@ -3,9 +3,19 @@ model User {
   // Human-readable public identifier, e.g. "CPPATK8M2R4N7" (canonical) /
   // "CP-PAT-K8M2R4N-7" (display). Set once at account creation, never
   // mutated. Source of truth is the DisplayId ledger; this column is a
-  // denormalized fast-path for joins/UI. Nullable for the additive
-  // migration window — a follow-up migration drops it to NOT NULL after
-  // backfill. See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+  // denormalized fast-path for joins/UI.
+  //
+  // Modelled as nullable here even though the DB column flips to NOT NULL
+  // via 20260624150000_make_user_display_id_required. The runtime
+  // insertion pattern (auth.service.ts) is `tx.user.create({...})` then
+  // `tx.user.update({ displayId })` inside one transaction; Postgres
+  // checks NOT NULL at INSERT-statement-end, not at COMMIT, so applying
+  // the NOT NULL migration ALSO requires refactoring the 4 user-create
+  // sites to pre-generate the displayId and include it in the INSERT.
+  // Until that refactor lands, leave this column nullable in the
+  // Prisma schema and HOLD the NOT NULL migration (it lives in
+  // migrations/ but is not safe to apply yet). See
+  // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §11.
   displayId               String?                  @unique
   email                   String?                  @unique
   name                    String?

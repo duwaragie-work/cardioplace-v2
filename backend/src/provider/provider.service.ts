@@ -1104,6 +1104,8 @@ export class ProviderService {
           select: {
             id: true,
             name: true,
+            // Permanent display ID surfaced on the alert row alongside name.
+            displayId: true,
             dateOfBirth: true,
             communicationPreference: true,
             patientProfile: { select: this.profileSelect },
@@ -1295,6 +1297,8 @@ export class ProviderService {
           select: {
             id: true,
             name: true,
+            // Permanent display ID surfaced on the alert detail row.
+            displayId: true,
             dateOfBirth: true,
             communicationPreference: true,
             patientProfile: { select: this.profileSelect },
@@ -1461,6 +1465,9 @@ export class ProviderService {
         createdAt: alert.createdAt,
         patient: {
           id: alert.user?.id ?? '',
+          // Permanent public-facing identifier surfaced on the alert row.
+          // See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+          displayId: alert.user?.displayId ?? null,
           name: alert.user?.name ?? 'Unknown',
           dateOfBirth: alert.user?.dateOfBirth ?? null,
           communicationPreference: commPref ?? null,

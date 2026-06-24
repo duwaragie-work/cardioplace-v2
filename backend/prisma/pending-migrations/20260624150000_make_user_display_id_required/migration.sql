@@ -1,0 +1,33 @@
+-- ⚠️  HELD MIGRATION — DO NOT MOVE INTO migrations/ YET. ⚠️
+--
+-- This file lives in `prisma/pending-migrations/` (Prisma ignores it)
+-- because applying it requires a code refactor that has not yet shipped.
+-- Moving it to `prisma/migrations/` would cause `prisma migrate deploy`
+-- to apply it on the next deploy, which would break the 4 user-create
+-- sites in auth.service.ts.
+--
+-- Why held:
+--   The current runtime pattern in auth.service.ts is
+--      tx.user.create({ ...no displayId... })
+--      tx.user.update({ data: { displayId } })
+--   in one transaction. Postgres checks NOT NULL at INSERT-statement-end
+--   (not at COMMIT), so applying this constraint while that pattern is
+--   in place makes every new sign-up fail.
+--
+-- To safely apply, do all four steps in order:
+--   1. Refactor auth.service.ts so DisplayId is generated BEFORE the
+--      user INSERT and passed in as part of `data`. Drop the follow-up
+--      tx.user.update.
+--   2. Run scripts/backfill-display-ids.ts against the target DB.
+--      The script exits non-zero if any User still has displayId IS NULL.
+--   3. Confirm zero nulls:
+--        SELECT COUNT(*) FROM "User" WHERE "displayId" IS NULL;  -- 0
+--   4. Move this file into prisma/migrations/ and deploy.
+--
+-- Also update prisma/schema/user.prisma to drop the `?` from
+-- `displayId String? @unique` so Prisma's generated type reflects the
+-- DB-level constraint.
+--
+-- Spec: docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §11.
+
+ALTER TABLE "User" ALTER COLUMN "displayId" SET NOT NULL;

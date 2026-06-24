@@ -11,7 +11,11 @@ import { createHash, randomBytes, randomInt } from 'crypto'
 import type { Profile } from 'passport-google-oauth20'
 import { POLICY_VERSION } from '@cardioplace/shared'
 import { EmailService } from '../email/email.service.js'
-import { magicLinkEmailHtml, otpEmailHtml } from '../email/email-templates.js'
+import {
+  magicLinkEmailHtml,
+  otpEmailHtml,
+  welcomeEmailHtml,
+} from '../email/email-templates.js'
 import {
   AccountStatus,
   OnboardingStatus,
@@ -275,6 +279,29 @@ export class AuthService {
     private webAuthnService: WebAuthnService,
     private displayIdService: DisplayIdService,
   ) {}
+
+  /**
+   * Sends the one-shot welcome email after a User row is first created.
+   * Carries the patient's permanent display ID so they have it handy for
+   * support calls. Fire-and-forget — EmailService.sendEmail already
+   * swallows transport failures, so we don't await this on the auth path.
+   * See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §5.
+   */
+  private dispatchWelcomeEmail(user: {
+    email: string | null
+    name: string | null
+    displayId: string | null
+    roles: UserRole[]
+  }): void {
+    if (!user.email || !user.displayId) return
+    const formatted = DisplayIdService.formatForDisplay(user.displayId)
+    const isPatient = user.roles.includes(UserRole.PATIENT)
+    void this.emailService.sendEmail(
+      user.email,
+      'Welcome to Cardioplace — your account ID',
+      welcomeEmailHtml(user.name ?? '', formatted, isPatient),
+    )
+  }
 
   // ─── Token Issuance ─────────────────────────────────────────────────────────
 
@@ -2501,6 +2528,8 @@ export class AuthService {
         data: { displayId: value },
       })
     })
+    // First-touch welcome email for the just-created social user.
+    this.dispatchWelcomeEmail(user)
     return user
   }
 
@@ -2718,6 +2747,8 @@ export class AuthService {
           data: { displayId: value },
         })
       })
+      // First-touch welcome email — only fires on this new-user branch.
+      this.dispatchWelcomeEmail(user)
     } else if (!user.isVerified) {
       user = await this.prisma.user.update({
         where: { id: user.id },
@@ -2947,6 +2978,7 @@ export class AuthService {
       where: { id: userId },
       select: {
         id: true,
+        displayId: true,
         email: true,
         name: true,
         roles: true,
@@ -3189,6 +3221,8 @@ export class AuthService {
           data: { displayId: value },
         })
       })
+      // First-touch welcome email — only fires on this new-user branch.
+      this.dispatchWelcomeEmail(user)
     } else if (!user.isVerified) {
       user = await this.prisma.user.update({
         where: { id: user.id },
@@ -3421,6 +3455,7 @@ export class AuthService {
       // here; the matching `policy_acknowledged` AuthLog event is written
       // post-commit below.
       let userRow: typeof existing
+      let userWasCreated = false
       if (existing) {
         const merged = Array.from(new Set([...existing.roles, fresh.role]))
         userRow = await tx.user.update({
@@ -3455,6 +3490,7 @@ export class AuthService {
           where: { id: created.id },
           data: { displayId: value },
         })
+        userWasCreated = true
       }
 
       if (userRow.accountStatus !== AccountStatus.ACTIVE) {
@@ -3528,8 +3564,15 @@ export class AuthService {
         },
       })
 
-      return { user: userRow, invite: claimedInvite }
+      return { user: userRow, invite: claimedInvite, userWasCreated }
     })
+
+    // First-touch welcome email for the just-created invitee. The
+    // returning-user branch already has a displayId from their previous
+    // OTP/magic-link sign-in, so we skip them here to avoid spam.
+    if (result.userWasCreated) {
+      this.dispatchWelcomeEmail(result.user)
+    }
 
     await this.silentlyUpdateTimezone(result.user.id, context?.timezone)
 
