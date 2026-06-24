@@ -461,6 +461,10 @@ export class ProviderService {
 
       return {
         id: u.id,
+        // Permanent public identifier (CP-PAT-...). Used by admin UI as the
+        // patient's at-a-glance handle and quoted in escalation emails. See
+        // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+        displayId: u.displayId,
         name: u.name,
         email: u.email,
         riskTier: this.deriveRiskTier(profile, u.dateOfBirth),
@@ -726,6 +730,9 @@ export class ProviderService {
 
     const patient = {
       id: user.id,
+      // Permanent public identifier (CP-PAT-...). See
+      // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+      displayId: user.displayId,
       name: user.name,
       email: user.email,
       riskTier: this.deriveRiskTier(profile, user.dateOfBirth),

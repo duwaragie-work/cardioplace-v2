@@ -55,6 +55,15 @@ import { listCaregivers } from '@/lib/services/caregiver.service';
 import EnrollmentCard from './EnrollmentCard';
 import ConditionPill from './ConditionPill';
 
+/**
+ * Formats a canonical display ID ("CPPATK8M2R4N7") with hyphens
+ * ("CP-PAT-K8M2R4N-7") for human display. Mirrors DisplayIdService.
+ */
+function formatDisplayId(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value;
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`;
+}
+
 // Manual-test round 2 Group D2 — Caregivers is now its own first-class tab,
 // out of Care Team (where it was nested at the bottom of the assignment editor).
 type TabKey = 'profile' | 'medications' | 'alerts' | 'readings' | 'thresholds' | 'careteam' | 'caregivers' | 'timeline';
@@ -71,6 +80,10 @@ export interface ConditionTag {
 
 interface PatientHeader {
   id: string;
+  // Permanent public-facing identifier (CP-PAT-...). Set at account
+  // creation; locked forever. See
+  // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+  displayId: string | null;
   name: string | null;
   email: string | null;
   riskTier: string | null;
@@ -174,6 +187,7 @@ export default function PatientDetailShell({ patientId }: Props) {
         const p = data?.patient ?? data;
         setHeader({
           id: p?.id ?? patientId,
+          displayId: p?.displayId ?? null,
           name: p?.name ?? null,
           email: p?.email ?? null,
           riskTier: p?.riskTier ?? null,
@@ -568,6 +582,15 @@ export default function PatientDetailShell({ patientId }: Props) {
                       <span className="inline-flex items-center gap-1 min-w-0 max-w-full">
                         <Mail className="w-3 h-3 shrink-0" />
                         <span className="truncate">{header.email}</span>
+                      </span>
+                    )}
+                    {header.displayId && (
+                      <span
+                        className="inline-flex items-center font-mono tracking-tight"
+                        data-testid="admin-patient-display-id"
+                        title="Cardioplace ID — permanent, quote on support calls"
+                      >
+                        {formatDisplayId(header.displayId)}
                       </span>
                     )}
                     {header.lastEntryDate && (
