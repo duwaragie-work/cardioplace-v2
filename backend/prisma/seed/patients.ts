@@ -4,6 +4,8 @@
 // from the pre-Phase-0 seed.ts (phase/19 demo fixtures + Bucket B). No
 // clinical data changed — §F appends the filler cohort separately so this
 // module's output stays byte-identical for the modularization commit.
+import { DisplayIdClass } from '../../src/generated/prisma/enums.js'
+import { getOrGenerateDisplayIdForEmail } from './display-ids.js'
 import {
   prisma,
   DEMO_OTP,
@@ -426,6 +428,11 @@ export async function seedPatients(
   } = admins
 
   for (const p of patients) {
+    const patientDisplayId = await getOrGenerateDisplayIdForEmail(
+      prisma,
+      p.email,
+      DisplayIdClass.PATIENT,
+    )
     const user = await prisma.user.upsert({
       where: { email: p.email },
       update: {},
@@ -446,6 +453,7 @@ export async function seedPatients(
         dateOfBirth: p.dateOfBirth,
         timezone: 'America/New_York',
         preferredLanguage: 'en',
+        displayId: patientDisplayId,
       },
     })
     await seedPermaOtp(p.email, otpHash)

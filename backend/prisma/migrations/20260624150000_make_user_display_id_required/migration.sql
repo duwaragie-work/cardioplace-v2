@@ -1,0 +1,27 @@
+-- Tighten User.displayId to NOT NULL. THIRD migration in the rollout.
+-- Safe to apply now because all four code-side prerequisites are in place:
+--
+--   1. 20260624140000_add_display_id     — additive: nullable column + ledger + trigger
+--   2. (code refactor, this branch) every User-insertion path pre-generates
+--      the displayId and passes it in the create `data`:
+--        - auth.service.ts: 4 hooks call DisplayIdService.issueForCreate()
+--          which wraps tx.user.create + ledger insert with collision retry
+--        - prisma/seed/admins.ts + patients.ts: every upsert passes a
+--          displayId in its create clause via getOrGenerateDisplayIdForEmail()
+--   3. (this) flip the column to NOT NULL
+--
+-- After this lands, an INSERT into "User" without a displayId fails at the
+-- DB layer — which is now impossible from any code path because every
+-- insertion site provides one.
+--
+-- IMPORTANT: any environment that deployed step 1 BEFORE this migration
+-- must have its existing User rows backfilled before applying this:
+--     npm exec tsx scripts/backfill-display-ids.ts
+-- The script exits non-zero if any User row is still displayId IS NULL.
+--
+-- Verification (sanity check, not a gate — the backfill script does this):
+--     SELECT COUNT(*) FROM "User" WHERE "displayId" IS NULL;  -- expected 0
+--
+-- Spec: docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §11.
+
+ALTER TABLE "User" ALTER COLUMN "displayId" SET NOT NULL;
