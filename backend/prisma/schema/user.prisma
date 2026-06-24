@@ -5,18 +5,13 @@ model User {
   // mutated. Source of truth is the DisplayId ledger; this column is a
   // denormalized fast-path for joins/UI.
   //
-  // Modelled as nullable here even though the DB column flips to NOT NULL
-  // via 20260624150000_make_user_display_id_required. The runtime
-  // insertion pattern (auth.service.ts) is `tx.user.create({...})` then
-  // `tx.user.update({ displayId })` inside one transaction; Postgres
-  // checks NOT NULL at INSERT-statement-end, not at COMMIT, so applying
-  // the NOT NULL migration ALSO requires refactoring the 4 user-create
-  // sites to pre-generate the displayId and include it in the INSERT.
-  // Until that refactor lands, leave this column nullable in the
-  // Prisma schema and HOLD the NOT NULL migration (it lives in
-  // migrations/ but is not safe to apply yet). See
-  // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §11.
-  displayId               String?                  @unique
+  // NOT NULL is enforced by migration
+  // 20260624150000_make_user_display_id_required. Every code path that
+  // inserts a User row pre-generates the displayId via
+  // DisplayIdService.issueForCreate (auth.service.ts) or via the seed
+  // helper getOrGenerateDisplayIdForEmail (prisma/seed/display-ids.ts).
+  // See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §11.
+  displayId               String                   @unique
   email                   String?                  @unique
   name                    String?
   pwdhash                 String?

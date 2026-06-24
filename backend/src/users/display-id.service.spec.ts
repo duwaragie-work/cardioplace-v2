@@ -144,21 +144,53 @@ describe('DisplayIdService — pure helpers', () => {
   })
 })
 
-describe('DisplayIdService — issue() with mocked Prisma', () => {
+describe('DisplayIdService — issueForCreate() with mocked Prisma', () => {
   let service: DisplayIdService
 
-  // Minimal mock for the .displayId.create + .displayIdCollisionLog.create
-  // path. We don't depend on the broader TransactionClient surface.
+  // Mock TransactionClient with just the surfaces issueForCreate uses:
+  // displayId.create + displayIdCollisionLog.create. The caller's
+  // createUserFn closure is fed a generated displayId value and returns
+  // a stub User-shaped object.
   function makeTx(behaviours: {
-    createImpl: () => Promise<unknown>
+    ledgerCreate: () => Promise<unknown>
     collisionLogCreate?: () => Promise<unknown>
   }) {
     return {
-      displayId: { create: jest.fn(behaviours.createImpl) },
+      displayId: { create: jest.fn(behaviours.ledgerCreate) },
       displayIdCollisionLog: {
         create: jest.fn(behaviours.collisionLogCreate ?? (async () => ({}))),
       },
-    } as unknown as Parameters<DisplayIdService['issue']>[0]
+    } as unknown as Parameters<DisplayIdService['issueForCreate']>[0]
+  }
+
+  // Default closure: succeed and return a User shape.
+  function makeCreateUserFn(opts?: {
+    failFirstOnDisplayId?: boolean
+    failWithEmailDup?: boolean
+  }) {
+    let calls = 0
+    return jest.fn(async (displayId: string) => {
+      calls++
+      if (opts?.failFirstOnDisplayId && calls === 1) {
+        const err = new Error('Unique constraint failed') as Error & {
+          code: string
+          meta: { target: string[] }
+        }
+        err.code = 'P2002'
+        err.meta = { target: ['displayId'] }
+        throw err
+      }
+      if (opts?.failWithEmailDup) {
+        const err = new Error('Unique constraint failed') as Error & {
+          code: string
+          meta: { target: string[] }
+        }
+        err.code = 'P2002'
+        err.meta = { target: ['email'] }
+        throw err
+      }
+      return { id: `user_${calls}`, displayId }
+    })
   }
 
   beforeEach(async () => {
@@ -172,71 +204,141 @@ describe('DisplayIdService — issue() with mocked Prisma', () => {
   })
 
   it('succeeds on first attempt — no collision log written', async () => {
-    const tx = makeTx({
-      createImpl: async () => ({}),
-    })
-    const result = await service.issue(tx, 'user_123', DisplayIdClass.PATIENT, 'otp')
-    expect(result.value).toMatch(/^CPPAT[0-9A-Z]{8}$/)
-    expect(result.display).toMatch(/^CP-PAT-[0-9A-Z]{7}-[0-9A-Z]$/)
-    expect(isValidCheckDigit(result.value)).toBe(true)
+    const tx = makeTx({ ledgerCreate: async () => ({}) })
+    const createUser = makeCreateUserFn()
+    const user = await service.issueForCreate(
+      tx,
+      DisplayIdClass.PATIENT,
+      'otp',
+      createUser as Parameters<DisplayIdService['issueForCreate']>[3],
+    )
+    expect(user.id).toBe('user_1')
+    // The closure received a well-formed displayId.
+    const passed = (createUser.mock.calls[0]?.[0] ?? '') as string
+    expect(passed).toMatch(/^CPPAT[0-9A-Z]{8}$/)
+    expect(isValidCheckDigit(passed)).toBe(true)
     expect(tx.displayId.create).toHaveBeenCalledTimes(1)
     expect(tx.displayIdCollisionLog.create).not.toHaveBeenCalled()
   })
 
-  it('retries on P2002 unique-violation and logs the collision', async () => {
-    let calls = 0
+  it('retries when createUserFn fails on displayId-column unique-violation', async () => {
+    const tx = makeTx({ ledgerCreate: async () => ({}) })
+    const createUser = makeCreateUserFn({ failFirstOnDisplayId: true })
+    const user = await service.issueForCreate(
+      tx,
+      DisplayIdClass.STAFF,
+      'invite_accept',
+      createUser as Parameters<DisplayIdService['issueForCreate']>[3],
+    )
+    expect(user.id).toBe('user_2')
+    expect(createUser).toHaveBeenCalledTimes(2)
+    expect(tx.displayIdCollisionLog.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries when ledger insert fails on value PK unique-violation', async () => {
+    let ledgerCalls = 0
     const tx = makeTx({
-      createImpl: async () => {
-        calls++
-        if (calls === 1) {
+      ledgerCreate: async () => {
+        ledgerCalls++
+        if (ledgerCalls === 1) {
           const err = new Error('Unique constraint failed') as Error & {
             code: string
+            meta: { target: string[] }
           }
           err.code = 'P2002'
+          err.meta = { target: ['value'] }
           throw err
         }
         return {}
       },
     })
-    const result = await service.issue(tx, 'user_456', DisplayIdClass.STAFF, 'invite_accept')
-    expect(result.value).toMatch(/^CPSTF/)
+    const createUser = makeCreateUserFn()
+    const user = await service.issueForCreate(
+      tx,
+      DisplayIdClass.PATIENT,
+      'otp',
+      createUser as Parameters<DisplayIdService['issueForCreate']>[3],
+    )
+    expect(user).toBeDefined()
     expect(tx.displayId.create).toHaveBeenCalledTimes(2)
-    expect(tx.displayIdCollisionLog.create).toHaveBeenCalledTimes(1)
   })
 
-  it('throws ConflictException after 3 consecutive collisions', async () => {
-    const tx = makeTx({
-      createImpl: async () => {
-        const err = new Error('Unique constraint failed') as Error & {
-          code: string
-        }
-        err.code = 'P2002'
-        throw err
-      },
+  it('throws ConflictException after MAX_ATTEMPTS displayId collisions', async () => {
+    const tx = makeTx({ ledgerCreate: async () => ({}) })
+    let calls = 0
+    const createUser = jest.fn(async (_displayId: string) => {
+      calls++
+      const err = new Error('Unique constraint failed') as Error & {
+        code: string
+        meta: { target: string[] }
+      }
+      err.code = 'P2002'
+      err.meta = { target: ['displayId'] }
+      throw err
     })
     await expect(
-      service.issue(tx, 'user_789', DisplayIdClass.PATIENT, 'backfill'),
+      service.issueForCreate(
+        tx,
+        DisplayIdClass.PATIENT,
+        'backfill',
+        createUser as Parameters<DisplayIdService['issueForCreate']>[3],
+      ),
     ).rejects.toBeInstanceOf(ConflictException)
-    expect(tx.displayId.create).toHaveBeenCalledTimes(3)
+    expect(createUser).toHaveBeenCalledTimes(3)
+    expect(calls).toBe(3)
+  })
+
+  it('propagates non-displayId unique violations immediately (e.g. duplicate email)', async () => {
+    const tx = makeTx({ ledgerCreate: async () => ({}) })
+    const createUser = makeCreateUserFn({ failWithEmailDup: true })
+    await expect(
+      service.issueForCreate(
+        tx,
+        DisplayIdClass.PATIENT,
+        'otp',
+        createUser as Parameters<DisplayIdService['issueForCreate']>[3],
+      ),
+    ).rejects.toThrow('Unique constraint failed')
+    // Did NOT retry (email collision isn't a displayId problem).
+    expect(createUser).toHaveBeenCalledTimes(1)
   })
 
   it('propagates non-P2002 errors immediately', async () => {
-    const tx = makeTx({
-      createImpl: async () => {
-        throw new Error('connection lost')
-      },
+    const tx = makeTx({ ledgerCreate: async () => ({}) })
+    const createUser = jest.fn(async (_displayId: string) => {
+      throw new Error('connection lost')
     })
     await expect(
-      service.issue(tx, 'user_x', DisplayIdClass.PATIENT, 'otp'),
+      service.issueForCreate(
+        tx,
+        DisplayIdClass.PATIENT,
+        'otp',
+        createUser as Parameters<DisplayIdService['issueForCreate']>[3],
+      ),
     ).rejects.toThrow('connection lost')
-    expect(tx.displayId.create).toHaveBeenCalledTimes(1)
+    expect(createUser).toHaveBeenCalledTimes(1)
   })
 
   it('emits the correct prefix for each class', async () => {
-    const tx = makeTx({ createImpl: async () => ({}) })
-    const p = await service.issue(tx, 'p1', DisplayIdClass.PATIENT, 'otp')
-    const s = await service.issue(tx, 's1', DisplayIdClass.STAFF, 'invite_accept')
-    expect(p.value.slice(0, 5)).toBe('CPPAT')
-    expect(s.value.slice(0, 5)).toBe('CPSTF')
+    const tx = makeTx({ ledgerCreate: async () => ({}) })
+    const captured: string[] = []
+    const createUser = jest.fn(async (displayId: string) => {
+      captured.push(displayId)
+      return { id: `u_${captured.length}` }
+    })
+    await service.issueForCreate(
+      tx,
+      DisplayIdClass.PATIENT,
+      'otp',
+      createUser as Parameters<DisplayIdService['issueForCreate']>[3],
+    )
+    await service.issueForCreate(
+      tx,
+      DisplayIdClass.STAFF,
+      'invite_accept',
+      createUser as Parameters<DisplayIdService['issueForCreate']>[3],
+    )
+    expect(captured[0]?.slice(0, 5)).toBe('CPPAT')
+    expect(captured[1]?.slice(0, 5)).toBe('CPSTF')
   })
 })

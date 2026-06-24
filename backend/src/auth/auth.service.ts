@@ -18,6 +18,7 @@ import {
 } from '../email/email-templates.js'
 import {
   AccountStatus,
+  DisplayIdClass,
   OnboardingStatus,
   UserRole,
 } from '../generated/prisma/enums.js'
@@ -2504,32 +2505,30 @@ export class AuthService {
       }
     }
 
-    // Wrap user creation + DisplayId issuance in one transaction so we
-    // never leak an orphan User without a permanent identifier.
-    // See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
-    const user = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.user.create({
-        data: {
-          email: email ?? null,
-          name: name ?? null,
-          isVerified: emailVerified,
-          roles: [UserRole.PATIENT],
-          accounts: {
-            create: { provider, providerId, email },
-          },
-        },
-      })
-      const { value } = await this.displayIdService.issue(
+    // Pre-generate the permanent DisplayId and include it in the User
+    // INSERT — Postgres checks User.displayId's NOT NULL constraint at
+    // INSERT-statement-end. The service handles collision retry around
+    // the whole step. See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+    const user = await this.prisma.$transaction((tx) =>
+      this.displayIdService.issueForCreate(
         tx,
-        created.id,
-        DisplayIdService.classFromRoles(created.roles),
+        DisplayIdClass.PATIENT,
         'google_oauth',
-      )
-      return tx.user.update({
-        where: { id: created.id },
-        data: { displayId: value },
-      })
-    })
+        (displayId) =>
+          tx.user.create({
+            data: {
+              email: email ?? null,
+              name: name ?? null,
+              isVerified: emailVerified,
+              roles: [UserRole.PATIENT],
+              displayId,
+              accounts: {
+                create: { provider, providerId, email },
+              },
+            },
+          }),
+      ),
+    )
     // First-touch welcome email for the just-created social user.
     this.dispatchWelcomeEmail(user)
     return user
@@ -2728,27 +2727,24 @@ export class AuthService {
     })
 
     if (!user) {
-      // Issue the permanent DisplayId in the same transaction as the user
-      // create — see docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
-      user = await this.prisma.$transaction(async (tx) => {
-        const created = await tx.user.create({
-          data: {
-            email: normalizedEmail,
-            isVerified: true,
-            roles: [UserRole.PATIENT],
-          },
-        })
-        const { value } = await this.displayIdService.issue(
+      // Pre-generate the permanent DisplayId and include it in the User
+      // INSERT — see docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+      user = await this.prisma.$transaction((tx) =>
+        this.displayIdService.issueForCreate(
           tx,
-          created.id,
-          DisplayIdService.classFromRoles(created.roles),
+          DisplayIdClass.PATIENT,
           'otp',
-        )
-        return tx.user.update({
-          where: { id: created.id },
-          data: { displayId: value },
-        })
-      })
+          (displayId) =>
+            tx.user.create({
+              data: {
+                email: normalizedEmail,
+                isVerified: true,
+                roles: [UserRole.PATIENT],
+                displayId,
+              },
+            }),
+        ),
+      )
       // First-touch welcome email — only fires on this new-user branch.
       this.dispatchWelcomeEmail(user)
     } else if (!user.isVerified) {
@@ -3217,27 +3213,24 @@ export class AuthService {
     })
 
     if (!user) {
-      // Same DisplayId issuance pattern as OTP path — see
+      // Same pre-generate pattern as OTP path — see
       // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
-      user = await this.prisma.$transaction(async (tx) => {
-        const created = await tx.user.create({
-          data: {
-            email: record.email,
-            isVerified: true,
-            roles: [UserRole.PATIENT],
-          },
-        })
-        const { value } = await this.displayIdService.issue(
+      user = await this.prisma.$transaction((tx) =>
+        this.displayIdService.issueForCreate(
           tx,
-          created.id,
-          DisplayIdService.classFromRoles(created.roles),
+          DisplayIdClass.PATIENT,
           'magic_link',
-        )
-        return tx.user.update({
-          where: { id: created.id },
-          data: { displayId: value },
-        })
-      })
+          (displayId) =>
+            tx.user.create({
+              data: {
+                email: record.email,
+                isVerified: true,
+                roles: [UserRole.PATIENT],
+                displayId,
+              },
+            }),
+        ),
+      )
       // First-touch welcome email — only fires on this new-user branch.
       this.dispatchWelcomeEmail(user)
     } else if (!user.isVerified) {
@@ -3485,28 +3478,28 @@ export class AuthService {
           },
         })
       } else {
-        const created = await tx.user.create({
-          data: {
-            email: fresh.email,
-            name: fresh.name,
-            isVerified: true,
-            roles: [fresh.role],
-            onboardingStatus: OnboardingStatus.COMPLETED,
-          },
-        })
-        // Issue DisplayId on the same transaction. Class derives from the
-        // invited role: PATIENT invites → PAT prefix; staff invites → STF.
-        // See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
-        const { value } = await this.displayIdService.issue(
+        // Pre-generate DisplayId so the User INSERT can satisfy NOT NULL.
+        // Class derives from the invited role: PATIENT invites → PAT
+        // prefix; staff invites → STF. See
+        // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+        userRow = await this.displayIdService.issueForCreate(
           tx,
-          created.id,
-          DisplayIdService.classFromRoles(created.roles),
+          fresh.role === UserRole.PATIENT
+            ? DisplayIdClass.PATIENT
+            : DisplayIdClass.STAFF,
           'invite_accept',
+          (displayId) =>
+            tx.user.create({
+              data: {
+                email: fresh.email,
+                name: fresh.name,
+                isVerified: true,
+                roles: [fresh.role],
+                onboardingStatus: OnboardingStatus.COMPLETED,
+                displayId,
+              },
+            }),
         )
-        userRow = await tx.user.update({
-          where: { id: created.id },
-          data: { displayId: value },
-        })
         userWasCreated = true
       }
 

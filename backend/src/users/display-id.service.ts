@@ -44,20 +44,30 @@ export class DisplayIdService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Issues a new display identifier for `userId` inside `tx`. The User row
-   * must already exist (FK to User.id is required). After this returns, the
-   * caller MUST also write `value` back to User.displayId in the same
-   * transaction — the column is the denormalized fast-path cache.
+   * Creates a User row with a pre-generated permanent DisplayId in one
+   * transaction. The caller provides a `createUserFn` closure that runs
+   * `tx.user.create({ data: { ..., displayId } })` with the value this
+   * service supplies.
    *
-   * Throws on >MAX_ALLOCATION_ATTEMPTS collisions (RNG broken or namespace
-   * exhausted — both need a human).
+   * This pattern is required because `User.displayId` is NOT NULL —
+   * Postgres checks NOT NULL at INSERT-statement-end (not COMMIT), so the
+   * row must include `displayId` at the moment of insert. Generating
+   * post-insert and updating would fail the constraint.
+   *
+   * Collision handling: if the User insert (or the subsequent ledger
+   * insert) fails on a displayId unique constraint, the whole step
+   * retries up to MAX_ALLOCATION_ATTEMPTS with a fresh value.
+   * Non-collision errors (e.g. duplicate email) propagate immediately.
+   *
+   * Throws ConflictException on collision exhaustion (RNG broken or
+   * namespace exhausted — both need a human).
    */
-  async issue(
+  async issueForCreate<T extends { id: string }>(
     tx: Prisma.TransactionClient,
-    userId: string,
     cls: DisplayIdClass,
     via: IssuedVia,
-  ): Promise<{ value: string; display: string }> {
+    createUserFn: (displayIdValue: string) => Promise<T>,
+  ): Promise<T> {
     let attempts = 0
     const collidedAttempts: string[] = []
 
@@ -67,18 +77,22 @@ export class DisplayIdService {
       const display = formatForDisplay(value)
 
       try {
+        // User insert MUST include displayId in `data` — the caller's
+        // closure is responsible for that.
+        const user = await createUserFn(value)
+        // Ledger row, in the same transaction. If THIS fails on the
+        // value-PK collision the outer catch retries; if it fails for
+        // another reason it propagates.
         await tx.displayId.create({
           data: {
             value,
             display,
             class: cls,
-            userId,
+            userId: user.id,
             issuedVia: via,
           },
         })
-
         if (collidedAttempts.length > 0) {
-          // Log the eventual win so ops can see the namespace pressure.
           await tx.displayIdCollisionLog.create({
             data: {
               attemptedValue: collidedAttempts[0]!,
@@ -88,10 +102,9 @@ export class DisplayIdService {
             },
           })
         }
-
-        return { value, display }
+        return user
       } catch (err: unknown) {
-        if (isUniqueViolation(err)) {
+        if (isDisplayIdCollision(err)) {
           collidedAttempts.push(value)
           this.logger.warn(
             `Display ID collision on attempt ${attempts}/${MAX_ALLOCATION_ATTEMPTS} for ${cls}: ${value}`,
@@ -287,11 +300,32 @@ function generateCanonical(cls: DisplayIdClass): string {
   return `${BRAND}${CLASS_PREFIX[cls]}${body}${check}`
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as { code: unknown }).code === 'P2002'
-  )
+/**
+ * True iff the error is a Prisma P2002 unique-violation specifically on
+ * one of the displayId-bearing columns. Lets the retry loop distinguish
+ * "regenerate and try again" (collision on value/display/User.displayId)
+ * from "give up immediately" (e.g. duplicate User.email).
+ */
+function isDisplayIdCollision(err: unknown): boolean {
+  if (
+    typeof err !== 'object' ||
+    err === null ||
+    !('code' in err) ||
+    (err as { code: unknown }).code !== 'P2002'
+  ) {
+    return false
+  }
+  const meta = (err as { meta?: { target?: unknown } }).meta
+  const target = meta?.target
+  const isMatch = (s: string): boolean =>
+    s === 'displayId' || s === 'value' || s === 'display'
+  if (Array.isArray(target)) {
+    return target.some((t) => typeof t === 'string' && isMatch(t))
+  }
+  if (typeof target === 'string') {
+    return isMatch(target)
+  }
+  // No meta.target — conservatively assume it's a displayId collision.
+  // Worse case: a few wasted retries. Better than masking a real error.
+  return true
 }

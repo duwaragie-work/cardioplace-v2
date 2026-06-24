@@ -46,54 +46,60 @@ function formatForDisplay(canonical: string): string {
   return `${canonical.slice(0, 2)}-${canonical.slice(2, 5)}-${canonical.slice(5, 12)}-${canonical.slice(12)}`
 }
 
+/**
+ * Idempotent: returns the existing displayId for the given email if any,
+ * otherwise generates a fresh value (without writing to DB). The caller
+ * passes the returned value into their `prisma.user.upsert({ create })`
+ * clause; the ledger row is written by `seedDisplayIds()` afterward.
+ *
+ * Required because User.displayId is NOT NULL — every upsert that may
+ * take the create branch must supply the column.
+ */
+export async function getOrGenerateDisplayIdForEmail(
+  prisma: PrismaClient,
+  email: string,
+  cls: DisplayIdClass,
+): Promise<string> {
+  const existing = await prisma.user.findUnique({
+    where: { email },
+    select: { displayId: true },
+  })
+  if (existing?.displayId) return existing.displayId
+  return generateCanonical(cls)
+}
+
+/** Post-step: writes a DisplayId ledger row for every User who has a
+ *  displayId set but no matching ledger entry. Runs after every seed
+ *  upsert because the runtime auth path always pairs the two; the seed
+ *  takes a shortcut and lets this catch-up step handle it.
+ */
 export async function seedDisplayIds(prisma: PrismaClient): Promise<void> {
   const candidates = await prisma.user.findMany({
-    where: { displayId: null },
-    select: { id: true, roles: true },
+    where: {
+      displayId: { not: null },
+      displayIdLedger: null,
+    },
+    select: { id: true, roles: true, displayId: true },
     orderBy: { createdAt: 'asc' },
   })
   if (candidates.length === 0) return
 
-  console.log(`  ↳ assigning displayId to ${candidates.length} seeded user(s)…`)
-  let issued = 0
+  console.log(`  ↳ writing displayId ledger rows for ${candidates.length} seeded user(s)…`)
+  let written = 0
   for (const user of candidates) {
     const cls = user.roles.includes('PATIENT')
       ? DisplayIdClass.PATIENT
       : DisplayIdClass.STAFF
-    // 5 retries — same defensive cap as the runtime service.
-    for (let attempt = 1; attempt <= 5; attempt++) {
-      const value = generateCanonical(cls)
-      try {
-        await prisma.$transaction(async (tx) => {
-          await tx.displayId.create({
-            data: {
-              value,
-              display: formatForDisplay(value),
-              class: cls,
-              userId: user.id,
-              issuedVia: 'backfill',
-            },
-          })
-          await tx.user.update({
-            where: { id: user.id },
-            data: { displayId: value },
-          })
-        })
-        issued++
-        break
-      } catch (err: unknown) {
-        if (
-          typeof err === 'object' &&
-          err !== null &&
-          'code' in err &&
-          (err as { code: unknown }).code === 'P2002' &&
-          attempt < 5
-        ) {
-          continue
-        }
-        throw err
-      }
-    }
+    await prisma.displayId.create({
+      data: {
+        value: user.displayId!,
+        display: formatForDisplay(user.displayId!),
+        class: cls,
+        userId: user.id,
+        issuedVia: 'backfill',
+      },
+    })
+    written++
   }
-  console.log(`  ↳ ${issued}/${candidates.length} displayIds issued.`)
+  console.log(`  ↳ ${written}/${candidates.length} ledger rows written.`)
 }
