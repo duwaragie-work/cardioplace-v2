@@ -33,6 +33,10 @@ export interface MyProfile {
   mfaEnabled: boolean
   /** Whether the user's role is under the enforced-MFA policy. */
   mfaRequired: boolean
+  /** Total recovery codes issued (0 when not enrolled). */
+  recoveryCodesTotal: number
+  /** Recovery codes not yet used (0 when not enrolled). */
+  recoveryCodesRemaining: number
   activePractice: { id: string; name: string } | null
   availablePractices: Array<{ id: string; name: string }>
 }
@@ -80,6 +84,8 @@ export async function getMyProfile(): Promise<MyProfile> {
     timezone: (data.timezone as string | null) ?? null,
     mfaEnabled: Boolean(data.mfaEnabled),
     mfaRequired: Boolean(data.mfaRequired),
+    recoveryCodesTotal: Number(data.recoveryCodesTotal ?? 0),
+    recoveryCodesRemaining: Number(data.recoveryCodesRemaining ?? 0),
     activePractice:
       (data.activePractice as { id: string; name: string } | null) ?? null,
     availablePractices: Array.isArray(data.availablePractices)

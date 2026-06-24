@@ -21,6 +21,7 @@ import {
   Pencil,
   Check,
   X,
+  Mail,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -208,14 +209,97 @@ export default function SettingsPage() {
   return (
     <main id="main" className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
       <div className="max-w-2xl mx-auto px-4 md:px-6 py-6 md:py-8">
-        <h1 className="text-xl font-bold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
-          Settings
-        </h1>
-        <p className="text-sm mb-6" style={{ color: 'var(--brand-text-muted)' }}>
-          Manage how you sign in to Cardioplace.
+        {/* Page header — gradient icon + title, matching the admin app */}
+        <div className="flex items-center gap-3 min-w-0 mb-6">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0"
+            style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
+            aria-hidden
+          >
+            <ShieldCheck className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
+              Settings
+            </h1>
+            <p className="text-[12px] truncate" style={{ color: 'var(--brand-text-muted)' }}>
+              Manage how you sign in and keep your account secure.
+            </p>
+          </div>
+        </div>
+
+        {/* Security section label */}
+        <p
+          className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
+          style={{ color: 'var(--brand-text-muted)' }}
+        >
+          Sign-in &amp; security
         </p>
 
-        {/* Biometric card */}
+        {/* Factor 1 — Email one-time code (always on, read-only) */}
+        <section
+          className="rounded-2xl bg-white overflow-hidden mb-4"
+          style={{ border: '1px solid var(--brand-border)' }}
+        >
+          <div className="p-5 flex items-start gap-4">
+            <span
+              className="shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center text-white"
+              style={{
+                background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+                boxShadow: '0 4px 16px rgba(123,0,224,0.28)',
+              }}
+              aria-hidden
+            >
+              <Mail className="w-6 h-6" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                  Email one-time code
+                </h2>
+                <span
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide"
+                  style={{
+                    backgroundColor: 'var(--brand-success-green-light, #DCFCE7)',
+                    color: 'var(--brand-success-green, #166534)',
+                  }}
+                >
+                  <Check className="w-3 h-3" />
+                  Always on
+                </span>
+              </div>
+              <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
+                A 6-digit code (or magic link) is sent to your email each time you sign in.
+              </p>
+            </div>
+          </div>
+          <div className="px-5 pb-5">
+            <div
+              className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5"
+              style={{ border: '1px solid var(--brand-border)' }}
+            >
+              <div className="min-w-0">
+                <p
+                  className="text-[11px] font-semibold uppercase tracking-wide"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                >
+                  Codes are sent to
+                </p>
+                <p
+                  className="mt-0.5 text-[13.5px] font-medium truncate"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {user?.email || '—'}
+                </p>
+              </div>
+              <span className="shrink-0 text-[11.5px]" style={{ color: 'var(--brand-text-muted)' }}>
+                Can&apos;t be changed here
+              </span>
+            </div>
+          </div>
+        </section>
+
+        {/* Factor 2 — Biometric (Face ID / fingerprint) */}
         <section
           className="rounded-2xl bg-white overflow-hidden"
           style={{ border: '1px solid var(--brand-border)' }}
@@ -232,9 +316,33 @@ export default function SettingsPage() {
               <Fingerprint className="w-6 h-6" />
             </span>
             <div className="min-w-0 flex-1">
-              <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                Face ID / fingerprint
-              </h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                  Face ID / fingerprint
+                </h2>
+                {hasBiometric ? (
+                  <span
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide"
+                    style={{
+                      backgroundColor: 'var(--brand-success-green-light, #DCFCE7)',
+                      color: 'var(--brand-success-green, #166534)',
+                    }}
+                  >
+                    <Check className="w-3 h-3" />
+                    On
+                  </span>
+                ) : (
+                  <span
+                    className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide"
+                    style={{
+                      backgroundColor: 'var(--brand-primary-purple-light)',
+                      color: 'var(--brand-primary-purple)',
+                    }}
+                  >
+                    Recommended
+                  </span>
+                )}
+              </div>
               <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
                 After your email code, confirm with Face ID or your fingerprint.
                 Keep your recovery codes safe — they&apos;re the only way in if you
@@ -267,8 +375,33 @@ export default function SettingsPage() {
           )}
 
           {loading ? (
-            <div className="px-5 py-8 flex justify-center">
-              <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--brand-text-muted)' }} />
+            <div className="px-5 pb-5 space-y-2" aria-hidden>
+              {[0, 1].map((i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-3 rounded-xl px-3 py-3"
+                  style={{ border: '1px solid var(--brand-border)' }}
+                >
+                  <span
+                    className="w-4 h-4 rounded-full animate-pulse shrink-0"
+                    style={{ backgroundColor: 'var(--brand-border)' }}
+                  />
+                  <div className="flex-1 space-y-1.5">
+                    <span
+                      className="block h-3 rounded animate-pulse"
+                      style={{ backgroundColor: 'var(--brand-border)', width: '55%' }}
+                    />
+                    <span
+                      className="block h-2.5 rounded animate-pulse"
+                      style={{ backgroundColor: 'var(--brand-border)', width: '35%' }}
+                    />
+                  </div>
+                </div>
+              ))}
+              <span
+                className="block h-12 rounded-full animate-pulse mt-3"
+                style={{ backgroundColor: 'var(--brand-border)' }}
+              />
             </div>
           ) : (
             <div className="px-5 pb-5">
@@ -490,9 +623,32 @@ export default function SettingsPage() {
                 <KeyRound className="w-6 h-6" />
               </span>
               <div className="min-w-0 flex-1">
-                <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                  Recovery codes
-                </h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                    Recovery codes
+                  </h2>
+                  {(recovery?.remaining ?? 0) <= 3 ? (
+                    <span
+                      className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide"
+                      style={{
+                        backgroundColor: 'var(--brand-warning-amber-light, #FEF3C7)',
+                        color: 'var(--brand-warning-amber, #92400E)',
+                      }}
+                    >
+                      Running low
+                    </span>
+                  ) : (
+                    <span
+                      className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide"
+                      style={{
+                        backgroundColor: 'var(--brand-background, #FAFBFF)',
+                        color: 'var(--brand-text-muted)',
+                      }}
+                    >
+                      Fallback
+                    </span>
+                  )}
+                </div>
                 <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
                   Use one to sign in if you can&apos;t use Face ID / fingerprint.
                   <span className="font-semibold">
