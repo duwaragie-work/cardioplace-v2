@@ -89,14 +89,18 @@ export interface VirtualAuthenticator {
 }
 
 /**
- * Attach a CTAP2 platform virtual authenticator to this page's target with
+ * Attach a CTAP2 virtual authenticator to this page's target with
  * user-verification pre-satisfied, so register/authenticate ceremonies resolve
  * automatically. Bound to the page target — survives navigations/reloads on the
  * same `page`, absent on any other page/context (which is what the recovery-
  * fallback spec relies on to force a ceremony failure).
+ *
+ * Defaults to a platform (`internal`) authenticator — pass `transport: 'usb'`
+ * for a roaming one (used by the cross-platform "add another device" flow).
  */
 export async function addVirtualAuthenticator(
   page: Page,
+  opts: { transport?: 'internal' | 'usb' | 'ble' | 'nfc' } = {},
 ): Promise<VirtualAuthenticator> {
   const client = await page.context().newCDPSession(page)
   await client.send('WebAuthn.enable')
@@ -105,7 +109,7 @@ export async function addVirtualAuthenticator(
     {
       options: {
         protocol: 'ctap2',
-        transport: 'internal',
+        transport: opts.transport ?? 'internal',
         hasResidentKey: true,
         hasUserVerification: true,
         isUserVerified: true,

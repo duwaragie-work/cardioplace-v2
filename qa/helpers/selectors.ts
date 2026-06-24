@@ -685,6 +685,14 @@ export const T = {
     recoveryCodesList: 'recovery-codes-list',
     recoveryCodesAck: 'recovery-codes-ack',
     recoveryCodesContinue: 'recovery-codes-continue',
+
+    // Patient settings — device management + recovery regen. Device rows have
+    // no per-row testid; rename/remove are reached via their aria-labels
+    // ("Rename device" / "Remove device" / "Save name").
+    settingsEnableBiometric: 'settings-enable-biometric',
+    settingsAddAnotherDevice: 'settings-add-another-device',
+    settingsRenameInput: 'settings-rename-input',
+    settingsRegenerateCodes: 'settings-regenerate-codes',
   },
 } as const
 

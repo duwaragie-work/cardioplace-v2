@@ -395,20 +395,31 @@ export class TestControlService {
    * account permanently "MFA required" and break the plain OTP→dashboard auth
    * specs that share these seed accounts.
    *
-   * Clears all three independent MFA tables for the user:
+   * Clears all three independent MFA tables for the user, plus the recent
+   * failed-attempt AuthLog rows:
    *   • TotpCredential      — provider/admin authenticator secret (1:1)
    *   • MfaRecoveryCode     — TOTP backup codes (1:many)
    *   • WebAuthnCredential  — patient biometric / passkeys (1:many)
+   *   • AuthLog(mfa_challenge_failed) — so the 5-fails/15-min lockout counter
+   *     resets too; otherwise a lockout spec would leave the account locked for
+   *     the other MFA specs that share it.
    *
    * Test-infra only — there is no production path that bulk-wipes MFA.
    */
   async resetUserMfa(userId: string): Promise<{ rowsDeleted: number }> {
-    const [totp, recovery, webauthn] = await this.prisma.$transaction([
-      this.prisma.totpCredential.deleteMany({ where: { userId } }),
-      this.prisma.mfaRecoveryCode.deleteMany({ where: { userId } }),
-      this.prisma.webAuthnCredential.deleteMany({ where: { userId } }),
-    ])
-    return { rowsDeleted: totp.count + recovery.count + webauthn.count }
+    const [totp, recovery, webauthn, failedLogs] =
+      await this.prisma.$transaction([
+        this.prisma.totpCredential.deleteMany({ where: { userId } }),
+        this.prisma.mfaRecoveryCode.deleteMany({ where: { userId } }),
+        this.prisma.webAuthnCredential.deleteMany({ where: { userId } }),
+        this.prisma.authLog.deleteMany({
+          where: { userId, event: 'mfa_challenge_failed' },
+        }),
+      ])
+    return {
+      rowsDeleted:
+        totp.count + recovery.count + webauthn.count + failedLogs.count,
+    }
   }
 
   /**
