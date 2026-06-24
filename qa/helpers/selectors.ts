@@ -639,6 +639,53 @@ export const T = {
   activate: {
     confirm: 'activate-confirm',
   },
+
+  // ─── MFA (phase/27 — Manisha 2026-06-12 Access Control §6) ──────────────
+  //
+  // Admin = TOTP (authenticator app) + recovery codes; patient = WebAuthn
+  // (Face ID / fingerprint) + recovery codes. Testids reconciled against the
+  // real components:
+  //   admin/src/app/sign-in/mfa-enroll/page.tsx
+  //   admin/src/app/sign-in/mfa-challenge/page.tsx
+  //   admin/src/components/settings/SettingsScreen.tsx
+  //   admin/src/components/profile/RecoveryCodesModal.tsx
+  //   frontend/src/app/sign-in/biometric/page.tsx
+  //   frontend/src/components/cardio/RecoveryCodesPanel.tsx
+  mfa: {
+    // Admin TOTP enrollment wizard (/sign-in/mfa-enroll)
+    adminEnrollBegin: 'admin-mfa-begin',
+    adminEnrollCode: 'admin-mfa-enroll-code',
+    adminEnrollVerify: 'admin-mfa-enroll-verify',
+    adminEnrollRecoveryCodes: 'admin-mfa-recovery-codes',
+    adminEnrollSavedAck: 'admin-mfa-saved-ack',
+    adminEnrollFinish: 'admin-mfa-finish',
+
+    // Admin TOTP sign-in challenge (/sign-in/mfa-challenge)
+    adminChallengeCode: 'admin-mfa-code',
+    adminChallengeVerify: 'admin-mfa-verify',
+    adminChallengeRecovery: 'admin-mfa-recovery',
+    adminChallengeRecoveryVerify: 'admin-mfa-recovery-verify',
+
+    // Admin settings (/settings) — security cards + regenerate modal
+    adminSettingsMfaLink: 'admin-settings-mfa-link',
+    adminSettingsRecoveryCodes: 'admin-settings-recovery-codes',
+    adminRecoveryModal: 'admin-recovery-codes-modal',
+    adminRecoveryGenerate: 'admin-recovery-codes-generate',
+    adminRecoveryList: 'admin-recovery-codes-list',
+    adminRecoveryDone: 'admin-recovery-codes-done',
+
+    // Patient WebAuthn biometric challenge (/sign-in/biometric)
+    biometricPromptBtn: 'biometric-prompt-btn',
+    biometricUseRecoveryBtn: 'use-recovery-code-btn',
+    biometricRecoveryInput: 'recovery-code-input',
+    biometricRecoverySubmit: 'recovery-code-submit',
+    biometricSetupHere: 'biometric-setup-here',
+
+    // Patient recovery-codes panel (shown on first biometric setup / regen)
+    recoveryCodesList: 'recovery-codes-list',
+    recoveryCodesAck: 'recovery-codes-ack',
+    recoveryCodesContinue: 'recovery-codes-continue',
+  },
 } as const
 
 export type TestId = string

@@ -389,6 +389,29 @@ export class TestControlService {
   }
 
   /**
+   * Wipe a user's entire MFA footprint so the E2E suite starts each MFA spec
+   * from a clean "never enrolled" baseline — without this, enrolling TOTP on a
+   * seed admin (or registering a passkey on a seed patient) would leave the
+   * account permanently "MFA required" and break the plain OTP→dashboard auth
+   * specs that share these seed accounts.
+   *
+   * Clears all three independent MFA tables for the user:
+   *   • TotpCredential      — provider/admin authenticator secret (1:1)
+   *   • MfaRecoveryCode     — TOTP backup codes (1:many)
+   *   • WebAuthnCredential  — patient biometric / passkeys (1:many)
+   *
+   * Test-infra only — there is no production path that bulk-wipes MFA.
+   */
+  async resetUserMfa(userId: string): Promise<{ rowsDeleted: number }> {
+    const [totp, recovery, webauthn] = await this.prisma.$transaction([
+      this.prisma.totpCredential.deleteMany({ where: { userId } }),
+      this.prisma.mfaRecoveryCode.deleteMany({ where: { userId } }),
+      this.prisma.webAuthnCredential.deleteMany({ where: { userId } }),
+    ])
+    return { rowsDeleted: totp.count + recovery.count + webauthn.count }
+  }
+
+  /**
    * F13 — set/clear PatientProfile.aceContraindicatedAt so specs can exercise
    * the ACE/ARB re-add gate without walking the full B4 angioedema-resolution
    * flow. Test-infra only.
