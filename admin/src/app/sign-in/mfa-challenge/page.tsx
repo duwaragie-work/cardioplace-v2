@@ -280,6 +280,14 @@ export default function MfaChallengePage() {
               <KeyRound className="w-3.5 h-3.5" />
               Back to authenticator code
             </button>
+
+            <p className="mt-6 text-center text-xs text-gray-400">
+              Lost your authenticator and your recovery codes too?{' '}
+              <a href="mailto:support@cardioplace.ai" className="text-[#7B00E0] hover:underline">
+                Contact an administrator
+              </a>{' '}
+              to reset your two-factor setup.
+            </p>
           </>
         )}
 

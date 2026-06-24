@@ -121,6 +121,79 @@ flow, and why the **recovery code** is the universal fallback.
 
 ---
 
+## Data model (database)
+
+Biometric added **one** new table — `WebAuthnCredential` — and **reuses** the
+existing `MfaRecoveryCode` table (built for provider TOTP) for the recovery
+codes. No challenge table: the challenge rides in a short-lived signed JWT.
+
+```
+                         ┌──────────────────────┐
+                         │         User         │
+                         └──────────┬───────────┘
+              1 ── many              │              1 ── many
+        ┌──────────────────────────┘ └──────────────────────────┐
+        ▼                                                        ▼
+┌────────────────────────┐                          ┌────────────────────────┐
+│   WebAuthnCredential    │  (new — one per device)  │     MfaRecoveryCode     │ (reused)
+│  up to 3 per patient    │                          │   ~10 codes per patient │
+└────────────────────────┘                          └────────────────────────┘
+        onDelete: Cascade                                  onDelete: Cascade
+```
+
+### `WebAuthnCredential` (new)
+
+`prisma/schema/webauthn_credential.prisma` · migration
+`20260622120000_add_webauthn_credentials`.
+
+```prisma
+model WebAuthnCredential {
+  id           String    @id @default(ulid())
+  userId       String
+  credentialId String    @unique   // authenticator's public id (lookup key)
+  publicKey    String              // COSE public key, base64url (verifies signatures)
+  counter      Int       @default(0)   // signature counter (0 for synced passkeys)
+  transports   String[]            // e.g. ["internal"], ["hybrid"]
+  deviceType   String?             // "singleDevice" | "multiDevice"
+  backedUp     Boolean   @default(false)  // synced to iCloud/Google?
+  deviceName   String?             // friendly label (we set / patient renames)
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+```
+
+- **Relationship:** `User` **1 — ∞** `WebAuthnCredential` (one patient → many
+  devices, capped at 3 in code). FK `userId`, **`onDelete: Cascade`**.
+- Every field **except `deviceName`** comes from the device's attestation;
+  `credentialId` is unique so login can look the passkey up by it.
+
+### `MfaRecoveryCode` (reused, not new)
+
+Shared with the provider TOTP path. `User` **1 — ∞** `MfaRecoveryCode`
+(~10 rows per patient), FK `userId`, **`onDelete: Cascade`**.
+
+```prisma
+model MfaRecoveryCode {
+  id        String    @id @default(ulid())
+  userId    String
+  codeHash  String              // bcrypt hash — plaintext NEVER stored
+  usedAt    DateTime?           // set when a code is consumed (one-time)
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+```
+
+- A patient is never also a provider, so the rows never collide.
+- **Deleting a device does NOT delete recovery codes** (they're account-wide).
+  Codes are only wiped on **regenerate** or **admin reset**.
+
+---
+
 ## 2. Scenario — Enable biometric (registration)
 
 A signed-in patient turns on Face ID / fingerprint from **Settings**. Nothing
@@ -504,3 +577,97 @@ codes again).
   `webauthn_auth_succeeded/failed`, `webauthn_recovery_code_used/failed`,
   `webauthn_recovery_codes_regenerated`, `webauthn_credential_renamed`,
   `webauthn_credential_removed`, `webauthn_reset_by_admin`.
+
+---
+
+## Steps to remember (reusable for any project)
+
+A condensed, framework-agnostic recipe for adding passkey / WebAuthn auth. The
+names in parentheses are our implementation; the **steps** are universal.
+
+### 0. Setup (once)
+
+1. Pick a library: server (`@simplewebauthn/server`) + browser
+   (`@simplewebauthn/browser`).
+2. Configure the **Relying Party**: `rpID` (registrable domain, no scheme/port),
+   `rpName` (shown in the prompt), allowed `origin`(s). Must be **HTTPS** in prod
+   (`localhost` is exempt for dev).
+3. Add a **credentials table** (1 user → many): `credentialId` (unique),
+   `publicKey`, `counter`, `transports`, `deviceType`, `backedUp`, `deviceName`.
+4. Decide the **policy**: is biometric a *second factor* (our choice — after
+   OTP) or *passwordless first factor*? And the **fallback** (we use recovery
+   codes; never an email/OTP bypass, or biometric stops being a real factor).
+
+### 1. Register a passkey (enrollment)
+
+> Always **two round-trips**: `start` (server → challenge) and `verify`
+> (server checks). Keep the challenge **stateless** in a short-lived signed JWT.
+
+1. **(Client) Pre-check support** before showing the button:
+   `browserSupportsWebAuthn()` **and** `platformAuthenticatorIsAvailable()`.
+2. **(Client → Server) `register/start`**: server generates a random
+   **challenge** + `generateRegistrationOptions(...)`; returns options + a signed
+   token carrying the challenge. Set `authenticatorAttachment: 'platform'` for
+   "this device", or leave it **unset** to offer the cross-device QR.
+3. **(Client) `startRegistration({ optionsJSON })`** → OS prompt → device makes
+   the **key pair**, returns the **attestation**.
+4. **(Client → Server) `register/verify`**: `verifyRegistrationResponse(...)`
+   against the challenge/origin/RP → on success **store the public key + meta**.
+   Never store the private key (it never leaves the device).
+5. First passkey → also **mint recovery codes** (store **hashed**, show plaintext
+   once).
+
+### 2. Authenticate (login second factor)
+
+> Login is the **mirror** of registration: registration *stored* the public key;
+> login *uses* it to verify a fresh signature.
+
+1. **(First factor)** password / OTP / magic-link succeeds.
+2. **(Server gate)** if the user has ≥1 credential → return a "challenge
+   required" marker (no tokens yet) carrying a signed challenge token.
+3. **(Client → Server) `authenticate/options`**: build
+   `generateAuthenticationOptions(...)` with `allowCredentials` = the user's
+   credentialIds (so the browser only prompts where a passkey exists).
+4. **(Client) `startAuthentication({ optionsJSON })`** → OS prompt → device
+   **signs the challenge** → returns the **assertion**.
+5. **(Client → Server) `authenticate/verify`**: look up the credential by
+   `assertion.id`, `verifyAuthenticationResponse(...)` against the stored public
+   key + challenge → **update the `counter`** → issue the real session
+   (cookies/tokens).
+
+### 3. Fallback (can't use the device)
+
+1. Offer the **recovery code** path (the only non-bypass fallback).
+2. Verify the entered code against the stored **hashes**, **consume only that
+   one** (don't auto-regenerate), report how many remain.
+3. Optionally offer "set up biometric on THIS device now" right after, so the
+   new device is enrolled.
+
+### 4. Manage (settings)
+
+- **List** devices; **rename** (cosmetic only); **remove** (scoped to the user).
+- **Regenerate** recovery codes (replace all; show once).
+- Cap the number of devices; **hide "set up this device"** once the current one
+  is registered (remember its `credentialId` locally — WebAuthn won't tell you
+  which list row is "this device").
+
+### 5. Recovery / lockout
+
+- Lost device **and** codes → **admin reset** (wipe credentials + codes, audit,
+  notify) → user re-enrolls.
+
+### Gotchas to never forget
+
+- **HTTPS or `localhost`** only — WebAuthn refuses other origins.
+- **`rpID` must match the host** (or be a parent domain) — mismatches fail silently-ish.
+- **Synced passkeys (iCloud/Google) keep `counter` at 0** — don't treat 0 as a bug.
+- **Cross-device QR needs Bluetooth** on both — it's a proximity check; desktops
+  often lack it → recovery code is the escape.
+- **The page can't detect "this device is already registered"** — track it
+  yourself by `credentialId` (on register **and** login).
+- **The browser/OS picks the method** (Face ID / fingerprint / PIN) — you only
+  request `platform` + `userVerification: 'required'`.
+- **Never store the private key or biometric** — only public keys + signatures
+  cross the wire; recovery codes are **hashed**.
+- **Keep a fallback that isn't device-bound** (recovery codes / authenticator
+  app) or a single device-bound passkey = guaranteed lockout.
