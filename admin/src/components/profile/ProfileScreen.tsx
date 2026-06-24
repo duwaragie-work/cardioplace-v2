@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Pencil,
   ShieldCheck,
-  Loader2,
+  UserRound,
   AlertCircle,
 } from 'lucide-react';
 import { RoleBadge, StatusBadge } from '@/components/user-management/badges';
@@ -82,6 +82,56 @@ function InfoRow({
   );
 }
 
+/** Loading placeholder shown instead of a spinner. */
+function ProfileSkeleton() {
+  return (
+    <div className="space-y-5" aria-hidden>
+      {/* Hero */}
+      <div
+        className="rounded-2xl bg-white p-5 flex items-center gap-4"
+        style={{ border: '1px solid var(--brand-border)' }}
+      >
+        <span
+          className="shrink-0 w-16 h-16 rounded-2xl animate-pulse"
+          style={{ backgroundColor: 'var(--brand-border)' }}
+        />
+        <div className="flex-1 space-y-2">
+          <span
+            className="block h-4 rounded animate-pulse"
+            style={{ backgroundColor: 'var(--brand-border)', width: '50%' }}
+          />
+          <span
+            className="block h-3 rounded animate-pulse"
+            style={{ backgroundColor: 'var(--brand-border)', width: '30%' }}
+          />
+        </div>
+      </div>
+      {/* Details */}
+      <div
+        className="rounded-2xl bg-white overflow-hidden"
+        style={{ border: '1px solid var(--brand-border)' }}
+      >
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div
+            key={i}
+            className="flex items-center justify-between px-4 py-3.5"
+            style={{ borderTop: i === 0 ? 'none' : '1px solid var(--brand-border)' }}
+          >
+            <span
+              className="h-3 rounded animate-pulse"
+              style={{ backgroundColor: 'var(--brand-border)', width: '28%' }}
+            />
+            <span
+              className="h-3 rounded animate-pulse"
+              style={{ backgroundColor: 'var(--brand-border)', width: '40%' }}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ProfileScreen() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<MyProfile | null>(null);
@@ -110,50 +160,72 @@ export default function ProfileScreen() {
     setProfile((prev) => (prev ? { ...prev, ...patch } : prev));
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2
-          className="w-5 h-5 animate-spin"
-          style={{ color: 'var(--brand-text-muted)' }}
-        />
+  const header = (
+    <div className="flex items-center gap-3 min-w-0">
+      <div
+        className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0"
+        style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
+        aria-hidden
+      >
+        <UserRound className="w-5 h-5" />
       </div>
-    );
-  }
+      <div className="min-w-0">
+        <h1
+          className="text-xl font-bold truncate"
+          style={{ color: 'var(--brand-text-primary)' }}
+        >
+          My account
+        </h1>
+        <p
+          className="text-[12px] truncate"
+          style={{ color: 'var(--brand-text-muted)' }}
+        >
+          Your profile details, roles, and practice access.
+        </p>
+      </div>
+    </div>
+  );
+
+  const wrap = (inner: React.ReactNode) => (
+    <div className="max-w-[1200px] mx-auto px-4 md:px-8 py-6 space-y-5">
+      {header}
+      {inner}
+    </div>
+  );
+
+  if (loading) return wrap(<ProfileSkeleton />);
 
   if (error || !profile) {
-    return (
-      <div className="max-w-2xl mx-auto px-4 md:px-6 py-10">
-        <div
-          className="flex items-start gap-3 px-4 py-4 rounded-xl"
-          style={{
-            backgroundColor: 'var(--brand-alert-red-light)',
-            color: 'var(--brand-alert-red)',
-          }}
-          role="alert"
-        >
-          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-          <div className="min-w-0">
-            <p className="text-[13px] font-bold">Couldn’t load your profile</p>
-            <p className="text-[12px] mt-0.5">{error}</p>
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="mt-2 text-[12px] font-bold underline cursor-pointer"
-            >
-              Try again
-            </button>
-          </div>
+    return wrap(
+      <div
+        className="flex items-start gap-3 px-4 py-4 rounded-xl"
+        style={{
+          backgroundColor: 'var(--brand-alert-red-light)',
+          color: 'var(--brand-alert-red)',
+        }}
+        role="alert"
+      >
+        <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+        <div className="min-w-0">
+          <p className="text-[13px] font-bold">Couldn’t load your profile</p>
+          <p className="text-[12px] mt-0.5">{error}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-2 text-[12px] font-bold underline cursor-pointer"
+          >
+            Try again
+          </button>
         </div>
-      </div>
+      </div>,
     );
   }
 
   const displayName = profile.name || user?.name || 'Admin user';
 
-  return (
-    <div className="max-w-2xl mx-auto px-4 md:px-6 py-6 md:py-8">
-      {/* Header card — avatar + name + edit action (side-by-side, no banner) */}
+  return wrap(
+    <>
+      {/* Identity card — avatar + name + edit action */}
       <div
         className="rounded-2xl bg-white p-5 flex items-center gap-4"
         style={{ border: '1px solid var(--brand-border)' }}
@@ -169,12 +241,12 @@ export default function ProfileScreen() {
           {initialsFor(profile.name, profile.email)}
         </span>
         <div className="min-w-0 flex-1">
-          <h1
+          <h2
             className="text-[18px] font-bold leading-tight truncate"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {displayName}
-          </h1>
+          </h2>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {profile.roles.length > 0 ? (
               profile.roles.map((r) => <RoleBadge key={r} role={r} />)
@@ -197,8 +269,9 @@ export default function ProfileScreen() {
       </div>
 
       {/* Account details */}
+      <div>
       <p
-        className="mt-6 mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
+        className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
         style={{ color: 'var(--brand-text-muted)' }}
       >
         Account details
@@ -256,12 +329,13 @@ export default function ProfileScreen() {
 
         <InfoRow label="Member since">{formatDate(profile.createdAt)}</InfoRow>
       </div>
+      </div>
 
       {/* Multi-practice memberships (only when 2+) */}
       {profile.availablePractices.length > 1 && (
-        <>
+        <div>
           <p
-            className="mt-6 mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
+            className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
             style={{ color: 'var(--brand-text-muted)' }}
           >
             Practice memberships
@@ -294,7 +368,7 @@ export default function ProfileScreen() {
               </div>
             ))}
           </div>
-        </>
+        </div>
       )}
 
       <EditProfileModal
@@ -303,6 +377,6 @@ export default function ProfileScreen() {
         onClose={() => setEditing(false)}
         onSaved={handleSaved}
       />
-    </div>
+    </>,
   );
 }

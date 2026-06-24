@@ -24,9 +24,11 @@ import { regenerateRecoveryCodes } from '@/lib/services/mfa.service';
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** Fired after a fresh set is generated so the parent can refresh counts. */
+  onGenerated?: () => void;
 }
 
-export default function RecoveryCodesModal({ open, onClose }: Props) {
+export default function RecoveryCodesModal({ open, onClose, onGenerated }: Props) {
   const [phase, setPhase] = useState<'confirm' | 'codes'>('confirm');
   const [codes, setCodes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -61,6 +63,7 @@ export default function RecoveryCodesModal({ open, onClose }: Props) {
       const { recoveryCodes } = await regenerateRecoveryCodes();
       setCodes(recoveryCodes);
       setPhase('codes');
+      onGenerated?.();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Could not generate new codes.',

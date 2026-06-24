@@ -27,7 +27,7 @@ import type {
   AuthenticationResponseJSON,
   RegistrationResponseJSON,
 } from '@simplewebauthn/server'
-import { mfaResetEmailHtml } from '../email/email-templates.js'
+import { mfaResetEmailHtml, biometricResetEmailHtml } from '../email/email-templates.js'
 import type { ProfileDto } from './dto/profile.dto.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -1140,8 +1140,10 @@ export class AuthService {
         create: { userId, secretEncrypted, enrolledAt: now },
         update: { secretEncrypted, enrolledAt: now, mfaResetByAdminAt: null },
       })
-      // Replace any prior unused codes (covers a recovery-forced re-enrollment).
-      await tx.mfaRecoveryCode.deleteMany({ where: { userId, usedAt: null } })
+      // Replace ALL prior codes (used + unused) so a fresh enrollment always
+      // starts at exactly 10 — otherwise old used rows linger and inflate the
+      // total (e.g. "10 of 11 remaining" after a re-enroll).
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId } })
       await tx.mfaRecoveryCode.createMany({
         data: hashes.map((codeHash) => ({ userId, codeHash })),
       })
@@ -1761,7 +1763,7 @@ export class AuthService {
       await this.emailService.sendEmail(
         target.email,
         'Your Cardioplace biometric sign-in was reset',
-        mfaResetEmailHtml(target.name ?? null),
+        biometricResetEmailHtml(target.name ?? null),
       )
     }
     return {
@@ -2949,6 +2951,19 @@ export class AuthService {
     })
     const mfaEnabled = totpCred?.enrolledAt != null
     const mfaRequired = requiresMfa(user.roles)
+    // Recovery-code counts power the Settings "fallback" card (how many are
+    // left vs used). Only queried when enrolled — patients/non-enrolled users
+    // have none, so we skip the round-trip.
+    let recoveryCodesTotal = 0
+    let recoveryCodesRemaining = 0
+    if (mfaEnabled) {
+      const [total, remaining] = await Promise.all([
+        this.prisma.mfaRecoveryCode.count({ where: { userId } }),
+        this.prisma.mfaRecoveryCode.count({ where: { userId, usedAt: null } }),
+      ])
+      recoveryCodesTotal = total
+      recoveryCodesRemaining = remaining
+    }
 
     // Phase/practice-identity rehydrate fix (Manisha 2026-06-12 §1, smoke
     // 2026-06-18) — surface activePracticeId + activePractice + the user's
@@ -2993,6 +3008,8 @@ export class AuthService {
       // MFA status (additive) — drives the profile Security pill.
       mfaEnabled,
       mfaRequired,
+      recoveryCodesTotal,
+      recoveryCodesRemaining,
       // Practice-identity rehydrate fields (additive — pre-fix consumers
       // ignore them).
       activePracticeId: activePractice ? activePractice.id : null,
