@@ -1556,6 +1556,7 @@ const ALERT_INCLUDE = {
       id: true,
       name: true,
       email: true,
+      displayId: true,
       dateOfBirth: true,
       enrollmentStatus: true,
       providerAssignmentAsPatient: {
@@ -1607,6 +1608,11 @@ interface AlertRow {
     id: string
     name: string | null
     email: string | null
+    // Permanent human-readable identifier (CP-PAT-... / CP-STF-...).
+    // Surfaced in the email subject for staff recipients so they can
+    // cross-reference with their own systems. See
+    // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+    displayId: string | null
     dateOfBirth: Date | null
     // Layer B dispatch gate — escalation only fires for patients the admin
     // has passed through the 4-piece enrollment gate (assignment + practice
@@ -1677,9 +1683,15 @@ function escalationEmailBody(args: {
   const isPatient = role === 'PATIENT'
 
   // Subject — patient-role emails keep the friendly, non-alarming title.
+  // Staff subjects include the patient's permanent display ID so the
+  // clinician can cross-reference with their own systems at a glance.
+  // See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §5.
+  const displayIdSuffix = alert.user.displayId
+    ? ` · ${formatDisplayIdForView(alert.user.displayId)}`
+    : ''
   const subject = isPatient
     ? patientSubject(alert.tier)
-    : `[${humanStep(step)} ${tierLabel}] ${patientName} — ${practiceName}`
+    : `[${humanStep(step)} ${tierLabel}] ${patientName}${displayIdSuffix} — ${practiceName}`
 
   const stepPill = `${humanStep(step)}${afterHours ? ' (after-hours queued)' : ''}`
   const ackFooter = ackFooterFor(alert.tier)
@@ -1736,8 +1748,13 @@ function escalationEmailBody(args: {
   const createdLine = `<div style="margin-top:6px;font-size:12px;color:#6b7280">Alert created: <strong>${escapeHtml(createdLocal)}</strong> <span style="color:#9ca3af">(${escapeHtml(createdUtc)})</span></div>`
 
   // Footer with stable IDs so anyone replying via phone or Slack can
-  // reference exactly which alert / patient.
-  const idFooter = `<div style="margin-top:18px;font-size:11px;color:#9ca3af;font-family:ui-monospace,SFMono-Regular,monospace">Alert ID: ${escapeHtml(alert.id)} &middot; Patient ID: ${escapeHtml(alert.userId)}</div>`
+  // reference exactly which alert / patient. Prefer the human-readable
+  // displayId when present (CP-PAT-...); fall back to the ULID. The
+  // displayId is the cross-system handle clinicians actually want to use.
+  const patientRefId = alert.user.displayId
+    ? formatDisplayIdForView(alert.user.displayId)
+    : alert.userId
+  const idFooter = `<div style="margin-top:18px;font-size:11px;color:#9ca3af;font-family:ui-monospace,SFMono-Regular,monospace">Alert ID: ${escapeHtml(alert.id)} &middot; Patient ID: ${escapeHtml(patientRefId)}</div>`
 
   // Header / clinical / detail / action / footer blocks. Keep inline styles
   // — most email clients strip <style> tags.
@@ -1841,6 +1858,16 @@ function ageFromDob(dob: Date | null, now: Date): number | null {
   if (ms < 0) return null
   const years = ms / (365.25 * 24 * 3600 * 1000)
   return Math.floor(years)
+}
+
+// Formats a canonical display ID ("CPPATK8M2R4N7") with hyphens for human
+// display ("CP-PAT-K8M2R4N-7"). Defensive: if input is already hyphenated
+// or off the expected length, returns it verbatim. Mirrors the formatter
+// in DisplayIdService (kept local to avoid cross-module dependency from
+// the escalation pipeline into the users module).
+function formatDisplayIdForView(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`
 }
 
 function tierLabelFor(tier: string | null): string {
