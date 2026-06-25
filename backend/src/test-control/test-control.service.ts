@@ -262,7 +262,11 @@ export class TestControlService {
   async resetTestPatients(): Promise<{ usersTouched: number; rowsDeleted: number }> {
     const users = await this.prisma.user.findMany({
       where: {
-        email: { endsWith: '.cardioplace.test' },
+        // Seed/test patient emails are `<name>@cardioplace.test`. The previous
+        // `.cardioplace.test` matcher (leading dot) matched NONE of them — the
+        // char before "cardioplace.test" is "@", not "." — so this reset was a
+        // silent no-op and spec 33's report assertions saw stale seed readings.
+        email: { endsWith: '@cardioplace.test' },
         roles: { has: 'PATIENT' },
       },
       select: { id: true, email: true },

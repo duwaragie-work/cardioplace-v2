@@ -14,6 +14,7 @@ import { fetchWithAuth, getAccessToken } from './token'
 const API = process.env.NEXT_PUBLIC_API_URL
 
 export type { SlaReport } from '@cardioplace/shared'
+export { isSlaExemptTier, SLA_NOT_APPLICABLE_LABEL } from '@cardioplace/shared'
 export {
   listReportPractices,
   type ReportPractice,

@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
 import {
+  isSlaExemptTier,
+  SLA_NOT_APPLICABLE_LABEL,
   TIER_RESOLVE_SLA_MINUTES,
   TIER_SLA_MINUTES,
   type MonthlyReport,
@@ -78,9 +80,22 @@ export class SlaService {
       }
     })
 
+    // SLA-exempt tiers (Tier 3 informational) are excluded from both rollups:
+    // they never count as "failing", and the headline acked-% is computed over
+    // tracked tiers only — so informational alerts don't move the numbers.
     const tiersFailing = byTier.filter(
-      (r) => r.ackPass === false || r.resolvePass === false,
+      (r) =>
+        !isSlaExemptTier(r.tier) &&
+        (r.ackPass === false || r.resolvePass === false),
     ).length
+
+    const tracked = monthly.byTier.filter((t) => !isSlaExemptTier(t.tier))
+    const trackedTotal = tracked.reduce((sum, t) => sum + t.total, 0)
+    const trackedAcked = tracked.reduce(
+      (sum, t) => sum + t.acknowledgedInWindow,
+      0,
+    )
+    const overallAckWithinPct = pct(trackedAcked, trackedTotal)
 
     return {
       practiceId: monthly.practiceId,
@@ -91,7 +106,7 @@ export class SlaService {
       practiceTimezone: monthly.practiceTimezone,
       generatedAt: monthly.generatedAt,
       provisional: true,
-      overallAckWithinPct: monthly.overall.acknowledgedInWindowPct,
+      overallAckWithinPct,
       tiersFailing,
       byTier,
     }
@@ -131,6 +146,13 @@ export class SlaService {
       'Resolve verdict',
     )
     for (const r of report.byTier) {
+      if (isSlaExemptTier(r.tier)) {
+        // Tier 3 informational — not SLA-tracked. Every metric cell reads
+        // "Not acceptable" so an exported sheet is unambiguous.
+        const na = SLA_NOT_APPLICABLE_LABEL
+        row(r.tier.replace(/_/g, ' '), r.total, na, na, na, na, na, na, na)
+        continue
+      }
       row(
         r.tier.replace(/_/g, ' '),
         r.total,
@@ -221,7 +243,7 @@ export class SlaService {
       const tileTop = doc.y
       drawTile(leftX, tileTop, tileW, tileH, 'Acked within target',
         report.overallAckWithinPct === null ? '—' : `${report.overallAckWithinPct}%`,
-        'across all alerts')
+        'across SLA-tracked tiers')
       drawTile(leftX + tileW + tileGap, tileTop, tileW, tileH, 'Tiers failing',
         String(report.tiersFailing), 'mean over target')
       doc.y = tileTop + tileH
@@ -270,6 +292,18 @@ export class SlaService {
       }
       let top = doc.y
       let y = HEADER_H
+      // SLA-exempt (Tier 3) rows render a single "Not acceptable" span across
+      // the metric columns. We draw that span AFTER the grid lines so the
+      // vertical dividers don't strike through the text — collect the bands
+      // here and overlay them once the table is closed.
+      let pageIndex = doc.bufferedPageRange().start
+      const exemptBands: Array<{
+        page: number
+        spanX: number
+        spanW: number
+        rowY: number
+        zebra: boolean
+      }> = []
       drawHeader(top)
       const closeSegment = () => {
         doc.save()
@@ -291,6 +325,7 @@ export class SlaService {
         if (top + y + ROW_H > bottomLimit) {
           closeSegment()
           doc.addPage()
+          pageIndex++
           top = doc.y
           y = HEADER_H
           drawHeader(top)
@@ -299,6 +334,27 @@ export class SlaService {
           doc.save()
           doc.fillColor(ZEBRA).rect(leftX, top + y, pageWidth, ROW_H).fill()
           doc.restore()
+        }
+        if (isSlaExemptTier(r.tier)) {
+          // Tier name in column 0; the metric columns collapse to one
+          // "Not acceptable" span, overlaid after the grid is drawn.
+          const tierW = cols[0].width * pageWidth
+          doc.font('Helvetica').fontSize(8.5).fillColor(TEXT_SOFT)
+          doc.text(r.tier.replace(/_/g, ' '), leftX + CELL_PAD_X, top + y + 7, {
+            width: tierW - CELL_PAD_X * 2,
+            align: cols[0].align ?? 'left',
+            lineBreak: false,
+            ellipsis: true,
+          })
+          exemptBands.push({
+            page: pageIndex,
+            spanX: leftX + tierW,
+            spanW: pageWidth - tierW,
+            rowY: top + y,
+            zebra: i % 2 === 1,
+          })
+          y += ROW_H
+          continue
         }
         const values: Array<{ text: string; color?: string }> = [
           { text: r.tier.replace(/_/g, ' ') },
@@ -323,6 +379,25 @@ export class SlaService {
         y += ROW_H
       }
       closeSegment()
+
+      // Overlay the "Not acceptable" spans on top of the finished grid so the
+      // column dividers don't cut through the text. A masking fill in the
+      // row's background colour hides the interior verticals first.
+      for (const b of exemptBands) {
+        doc.switchToPage(b.page)
+        doc.save()
+        doc.fillColor(b.zebra ? ZEBRA : 'white')
+          .rect(b.spanX + 0.5, b.rowY + 0.5, b.spanW - 1, ROW_H - 1)
+          .fill()
+        doc.fillColor(MUTED).font('Helvetica').fontSize(8.5)
+          .text(SLA_NOT_APPLICABLE_LABEL, b.spanX + CELL_PAD_X, b.rowY + 7, {
+            width: b.spanW - CELL_PAD_X * 2,
+            align: 'center',
+            lineBreak: false,
+            ellipsis: true,
+          })
+        doc.restore()
+      }
       doc.y = top + y
 
       // Footer
