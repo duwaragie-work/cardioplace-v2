@@ -17,7 +17,9 @@ import {
   formatMonthLabel,
   formatTierLabel,
   getSlaReport,
+  isSlaExemptTier,
   listReportPractices,
+  SLA_NOT_APPLICABLE_LABEL,
   type ReportPractice,
   type SlaReport,
 } from '@/lib/services/sla.service';
@@ -299,7 +301,7 @@ function Tiles({ report }: { report: SlaReport }) {
     {
       label: 'Acked within target',
       value: report.overallAckWithinPct === null ? '—' : `${report.overallAckWithinPct}%`,
-      caption: 'across all alerts',
+      caption: 'across SLA-tracked tiers',
     },
     {
       label: 'Tiers failing',
@@ -370,12 +372,24 @@ function SlaTable({ report }: { report: SlaReport }) {
                   </span>
                 </Td>
                 <Td align="right">{r.total}</Td>
-                <Td align="right">{formatDuration(r.ackTargetSeconds)}</Td>
-                <Td align="right">{formatDuration(r.meanAckSeconds)}</Td>
-                <Td align="center"><VerdictBadge pass={r.ackPass} /></Td>
-                <Td align="right">{formatDuration(r.resolveTargetSeconds)}</Td>
-                <Td align="right">{formatDuration(r.meanResolveSeconds)}</Td>
-                <Td align="center"><VerdictBadge pass={r.resolvePass} /></Td>
+                {isSlaExemptTier(r.tier) ? (
+                  <td
+                    colSpan={6}
+                    className="px-3 py-3 text-[13px] text-center font-semibold"
+                    style={{ color: 'var(--brand-text-muted)' }}
+                  >
+                    {SLA_NOT_APPLICABLE_LABEL}
+                  </td>
+                ) : (
+                  <>
+                    <Td align="right">{formatDuration(r.ackTargetSeconds)}</Td>
+                    <Td align="right">{formatDuration(r.meanAckSeconds)}</Td>
+                    <Td align="center"><VerdictBadge pass={r.ackPass} /></Td>
+                    <Td align="right">{formatDuration(r.resolveTargetSeconds)}</Td>
+                    <Td align="right">{formatDuration(r.meanResolveSeconds)}</Td>
+                    <Td align="center"><VerdictBadge pass={r.resolvePass} /></Td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>
@@ -398,20 +412,29 @@ function SlaTable({ report }: { report: SlaReport }) {
                 {r.total} alert{r.total === 1 ? '' : 's'}
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Milestone
-                label="Acknowledge"
-                target={formatDuration(r.ackTargetSeconds)}
-                mean={formatDuration(r.meanAckSeconds)}
-                pass={r.ackPass}
-              />
-              <Milestone
-                label="Resolve"
-                target={formatDuration(r.resolveTargetSeconds)}
-                mean={formatDuration(r.meanResolveSeconds)}
-                pass={r.resolvePass}
-              />
-            </div>
+            {isSlaExemptTier(r.tier) ? (
+              <div
+                className="px-3 py-3 rounded-lg text-[12px] font-semibold text-center"
+                style={{ backgroundColor: 'var(--brand-background)', color: 'var(--brand-text-muted)' }}
+              >
+                {SLA_NOT_APPLICABLE_LABEL}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <Milestone
+                  label="Acknowledge"
+                  target={formatDuration(r.ackTargetSeconds)}
+                  mean={formatDuration(r.meanAckSeconds)}
+                  pass={r.ackPass}
+                />
+                <Milestone
+                  label="Resolve"
+                  target={formatDuration(r.resolveTargetSeconds)}
+                  mean={formatDuration(r.meanResolveSeconds)}
+                  pass={r.resolvePass}
+                />
+              </div>
+            )}
           </div>
         ))}
       </div>

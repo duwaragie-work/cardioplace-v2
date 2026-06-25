@@ -59,6 +59,22 @@ export const TIER_RESOLVE_SLA_MINUTES: Record<AlertTierValue, number> = {
 };
 
 /**
+ * Tiers that are NOT held to a response-time SLA. Per care-team decision,
+ * Tier 3 (informational) alerts don't warrant ack/resolve SLA tracking — the
+ * SLA report shows "Not acceptable" in their metric cells and leaves them out
+ * of the rollup totals (overall acked-% and tiers-failing). Single source of
+ * truth: backend (PDF/CSV/totals) and admin UI all read from here.
+ */
+export const SLA_EXEMPT_TIERS: readonly AlertTierValue[] = ['TIER_3_INFO'];
+
+export function isSlaExemptTier(tier: AlertTierValue): boolean {
+  return SLA_EXEMPT_TIERS.includes(tier);
+}
+
+/** Text shown in place of SLA targets / means / verdicts for exempt tiers. */
+export const SLA_NOT_APPLICABLE_LABEL = 'Not acceptable';
+
+/**
  * The "escalated" KPI counts any alert whose escalation walked past T+0,
  * i.e. the program had to follow up after the initial dispatch failed to
  * close the alert. Matches the rungs defined in `LadderStep` in Prisma.
