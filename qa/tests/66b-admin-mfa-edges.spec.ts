@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { newTestControl } from '../helpers/test-control.js'
-import { signInAdmin, authedApi } from '../helpers/auth.js'
+import { signInAdmin, authedApi, clearSession } from '../helpers/auth.js'
 import {
   enrollAdminTotp,
   totpCode,
@@ -94,7 +94,11 @@ test.describe('Spec 66b — admin MFA edges', () => {
     await page.locator(byTestId(T.mfa.adminChallengeRecovery)).fill('ZZZZZ-ZZZZZ')
     await page.locator(byTestId(T.mfa.adminChallengeRecoveryVerify)).click()
 
-    await expect(page.locator('[role="alert"]')).toBeVisible({ timeout: 15_000 })
+    await expect(
+      // Exclude Next's route announcer (also role="alert") so this resolves to
+      // the single real error/lock banner — otherwise strict mode trips on 2.
+      page.locator('[role="alert"]:not(#__next-route-announcer__)'),
+    ).toBeVisible({ timeout: 15_000 })
     await expect(page).toHaveURL(/\/sign-in\/mfa-challenge/)
   })
 
@@ -110,6 +114,11 @@ test.describe('Spec 66b — admin MFA edges', () => {
     await page.locator(byTestId(T.mfa.adminChallengeRecoveryVerify)).click()
     await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
 
+    // The first sign-in left an active admin session, so /sign-in would bounce
+    // straight to /dashboard. Clear it so the second sign-in re-runs the OTP +
+    // MFA challenge (where the burned code must now be rejected).
+    await clearSession(page.context())
+
     // Second use of the SAME code — the authenticator is untouched, so a new
     // sign-in still hits the challenge, but the burned code is now rejected.
     await adminOtpExpectingMfaChallenge(page, ADMIN.email, ADMIN_BASE_URL)
@@ -117,7 +126,11 @@ test.describe('Spec 66b — admin MFA edges', () => {
     await page.locator(byTestId(T.mfa.adminChallengeRecovery)).fill(code)
     await page.locator(byTestId(T.mfa.adminChallengeRecoveryVerify)).click()
 
-    await expect(page.locator('[role="alert"]')).toBeVisible({ timeout: 15_000 })
+    await expect(
+      // Exclude Next's route announcer (also role="alert") so this resolves to
+      // the single real error/lock banner — otherwise strict mode trips on 2.
+      page.locator('[role="alert"]:not(#__next-route-announcer__)'),
+    ).toBeVisible({ timeout: 15_000 })
     await expect(page).toHaveURL(/\/sign-in\/mfa-challenge/)
   })
 
@@ -132,7 +145,11 @@ test.describe('Spec 66b — admin MFA edges', () => {
     for (let i = 0; i < 6; i++) {
       await page.locator(byTestId(T.mfa.adminChallengeCode)).fill('000000')
       await page.locator(byTestId(T.mfa.adminChallengeVerify)).click()
-      await expect(page.locator('[role="alert"]')).toBeVisible({ timeout: 15_000 })
+      await expect(
+      // Exclude Next's route announcer (also role="alert") so this resolves to
+      // the single real error/lock banner — otherwise strict mode trips on 2.
+      page.locator('[role="alert"]:not(#__next-route-announcer__)'),
+    ).toBeVisible({ timeout: 15_000 })
       if (await lockMsg.isVisible().catch(() => false)) break
     }
     await expect(lockMsg).toBeVisible({ timeout: 15_000 })

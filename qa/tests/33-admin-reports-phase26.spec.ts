@@ -132,6 +132,11 @@ test.describe('phase/26 — admin reporting suite + Tier 3 SLA policy', () => {
     // Hill practice has no other alerts polluting the rollups for this month.
     await tc.resetTestPatients()
     const aisha = await tc.findUser(PATIENTS.aisha.email)
+    // The SLA report only counts acks by a clinical actor (SUPER_ADMIN /
+    // MEDICAL_DIRECTOR / PROVIDER) — patient self-acks are ignored, so a
+    // patient-acked alert yields meanAckSeconds=null → ackPass=null. Ack as the
+    // support admin so the breach is measurable (ackPass=false).
+    const supportAdmin = await tc.findUser(ADMINS.support.email)
 
     // Previous calendar month — the SLA report's default window. Seed mid-month
     // at noon UTC so the alert lands safely inside the practice-tz window.
@@ -159,7 +164,7 @@ test.describe('phase/26 — admin reporting suite + Tier 3 SLA policy', () => {
       {
         tier: 'TIER_3_INFO',
         status: 'ACKNOWLEDGED',
-        acknowledgedByUserId: aisha.id,
+        acknowledgedByUserId: supportAdmin.id,
         createdAtIso: mid.toISOString(),
       },
     ])
