@@ -67,7 +67,7 @@ export default function IdleWarningToast() {
     };
   }, [visible]);
 
-  // if (!visible) return null;
+  if (!visible) return null;
 
   return (
     <div
