@@ -15,10 +15,20 @@ interface LandingHeaderProps {
 
 export default function LandingHeader(_props: LandingHeaderProps) {
   const { t } = useLanguage();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, activePractice, availablePractices } =
+    useAuth();
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => { setMounted(true); }, []);
+
+  // A first-time-enrolling multi-practice provider holds a real session (so
+  // isAuthenticated is true) but hasn't picked a practice yet — the backend
+  // PracticeRequiredGuard blocks the dashboard until they do. Don't tease the
+  // Dashboard button during that window; it reappears once a practice is set.
+  // Org-wide admins (no memberships) and single-practice users are unaffected.
+  const practicePending =
+    isAuthenticated && !activePractice && availablePractices.length > 1;
+  const showDashboard = isAuthenticated && !practicePending;
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-white/80 shadow-[0_1px_2px_rgba(76,29,149,0.05)]">
@@ -40,8 +50,8 @@ export default function LandingHeader(_props: LandingHeaderProps) {
 
         <div className="flex items-center gap-3">
           {/* Admin app is English-only — language selector intentionally hidden. */}
-          {mounted && !isLoading && (
-            isAuthenticated ? (
+          {mounted && !isLoading && !practicePending && (
+            showDashboard ? (
               <Link
                 href="/dashboard"
                 className="hidden md:flex items-center gap-2 bg-[#6b00d1] text-white font-semibold text-sm px-4 py-2 rounded-full hover:bg-[#5a00b0] transition-colors"
@@ -73,8 +83,8 @@ export default function LandingHeader(_props: LandingHeaderProps) {
       {menuOpen && (
         <div className="md:hidden bg-white border-t border-[#eedbff] px-6 py-4 flex flex-col gap-4">
           {/* Admin app is English-only — language selector intentionally hidden. */}
-          {mounted && !isLoading && (
-            isAuthenticated ? (
+          {mounted && !isLoading && !practicePending && (
+            showDashboard ? (
               <Link
                 href="/dashboard"
                 onClick={() => setMenuOpen(false)}
