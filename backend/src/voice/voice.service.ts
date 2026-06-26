@@ -213,14 +213,16 @@ export class VoiceService implements OnModuleDestroy {
     private readonly voiceTools: VoiceToolsService,
     private readonly intakeStatusService: IntakeStatusService,
   ) {
-    // Default to a Live-capable model verified present via ListModels on
-    // the Gemini Developer API. `gemini-2.5-flash-native-audio-preview-
-    // 09-2025` exposes bidiGenerateContent and produces native-audio
-    // output (better voice quality vs. cascading models). Override via
-    // GEMINI_VOICE_MODEL env var.
+    // Default to the GA Live-capable native-audio model on Vertex AI.
+    // `gemini-live-2.5-flash-native-audio` exposes bidiGenerateContent and
+    // produces native-audio output (better voice quality vs. cascading
+    // models). It replaces the preview model
+    // `gemini-live-2.5-flash-preview-native-audio-09-2025`, which was
+    // deprecated and removed on 2026-03-19. Override via GEMINI_VOICE_MODEL
+    // env var only if Google ships a newer Live-capable variant.
     this.voiceModel =
       this.config.get<string>('GEMINI_VOICE_MODEL') ??
-      'gemini-2.5-flash-native-audio-preview-09-2025'
+      'gemini-live-2.5-flash-native-audio'
     // Vertex AI ships the Live API under apiVersion v1beta1 (NOT the SDK
     // default). Without this override the constructed client points at a
     // text-only surface and `client.live.connect(...)` 404s.
