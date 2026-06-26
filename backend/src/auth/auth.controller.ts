@@ -238,11 +238,8 @@ export class AuthController {
       dto.practiceId,
       context,
     )
-    // MFA gate — multi-practice provider/admin who is enrolled gets a
-    // challenge after picking a practice; no tokens/cookies yet.
-    if ('status' in result && result.status === 'MFA_REQUIRED') {
-      return result
-    }
+    // MFA already cleared before the selector (Manisha 2026-06-12 §6), so
+    // selectPractice always issues the real token pair here.
     const scope = scopeForRoles(result.roles)
     this.setAccessCookie(res, result.accessToken, scope)
     this.setRefreshCookie(res, result.refreshToken, scope)
@@ -328,6 +325,11 @@ export class AuthController {
       dto.code,
       context,
     )
+    // Multi-practice provider: second factor cleared, now pick a practice. No
+    // tokens/cookies yet — the FE routes to /sign-in/select-practice.
+    if ('status' in result && result.status === 'PRACTICE_SELECT_REQUIRED') {
+      return result
+    }
     this.issueSessionCookies(res, result)
     await this.trackDevice(req, context, result.userId)
     return result
@@ -346,6 +348,10 @@ export class AuthController {
       dto.recoveryCode,
       context,
     )
+    // Multi-practice provider: recovery code accepted, now pick a practice.
+    if ('status' in result && result.status === 'PRACTICE_SELECT_REQUIRED') {
+      return result
+    }
     this.issueSessionCookies(res, result)
     await this.trackDevice(req, context, result.userId)
     return result

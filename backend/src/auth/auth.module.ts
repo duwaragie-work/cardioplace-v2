@@ -14,6 +14,7 @@ import { WebAuthnService } from './webauthn.service.js'
 import { Public } from './decorators/public.decorator.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
 import { MfaRequiredGuard } from './guards/mfa-required.guard.js'
+import { PracticeRequiredGuard } from './guards/practice-required.guard.js'
 import { RolesGuard } from './guards/roles.guard.js'
 import { JwtStrategy } from './strategies/jwt.strategy.js'
 
@@ -62,6 +63,12 @@ export { Public }
     {
       provide: APP_GUARD,
       useClass: MfaRequiredGuard,
+    },
+    // Practice-selection gate (Manisha 2026-06-12 §1) — after MFA, a multi-
+    // practice clinician must pick a practice before any protected route.
+    {
+      provide: APP_GUARD,
+      useClass: PracticeRequiredGuard,
     },
   ],
   controllers: [AuthController],
