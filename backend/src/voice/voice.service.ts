@@ -325,8 +325,10 @@ export class VoiceService implements OnModuleDestroy {
     }
 
     // ── Open Gemini Live session (Step 4 — replaces ADK gRPC stream) ──
-    // Use the dedicated v1alpha client (see constructor). The shared
-    // `GeminiService.clientInstance` is on v1beta for text/OCR/embeddings.
+    // Use the dedicated Vertex Live client (see constructor — pinned to
+    // apiVersion v1beta1, which is where Vertex hosts the Live surface).
+    // The shared `GeminiService.clientInstance` uses the SDK default,
+    // which exposes text/OCR/embeddings but not bidiGenerateContent.
     const client = this.liveClient
     // B.4 — resolve the v2 flag via ConfigService (same source + exact
     // `=== 'true'` check as the text chat) so voice and text never drift.
