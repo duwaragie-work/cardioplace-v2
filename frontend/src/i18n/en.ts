@@ -1526,6 +1526,15 @@ const en = {
   'intake.caregivers.subtitle': 'A family member or friend we can notify if a serious health alert comes up. They’re only contacted for care-team-approved alerts, and only after you give consent. You can skip this and add someone later from your profile.',
   'intake.caregivers.audio': 'Optionally add a caregiver, a family member or friend we can notify if a serious health alert comes up. They are only contacted after you give consent. You can skip this and add someone later from your profile.',
   'chat.orTypePlaceholder': 'Or type a message...',
+
+  // ─── Auth — idle/session banners (patient app only; admin is EN-only) ───────
+  'auth.sessionExpired.title': 'Notice you were signed out',
+  'auth.sessionExpired.body':
+    'Your session ended because there was no activity for a while. Please sign in again to continue.',
+  'auth.idleWarning.title': 'Warning signing out soon',
+  'auth.idleWarning.body':
+    'You will be signed out in about 60 seconds because of inactivity. Move the mouse or press any key to stay signed in.',
+  'auth.idleWarning.stay': 'Stay signed in',
 } as const;
 
 export type TranslationKey = keyof typeof en;

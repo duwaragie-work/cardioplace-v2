@@ -12,9 +12,9 @@ import { Info } from 'lucide-react';
  * Accessibility (Rengan 2026-04 spec — Tasks 2, 8, 10):
  *   • role="status" + aria-live="polite" — screen readers announce on
  *     page load without interrupting any current speech.
- *   • Text ≥ 18 px (1.125rem) with high-contrast info palette
- *     (#1E3A8A on #EFF6FF ≈ 9.6:1).
  *   • Icon + word "Notice" — never colour-only signalling.
+ *   • Styled to the site's banner language (rounded-xl card, soft purple
+ *     tint, brand-purple icon, high-contrast #170c1d title on a light bg).
  */
 export default function SessionExpiredBanner() {
   const params = useSearchParams();
@@ -24,18 +24,17 @@ export default function SessionExpiredBanner() {
     <div
       role="status"
       aria-live="polite"
-      className="mx-auto mb-6 flex w-full max-w-[640px] items-start gap-3 rounded-lg border-2 border-[#1E3A8A] bg-[#EFF6FF] p-4"
+      className="mx-auto mb-6 flex w-full max-w-[640px] items-start gap-2.5 rounded-xl border border-[#e5d9f2] bg-[rgba(243,232,255,0.4)] px-4 py-3.5"
       data-testid="session-expired-banner"
     >
       <Info
         aria-hidden="true"
-        className="mt-0.5 shrink-0 text-[#1E3A8A]"
-        size={28}
-        strokeWidth={2.25}
+        className="mt-0.5 h-5 w-5 shrink-0 text-[#7B00E0]"
+        strokeWidth={2.5}
       />
-      <div className="flex-1 text-[1.125rem] leading-snug text-[#1A1A2E]">
-        <strong className="block font-semibold text-[#1E3A8A]">
-          Notice — you were signed out
+      <div className="flex-1 text-sm leading-relaxed text-[#4b5563]">
+        <strong className="block font-semibold text-[#170c1d]">
+          Notice you were signed out
         </strong>
         <span>
           Your session ended because there was no activity for a while.
