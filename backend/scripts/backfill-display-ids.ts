@@ -1,24 +1,38 @@
+// EMERGENCY RECOVERY TOOL — superseded by the atomic migration
+// `20260624140000_add_display_id`, which now performs this backfill inside
+// the same transaction as the DDL and the SET NOT NULL. Normal deploys do
+// NOT need this script — `npx prisma migrate deploy` populates existing
+// rows automatically.
+//
+// Keep this script in tree as a fallback for one specific recovery
+// scenario: the OLD broken two-migration sequence partially applied
+// somewhere (added the nullable column but the SET NOT NULL aborted),
+// leaving rows with `displayId IS NULL` and the migration marked failed.
+// Steps to recover:
+//   1. Mark the failed migration as rolled-back:
+//        npx prisma migrate resolve --rolled-back 20260624150000_make_user_display_id_required
+//   2. Run this script to populate the existing NULL rows.
+//   3. Drop the old migration record so the new combined migration can apply:
+//        npx prisma migrate resolve --rolled-back 20260624140000_add_display_id
+//   4. `npx prisma migrate deploy` — applies the new combined migration
+//      (additive bits are no-ops on tables/columns that already exist,
+//      backfill loop is empty because the rows are populated).
+//
 // Backfill DisplayId rows + User.displayId column for every existing user
 // that doesn't yet have one. Idempotent — skips any user whose displayId
-// is already set.
+// is already set. Class assignment: PATIENT class if PATIENT ∈ roles array,
+// STAFF otherwise. Matches the runtime assignment at the 4 user-create
+// sites (see auth.service.ts).
 //
-// Class assignment rule: PATIENT class if PATIENT ∈ roles array (initial
-// population class is patient), STAFF class otherwise. This matches the
-// runtime assignment at the 4 user-create sites (see auth.service.ts).
-//
-// USAGE:
-//   STAGING first:  DATABASE_URL=postgres://staging... npm exec tsx scripts/backfill-display-ids.ts
-//   Then prod:      DATABASE_URL=postgres://prod...    npm exec tsx scripts/backfill-display-ids.ts
-//   Dry run:        DRY_RUN=1 npm exec tsx scripts/backfill-display-ids.ts
+// USAGE (recovery only):
+//   STAGING:  DATABASE_URL=postgres://staging... npm exec tsx scripts/backfill-display-ids.ts
+//   PROD:     DATABASE_URL=postgres://prod...    npm exec tsx scripts/backfill-display-ids.ts
+//   Dry run:  DRY_RUN=1 npm exec tsx scripts/backfill-display-ids.ts
 //
 // EXIT CODES:
 //   0  — backfill complete, every user now has displayId
 //   1  — error during backfill (transaction rolled back; nothing partial)
 //   2  — verification failed (some users still NULL after run)
-//
-// The script is the gate for the follow-up migration that drops
-// User.displayId to NOT NULL. Do NOT land that migration until this script
-// exits 0 on the target database.
 
 import { PrismaPg } from '@prisma/adapter-pg'
 import dotenv from 'dotenv'

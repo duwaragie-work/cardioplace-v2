@@ -6,6 +6,7 @@ import type { App } from 'supertest/types.js'
 import { AppModule } from '../src/app.module.js'
 import { AuthService } from '../src/auth/auth.service.js'
 import { PrismaService } from '../src/prisma/prisma.service.js'
+import { generateTestDisplayId } from './helpers/generate-test-display-id.js'
 
 /**
  * Integration Test - Social Login Flow
@@ -238,6 +239,7 @@ describe('Auth Social Login Flow (e2e)', () => {
       const user = await prisma.user.create({
         data: {
           name: mockGoogleUser.name,
+          displayId: generateTestDisplayId([]),
         },
       })
 
@@ -387,6 +389,7 @@ describe('Auth Social Login Flow (e2e)', () => {
       const user = await prisma.user.create({
         data: {
           name: mockAppleUser.name,
+          displayId: generateTestDisplayId([]),
         },
       })
 

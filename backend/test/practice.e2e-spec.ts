@@ -5,6 +5,7 @@ import request from 'supertest'
 import type { App } from 'supertest/types.js'
 import { AppModule } from '../src/app.module.js'
 import { PrismaService } from '../src/prisma/prisma.service.js'
+import { generateTestDisplayId } from './helpers/generate-test-display-id.js'
 
 // Phase/13 — practice config, assignment, threshold, enrollment gate.
 //
@@ -90,6 +91,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
         roles: ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS'],
         isVerified: true,
         onboardingStatus: 'COMPLETED',
+        displayId: generateTestDisplayId(['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS']),
       },
     })
     const patient = await prisma.user.create({
@@ -99,6 +101,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
         roles: ['PATIENT'],
         isVerified: true,
         onboardingStatus: 'NOT_COMPLETED',
+        displayId: generateTestDisplayId(['PATIENT']),
       },
     })
     const provider = await prisma.user.create({
@@ -107,6 +110,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
         name: 'Provider',
         roles: ['PROVIDER'],
         isVerified: true,
+        displayId: generateTestDisplayId(['PROVIDER']),
       },
     })
     const backup = await prisma.user.create({
@@ -115,6 +119,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
         name: 'Backup',
         roles: ['PROVIDER'],
         isVerified: true,
+        displayId: generateTestDisplayId(['PROVIDER']),
       },
     })
     const md = await prisma.user.create({
@@ -123,6 +128,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
         name: 'Medical Director',
         roles: ['MEDICAL_DIRECTOR'],
         isVerified: true,
+        displayId: generateTestDisplayId(['MEDICAL_DIRECTOR']),
       },
     })
     const plainPatient = await prisma.user.create({
@@ -132,6 +138,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
         roles: ['PATIENT'],
         isVerified: true,
         onboardingStatus: 'NOT_COMPLETED',
+        displayId: generateTestDisplayId(['PATIENT']),
       },
     })
 
@@ -466,6 +473,7 @@ describe('Practice / Assignment / Threshold / Enrollment (e2e)', () => {
           roles: ['PATIENT'],
           isVerified: true,
           onboardingStatus: 'NOT_COMPLETED',
+          displayId: generateTestDisplayId(['PATIENT']),
         },
       })
       testEmails.push(scratch.email!)
