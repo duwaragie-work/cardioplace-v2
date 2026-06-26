@@ -2,6 +2,38 @@
 // instrumented module loads. No-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset.
 import './observability/tracing.js'
 
+// Google ADC env-var → temp-file shim. Lets you set the SA JSON contents
+// directly in GOOGLE_APPLICATION_CREDENTIALS_JSON (any single-string env-var
+// platform: Railway, Heroku, Vercel, a local .env file, etc.) instead of
+// pointing GOOGLE_APPLICATION_CREDENTIALS at a file on disk. The Google SDK
+// only knows how to read credentials from a file path — this shim writes
+// the JSON to a temp file at startup and sets GOOGLE_APPLICATION_CREDENTIALS
+// to that path so ADC picks it up normally.
+//
+// No-op when:
+//   • GOOGLE_APPLICATION_CREDENTIALS_JSON is unset (production w/ attached
+//     SA on Cloud Run / GCE / GKE → ADC reads metadata server directly), OR
+//   • GOOGLE_APPLICATION_CREDENTIALS is already set (local dev with file
+//     path — that wins, JSON env-var ignored).
+// Runs before any import that touches the GCP SDK so the path is in place
+// when @google/genai initialises.
+import { writeFileSync, mkdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+if (
+  process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON &&
+  !process.env.GOOGLE_APPLICATION_CREDENTIALS
+) {
+  const dir = join(tmpdir(), 'gcp')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'cardioplace-sa.json')
+  writeFileSync(path, process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON, 'utf8')
+  process.env.GOOGLE_APPLICATION_CREDENTIALS = path
+  // eslint-disable-next-line no-console
+  console.log(`🔑 Wrote GCP SA JSON to ${path} (from GOOGLE_APPLICATION_CREDENTIALS_JSON)`)
+}
+
 import { ValidationPipe } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
 import type { NestExpressApplication } from '@nestjs/platform-express'
