@@ -90,6 +90,32 @@ export interface AlertContext {
    *  "— confirm with next reading" annotation on the physician message. */
   singleReadingSession?: boolean
 
+  /** Chunk B (Manisha Backdated Readings sign-off 2026-06-06) — the firing
+   *  entry's measurement-lag band ('REAL_TIME' | 'NEAR_REAL_TIME' |
+   *  'DELAYED_ENTRY' | 'HISTORICAL_ENTRY'). When 'DELAYED_ENTRY' the four BP
+   *  Level-2 patient messages suppress the 911 CTA and the physician messages
+   *  carry a [DELAYED ENTRY] badge. String (not the Prisma enum) to keep the
+   *  registry prisma-dependency-free, matching the rest of AlertContext. */
+  delayBand?: string
+
+  /** Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06,
+   *  Recheck #1 refinement) — measurement timestamp of the firing session
+   *  (latest sibling reading), used by the signed DELAYED_ENTRY physician
+   *  wording to render the "[date/time]" placeholder. */
+  measuredAt?: Date
+
+  /** Chunk B fix-up — integer hours between measurement and entry
+   *  (floor((loggedAt − measuredAt) / 1h), clamped ≥0). Renders the "[X]
+   *  hours" placeholder in the signed DELAYED_ENTRY physician wording.
+   *  Always populated by OutputGenerator in production; optional for
+   *  direct test callers (helpers fall back to band-only phrasing). */
+  delayHours?: number
+
+  /** Chunk B fix-up — IANA timezone for rendering measuredAt in the
+   *  patient's local time (pilot default America/New_York — rendering UTC
+   *  would read 4–5h off to providers). */
+  timezone?: string | null
+
   /** Cluster 8 — which angioedema symptom(s) the patient reported. Drives
    *  whether the message leads with face-swelling or throat-tightness
    *  phrasing. Populated only for the angioedema rules. */
@@ -159,6 +185,14 @@ export interface AlertContext {
    * re-touching the plumbing.
    */
   activeMedications?: Array<{ drugName: string; drugClass: string }>
+
+  /** Option D (Manisha 2026-06-12 Q2) — RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL
+   *  only. The patient's INITIAL emergency-range reading (BP1) in the
+   *  retake-to-confirm flow. The confirmatory below-threshold reading (BP2) is
+   *  the standard `systolicBP` / `diastolicBP`. Undefined for every other rule
+   *  (the helper renders "?/?" — never reached in production for those rules). */
+  initialSystolicBP?: number | null
+  initialDiastolicBP?: number | null
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -210,6 +244,15 @@ function bp(ctx: AlertContext): string {
 
 function hr(ctx: AlertContext): string {
   return `HR ${ctx.pulse ?? '?'} bpm`
+}
+
+// Option D (Manisha 2026-06-12 Q2) — renders the INITIAL emergency-range
+// reading (BP1) for RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL. BP2 (the
+// confirmatory reading) uses the standard bp(ctx).
+function initialBp(ctx: AlertContext): string {
+  const sbp = ctx.initialSystolicBP ?? '?'
+  const dbp = ctx.initialDiastolicBP ?? '?'
+  return `${sbp}/${dbp} mmHg`
 }
 
 function physSuffix(ctx: AlertContext): string {
@@ -345,6 +388,101 @@ function formatDrugList(names: string[]): string {
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
 }
 
+// ─── Chunk B: backdated-reading message modifiers ─────────────────────────────
+// Manisha Backdated Readings sign-off 2026-06-06. A reading logged ≥1h after it
+// was measured (DELAYED_ENTRY) can't confirm an active emergency, so the four BP
+// Level-2 patient messages drop the directive 911 CTA and redirect to the care
+// team; the physician messages carry Manisha's signed delayed-entry flag
+// (Recheck #1 refinement — physL2DelayedFlag below). Level-1 physician
+// messages get a provider-only disclaimer (Recheck #2 — physL1DelayedDisclaimer
+// below, applied centrally by OutputGenerator keyed on tier). HISTORICAL_ENTRY
+// (≥24h) never reaches this layer — the engine suppresses ALL alerts upstream
+// (alert-engine.service.ts, Chunk B fix-up). The patient "recorded but won't
+// alert" courtesy note renders off serializeEntry's delayBand /
+// alertsSuppressedReason on the entry response (Chunk C) — no new rule_id,
+// no new dispatch path.
+function isDelayedEntry(ctx: AlertContext): boolean {
+  return ctx.delayBand === 'DELAYED_ENTRY'
+}
+
+// Band-only physician badge — retained as the graceful fallback when a direct
+// caller supplies delayBand without delayHours/measuredAt (production always
+// populates both via OutputGenerator). Trailing space so it composes as a prefix.
+const PHYS_DELAYED_BADGE =
+  '[DELAYED ENTRY — logged ≥1h after measurement; confirm current symptoms before acting] '
+
+/** "1 hour" / "n hours" — Manisha's signed template substitutes an integer
+ *  into "[X] hours"; plural-aware rendering is a grammatical instantiation,
+ *  not a wording change (approved 2026-06-10). */
+function delayHoursPhrase(hours: number): string {
+  return `${hours} hour${hours === 1 ? '' : 's'}`
+}
+
+/** Render a measurement timestamp in the patient's local time, e.g.
+ *  "Jun 9, 2026, 2:30 PM". Falls back to America/New_York (the pilot
+ *  population) when the profile timezone is missing or invalid. */
+function formatMeasuredAt(
+  measuredAt: Date,
+  timezone: string | null | undefined,
+): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      ...opts,
+      timeZone: timezone || 'America/New_York',
+    }).format(measuredAt)
+  } catch {
+    return new Intl.DateTimeFormat('en-US', {
+      ...opts,
+      timeZone: 'America/New_York',
+    }).format(measuredAt)
+  }
+}
+
+/**
+ * Chunk B fix-up — Manisha's SIGNED physician-tier delayed-entry flag for the
+ * four BP Level-2 rules (Backdated Readings sign-off 2026-06-06, Recheck #1
+ * refinement, signed verbatim):
+ *   "Delayed entry: patient reported [BP] for [date/time]. Reading entered
+ *    [X] hours later. Verify current BP and assess for headache, visual
+ *    changes, chest pain, or dyspnea. If unable to reach patient, escalate
+ *    per standard protocol."
+ * [BP] renders via bp(ctx) (registry house style, mmHg-suffixed). Trailing
+ * space so it composes as a prefix on the rule's physician message.
+ */
+function physL2DelayedFlag(ctx: AlertContext): string {
+  if (!isDelayedEntry(ctx)) return ''
+  if (ctx.delayHours == null || ctx.measuredAt == null) return PHYS_DELAYED_BADGE
+  return `Delayed entry: patient reported ${bp(ctx)} for ${formatMeasuredAt(ctx.measuredAt, ctx.timezone)}. Reading entered ${delayHoursPhrase(ctx.delayHours)} later. Verify current BP and assess for headache, visual changes, chest pain, or dyspnea. If unable to reach patient, escalate per standard protocol. `
+}
+
+/**
+ * Chunk B fix-up — Recheck #2 provider-only disclaimer for Level-1 alerts on
+ * DELAYED_ENTRY: "Note: this reading was entered [X] hours after measurement.
+ * Clinical context may have changed." Patient + caregiver tiers stay identical
+ * to real-time (the patient already knows they backdated — repeating it adds
+ * no clinical value, per the signed doc). Applied CENTRALLY by OutputGenerator
+ * to every rule result whose tier is BP_LEVEL_1_HIGH / BP_LEVEL_1_LOW —
+ * Recheck #2 is reading-generic, so the HR-axis and HF-decompensation L1
+ * rules are included. Leading space so it composes as a suffix.
+ *
+ * TIER_1 contraindication + TIER_2 discrepancy DELAYED disclaimers are NOT
+ * itemized in the signed doc — deferred until clarified with Manisha; do not
+ * widen the OutputGenerator dispatch without a sign-off.
+ */
+export function physL1DelayedDisclaimer(ctx: AlertContext): string {
+  if (!isDelayedEntry(ctx)) return ''
+  const lag =
+    ctx.delayHours == null ? 'more than 1 hour' : delayHoursPhrase(ctx.delayHours)
+  return ` Note: this reading was entered ${lag} after measurement. Clinical context may have changed.`
+}
+
 // ─── registry ────────────────────────────────────────────────────────────────
 
 export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
@@ -376,7 +514,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       // meaningful for the ACE/ARB rule: 2nd/3rd trimester carries the
       // classic fetopathy (renal dysgenesis, oligohydramnios, pulmonary
       // hypoplasia); 1st trimester carries lower but still elevated risk.
-      return `CONTRAINDICATION — Pregnant patient on ${cls}: ${names}${gestationalAgePhrase(ctx)}. ACE/ARBs are contraindicated in pregnancy (FDA Category D/X). Recommend immediate substitution (CHAP-protocol alternative — labetalol or long-acting nifedipine). Patient has been advised not to self-discontinue.${physSuffix(ctx)}`
+      return `CONTRAINDICATION — Pregnant patient on ${cls}: ${names}${gestationalAgePhrase(ctx)}.${medicationListPhrase(ctx)} ACE/ARBs are contraindicated in pregnancy (FDA Category D/X). Recommend immediate substitution (CHAP-protocol alternative — labetalol or long-acting nifedipine). Patient has been advised not to self-discontinue.${physSuffix(ctx)}`
     },
   },
 
@@ -396,7 +534,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       return `${patientNameOr(ctx)} is taking a medication${med} that may need to be reviewed given their heart failure diagnosis. ${CARE_TEAM_NOTIFIED}`
     },
     physicianMessage: (ctx) =>
-      `CONTRAINDICATION — HFrEF patient on non-dihydropyridine CCB: ${ctx.drugName ?? 'unknown'} (diltiazem/verapamil). NDHP-CCBs are potentially harmful in HFrEF (negative inotropy) per 2022 AHA/ACC/HFSA HF guideline. Recommend review and substitution.${physSuffix(ctx)}`,
+      `CONTRAINDICATION — HFrEF patient on non-dihydropyridine CCB: ${ctx.drugName ?? 'unknown'} (diltiazem/verapamil).${medicationListPhrase(ctx)} NDHP-CCBs are potentially harmful in HFrEF (negative inotropy) per 2022 AHA/ACC/HFSA HF guideline. Recommend review and substitution.${physSuffix(ctx)}`,
   },
 
   // ── BP Level 2 symptom overrides ──────────────────────────────────────
@@ -404,24 +542,34 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   // time is referenced in Manisha's clinician wording but isn't on AlertContext
   // (omitted). MVP US-only: 911 hardcoded per CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   RULE_SYMPTOM_OVERRIDE_GENERAL: {
-    patientMessage: () =>
-      'Based on what you reported, your care team needs to know right away. If you are having chest pain, trouble breathing, or feel like you might faint, call 911. Otherwise, your care team has been notified and will contact you.',
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
+    patientMessage: (ctx) =>
+      isDelayedEntry(ctx)
+        ? "You logged symptoms from earlier along with this reading. Because it wasn't just recorded, we can't treat it as an active emergency — please share it with your care team today."
+        : 'Based on what you reported, your care team needs to know right away. If you are having chest pain, trouble breathing, or feel like you might faint, call 911. Otherwise, your care team has been notified and will contact you.',
     caregiverMessage: (ctx) =>
       `${patientNameOr(ctx)} reported symptoms that need attention: ${ctx.conditionLabel ?? '—'}. ${CARE_TEAM_NOTIFIED} If they are having chest pain, trouble breathing, or feel faint, please help them call 911.`,
     physicianMessage: (ctx) =>
-      `SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP at time of report: ${bp(ctx)}, ${hr(ctx)}. Symptoms triggered override regardless of BP threshold. Recommend urgent clinical assessment.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP at time of report: ${bp(ctx)}, ${hr(ctx)}. Symptoms triggered override regardless of BP threshold. Recommend urgent clinical assessment.${physSuffix(ctx)}`,
   },
 
   // Doc 2 (Manisha 6/2) supersedes the Cluster 6 Q6 (5/9) "preeclampsia"
   // patient wording — newest sign-off wins. Gestational age omitted (not on
   // AlertContext). MVP US-only: 911 hardcoded per CROSS_HANDOFF_ADDENDUM.
   RULE_SYMPTOM_OVERRIDE_PREGNANCY: {
-    patientMessage: () =>
-      "Some of the symptoms you reported can be serious during pregnancy. Please call your doctor or go to the hospital right away. If you have trouble breathing or a very bad headache that won't go away, call 911.",
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
+    patientMessage: (ctx) =>
+      isDelayedEntry(ctx)
+        ? "You logged pregnancy-related symptoms from earlier. Because they weren't just recorded, please contact your doctor or care team today to discuss them."
+        : "Some of the symptoms you reported can be serious during pregnancy. Please call your doctor or go to the hospital right away. If you have trouble breathing or a very bad headache that won't go away, call 911.",
     caregiverMessage: (ctx) =>
       `${patientNameOr(ctx)} reported pregnancy-related symptoms that may be serious: ${ctx.conditionLabel ?? '—'}. Please help them contact their doctor or go to the hospital. If they have trouble breathing, call 911.`,
     physicianMessage: (ctx) =>
-      `PREGNANCY SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP: ${bp(ctx)}. Evaluate for preeclampsia with severe features. ACOG criteria: headache unresponsive to medication, visual disturbances, RUQ/epigastric pain, thrombocytopenia, elevated LFTs, renal insufficiency.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}PREGNANCY SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP: ${bp(ctx)}. Evaluate for preeclampsia with severe features. ACOG criteria: headache unresponsive to medication, visual disturbances, RUQ/epigastric pain, thrombocytopenia, elevated LFTs, renal insufficiency.${physSuffix(ctx)}`,
   },
 
   // ── Absolute emergency ────────────────────────────────────────────────
@@ -431,12 +579,17 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   // MVP US-only: emergency number hardcoded to 911. See CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   // Post-MVP: replace with {{emergencyNumber}} resolved by locale.
   RULE_ABSOLUTE_EMERGENCY: {
-    patientMessage: () =>
-      'Your blood pressure is dangerously high and you are having symptoms that need emergency care. Call 911 or go to the nearest emergency room right now. Do not wait.',
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
+    patientMessage: (ctx) =>
+      isDelayedEntry(ctx)
+        ? "You logged a high blood pressure reading from earlier. Because it wasn't just taken, we can't treat it as a current emergency — but it still matters. Please share it with your care team today."
+        : 'Your blood pressure is dangerously high and you are having symptoms that need emergency care. Call 911 or go to the nearest emergency room right now. Do not wait.',
     caregiverMessage: (ctx) =>
       `URGENT — ${patientNameOr(ctx)}'s blood pressure is dangerously high (${bp(ctx)}) and they are having symptoms. Please help them call 911 or get to the nearest emergency room immediately.`,
     physicianMessage: (ctx) =>
-      `HYPERTENSIVE EMERGENCY — BP ${bp(ctx)} with symptoms: ${ctx.conditionLabel ?? '—'}. Meets criteria for hypertensive emergency (SBP ≥180 and/or DBP ≥120 with target organ damage). Patient advised to call 911. Immediate evaluation required.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}HYPERTENSIVE EMERGENCY — BP ${bp(ctx)} with symptoms: ${ctx.conditionLabel ?? '—'}. Meets criteria for hypertensive emergency (SBP ≥180 and/or DBP ≥120 with target organ damage). Patient advised to call 911. Immediate evaluation required.${physSuffix(ctx)}`,
   },
 
   // ── Pregnancy thresholds ──────────────────────────────────────────────
@@ -448,12 +601,17 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   // remain backlogged. MVP US-only: 911 hardcoded per
   // CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   RULE_PREGNANCY_L2: {
-    patientMessage: () =>
-      "Your blood pressure is very high. During pregnancy, this needs urgent attention. Please call your doctor or go to the hospital right away. If you can't reach your doctor, call 911.",
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
+    patientMessage: (ctx) =>
+      isDelayedEntry(ctx)
+        ? "You logged a high blood pressure reading from earlier in your pregnancy. Because it wasn't just taken, please share it with your doctor or care team today rather than treating it as an emergency right now."
+        : "Your blood pressure is very high. During pregnancy, this needs urgent attention. Please call your doctor or go to the hospital right away. If you can't reach your doctor, call 911.",
     caregiverMessage: (ctx) =>
       `URGENT — ${patientNameOr(ctx)}'s blood pressure is very high (${bp(ctx)}) during pregnancy. Please help them contact their doctor or go to the hospital immediately.`,
     physicianMessage: (ctx) =>
-      `PREGNANCY BP LEVEL 2 — BP ${bp(ctx)}${gestationalAgePhrase(ctx)}. Meets ACOG criteria for severe hypertension in pregnancy (SBP ≥160 or DBP ≥110). Initiate antihypertensive therapy within 30–60 min. Evaluate for preeclampsia with severe features.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}PREGNANCY BP LEVEL 2 — BP ${bp(ctx)}${gestationalAgePhrase(ctx)}. Meets ACOG criteria for severe hypertension in pregnancy (SBP ≥160 or DBP ≥110). Initiate antihypertensive therapy within 30–60 min. Evaluate for preeclampsia with severe features.${physSuffix(ctx)}`,
   },
 
   RULE_PREGNANCY_L1_HIGH: {
@@ -525,7 +683,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     caregiverMessage: (ctx) =>
       `${patientNameOr(ctx)}'s diastolic blood pressure is critically low (${ctx.diastolicBP ?? '?'} mmHg). If they have chest pain or feel faint, help them call 911.`,
     physicianMessage: (ctx) =>
-      `CAD DBP CRITICAL — DBP < ${ctx.thresholdValue ?? 70}: ${bp(ctx)}. Low DBP may compromise coronary perfusion (J-curve). Assess for symptomatic hypotension. Consider dose reduction of antihypertensives, particularly vasodilators.${physSuffix(ctx)}`,
+      `CAD DBP CRITICAL — DBP < ${ctx.thresholdValue ?? 70}: ${bp(ctx)}${agePhrase(ctx)}. Low DBP may compromise coronary perfusion (J-curve). Assess for symptomatic hypotension. Consider dose reduction of antihypertensives, particularly vasodilators.${physSuffix(ctx)}`,
   },
   RULE_CAD_HIGH: {
     patientMessage: (ctx) =>
@@ -658,7 +816,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     // the axis that actually triggered. Evaluated on the session-averaged
     // values (physicianCtx), which is the engine's evaluation truth.
     physicianMessage: (ctx) =>
-      `BP Level 1 High — ${stage2Band(ctx)} at ${bp(ctx)}.${preDaySuffix(ctx)}${physSuffix(ctx)}`,
+      `BP Level 1 High — ${stage2Band(ctx)} at ${bp(ctx)}${agePhrase(ctx)}.${preDaySuffix(ctx)}${physSuffix(ctx)}`,
   },
   RULE_STANDARD_L1_LOW: {
     // F26 — disclaimer is admin-only, not patient. Wording per Doc 2 (Manisha 6/2).
@@ -963,7 +1121,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       "You told us you've taken a pain reliever like ibuprofen, Advil, Aleve, or naproxen. These can raise your blood pressure and make your blood-pressure medicine work less well, especially if you take them often. If your pain needs a few days of relief, acetaminophen (Tylenol) is usually a safer choice — please check with your care team.",
     caregiverMessage: () => '',
     physicianMessage: (ctx) =>
-      `Tier 3 — NSAID use reported alongside antihypertensive therapy. Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend.${physSuffix(ctx)}`,
+      `Tier 3 — NSAID use reported alongside antihypertensive therapy.${medicationListPhrase(ctx)} Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend.${physSuffix(ctx)}`,
   },
 
   RULE_ACE_COUGH: {
@@ -994,6 +1152,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       const name = ctx.patientName?.trim() || 'The patient'
       return `${name} reported swelling of their face, lips, or tongue. This can be a dangerous reaction to one of their blood pressure medicines. If they have trouble breathing or throat tightness, call 911 now. If not, take them to the nearest emergency room now. Do not let them take another dose of that medicine.`
     },
+    // D4 #2 — Manisha 2026-06-09: med-list rejected here (airway emergency). Tier 2 post-resolution provider note deferred to backlog.
     physicianMessage: (ctx) => {
       const drug = ctx.drugName ?? 'unknown'
       const airway = ctx.angioedemaThroat
@@ -1034,9 +1193,9 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       const cls = ctx.drugClass ?? 'rate-control'
       const sessions = ctx.bradySustainedSessions ?? 0
       if (sessions >= 3) {
-        return `Tier 2 — Sustained asymptomatic bradycardia: mean resting HR ≤45 bpm on ${sessions} consecutive sessions (current ${hr} bpm). Patient is on ${med} (${cls}). ECG and medication-dose review recommended.${physSuffix(ctx)}`
+        return `Tier 2 — Sustained asymptomatic bradycardia: mean resting HR ≤45 bpm on ${sessions} consecutive sessions (current ${hr} bpm)${agePhrase(ctx)}. Patient is on ${med} (${cls}). ECG and medication-dose review recommended.${physSuffix(ctx)}`
       }
-      return `Tier 3 — Surveillance: resting HR ${hr} bpm (asymptomatic). Patient is on ${med} (${cls}). Consider: is this the therapeutic target? Trend review recommended. If HR persists ≤45 on multiple sessions, consider ECG and medication-dose review.${physSuffix(ctx)}`
+      return `Tier 3 — Surveillance: resting HR ${hr} bpm${agePhrase(ctx)} (asymptomatic). Patient is on ${med} (${cls}). Consider: is this the therapeutic target? Trend review recommended. If HR persists ≤45 on multiple sessions, consider ECG and medication-dose review.${physSuffix(ctx)}`
     },
   },
 
@@ -1054,6 +1213,34 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       "Starting a new medicine can take some getting used to. If you missed a dose, that's okay — just try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule.",
     caregiverMessage: () => '',
     physicianMessage: () => '',
+  },
+
+  // ── Option D — retake-to-confirm outcomes (Manisha 2026-06-12 Q2) ───────
+  // Both are PROVIDER-ONLY (no patient/caregiver message). The physician
+  // wording is LOCKED to Manisha's 2026-06-12 sign-off (Edit-Window + Session
+  // Policy, Q2 + Implementation Note 5) — do NOT soften without a fresh
+  // sign-off. No physSuffix() is appended: the strings are verbatim-locked and
+  // self-contained (the single-reading caveat would be redundant — these rules
+  // ARE the single-/unconfirmed-reading outcome).
+
+  // Patient declined the confirmatory measurement / closed the app / the 5-min
+  // window expired. Tier 1 provider-only (Implementation Note 5: unconfirmed,
+  // possibly artifactual → Tier 1, NOT Tier 2). [BP] = the unconfirmed reading.
+  RULE_UNCONFIRMED_EMERGENCY: {
+    patientMessage: () => '',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Single unconfirmed emergency-range reading: ${bp(ctx)}. Patient did not complete confirmatory measurement. Recommend phone outreach to verify current status.`,
+  },
+
+  // Second reading came back below the emergency threshold — no emergency
+  // alert fired. Tier 3 informational, no ladder. [BP1] = initial emergency
+  // reading; [BP2] = confirmatory below-threshold reading.
+  RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL: {
+    patientMessage: () => '',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Patient's initial reading was ${initialBp(ctx)} (emergency range); confirmatory reading was ${bp(ctx)} (below emergency threshold). No emergency alert fired. Review at next encounter.`,
   },
 }
 

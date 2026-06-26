@@ -28,6 +28,22 @@ async function seedHistoryToClearPreDay3(tc: TestControl, userId: string): Promi
 }
 
 /**
+ * Normalize Aisha to her seed "control" baseline (pure HTN, no HF). resetUser
+ * wipes journal/alert state but NOT PatientProfile, so a sibling test in the
+ * same shard that flips Aisha to HFrEF (e.g. via setUserCondition) leaks into
+ * here. The Q2 single-reading HOLD assertions assume STANDARD_L1_HIGH, but
+ * RULE_HFREF_HIGH is intentionally exempt from the single-reading gate
+ * (Manisha 2026-06-02) and would fire immediately — defeating the "held" check.
+ * Clearing the HF-family conditions forces the standard (gated) path. Matches
+ * the defensive normalization already done in specs 33/34.
+ */
+async function normalizeAishaControl(tc: TestControl, userId: string): Promise<void> {
+  await tc.setUserCondition(userId, 'hasHeartFailure', false, 'NOT_APPLICABLE')
+  await tc.setUserCondition(userId, 'hasDCM', false)
+  await tc.setUserCondition(userId, 'hasHCM', false)
+}
+
+/**
  * Cluster 6 engine coverage via the API (Manisha 5/9 sign-off).
  *
  * Drives the rule engine through the public daily-journal endpoints + the
@@ -114,6 +130,7 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
+    await normalizeAishaControl(tc, u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
@@ -151,6 +168,7 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
+    await normalizeAishaControl(tc, u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
@@ -203,6 +221,7 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
+    await normalizeAishaControl(tc, u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {

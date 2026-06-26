@@ -40,7 +40,24 @@ export class SessionAveragerService {
     }
 
     const siblings = await this.loadSessionSiblings(anchor)
-    return SessionAveragerService.aggregate(anchor, siblings)
+
+    // Option D (Manisha 2026-06-12 Q2) — the CONFIRMED_NORMAL physician message
+    // names BP1 (the held first-of-pair). Fetch it DIRECTLY by confirmsEntryId
+    // rather than relying on it being a session-proximity sibling: a slow retake
+    // (or measuredAt drift) can push the first reading outside the averaging
+    // window, which would otherwise render BP1 as "?/?". Tenant-scoped by userId.
+    let optionDFirst:
+      | { systolicBP: number | null; diastolicBP: number | null }
+      | undefined
+    if (anchor.emergencyConfirmation === 'CONFIRMATORY' && anchor.confirmsEntryId) {
+      const first = await this.prisma.journalEntry.findFirst({
+        where: { id: anchor.confirmsEntryId, userId: anchor.userId },
+        select: { systolicBP: true, diastolicBP: true },
+      })
+      if (first) optionDFirst = first
+    }
+
+    return SessionAveragerService.aggregate(anchor, siblings, optionDFirst)
   }
 
   private async loadSessionSiblings(anchor: {
@@ -95,6 +112,16 @@ export class SessionAveragerService {
       measuredAt: Date
       sessionId: string | null
       singleReadingFinalized?: boolean
+      delayBand?: string
+      /** Chunk B fix-up — anchor row's DB persist time ("loggedAt"). Always
+       *  present on real reads (averageForEntry passes the full Prisma row);
+       *  optional so pure-aggregation test callers keep compiling. */
+      createdAt?: Date
+      /** Option D (Manisha 2026-06-12 Q2) — anchor's retake-confirm state +
+       *  the first-of-pair id (for BP1 lookup among siblings). Optional so
+       *  pure-aggregation test callers keep compiling. */
+      emergencyConfirmation?: string | null
+      confirmsEntryId?: string | null
     },
     siblings: Array<{
       id: string
@@ -127,6 +154,10 @@ export class SessionAveragerService {
       medicationTaken?: boolean | null
       missedMedications?: unknown
     }>,
+    /** Option D (Manisha 2026-06-12 Q2) — the held first-of-pair (BP1), fetched
+     *  directly by confirmsEntryId in averageForEntry so it's robust to the
+     *  session window. Falls back to a sibling lookup for direct test callers. */
+    explicitOptionDFirst?: { systolicBP: number | null; diastolicBP: number | null },
   ): SessionAverage | null {
     if (siblings.length === 0) return null
 
@@ -160,6 +191,16 @@ export class SessionAveragerService {
     const medicationTaken = orReduceMedicationTaken(siblings)
     const missedMedications = unionMissedMedications(siblings)
 
+    // Option D (Manisha 2026-06-12 Q2) — on a CONFIRMATORY session, BP1 is the
+    // first-of-pair (AWAITING) reading. Prefer the explicitly-fetched entry
+    // (robust to the session window); fall back to a sibling lookup for direct
+    // test callers that don't pass it. BP2 is the anchor (submitted*).
+    const optionDFirst =
+      explicitOptionDFirst ??
+      (anchor.emergencyConfirmation === 'CONFIRMATORY' && anchor.confirmsEntryId
+        ? siblings.find((s) => s.id === anchor.confirmsEntryId)
+        : undefined)
+
     return {
       entryId: anchor.id,
       userId: anchor.userId,
@@ -179,6 +220,30 @@ export class SessionAveragerService {
       // Cluster 6 Q2 — bypass the non-emergency single-reading gate when
       // the anchor entry has been finalized by the frontend 5-min timeout.
       singleReadingFinalized: anchor.singleReadingFinalized ?? false,
+      // Option D (Manisha 2026-06-12 Q2) — retake-confirm state + BP1 for the
+      // CONFIRMED_NORMAL physician message. Null for non-Option-D sessions.
+      emergencyConfirmation: anchor.emergencyConfirmation ?? null,
+      optionDInitialSystolicBP: optionDFirst?.systolicBP ?? null,
+      optionDInitialDiastolicBP: optionDFirst?.diastolicBP ?? null,
+      // Chunk B (Manisha Backdated Readings sign-off 2026-06-06) — carry the
+      // anchor entry's measurement-lag band so the engine can suppress ALL
+      // alerts on HISTORICAL_ENTRY (fix-up) and the registry can drop the
+      // 911 CTA on DELAYED_ENTRY.
+      delayBand: anchor.delayBand,
+      // Chunk B fix-up (Recheck #1 refinement + Recheck #2) — integer hours
+      // between the anchor's measurement and its persist time. Renders the
+      // "[X] hours" placeholder in the signed DELAYED_ENTRY physician
+      // wording. Anchored on the anchor entry (not `latest`) so the figure
+      // matches the delayBand computed at create time.
+      delayHours: anchor.createdAt
+        ? Math.max(
+            0,
+            Math.floor(
+              (anchor.createdAt.getTime() - anchor.measuredAt.getTime()) /
+                3_600_000,
+            ),
+          )
+        : undefined,
     }
   }
 }

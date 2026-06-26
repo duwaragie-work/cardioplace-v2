@@ -241,6 +241,9 @@ describe('AlertEngineService.evaluateAdHoc', () => {
       // Issue #69 — and a 6th arg `contextMeds` so the generator can
       // compute `activeMedications` for any rule that opts into
       // `medicationListPhrase(ctx)`. Assert it's an Array.
+      // Chunk B fix-up — and a 7th arg `timezone` so the generator can
+      // render the signed DELAYED_ENTRY "[date/time]" placeholder in the
+      // patient's local time (engine pipes `ctx.timezone ?? null`).
       expect(outputGenerator.generate).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
@@ -248,6 +251,7 @@ describe('AlertEngineService.evaluateAdHoc', () => {
         null,
         expect.any(Date),
         expect.any(Array),
+        'America/New_York',
       )
     }
   })

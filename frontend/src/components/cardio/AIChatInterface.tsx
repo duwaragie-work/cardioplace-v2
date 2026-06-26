@@ -8,6 +8,7 @@ import {
   Send,
   Mic,
   MicOff,
+  AudioLines,
   Plus,
   Menu,
   X,
@@ -444,7 +445,7 @@ function DeleteConfirmModal({
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 function SidebarContent({
-  sessions, activeId, onSelect, onNewConversation, onDeleteSession, userInitials, userName, riskTier, isLoading,
+  sessions, activeId, onSelect, onNewConversation, onDeleteSession, userInitials, userName, riskTier, isLoading, onClose,
 }: {
   sessions: Session[];
   activeId: string | null;
@@ -455,6 +456,9 @@ function SidebarContent({
   userName: string;
   riskTier: string;
   isLoading: boolean;
+  // Mobile drawer passes this to render an in-header close button; the desktop
+  // sidebar omits it (no close affordance needed).
+  onClose?: () => void;
 }) {
   const { t } = useLanguage();
   const riskColor =
@@ -468,7 +472,19 @@ function SidebarContent({
     <div className="flex flex-col h-full overflow-hidden">
       <style>{sidebarScrollStyles}</style>
       <div className="px-4 pt-5 pb-3 shrink-0">
-        <h2 className="text-[0.9375rem] font-bold mb-3" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.conversations')}</h2>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h2 className="text-[0.9375rem] font-bold" style={{ color: 'var(--brand-text-primary)' }}>{t('chat.conversations')}</h2>
+          {onClose && (
+            <button
+              onClick={onClose}
+              aria-label={t('common.close')}
+              className="lg:hidden -mr-1 w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition hover:bg-gray-100"
+              style={{ backgroundColor: 'var(--brand-background)' }}
+            >
+              <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+            </button>
+          )}
+        </div>
         <button
           onClick={onNewConversation}
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[0.8125rem] font-semibold transition-all hover:opacity-90 active:scale-[0.98]"
@@ -503,14 +519,20 @@ function SidebarContent({
         ) : sessions.length === 0 ? (
           <p className="text-[0.75rem] px-2 py-2" style={{ color: 'var(--brand-text-muted)' }}>{t('chat.noConversations')}</p>
         ) : (
-          <div className="space-y-0.5">
+          <div className="space-y-1.5">
             {sessions.map((s) => {
               const isActive = s.id === activeId;
               return (
                 <div
                   key={s.id}
                   className={`group relative w-full text-left px-3 py-2.5 rounded-xl transition-all cursor-pointer ${!isActive ? 'hover:bg-[#F3EEFB]' : ''}`}
-                  style={{ backgroundColor: isActive ? 'var(--brand-primary-purple-light)' : undefined, borderLeft: isActive ? '2px solid var(--brand-primary-purple)' : '2px solid transparent' }}
+                  style={{
+                    backgroundColor: isActive ? 'var(--brand-primary-purple-light)' : undefined,
+                    border: '1px solid var(--brand-border)',
+                    // Active card keeps a slightly heavier purple left accent.
+                    borderLeftWidth: isActive ? '2px' : '1px',
+                    borderLeftColor: isActive ? 'var(--brand-primary-purple)' : 'var(--brand-border)',
+                  }}
                   onClick={() => onSelect(s.id)}
                 >
                   <div className="flex items-center gap-1.5 pr-6">
@@ -563,7 +585,7 @@ function VoiceCallBar({
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      className="shrink-0 flex items-center gap-3 px-4 lg:px-6 py-2.5"
+      className="shrink-0 flex items-center gap-2 sm:gap-3 px-3 sm:px-4 lg:px-6 py-2.5"
       style={{ backgroundColor: '#F3EEFB', borderBottom: '1px solid var(--brand-border)' }}
     >
       {/* Animated dot */}
@@ -573,23 +595,25 @@ function VoiceCallBar({
         animate={{ scale: isListening || isSpeaking ? [1, 1.4, 1] : 1 }}
         transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
       />
-      <div className="flex items-center gap-2 flex-1 min-w-0">
+      <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0 overflow-hidden">
         <Mic className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
-        <span className="text-[0.75rem] font-semibold" style={{ color: 'var(--brand-primary-purple)' }}>
-          {t('chat.voiceMode')}
+        {/* "Voice mode" label is dropped on phones to make room — the mic icon
+            already conveys the mode, and the state label stays. */}
+        <span className="text-[0.75rem] font-semibold shrink-0 hidden sm:inline" style={{ color: 'var(--brand-primary-purple)' }}>
+          {t('chat.voiceMode')} ·
         </span>
         <span
           data-testid="voice-state-label"
-          className="text-[0.75rem]"
+          className="text-[0.75rem] truncate"
           style={{ color: 'var(--brand-text-muted)' }}
         >
-          · {stateLabel[state] ?? state}
+          {stateLabel[state] ?? state}
         </span>
       </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem]" style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}>
-          <PhoneCall className="w-3 h-3" />
-          <span>{t('chat.emergencyCall')}</span>
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[0.625rem] shrink-0" style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}>
+          <PhoneCall className="w-3 h-3 shrink-0" />
+          <span className="hidden sm:inline">{t('chat.emergencyCall')}</span>
         </div>
         <button
           data-testid="voice-end-button"
@@ -1757,6 +1781,13 @@ export default function AIChatInterface() {
           // result payload. Blocked/failed results are filtered server-side.
           if (tool === 'submit_checkin' && (result as { saved?: boolean }).saved) {
             const d = (result as { data?: Record<string, unknown> }).data ?? {};
+            // Bug 60 — read the dispatcher's has_active_medications signal
+            // so the popup card + audio recap know whether the patient
+            // actually has medications to take. Without this, the
+            // vacuously-true medicationTaken=true we save for 0-meds
+            // patients (per Bug 53) renders as "All medications taken ✓".
+            const hasActiveMeds =
+              (result as { has_active_medications?: boolean }).has_active_medications;
             setPendingCheckin({
               systolicBP: d.systolicBP as number | undefined,
               diastolicBP: d.diastolicBP as number | undefined,
@@ -1768,6 +1799,7 @@ export default function AIChatInterface() {
               // correctly showed 400 lbs.
               weight: typeof d.weight === 'number' ? kgToLbs(d.weight) : undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
+              hasActiveMedications: hasActiveMeds,
               // Bug 16B fix — read missedMedications so the card surfaces
               // WHICH meds were missed (was: rendered "All taken" even when
               // missed array was non-empty). Bug 16A normalises
@@ -1787,6 +1819,9 @@ export default function AIChatInterface() {
             });
           } else if (tool === 'update_checkin' && (result as { updated?: boolean }).updated) {
             const d = (result as { data?: Record<string, unknown> }).data ?? {};
+            // Bug 60 — same has_active_medications threading as submit_checkin.
+            const hasActiveMedsUpd =
+              (result as { has_active_medications?: boolean }).has_active_medications;
             setPendingUpdateCard({
               entryId: (d.id as string | undefined) ?? '',
               entryDate: d.entryDate as string | undefined,
@@ -1797,6 +1832,7 @@ export default function AIChatInterface() {
               // returns kg in data.weight.
               weight: typeof d.weight === 'number' ? kgToLbs(d.weight) : undefined,
               medicationTaken: d.medicationTaken as boolean | undefined,
+              hasActiveMedications: hasActiveMedsUpd,
               missedMedications: pickMissedMedications(d),
               symptoms: [],
               structuredSymptoms: pickStructuredSymptoms(d),
@@ -1978,13 +2014,11 @@ export default function AIChatInterface() {
               initial={{ x: -288 }} animate={{ x: 0 }} exit={{ x: -288 }}
               transition={{ type: 'spring', stiffness: 360, damping: 34 }}
             >
-              <button onClick={() => setShowSessions(false)} className="absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center z-10 transition hover:bg-gray-100" style={{ backgroundColor: 'var(--brand-background)' }}>
-                <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
-              </button>
               <SidebarContent
                 sessions={sessions} activeId={activeSessionId} onSelect={handleSelectSession}
                 onNewConversation={handleNewConversation} onDeleteSession={handleRequestDelete} userInitials={userInitials}
                 userName={userName} riskTier={riskTier} isLoading={isLoadingSessions}
+                onClose={() => setShowSessions(false)}
               />
             </motion.div>
           </>
@@ -2014,8 +2048,20 @@ export default function AIChatInterface() {
             <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold" style={{ backgroundColor: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)' }}>
               {t('chat.contextLoaded')}
             </span>
-            <button className="lg:hidden w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-85 active:scale-95" style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }} onClick={handleNewConversation}>
-              <Plus className="w-4 h-4 text-white" />
+            {/* 44px tap target (the global min-touch-target rule) wrapping a
+                smaller 32px gradient circle — keeps accessibility without the
+                button reading as an oversized solid circle on phones. */}
+            <button
+              className="lg:hidden flex items-center justify-center shrink-0 rounded-full transition active:scale-95"
+              onClick={handleNewConversation}
+              aria-label={t('chat.newConversation')}
+            >
+              <span
+                className="w-8 h-8 rounded-full flex items-center justify-center transition hover:opacity-85"
+                style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)', boxShadow: '0 3px 10px rgba(123,0,224,0.28)' }}
+              >
+                <Plus className="w-4 h-4 text-white" strokeWidth={2.5} />
+              </span>
             </button>
           </div>
         </div>
@@ -2059,7 +2105,7 @@ export default function AIChatInterface() {
             actionType={voiceActionType}
           />
         ) : (
-        <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 min-h-0 flex flex-col gap-4" style={{ backgroundColor: 'var(--brand-background)' }}>
+        <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 min-h-0 flex flex-col gap-4 sidebar-scroll" style={{ backgroundColor: 'var(--brand-background)' }}>
           {isLoadingHistory && (
             <div className="space-y-4 py-4">
               <div className="flex justify-end"><div className="animate-pulse rounded-2xl px-4 py-3" style={{ backgroundColor: 'var(--brand-primary-purple-light)', width: '65%' }}><div className="h-3 rounded-full mb-2" style={{ backgroundColor: '#E9D5FF', width: '80%', marginLeft: 'auto' }} /><div className="h-3 rounded-full" style={{ backgroundColor: '#E9D5FF', width: '50%', marginLeft: 'auto' }} /></div></div>
@@ -2069,7 +2115,7 @@ export default function AIChatInterface() {
 
           {messages.length === 0 && transcript.length === 0 && !isTyping && !isLoadingHistory && !voiceSummaryLoading && (
             <div data-testid="chat-empty-state" className="flex-1 flex items-center justify-center">
-              <div className="text-center max-w-xs mx-auto">
+              <div className="text-center max-w-sm mx-auto w-full px-1">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ boxShadow: '0 8px 28px rgba(123, 0, 224, 0.14)' }}>
                   <Image src="/cardioplace-icon.svg" alt="" aria-hidden="true" width={50} height={50} />
                 </div>
@@ -2077,13 +2123,21 @@ export default function AIChatInterface() {
                 <p className="text-[0.8125rem] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
                   {t('chat.askMe')}
                 </p>
-                <div className="flex flex-wrap gap-2 justify-center mt-5">
+                {/* Suggested prompts — a compact 2×2 card grid that stays the
+                    same on every screen size and never grows tall enough to
+                    overflow the empty-state area. */}
+                <div className="grid grid-cols-2 gap-2.5 mt-5 w-full">
                   {[t('chat.chipBP'), t('chat.chipMeds'), t('chat.chipCheckin'), t('chat.chipHowAmI')].map((chip) => (
                     <button
                       key={chip}
                       onClick={() => setInputValue(chip)}
-                      className="px-3 py-1.5 rounded-full text-[0.75rem] font-semibold transition hover:opacity-80 active:scale-95"
-                      style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)', border: '1px solid #E9D5FF' }}
+                      className="flex items-center justify-center text-center px-3 py-3 rounded-2xl text-[0.75rem] font-semibold leading-snug transition hover:-translate-y-0.5 active:scale-[0.97]"
+                      style={{
+                        backgroundColor: 'white',
+                        color: 'var(--brand-text-secondary)',
+                        border: '1px solid var(--brand-border)',
+                        boxShadow: '0 2px 10px rgba(123,0,224,0.05)',
+                      }}
                     >
                       {chip}
                     </button>
@@ -2193,7 +2247,7 @@ export default function AIChatInterface() {
         <div className="shrink-0 bg-white px-4 lg:px-6 pt-3 pb-4" style={{ borderTop: '1px solid var(--brand-border)' }}>
           <div
             data-testid="chat-message-input"
-            className="flex items-end gap-2 px-4 py-1.5 transition-all"
+            className="flex items-center gap-2 px-4 py-1.5 transition-all"
             style={{
               border: isVoiceActive ? '1.5px solid var(--brand-primary-purple)' : '1.5px solid var(--brand-border)',
               borderRadius: '28px',
@@ -2272,7 +2326,7 @@ export default function AIChatInterface() {
                 Distinct from the purple voice-call mic to the right which
                 starts a live bidirectional voice call. Hidden when the
                 browser lacks MediaRecorder / getUserMedia. */}
-            {dictationSupported && (
+            {dictationSupported && inputValue.trim().length === 0 && !isVoiceActive && !isVoiceConnecting && (
               <motion.button
                 data-testid="chat-dictate-button"
                 type="button"
@@ -2330,68 +2384,77 @@ export default function AIChatInterface() {
               </motion.button>
             )}
 
-            {/* Mic button — disabled while text is sending. Color encodes:
-                - red: active call
-                - amber: connecting (in flight)
-                - amber-outline + warning title: prewarm failed, click to retry
+            {/* Voice-call button — starts a live bidirectional voice session.
+                ChatGPT-style: shown when the input is EMPTY (alongside the
+                dictation mic) OR whenever a call is in progress; hidden once the
+                user types (Send takes its place). Uses a distinct waveform
+                (AudioLines) icon — NOT the dictation Mic — so the two voice
+                affordances read differently. Color encodes:
+                - red: active call · amber: connecting · amber-outline: retry
                 - purple: idle / ready */}
-            <motion.button
-              data-testid="voice-mic-button"
-              onClick={() => void handleMicClick()}
-              disabled={!token || isSending}
-              className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition disabled:opacity-40"
-              style={{
-                background: isVoiceActive
-                  ? 'linear-gradient(135deg, #ef4444, #dc2626)'
-                  : isVoiceConnecting
-                  ? '#f59e0b'
-                  : prewarmStatus === 'failed'
-                  ? '#fef3c7'
-                  : 'var(--brand-primary-purple-light)',
-                outline: prewarmStatus === 'failed' ? '1px solid #d97706' : 'none',
-                outlineOffset: prewarmStatus === 'failed' ? '-1px' : undefined,
-              }}
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.92 }}
-              title={
-                isVoiceActive
-                  ? t('chat.endVoice')
-                  : prewarmStatus === 'failed'
-                  ? 'Voice is temporarily unavailable — click to retry'
-                  : t('chat.startVoice')
-              }
-            >
-              {isVoiceActive
-                ? <MicOff className="w-3.5 h-3.5 text-white" />
-                : <Mic
-                    className="w-3.5 h-3.5"
-                    style={{
-                      color: isVoiceConnecting
-                        ? 'white'
-                        : prewarmStatus === 'failed'
-                        ? '#d97706'
-                        : 'var(--brand-primary-purple)',
-                    }}
-                  />
-              }
-            </motion.button>
+            {(inputValue.trim().length === 0 || isVoiceActive || isVoiceConnecting) && (
+              <motion.button
+                data-testid="voice-mic-button"
+                onClick={() => void handleMicClick()}
+                disabled={!token || isSending}
+                className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition disabled:opacity-40"
+                style={{
+                  background: isVoiceActive
+                    ? 'linear-gradient(135deg, #ef4444, #dc2626)'
+                    : isVoiceConnecting
+                    ? '#f59e0b'
+                    : prewarmStatus === 'failed'
+                    ? '#fef3c7'
+                    : 'var(--brand-primary-purple-light)',
+                  outline: prewarmStatus === 'failed' ? '1px solid #d97706' : 'none',
+                  outlineOffset: prewarmStatus === 'failed' ? '-1px' : undefined,
+                }}
+                whileHover={{ scale: 1.08 }}
+                whileTap={{ scale: 0.92 }}
+                title={
+                  isVoiceActive
+                    ? t('chat.endVoice')
+                    : prewarmStatus === 'failed'
+                    ? 'Voice is temporarily unavailable — click to retry'
+                    : t('chat.startVoice')
+                }
+              >
+                {isVoiceActive
+                  ? <MicOff className="w-3.5 h-3.5 text-white" />
+                  : <AudioLines
+                      className="w-3.5 h-3.5"
+                      style={{
+                        color: isVoiceConnecting
+                          ? 'white'
+                          : prewarmStatus === 'failed'
+                          ? '#d97706'
+                          : 'var(--brand-primary-purple)',
+                      }}
+                    />
+                }
+              </motion.button>
+            )}
 
-            {/* Send button — disabled during voice */}
-            <motion.button
-              data-testid="chat-send-btn"
-              onClick={() => void handleSend()}
-              disabled={isSending || !inputValue.trim() || isVoiceActive || isVoiceConnecting}
-              className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
-              style={{
-                background: inputValue.trim() ? 'linear-gradient(135deg, #7B00E0, #9333EA)' : 'var(--brand-border)',
-                boxShadow: inputValue.trim() ? '0 4px 14px rgba(123,0,224,0.35)' : 'none',
-                transition: 'background 0.2s, box-shadow 0.2s',
-              }}
-              whileHover={inputValue.trim() ? { scale: 1.08 } : {}}
-              whileTap={inputValue.trim() ? { scale: 0.92 } : {}}
-            >
-              <Send className="w-3.5 h-3.5 text-white" />
-            </motion.button>
+            {/* Send button — ChatGPT-style: only appears once the user has typed
+                something (and not during a voice call), replacing the voice
+                buttons so the composer never shows all affordances at once. */}
+            {inputValue.trim().length > 0 && !isVoiceActive && !isVoiceConnecting && (
+              <motion.button
+                data-testid="chat-send-btn"
+                onClick={() => void handleSend()}
+                disabled={isSending || !inputValue.trim()}
+                className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
+                style={{
+                  background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
+                  boxShadow: '0 4px 14px rgba(123,0,224,0.35)',
+                  transition: 'background 0.2s, box-shadow 0.2s',
+                }}
+                whileHover={{ scale: 1.08 }}
+                whileTap={{ scale: 0.92 }}
+              >
+                <Send className="w-3.5 h-3.5 text-white" />
+              </motion.button>
+            )}
           </div>
 
           {/* Dictation status / error pill — sits BELOW the input bar so it

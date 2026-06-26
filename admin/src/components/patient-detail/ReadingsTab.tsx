@@ -48,6 +48,7 @@ import {
   type RejectedReading,
 } from '@/lib/services/provider.service';
 import { getPatientMedications, getPatientProfile } from '@/lib/services/patient-detail.service';
+import { hasLargeDiscrepancy } from '@cardioplace/shared';
 import { useAuth } from '@/lib/auth-context';
 import { canManageReadings } from '@/lib/roleGates';
 import AddEditReadingModal, {
@@ -121,8 +122,35 @@ function formatDate(iso: string): string {
   });
 }
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+function formatTime(iso: string, withSeconds = false): string {
+  return new Date(iso).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(withSeconds ? { second: '2-digit' } : {}),
+  });
+}
+
+// Bug 15 — entry ids that share their local HH:MM with another entry in the
+// list. Those render with seconds so two readings submitted moments apart (now
+// stored at full-ms precision, no DB collision) don't both show "03:11 PM" and
+// read like a duplicate. Mirrors the patient /readings rule (cross-app parity).
+export function sameMinuteCollisionIds(
+  entries: ReadonlyArray<{ id: string; measuredAt: string }>,
+): Set<string> {
+  const byMinute = new Map<string, string[]>();
+  for (const e of entries) {
+    const d = new Date(e.measuredAt);
+    if (Number.isNaN(d.getTime())) continue;
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}-${d.getMinutes()}`;
+    const arr = byMinute.get(key);
+    if (arr) arr.push(e.id);
+    else byMinute.set(key, [e.id]);
+  }
+  const colliding = new Set<string>();
+  for (const arr of byMinute.values()) {
+    if (arr.length >= 2) for (const id of arr) colliding.add(id);
+  }
+  return colliding;
 }
 
 function dateFilterCutoff(filter: DateFilter): Date | null {
@@ -143,25 +171,41 @@ export type ReadingGroup =
   | { kind: 'session'; sessionId: string; entries: PatientJournalEntry[] }
   | { kind: 'single'; entry: PatientJournalEntry };
 
+const READINGS_PROXIMITY_MS = 5 * 60 * 1000; // CLINICAL_SPEC §5.2 — 5-min window.
+
+// Bug 5 (live-test 2026-06-15) — whether two consecutive readings belong to the
+// same sitting. Explicit sessionId is authoritative: two non-null sessionIds
+// group only when equal (and a null never merges into a sessioned group — the
+// session boundary is respected). NULL-session rows (legacy data + chat-tool
+// entries that never carried a sessionId) fall back to the 5-min time-proximity
+// window, mirroring the patient app's grouping so the two surfaces agree.
+function sameSitting(a: PatientJournalEntry, b: PatientJournalEntry): boolean {
+  if (a.sessionId != null && b.sessionId != null) return a.sessionId === b.sessionId;
+  if (a.sessionId == null && b.sessionId == null) {
+    const ta = new Date(a.measuredAt).getTime();
+    const tb = new Date(b.measuredAt).getTime();
+    if (Number.isNaN(ta) || Number.isNaN(tb)) return false;
+    return Math.abs(ta - tb) <= READINGS_PROXIMITY_MS;
+  }
+  return false;
+}
+
 export function groupReadingsBySession(entries: PatientJournalEntry[]): ReadingGroup[] {
   const groups: ReadingGroup[] = [];
   let i = 0;
   while (i < entries.length) {
-    const sid = entries[i].sessionId;
-    if (sid != null) {
-      let j = i + 1;
-      while (j < entries.length && entries[j].sessionId === sid) j++;
-      const slice = entries.slice(i, j);
-      groups.push(
-        slice.length >= 2
-          ? { kind: 'session', sessionId: sid, entries: slice }
-          : { kind: 'single', entry: slice[0] },
-      );
-      i = j;
+    let j = i + 1;
+    while (j < entries.length && sameSitting(entries[j - 1], entries[j])) j++;
+    const slice = entries.slice(i, j);
+    if (slice.length >= 2) {
+      // Prefer a real sessionId for the key; null-proximity groups get a
+      // synthetic key derived from the anchor entry's id.
+      const sid = slice.find((e) => e.sessionId != null)?.sessionId ?? `proximity-${slice[0].id}`;
+      groups.push({ kind: 'session', sessionId: sid, entries: slice });
     } else {
-      groups.push({ kind: 'single', entry: entries[i] });
-      i++;
+      groups.push({ kind: 'single', entry: slice[0] });
     }
+    i = j;
   }
   return groups;
 }
@@ -399,25 +443,31 @@ export default function ReadingsTab({ patientId }: Props) {
         <EmptyCard hasReadings={entries.length > 0} />
       ) : (
         <div className="space-y-2" data-testid="admin-readings-list">
-          {groupReadingsBySession(filtered).map((g) =>
-            g.kind === 'session' ? (
-              <SessionGroupCard
-                key={`session-${g.sessionId}`}
-                group={g}
-                onView={(e) => setModal({ type: 'view', entry: e })}
-                onEdit={canManage ? (e) => setModal({ type: 'edit', entry: e }) : undefined}
-                onDelete={canManage ? (e) => setModal({ type: 'delete', entry: e }) : undefined}
-              />
-            ) : (
-              <ReadingCard
-                key={g.entry.id}
-                entry={g.entry}
-                onView={(e) => setModal({ type: 'view', entry: e })}
-                onEdit={canManage ? (e) => setModal({ type: 'edit', entry: e }) : undefined}
-                onDelete={canManage ? (e) => setModal({ type: 'delete', entry: e }) : undefined}
-              />
-            ),
-          )}
+          {(() => {
+            // Bug 15 — flag entries that share a minute so they render HH:MM:SS.
+            const secondsIds = sameMinuteCollisionIds(filtered);
+            return groupReadingsBySession(filtered).map((g) =>
+              g.kind === 'session' ? (
+                <SessionGroupCard
+                  key={`session-${g.sessionId}`}
+                  group={g}
+                  secondsIds={secondsIds}
+                  onView={(e) => setModal({ type: 'view', entry: e })}
+                  onEdit={canManage ? (e) => setModal({ type: 'edit', entry: e }) : undefined}
+                  onDelete={canManage ? (e) => setModal({ type: 'delete', entry: e }) : undefined}
+                />
+              ) : (
+                <ReadingCard
+                  key={g.entry.id}
+                  entry={g.entry}
+                  showSeconds={secondsIds.has(g.entry.id)}
+                  onView={(e) => setModal({ type: 'view', entry: e })}
+                  onEdit={canManage ? (e) => setModal({ type: 'edit', entry: e }) : undefined}
+                  onDelete={canManage ? (e) => setModal({ type: 'delete', entry: e }) : undefined}
+                />
+              ),
+            );
+          })()}
         </div>
       )}
 
@@ -449,11 +499,15 @@ export default function ReadingsTab({ patientId }: Props) {
 
 function SessionGroupCard({
   group,
+  secondsIds,
   onView,
   onEdit,
   onDelete,
 }: {
   group: Extract<ReadingGroup, { kind: 'session' }>;
+  /** Bug 15 — ids whose minute collides with another reading, so the inner
+   *  cards render HH:MM:SS. */
+  secondsIds?: Set<string>;
   onView?: (entry: PatientJournalEntry) => void;
   onEdit?: (entry: PatientJournalEntry) => void;
   onDelete?: (entry: PatientJournalEntry) => void;
@@ -461,6 +515,36 @@ function SessionGroupCard({
   const times = group.entries.map((e) => new Date(e.measuredAt).getTime());
   const first = new Date(Math.min(...times)).toISOString();
   const last = new Date(Math.max(...times)).toISOString();
+
+  // Item B — Option D first-of-pair + CONFIRMATORY pair. When the two BPs differ
+  // a lot, surface a provider-side "Large discrepancy" flag: the first reading
+  // may be a measurement error or transient spike rather than a true episode.
+  // NOTE: on confirmation the backend CLEARS the first reading's
+  // emergencyConfirmation back to null (it's now a resolved historical reading),
+  // so find the CONFIRMATORY entry first, then its first-of-pair via
+  // confirmsEntryId — don't look for a lingering 'AWAITING'.
+  const confirmatory = group.entries.find(
+    (e) =>
+      e.emergencyConfirmation === 'CONFIRMATORY' &&
+      e.systolicBP != null &&
+      e.diastolicBP != null,
+  );
+  const awaiting = confirmatory
+    ? group.entries.find(
+        (e) =>
+          e.id === confirmatory.confirmsEntryId &&
+          e.systolicBP != null &&
+          e.diastolicBP != null,
+      )
+    : undefined;
+  const largeDiscrepancy =
+    awaiting != null &&
+    confirmatory != null &&
+    hasLargeDiscrepancy(
+      { systolicBP: awaiting.systolicBP!, diastolicBP: awaiting.diastolicBP! },
+      { systolicBP: confirmatory.systolicBP!, diastolicBP: confirmatory.diastolicBP! },
+    );
+
   return (
     <div
       data-testid={`admin-readings-session-${group.sessionId}`}
@@ -477,10 +561,31 @@ function SessionGroupCard({
       >
         <Clock className="w-3 h-3" />
         Session: {group.entries.length} readings · {formatTime(first)} – {formatTime(last)}
+        {largeDiscrepancy && awaiting && confirmatory && (
+          <span
+            data-testid="admin-readings-discrepancy-badge"
+            className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+            style={{
+              backgroundColor: 'var(--brand-warning-amber-light)',
+              color: 'var(--brand-warning-amber-text)',
+            }}
+            title={`First reading ${awaiting.systolicBP}/${awaiting.diastolicBP}, second reading ${confirmatory.systolicBP}/${confirmatory.diastolicBP}. Possible measurement error or transient spike — review with patient.`}
+          >
+            <AlertTriangle className="w-3 h-3" />
+            Large discrepancy
+          </span>
+        )}
       </div>
       <div className="px-2 pb-2 space-y-2">
         {group.entries.map((e) => (
-          <ReadingCard key={e.id} entry={e} onView={onView} onEdit={onEdit} onDelete={onDelete} />
+          <ReadingCard
+            key={e.id}
+            entry={e}
+            showSeconds={secondsIds?.has(e.id) ?? false}
+            onView={onView}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
         ))}
       </div>
     </div>
@@ -558,11 +663,14 @@ function ReadingActionsMenu({
 
 function ReadingCard({
   entry,
+  showSeconds = false,
   onView,
   onEdit,
   onDelete,
 }: {
   entry: PatientJournalEntry;
+  /** Bug 15 — render HH:MM:SS when this reading shares its minute with another. */
+  showSeconds?: boolean;
   onView?: (entry: PatientJournalEntry) => void;
   onEdit?: (entry: PatientJournalEntry) => void;
   onDelete?: (entry: PatientJournalEntry) => void;
@@ -595,9 +703,13 @@ function ReadingCard({
             <Calendar className="w-3.5 h-3.5" style={{ color: 'var(--brand-text-muted)' }} />
             {formatDate(entry.measuredAt)}
           </span>
-          <span className="inline-flex items-center gap-1 text-[12px]" style={{ color: 'var(--brand-text-secondary)' }}>
+          <span
+            data-testid={`admin-reading-time-${entry.id}`}
+            className="inline-flex items-center gap-1 text-[12px]"
+            style={{ color: 'var(--brand-text-secondary)' }}
+          >
             <Clock className="w-3 h-3" />
-            {formatTime(entry.measuredAt)}
+            {formatTime(entry.measuredAt, showSeconds)}
           </span>
           <SourcePill source={entry.source} addedByName={entry.addedByName} />
           {entry.suboptimalMeasurement && (

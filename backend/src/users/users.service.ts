@@ -925,6 +925,14 @@ export class UsersService {
             take: 1,
           },
           userInviteCreated: { select: { practiceId: true } },
+          // MFA enrollment state (Manisha 2026-06-12 §6) — drives the "Reset
+          // MFA" action: only shown for users who actually have an enrolled
+          // authenticator. enrolledAt is nulled on admin reset, so the button
+          // disappears after a reset (once the list refetches).
+          totpCredential: { select: { enrolledAt: true } },
+          // Patient biometric (WebAuthn) — drives the "Reset biometric" support
+          // action, shown only for patients who have a registered passkey.
+          _count: { select: { webAuthnCredentials: true } },
         },
       }),
       this.prisma.user.count({ where: userWhere }),
@@ -937,6 +945,8 @@ export class UsersService {
       roles: u.roles,
       accountStatus: u.accountStatus,
       createdAt: u.createdAt,
+      mfaEnrolled: u.totpCredential?.enrolledAt != null,
+      biometricEnrolled: u._count.webAuthnCredentials > 0,
       practiceId:
         u.providerAssignmentAsPatient?.practiceId ??
         u.practiceCoordinator?.practiceId ??

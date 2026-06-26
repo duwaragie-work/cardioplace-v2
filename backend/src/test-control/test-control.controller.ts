@@ -160,6 +160,16 @@ export class TestControlController {
     return { ok: true }
   }
 
+  @Post('auth-session/backdate')
+  @HttpCode(200)
+  async backdateAuthSessions(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.backdateAuthSessions(body.userId, body.deltaSeconds)
+  }
+
   @Post('medication/backdate-verified')
   @HttpCode(200)
   async backdateMedicationVerified(
@@ -310,6 +320,19 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     return this.svc.resetUser(body.userId)
+  }
+
+  // phase/27 MFA E2E — wipe a user's TOTP secret + recovery codes + WebAuthn
+  // credentials so each MFA spec starts from a clean "never enrolled" baseline
+  // (and the shared seed accounts don't stay MFA-required for the other specs).
+  @Post('reset/user-mfa')
+  @HttpCode(200)
+  async resetUserMfa(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.resetUserMfa(body.userId)
   }
 
   // Cluster 8 §D — clear ALL of a user's PatientMedication rows so a test

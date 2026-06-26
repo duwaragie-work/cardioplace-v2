@@ -7,14 +7,16 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { EntrySource, Prisma } from '../generated/prisma/client.js';
-import { DailyJournalService } from './daily_journal.service.js';
+import { EntrySource, DelayBand, Prisma } from '../generated/prisma/client.js';
+import { DailyJournalService, computeDelayBand } from './daily_journal.service.js';
+import { JOURNAL_EVENTS } from './constants/events.js';
 import { SESSION_WINDOW_MS } from '@cardioplace/shared';
 
 const mockPrisma = {
   journalEntry: {
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     delete: jest.fn(),
     findMany: jest.fn(),
     findUnique: jest.fn(),
@@ -80,6 +82,32 @@ describe('DailyJournalService', () => {
         sessionId: 's1',
         measuredAt: new Date(now.getTime() - 60_000),
         singleReadingFinalized: true,
+      })
+      expect(await service.getActiveSession('u1', now)).toBeNull()
+    })
+
+    // Option D AWAITING UX revision (2026-06-16) — a held emergency awaiting its
+    // confirmatory reading must NOT surface the "add to this session?" prompt;
+    // the dedicated awaiting-emergency resume flow owns it instead.
+    it('returns null when the latest reading is a held AWAITING emergency', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({
+        id: 'e1',
+        sessionId: 's1',
+        measuredAt: new Date(now.getTime() - 60_000),
+        singleReadingFinalized: false,
+        emergencyConfirmation: 'AWAITING',
+      })
+      expect(await service.getActiveSession('u1', now)).toBeNull()
+    })
+
+    it('Bug 19 — returns null when the latest reading\'s session was explicitly closed', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({
+        id: 'e1',
+        sessionId: 's1',
+        measuredAt: new Date(now.getTime() - 60_000), // within window
+        singleReadingFinalized: false,
+        emergencyConfirmation: null,
+        sessionClosedAt: new Date(now.getTime() - 30_000), // "I'm good" closed it
       })
       expect(await service.getActiveSession('u1', now)).toBeNull()
     })
@@ -161,6 +189,39 @@ describe('DailyJournalService', () => {
 
       const res = await service.getActiveSession('u1', now)
       expect(res?.requiresMoreReadings).toBe(false)
+    })
+  })
+
+  // Option D AWAITING UX revision (2026-06-16) — drives the /check-in Screen A
+  // auto-resume + the /readings "Continue confirmation" CTA.
+  describe('getAwaitingEmergency', () => {
+    it('returns null when the patient has no held emergency awaiting confirmation', async () => {
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null)
+      expect(await service.getAwaitingEmergency('u1')).toBeNull()
+      // Scoped to the user's AWAITING readings only.
+      expect(mockPrisma.journalEntry.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: 'u1', emergencyConfirmation: 'AWAITING' },
+        }),
+      )
+    })
+
+    it('returns the held first-of-pair (id, session, BP, measuredAt) when one exists', async () => {
+      const measuredAt = new Date('2026-05-22T09:58:00Z')
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({
+        id: 'held-1',
+        sessionId: 's-held',
+        systolicBP: 195,
+        diastolicBP: 120,
+        measuredAt,
+      })
+      expect(await service.getAwaitingEmergency('u1')).toEqual({
+        id: 'held-1',
+        sessionId: 's-held',
+        systolicBP: 195,
+        diastolicBP: 120,
+        measuredAt: measuredAt.toISOString(),
+      })
     })
   })
 
@@ -263,6 +324,27 @@ describe('DailyJournalService', () => {
 
       const createArg = mockPrisma.journalEntry.create.mock.calls[0][0]
       expect(createArg.data.sessionId).toBe('s-fresh')
+    })
+
+    it('Bug 14 deprecation — a FRESH supplied sessionId is HONORED (own session), never merged into an open in-window one', async () => {
+      const measuredAt = '2026-05-22T10:00:00Z'
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' })
+      // findFirst (members of the supplied id) → none (fresh id). With the
+      // cross-id join removed, findOpenInWindowSession is NOT consulted for a
+      // supplied id — the deliberate client boundary stands. (Pre-buffer this
+      // joined an open session as the Bug 4 workaround; the FE buffer now threads
+      // one id per "I'm good" sitting, so merging across that boundary averaged
+      // two separate sittings — a clinically meaningless number.)
+      mockPrisma.journalEntry.findFirst.mockResolvedValue(null)
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(builtEntry('s-brand-new'))
+      mockPrisma.journalEntry.count.mockResolvedValue(0)
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ hasAFib: false })
+
+      await service.create('u1', { measuredAt, systolicBP: 130, diastolicBP: 80, sessionId: 's-brand-new' } as any)
+
+      const createArg = mockPrisma.journalEntry.create.mock.calls[0][0]
+      // Honored the deliberate client id — did NOT merge into the open session.
+      expect(createArg.data.sessionId).toBe('s-brand-new')
     })
 
     it('keeps a sessionId whose newest member is within the window', async () => {
@@ -442,6 +524,250 @@ describe('DailyJournalService', () => {
     })
   })
 
+  // Bug 23 (2026-06-17) — per-pathway engine-evaluation deferral. The buffer
+  // already gives the patient a 5-min on-device edit window, so an explicit
+  // "I'm good" close (closeSession) shouldn't ALSO wait out the single-reading
+  // hold + cron. Flag-gated by BUFFER_SKIPS_DEFER (default off).
+  describe('create — Bug 23 buffer fast-fire (BUFFER_SKIPS_DEFER)', () => {
+    function bug23Entry(sessionId: string) {
+      return {
+        id: 'e-bug23',
+        userId: 'u1',
+        measuredAt: new Date('2026-05-22T10:00:00Z'),
+        systolicBP: 145,
+        diastolicBP: 85,
+        pulse: 72,
+        weight: null,
+        position: null,
+        sessionId,
+        emergencyConfirmation: null,
+        confirmsEntryId: null,
+        engineEvaluationDeferredUntil: null,
+        singleReadingFinalized: false,
+        medicationTaken: null,
+        medicationScheduledLater: false,
+        missedDoses: null,
+        missedMedications: null,
+        otherSymptoms: [],
+        teachBackAnswer: null,
+        teachBackCorrect: null,
+        notes: null,
+        source: EntrySource.MANUAL,
+        sourceMetadata: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+    }
+
+    // Standard single-reading create mock sequence (gate → resolveSessionId →
+    // create → finalize-check → newer-outside-session). sessionId is honoured
+    // as fresh (findFirst → null).
+    function primeCreateMocks(sessionId: string) {
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' }) // gate
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // resolveCreateSessionId: fresh id
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(bug23Entry(sessionId))
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(0) // siblings
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ hasAFib: false })
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(20) // lifetime
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // newer-outside-session
+    }
+
+    const ORIG_FLAG = process.env.BUFFER_SKIPS_DEFER
+    afterEach(() => {
+      if (ORIG_FLAG === undefined) delete process.env.BUFFER_SKIPS_DEFER
+      else process.env.BUFFER_SKIPS_DEFER = ORIG_FLAG
+    })
+
+    const base = { measuredAt: '2026-05-22T10:00:00Z', systolicBP: 145, diastolicBP: 85 }
+
+    it('flag ON + closeSession → engineEvaluationDeferredUntil null + finalized at create', async () => {
+      process.env.BUFFER_SKIPS_DEFER = 'true'
+      primeCreateMocks('s-buf')
+      await service.create('u1', { ...base, sessionId: 's-buf', closeSession: true } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.engineEvaluationDeferredUntil).toBeNull()
+      expect(data.singleReadingFinalized).toBe(true)
+      // the whole sitting is finalized + un-badged so a multi-reading session
+      // averages and fires now (the last reading closes it).
+      const closeCall = mockPrisma.journalEntry.updateMany.mock.calls.find(
+        (c: any) => c[0]?.data?.singleReadingFinalized === true,
+      )
+      expect(closeCall).toBeTruthy()
+      expect(closeCall[0].where).toMatchObject({ userId: 'u1', sessionId: 's-buf' })
+      expect(closeCall[0].data.engineEvaluationDeferredUntil).toBeNull()
+    })
+
+    it('DEFAULT (unset) + closeSession → fast-fires (Manisha standing approval — default on)', async () => {
+      delete process.env.BUFFER_SKIPS_DEFER
+      primeCreateMocks('s-buf')
+      await service.create('u1', { ...base, sessionId: 's-buf', closeSession: true } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.engineEvaluationDeferredUntil).toBeNull()
+      expect(data.singleReadingFinalized).toBe(true)
+    })
+
+    it('BUFFER_SKIPS_DEFER=false (rollback) + closeSession → legacy 5-min hold', async () => {
+      process.env.BUFFER_SKIPS_DEFER = 'false'
+      primeCreateMocks('s-buf')
+      const before = Date.now()
+      await service.create('u1', { ...base, sessionId: 's-buf', closeSession: true } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.singleReadingFinalized).toBe(false)
+      expect(data.engineEvaluationDeferredUntil).toBeInstanceOf(Date)
+      const deferMs = (data.engineEvaluationDeferredUntil as Date).getTime() - before
+      expect(deferMs).toBeGreaterThan(4 * 60 * 1000) // ~5 min ahead
+      // no finalize on the close updateMany when explicitly opted out
+      const closeCall = mockPrisma.journalEntry.updateMany.mock.calls.find(
+        (c: any) => c[0]?.data?.sessionClosedAt,
+      )
+      expect(closeCall?.[0].data.singleReadingFinalized).toBeUndefined()
+    })
+
+    it('flag ON but NO closeSession (chat/voice pathway) → keeps the 5-min defer', async () => {
+      process.env.BUFFER_SKIPS_DEFER = 'true'
+      primeCreateMocks('s-chat')
+      await service.create('u1', { ...base, sessionId: 's-chat', source: 'manual' } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.singleReadingFinalized).toBe(false)
+      expect(data.engineEvaluationDeferredUntil).toBeInstanceOf(Date)
+    })
+
+    it('flag ON + closeSession but ADMIN actor → fast-fire scoped out (defer already null, not finalized)', async () => {
+      process.env.BUFFER_SKIPS_DEFER = 'true'
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' }) // gate
+      // actor + sessionId → assertSessionJoinable findFirst, then resolveCreateSessionId
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // assertSessionJoinable: no members
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // resolveCreateSessionId: fresh
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(bug23Entry('s-admin'))
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(0)
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ hasAFib: false })
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(20)
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null)
+      await service.create(
+        'u1',
+        { ...base, sessionId: 's-admin', closeSession: true } as any,
+        { id: 'admin-1', roles: ['PROVIDER'] } as any,
+      )
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      // admin already gets a null defer (existing policy) but is NOT fast-
+      // finalized — the buffer fast-fire is patient-only.
+      expect(data.engineEvaluationDeferredUntil).toBeNull()
+      expect(data.singleReadingFinalized).toBe(false)
+    })
+
+    // Bug 27 (2026-06-18) — a CONFIRMATORY second-of-pair is evaluated on create
+    // (the engine fires the resolved outcome immediately), so the 5-min editable
+    // defer is a lie for it. Same flag gate as the buffer fast-fire.
+    function primeConfirmatoryMocks(sessionId: string) {
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' }) // gate
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // resolveCreateSessionId: fresh id
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // inherited first-of-pair lookup
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(bug23Entry(sessionId))
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // newer-outside-session
+    }
+    const confirmsId = '11111111-1111-1111-1111-111111111111'
+
+    it('confirmsEntryId + flag ON (default) → engineEvaluationDeferredUntil null (no editable lie)', async () => {
+      delete process.env.BUFFER_SKIPS_DEFER
+      primeConfirmatoryMocks('s-cfm')
+      await service.create('u1', { ...base, sessionId: 's-cfm', confirmsEntryId: confirmsId } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.engineEvaluationDeferredUntil).toBeNull()
+    })
+
+    it('confirmsEntryId + flag OFF (rollback) → keeps the legacy 5-min defer', async () => {
+      process.env.BUFFER_SKIPS_DEFER = 'false'
+      primeConfirmatoryMocks('s-cfm')
+      const before = Date.now()
+      await service.create('u1', { ...base, sessionId: 's-cfm', confirmsEntryId: confirmsId } as any)
+      const data = mockPrisma.journalEntry.create.mock.calls[0][0].data
+      expect(data.engineEvaluationDeferredUntil).toBeInstanceOf(Date)
+      expect((data.engineEvaluationDeferredUntil as Date).getTime() - before).toBeGreaterThan(4 * 60 * 1000)
+    })
+  })
+
+  // Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) — the
+  // POST response's alertsSuppressedReason: 'GATE_A' when a later-measured
+  // reading exists outside the 5-min session window, 'HISTORICAL_ENTRY' when
+  // the stored band is ≥24h (takes precedence — stable on GETs too), null
+  // otherwise. Drives the Chunk C "recorded but won't alert" banner.
+  describe('create — alertsSuppressedReason (Chunk B fix-up)', () => {
+    function suppressionEntry(delayBand: DelayBand) {
+      return {
+        id: 'new-1',
+        userId: 'u1',
+        measuredAt: new Date('2026-05-22T10:00:00Z'),
+        delayBand,
+        systolicBP: 130,
+        diastolicBP: 80,
+        pulse: 72,
+        weight: null,
+        position: null,
+        sessionId: 's-1',
+        medicationTaken: null,
+        medicationScheduledLater: false,
+        missedDoses: null,
+        missedMedications: null,
+        otherSymptoms: [],
+        teachBackAnswer: null,
+        teachBackCorrect: null,
+        notes: null,
+        source: EntrySource.MANUAL,
+        sourceMetadata: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+    }
+
+    const measuredAt = '2026-05-22T10:00:00Z'
+
+    /** Queue the create-flow Once chain up to (not including) the Gate A
+     *  findFirst probe, which runs LAST in create(). */
+    function queueCreateFlow(delayBand: DelayBand) {
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ userId: 'u1' }) // gate
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // no open session
+      mockPrisma.journalEntry.create.mockResolvedValueOnce(suppressionEntry(delayBand))
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(0) // siblings
+      mockPrisma.patientProfile.findUnique.mockResolvedValueOnce({ hasAFib: false })
+      mockPrisma.journalEntry.count.mockResolvedValueOnce(20) // lifetime
+    }
+
+    it('GATE_A when a later-measured reading exists outside the session window', async () => {
+      queueCreateFlow(DelayBand.REAL_TIME)
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({ id: 'later-entry' }) // Gate A probe
+
+      const res = await service.create('u1', { measuredAt, systolicBP: 130, diastolicBP: 80 } as any)
+
+      expect(res.data.alertsSuppressedReason).toBe('GATE_A')
+      // The probe uses a 5-min sibling tolerance so a second same-session
+      // reading never false-positives (the engine compares the session max).
+      const gateACall = mockPrisma.journalEntry.findFirst.mock.calls.at(-1)[0]
+      expect(gateACall.where.userId).toBe('u1')
+      expect(gateACall.where.measuredAt.gt).toEqual(
+        new Date(new Date(measuredAt).getTime() + SESSION_WINDOW_MS),
+      )
+    })
+
+    it('no suppression → null (no later reading exists)', async () => {
+      queueCreateFlow(DelayBand.REAL_TIME)
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(null) // Gate A probe
+
+      const res = await service.create('u1', { measuredAt, systolicBP: 130, diastolicBP: 80 } as any)
+
+      expect(res.data.alertsSuppressedReason).toBeNull()
+      expect(res.data.delayBand).toBe(DelayBand.REAL_TIME)
+    })
+
+    it('HISTORICAL_ENTRY takes precedence over GATE_A (stable across GETs)', async () => {
+      queueCreateFlow(DelayBand.HISTORICAL_ENTRY)
+      mockPrisma.journalEntry.findFirst.mockResolvedValueOnce({ id: 'later-entry' }) // Gate A also trips
+
+      const res = await service.create('u1', { measuredAt, systolicBP: 130, diastolicBP: 80 } as any)
+
+      expect(res.data.alertsSuppressedReason).toBe('HISTORICAL_ENTRY')
+    })
+  })
+
   describe('create — DBP>=SBP reject + narrow-PP artifact (Manisha 5/24 Q1)', () => {
     const measuredAt = '2026-05-22T10:00:00Z'
 
@@ -537,6 +863,23 @@ describe('DailyJournalService', () => {
       const out = await service.getAlerts('u1')
       const ids = (out.data as Array<{ id: string }>).map((a) => a.id)
       expect(ids).toEqual(['nudge'])
+    })
+
+    it('Bug 12 — hides a TIER_1 provider-only alert (RULE_UNCONFIRMED_EMERGENCY, empty patientMessage) from the patient list', async () => {
+      mockPrisma.deviationAlert.findMany.mockResolvedValueOnce([
+        row({ id: 'bp', tier: 'BP_LEVEL_2', patientMessage: 'Call 911 now.' }),
+        // Option D provider-only flag — must NOT reach the patient surface even
+        // though it is Tier 1, not Tier 3.
+        row({
+          id: 'unconfirmed',
+          tier: 'TIER_1_CONTRAINDICATION',
+          ruleId: 'RULE_UNCONFIRMED_EMERGENCY',
+          patientMessage: '',
+        }),
+      ])
+      const out = await service.getAlerts('u1')
+      const ids = (out.data as Array<{ id: string }>).map((a) => a.id)
+      expect(ids).toEqual(['bp'])
     })
   })
 
@@ -713,13 +1056,71 @@ describe('DailyJournalService', () => {
     })
   })
 
+  // Manisha Backdated Readings sign-off 2026-06-06 — chunk A.
+  describe('computeDelayBand', () => {
+    const now = new Date('2026-06-09T12:00:00Z')
+
+    it('classifies a same-instant reading as REAL_TIME', () => {
+      expect(computeDelayBand(now, now)).toBe(DelayBand.REAL_TIME)
+    })
+
+    it('classifies a 4-min-old reading as REAL_TIME (boundary just under 5 min)', () => {
+      const measured = new Date(now.getTime() - 4 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.REAL_TIME)
+    })
+
+    it('classifies a 5-min-old reading as NEAR_REAL_TIME (boundary exactly at 5 min)', () => {
+      const measured = new Date(now.getTime() - 5 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.NEAR_REAL_TIME)
+    })
+
+    it('classifies a 45-min-old reading as NEAR_REAL_TIME', () => {
+      const measured = new Date(now.getTime() - 45 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.NEAR_REAL_TIME)
+    })
+
+    it('classifies a 1-hour-old reading as DELAYED_ENTRY (boundary exactly at 1 h)', () => {
+      const measured = new Date(now.getTime() - 60 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.DELAYED_ENTRY)
+    })
+
+    it('classifies a 6-hour-old reading as DELAYED_ENTRY', () => {
+      const measured = new Date(now.getTime() - 6 * 60 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.DELAYED_ENTRY)
+    })
+
+    it('classifies a 23h59m-old reading as DELAYED_ENTRY (just under 24 h)', () => {
+      const measured = new Date(now.getTime() - (24 * 60 * 60 * 1000 - 60 * 1000))
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.DELAYED_ENTRY)
+    })
+
+    it('classifies a 24-hour-old reading as HISTORICAL_ENTRY (boundary exactly at 24 h)', () => {
+      const measured = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.HISTORICAL_ENTRY)
+    })
+
+    it('classifies a 7-day-old reading as HISTORICAL_ENTRY', () => {
+      const measured = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.HISTORICAL_ENTRY)
+    })
+
+    it('classifies a clock-skew future reading as REAL_TIME (DTO validator rejects >5 min future)', () => {
+      // The DTO's `IsMeasuredAtReasonable` rejects >5 min future at the
+      // controller boundary, so this only matters for tiny clock drift.
+      // A measuredAt 30 seconds in the future is REAL_TIME, not historical.
+      const measured = new Date(now.getTime() + 30 * 1000)
+      expect(computeDelayBand(measured, now)).toBe(DelayBand.REAL_TIME)
+    })
+  });
   // ─── Journal-entry audit log (HIPAA/JCAHO closure) ──────────────────────────
   // Every reading create/edit/delete writes a ProfileVerificationLog row,
   // transaction-scoped with the data operation. Patient actions →
   // PATIENT_READING_*; care-team actions (actor param, Phase 3B admin
-  // endpoints) → ADMIN_READING_*. CTO Option C: admin edit/delete do NOT
-  // re-trigger the engine; patient edit/delete re-evaluation KEPT pending
-  // Manisha's Q2 sign-off.
+  // endpoints) → ADMIN_READING_*. CTO 2026-06-09 no-re-trigger policy: NEITHER
+  // admin NOR patient edit/delete re-triggers the engine. Admin edits emit
+  // nothing; patient edits/deletes emit ENTRY_UPDATED for chat/voice context
+  // refresh only — the engine listens to ENTRY_FINALIZED + ENTRY_CREATED, never
+  // ENTRY_UPDATED.
   describe('journal-entry audit log', () => {
     const measuredAt = '2026-06-12T10:00:00Z'
     const ADMIN: any = { id: 'admin-1', roles: ['SUPER_ADMIN'] }
@@ -888,7 +1289,7 @@ describe('DailyJournalService', () => {
       expect(mockPrisma.journalEntry.create.mock.calls[0][0].data.sessionId).toBe('s-live')
     })
 
-    it('PUT (patient) → PATIENT_READING_EDITED with prior + new snapshots; engine emit KEPT', async () => {
+    it('PUT (patient) → PATIENT_READING_EDITED; emits ENTRY_UPDATED (chat/voice) but NOT ENTRY_FINALIZED — no engine re-trigger (CTO 2026-06-09)', async () => {
       mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(fullRow({ systolicBP: 130 }))
       mockPrisma.journalEntry.update.mockResolvedValueOnce(fullRow({ systolicBP: 145 }))
       mockPrisma.profileVerificationLog.create.mockResolvedValueOnce({})
@@ -900,8 +1301,13 @@ describe('DailyJournalService', () => {
       expect(audit.data.fieldPath).toBe('journal_entry.edited')
       expect(audit.data.previousValue).toMatchObject({ entryId: 'e1', systolicBP: 130 })
       expect(audit.data.newValue).toMatchObject({ entryId: 'e1', systolicBP: 145 })
-      // Manisha Q2 pending — patient edits still re-trigger the engine.
+      // Bug 9 / CTO 2026-06-09 no-re-trigger: the edit emits ENTRY_UPDATED for
+      // chat/voice context refresh, but NEVER ENTRY_FINALIZED — the engine
+      // (which only listens to ENTRY_FINALIZED + ENTRY_CREATED) does not re-fire.
       expect(mockEventEmitter.emit).toHaveBeenCalledTimes(1)
+      const emitted = mockEventEmitter.emit.mock.calls.map((c: any[]) => c[0])
+      expect(emitted).toContain(JOURNAL_EVENTS.ENTRY_UPDATED)
+      expect(emitted).not.toContain(JOURNAL_EVENTS.ENTRY_FINALIZED)
       expect(r.statusCode).toBe(202)
     })
 
@@ -949,7 +1355,7 @@ describe('DailyJournalService', () => {
       expect(auditOrder).toBeLessThan(deleteOrder)
     })
 
-    it('DELETE (patient) with surviving session sibling → re-eval emit KEPT', async () => {
+    it('DELETE (patient) with surviving session sibling → emits ENTRY_UPDATED (context refresh only; engine does not re-eval per CTO 2026-06-09)', async () => {
       mockPrisma.journalEntry.findFirst
         .mockResolvedValueOnce(fullRow())
         .mockResolvedValueOnce({

@@ -389,6 +389,12 @@ function bpStatus(
 }
 
 function medicationLabel(s: CheckinSummary): string {
+  // Bug 60 — 0-meds patients have medicationTaken=true vacuously (per
+  // Bug 53 the bot skips the adherence question and passes true to the
+  // required-field gate). Rendering "All taken ✓" for someone with no
+  // medications is misleading; surface "No medications" so the card
+  // reflects reality.
+  if (s.hasActiveMedications === false) return 'No medications on file';
   // Bug 16C — when the patient explicitly missed one or more meds, surface
   // the names ("Missed: Norvasc, Toprol") instead of the generic boolean
   // rollup. Drives the same card whether the backend received
@@ -404,6 +410,10 @@ function medicationLabel(s: CheckinSummary): string {
 }
 
 function medicationColor(s: CheckinSummary): string {
+  // Bug 60 — 0-meds patients get a neutral muted color (matches the
+  // "No medications on file" label) so the card doesn't visually imply
+  // adherence success.
+  if (s.hasActiveMedications === false) return 'var(--brand-text-muted)';
   // Bug 16C — non-empty missedMedications means at least one was missed,
   // even if the boolean wasn't set. Show the alert-red color so the card
   // visually matches its label.
@@ -467,7 +477,12 @@ function buildAudio(s: CheckinSummary): string {
     bp += '.';
     parts.push(bp);
   }
-  if (s.medicationScheduledLater) parts.push('Medication scheduled for later.');
+  // Bug 60 — 0-meds patients should NOT hear "You took your medications" —
+  // that's a false claim (they have nothing to take). Skip the medication
+  // sentence entirely.
+  if (s.hasActiveMedications === false) {
+    // skip — no medication line for 0-meds patients
+  } else if (s.medicationScheduledLater) parts.push('Medication scheduled for later.');
   else if (s.medicationTaken === true) parts.push('You took your medications.');
   else if (s.medicationTaken === false) parts.push('You missed at least one medication.');
   const flagged =

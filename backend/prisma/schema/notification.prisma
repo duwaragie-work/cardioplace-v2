@@ -19,9 +19,9 @@ model Notification {
   escalationEvent   EscalationEvent?    @relation(fields: [escalationEventId], references: [id], onDelete: SetNull)
   user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, sentAt(sort: Desc)])
-  @@index([userId, readAt])
   // Phase/7 — cron retry idempotency. Ensures a given (alert, escalation step,
   // recipient, channel) combo is never double-sent even if the scanner retries.
   @@unique([alertId, escalationEventId, userId, channel])
+  @@index([userId, sentAt(sort: Desc)])
+  @@index([userId, readAt])
 }

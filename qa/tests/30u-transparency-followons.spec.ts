@@ -42,6 +42,17 @@ test.describe('B1 — PERSONALIZED +20 tolerance band visibility', () => {
     test.setTimeout(90_000)
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const aisha = await tc.findUser(PATIENTS.aisha.email)
+    // Personalization (and its +20 band on the goal card) only applies once
+    // the patient is past pre-Day-3: personalizedEligible = threshold != null
+    // && >=7 readings (Dr. Singal Q3). A lingering condition flag would also
+    // claim the sbp-high axis and zero the tolerance. Reset + clear conditions
+    // + seed >=7 readings so the personalized 135 (not the STANDARD 140) drives
+    // the goal card. Mirrors the B3 PERSONALIZED setup below.
+    await tc.resetUser(aisha.id)
+    for (const c of ['hasCAD', 'hasHeartFailure', 'hasHCM', 'hasDCM', 'hasAorticStenosis', 'isPregnant'] as const) {
+      await tc.setUserCondition(aisha.id, c, false)
+    }
+    await seedEstablishedHistory(tc, aisha.id)
     await tc.setPatientThreshold(aisha.id, { sbpUpperTarget: 135 })
     await tc.dispose()
 

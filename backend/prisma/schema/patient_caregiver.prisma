@@ -11,7 +11,7 @@
 // to sharing PHI with this caregiver. Only the Minimum-Necessary
 // caregiverMessage is transmitted (no readings, no other conditions).
 model PatientCaregiver {
-  id              String   @id @default(uuid())
+  id              String                 @id @default(uuid())
   patientUserId   String
   name            String
   relationship    String?
@@ -24,11 +24,11 @@ model PatientCaregiver {
   // Option A (account-based caregiver). Null for contact-only (Option B, pilot).
   caregiverUserId String?
   // Soft-disable instead of hard delete (audit trail of who could receive PHI).
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  active          Boolean                @default(true)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
 
-  patient   User  @relation("PatientCaregivers", fields: [patientUserId], references: [id], onDelete: Cascade)
+  patient User @relation("PatientCaregivers", fields: [patientUserId], references: [id], onDelete: Cascade)
 
   dispatchLogs CaregiverDispatchLog[]
 
@@ -36,21 +36,21 @@ model PatientCaregiver {
 }
 
 enum CaregiverNotifyChannel {
-  NONE      // captured but not yet notified (pre-consent or opted out)
+  NONE // captured but not yet notified (pre-consent or opted out)
   DASHBOARD // Option A — caregiver is a User with an inbox
-  SMS       // Option B — no provider wired yet (NoopSmsService)
-  EMAIL     // Option B — Resend EmailService
+  SMS // Option B — no provider wired yet (NoopSmsService)
+  EMAIL // Option B — Resend EmailService
 }
 
 // Idempotency for non-Notification channels (email/SMS write no Notification
 // row because the caregiver may not be a User). One row per
 // (alert, caregiver, channel) so a re-fired alert doesn't double-dispatch.
 model CaregiverDispatchLog {
-  id          String   @id @default(uuid())
+  id          String                 @id @default(uuid())
   alertId     String
   caregiverId String
   channel     CaregiverNotifyChannel
-  sentAt      DateTime @default(now())
+  sentAt      DateTime               @default(now())
 
   alert     DeviationAlert   @relation(fields: [alertId], references: [id], onDelete: Cascade)
   caregiver PatientCaregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)

@@ -18,7 +18,9 @@ import { CaregiverService } from './caregiver.service.js'
 import { CreateCaregiverDto } from './dto/create-caregiver.dto.js'
 import { UpdateCaregiverDto } from './dto/update-caregiver.dto.js'
 
-type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
+type AuthedReq = Request & {
+  user: { id: string; roles: UserRole[]; activePracticeId?: string | null }
+}
 
 // Admin-scoped caregiver management for the patient-detail screen.
 //   • READ — all four admin roles (HEALPLACE_OPS can view PHI-sharing config).
@@ -40,7 +42,7 @@ export class AdminCaregiverController {
   @Get()
   async list(@Req() req: AuthedReq, @Param('patientId') patientId: string) {
     await this.access.assertCanAccessPatient(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientId,
     )
     return this.caregiver.list(patientId)
@@ -55,7 +57,7 @@ export class AdminCaregiverController {
     @Body() dto: CreateCaregiverDto,
   ) {
     await this.access.assertCanAccessPatient(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientId,
     )
     return this.caregiver.create(patientId, req.user.id, 'ADMIN', dto)
@@ -70,7 +72,7 @@ export class AdminCaregiverController {
     @Body() dto: UpdateCaregiverDto,
   ) {
     await this.access.assertCanAccessPatient(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientId,
     )
     return this.caregiver.update(patientId, id, req.user.id, 'ADMIN', dto)
@@ -84,7 +86,7 @@ export class AdminCaregiverController {
     @Param('id') id: string,
   ) {
     await this.access.assertCanAccessPatient(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientId,
     )
     return this.caregiver.remove(patientId, id, req.user.id, 'ADMIN')

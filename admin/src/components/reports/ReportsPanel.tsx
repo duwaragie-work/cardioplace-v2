@@ -10,8 +10,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  CalendarDays,
   ChevronDown,
-  ClipboardList,
   Download,
   FileText,
   Loader2,
@@ -153,7 +153,7 @@ export default function ReportsPanel() {
             }}
             aria-hidden
           >
-            <ClipboardList className="w-5 h-5" />
+            <CalendarDays className="w-5 h-5" />
           </div>
           <div className="min-w-0">
             <h1

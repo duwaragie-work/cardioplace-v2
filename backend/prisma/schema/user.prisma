@@ -21,20 +21,21 @@ model User {
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
 
-  accounts                             Account[]
-  authLogs                             AuthLog[]
-  contentSubmitted                     Content[]                   @relation("ContentSubmittedBy")
-  contentRatings                       ContentRating[]             @relation("ContentRatings")
-  contentReviews                       ContentReview[]             @relation("ContentReviewedBy")
-  deviationAlerts                      DeviationAlert[]
-  escalationEvents                     EscalationEvent[]
-  journalEntries                       JournalEntry[]              @relation("PatientJournalEntries")
-  journalEntriesAdded                  JournalEntry[]              @relation("JournalEntryAddedBy")
-  notifications                        Notification[]
-  refreshTokens                        RefreshToken[]
-  scheduledCalls                       ScheduledCall[]
-  sessions                             Session[]
-  userDevices                          UserDevice[]
+  accounts            Account[]
+  authLogs            AuthLog[]
+  contentSubmitted    Content[]         @relation("ContentSubmittedBy")
+  contentRatings      ContentRating[]   @relation("ContentRatings")
+  contentReviews      ContentReview[]   @relation("ContentReviewedBy")
+  deviationAlerts     DeviationAlert[]
+  escalationEvents    EscalationEvent[]
+  journalEntries      JournalEntry[]    @relation("PatientJournalEntries")
+  journalEntriesAdded JournalEntry[]    @relation("JournalEntryAddedBy")
+  notifications       Notification[]
+  refreshTokens       RefreshToken[]
+  authSessions        AuthSession[]
+  scheduledCalls      ScheduledCall[]
+  sessions            Session[]
+  userDevices         UserDevice[]
 
   patientProfile                       PatientProfile?
   patientMedications                   PatientMedication[]
@@ -51,6 +52,15 @@ model User {
   profileVerificationLogs              ProfileVerificationLog[]
   caregivers                           PatientCaregiver[]          @relation("PatientCaregivers")
   rejectedReadingLogs                  RejectedReadingLog[]
+
+  // MFA — provider/admin TOTP second factor (Manisha 2026-06-12 §6). Both
+  // null/empty for patients (their biometric arrives later in its own table).
+  totpCredential   TotpCredential?
+  mfaRecoveryCodes MfaRecoveryCode[]
+
+  // Patient biometric sign-in (WebAuthn / passkeys). Optional, patient-side;
+  // empty for provider/admin accounts. One row per registered device.
+  webAuthnCredentials WebAuthnCredential[]
 }
 
 enum UserRole {

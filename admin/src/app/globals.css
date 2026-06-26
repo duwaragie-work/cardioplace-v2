@@ -254,3 +254,38 @@ html {
 .btn-admin-danger:hover {
   filter: brightness(0.92);
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Mobile input-zoom fix (iOS Safari).
+   iOS Safari auto-zooms the viewport when a focused form field has a computed
+   font-size below 16px — which shifts/breaks the layout on phones. Enforce a
+   16px floor on TOUCH devices only (`pointer: coarse`) so desktop keeps its
+   compact type. `max(16px, 1rem)` keeps the field scaling up with the user's
+   browser font-size setting (WCAG 1.4.4 — resize text) while never dropping
+   below the no-zoom floor. We deliberately do NOT set `user-scalable=no` /
+   `maximum-scale=1`: pinch-zoom must stay available. `!important` is required
+   to win over Tailwind `text-*` utilities set on individual inputs.
+   ────────────────────────────────────────────────────────────────────────── */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: max(16px, 1rem) !important;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Readable placeholders.
+   Tailwind Preflight defaults `::placeholder` to gray-400 (#9ca3af ≈ 2.8:1 on
+   white) — faint on phones and below WCAG AA. Set a darker default (~7:1) and
+   keep opacity:1 (some mobile browsers fade placeholders). Scoped to
+   `@layer base` so any explicit `placeholder:text-*` utility (Tailwind's
+   `utilities` layer) overrides it. An UNLAYERED rule would beat every utility
+   regardless of specificity (unlayered > layered).
+   ────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  ::placeholder {
+    color: #595959;
+    opacity: 1;
+  }
+}

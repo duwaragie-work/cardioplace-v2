@@ -1,10 +1,11 @@
 model RefreshToken {
-  id        String    @id @default(ulid())
-  tokenHash String
-  expiresAt DateTime
-  revokedAt DateTime?
-  userAgent String?
-  userId    String
-  createdAt DateTime  @default(now())
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String       @id @default(ulid())
+  tokenHash   String
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  userAgent   String?
+  userId      String
+  createdAt   DateTime     @default(now())
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  authSession AuthSession?
 }

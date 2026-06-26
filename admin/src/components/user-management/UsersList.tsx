@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
+  KeyRound,
   Loader2,
   Send,
   ShieldOff,
@@ -23,7 +24,11 @@ import {
   type UserListResponse,
   type UserRow,
 } from '@/lib/services/user-management.service';
-import { canDeactivateUser, type UserRole } from '@/lib/roleGates';
+import {
+  canDeactivateUser,
+  canResetUserMfa,
+  type UserRole,
+} from '@/lib/roleGates';
 import { useAuth } from '@/lib/auth-context';
 import type { PracticeOption } from './InviteUserModal';
 import { RoleBadge, StatusBadge } from './badges';
@@ -39,6 +44,12 @@ interface Props {
   practices: PracticeOption[];
   onPageChange: (next: number) => void;
   onDeactivateClick: (row: UserRow | CoordinatorPatientRow) => void;
+  /** Open the MFA-reset modal for a staff row. Omitted when the caller can't
+   *  reset MFA — the action then never renders. */
+  onResetMfaClick?: (row: { id: string; name: string }) => void;
+  /** Open the biometric-reset modal for a patient row. Omitted when the caller
+   *  can't reset — the action then never renders. */
+  onResetBiometricClick?: (row: { id: string; name: string }) => void;
   onReactivate: (id: string) => Promise<void> | void;
   onResendInvite: (inviteId: string) => Promise<void> | void;
   onRevokeInvite: (inviteId: string) => Promise<void> | void;
@@ -58,6 +69,10 @@ interface CombinedRow {
   practiceId: string | null;
   status: 'ACTIVE' | 'BLOCKED' | 'SUSPENDED' | 'DEACTIVATED' | 'INVITE_PENDING';
   invitedAt: string | null;
+  /** True only for activated users with an enrolled TOTP authenticator. */
+  mfaEnrolled: boolean;
+  /** True only for patients with a registered biometric passkey. */
+  biometricEnrolled: boolean;
   raw: UserRow | CoordinatorPatientRow | UserInviteRow;
 }
 
@@ -103,6 +118,8 @@ export default function UsersList({
   practices,
   onPageChange,
   onDeactivateClick,
+  onResetMfaClick,
+  onResetBiometricClick,
   onReactivate,
   onResendInvite,
   onRevokeInvite,
@@ -110,6 +127,7 @@ export default function UsersList({
 }: Props) {
   const { t } = useLanguage();
   const { user: caller } = useAuth();
+  const callerCanResetMfa = canResetUserMfa(caller);
   const practiceById = useMemo(() => {
     const m = new Map<string, string>();
     for (const p of practices) m.set(p.id, p.name);
@@ -134,6 +152,10 @@ export default function UsersList({
         practiceId: isCoordinatorPatientRow(u) ? null : u.practiceId ?? null,
         status: deriveStatus(u),
         invitedAt: isCoordinatorPatientRow(u) ? null : u.createdAt,
+        mfaEnrolled: isCoordinatorPatientRow(u) ? false : u.mfaEnrolled === true,
+        biometricEnrolled: isCoordinatorPatientRow(u)
+          ? false
+          : u.biometricEnrolled === true,
         raw: u,
       }),
     );
@@ -147,6 +169,8 @@ export default function UsersList({
       practiceId: inv.practiceId,
       status: 'INVITE_PENDING' as const,
       invitedAt: inv.invitedAt,
+      mfaEnrolled: false,
+      biometricEnrolled: false,
       raw: inv,
     }));
     // Pending invites first so they don't get buried on page 1.
@@ -281,8 +305,35 @@ export default function UsersList({
                   row.kind === 'user' && row.status === 'ACTIVE' && canAct;
                 const showReactivate =
                   row.kind === 'user' && row.status === 'DEACTIVATED' && canAct;
+                // MFA reset — staff (non-patient) rows only, never self, and
+                // only when the caller is authorized (SUPER_ADMIN / OPS).
+                const isStaffTarget =
+                  row.targetRoles.length > 0 &&
+                  !row.targetRoles.every((r) => r === 'PATIENT');
+                const showResetMfa =
+                  row.kind === 'user' &&
+                  !isSelf &&
+                  isStaffTarget &&
+                  row.mfaEnrolled &&
+                  callerCanResetMfa &&
+                  !!onResetMfaClick;
+                // Biometric reset — patient rows with a registered passkey.
+                const isPatientTarget =
+                  row.targetRoles.length > 0 &&
+                  row.targetRoles.every((r) => r === 'PATIENT');
+                const showResetBiometric =
+                  row.kind === 'user' &&
+                  !isSelf &&
+                  isPatientTarget &&
+                  row.biometricEnrolled &&
+                  callerCanResetMfa &&
+                  !!onResetBiometricClick;
                 const showUserDash =
-                  row.kind === 'user' && !showDeactivate && !showReactivate;
+                  row.kind === 'user' &&
+                  !showDeactivate &&
+                  !showReactivate &&
+                  !showResetMfa &&
+                  !showResetBiometric;
                 return (
                   <tr
                     key={`${row.kind}-${row.id}`}
@@ -405,6 +456,51 @@ export default function UsersList({
                             )}
                           </button>
                         )}
+                        {showResetMfa && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onResetMfaClick?.({ id: row.id, name: row.name })
+                            }
+                            disabled={isPending}
+                            aria-label="Reset two-factor authentication"
+                            title="Reset two-factor authentication"
+                            data-testid={`admin-user-reset-mfa-${row.email}`}
+                            className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                            style={{
+                              color: 'var(--brand-warning-amber, #B45309)',
+                              border:
+                                '1px solid var(--brand-warning-amber, #B45309)',
+                            }}
+                          >
+                            <KeyRound className="w-3 h-3" />
+                            Reset MFA
+                          </button>
+                        )}
+                        {showResetBiometric && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onResetBiometricClick?.({
+                                id: row.id,
+                                name: row.name,
+                              })
+                            }
+                            disabled={isPending}
+                            aria-label="Reset biometric sign-in"
+                            title="Reset biometric sign-in"
+                            data-testid={`admin-user-reset-biometric-${row.email}`}
+                            className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                            style={{
+                              color: 'var(--brand-warning-amber, #B45309)',
+                              border:
+                                '1px solid var(--brand-warning-amber, #B45309)',
+                            }}
+                          >
+                            <KeyRound className="w-3 h-3" />
+                            Reset biometric
+                          </button>
+                        )}
                         {showUserDash && (
                           <span
                             className="text-[11px]"
@@ -455,6 +551,26 @@ export default function UsersList({
               row.kind === 'user' && row.status === 'ACTIVE' && canAct;
             const showReactivate =
               row.kind === 'user' && row.status === 'DEACTIVATED' && canAct;
+            const isStaffTarget =
+              row.targetRoles.length > 0 &&
+              !row.targetRoles.every((r) => r === 'PATIENT');
+            const showResetMfa =
+              row.kind === 'user' &&
+              !isSelf &&
+              isStaffTarget &&
+              row.mfaEnrolled &&
+              callerCanResetMfa &&
+              !!onResetMfaClick;
+            const isPatientTarget =
+              row.targetRoles.length > 0 &&
+              row.targetRoles.every((r) => r === 'PATIENT');
+            const showResetBiometric =
+              row.kind === 'user' &&
+              !isSelf &&
+              isPatientTarget &&
+              row.biometricEnrolled &&
+              callerCanResetMfa &&
+              !!onResetBiometricClick;
             return (
               <div
                 key={`card-${row.kind}-${row.id}`}
@@ -506,7 +622,11 @@ export default function UsersList({
                 )}
 
                 {/* Action row — only when there's an action available */}
-                {(row.kind === 'invite' || showDeactivate || showReactivate) && (
+                {(row.kind === 'invite' ||
+                  showDeactivate ||
+                  showReactivate ||
+                  showResetMfa ||
+                  showResetBiometric) && (
                   <div className="flex flex-wrap items-center gap-2">
                     {row.kind === 'invite' && (
                       <>
@@ -582,6 +702,44 @@ export default function UsersList({
                           <Undo2 className="w-3 h-3" />
                         )}
                         {t('userManagement.action.reactivate')}
+                      </button>
+                    )}
+                    {showResetMfa && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onResetMfaClick?.({ id: row.id, name: row.name })
+                        }
+                        disabled={isPending}
+                        data-testid={`admin-user-reset-mfa-card-${row.email}`}
+                        className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                        style={{
+                          color: 'var(--brand-warning-amber, #B45309)',
+                          border:
+                            '1px solid var(--brand-warning-amber, #B45309)',
+                        }}
+                      >
+                        <KeyRound className="w-3 h-3" />
+                        Reset MFA
+                      </button>
+                    )}
+                    {showResetBiometric && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onResetBiometricClick?.({ id: row.id, name: row.name })
+                        }
+                        disabled={isPending}
+                        data-testid={`admin-user-reset-biometric-card-${row.email}`}
+                        className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                        style={{
+                          color: 'var(--brand-warning-amber, #B45309)',
+                          border:
+                            '1px solid var(--brand-warning-amber, #B45309)',
+                        }}
+                      >
+                        <KeyRound className="w-3 h-3" />
+                        Reset biometric
                       </button>
                     )}
                   </div>

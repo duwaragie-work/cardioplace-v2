@@ -470,9 +470,13 @@ describe('SystemPromptService', () => {
   // A.5 PatientThreshold rendering
   // ==========================================================================
   describe('A.5 threshold rendering', () => {
-    it('null threshold → "Provider has not yet set a personal BP goal"', () => {
+    it('null threshold → effective standard goal 140/90 rendered (Round-3 Item C — no more "Provider has not yet set" fallback; the chat surface ALWAYS surfaces an effective goal so the bot quotes the same number the engine alerts on)', () => {
       const out = service.buildPatientContext(buildContext())
-      expect(out).toContain('Provider has not yet set a personal BP goal')
+      expect(out).toContain('Effective BP goal: aim below 140/90 mmHg')
+      // The old fallback wording must NOT appear — its removal is the point
+      // of the Item C fix (a pregnant patient with no custom row used to
+      // hear "no goal set" while the engine alerted at 140/90).
+      expect(out).not.toContain('Provider has not yet set a personal BP goal')
     })
 
     it('full threshold → rendered with all axes', () => {
@@ -744,6 +748,122 @@ describe('SystemPromptService', () => {
       expect(out).not.toContain('Cardiac conditions:')
       expect(out).not.toContain('Medications:')
       expect(out).not.toContain('Provider-set')
+    })
+  })
+
+  // ==========================================================================
+  // Phase/16 — enrollment status + open AWAITING context lines
+  // (Nivakaran chat-v2 handoff 2026-06-17)
+  // ==========================================================================
+  describe('Phase/16 enrollment status', () => {
+    it('NOT_ENROLLED → renders care-team-pending wording in context', () => {
+      const out = service.buildPatientContext(
+        buildContext({ enrollmentStatus: 'NOT_ENROLLED' }),
+      )
+      expect(out).toContain('Enrollment status: NOT_ENROLLED')
+      expect(out).toContain('once enrollment is complete')
+    })
+
+    it('ENROLLED → renders actively-reviewing wording in context', () => {
+      const out = service.buildPatientContext(
+        buildContext({ enrollmentStatus: 'ENROLLED' }),
+      )
+      expect(out).toContain('Enrollment status: ENROLLED')
+      expect(out).toContain('actively reviewing')
+    })
+
+    it('null/undefined enrollmentStatus → no enrollment line emitted', () => {
+      const out = service.buildPatientContext(buildContext({ enrollmentStatus: null }))
+      expect(out).not.toContain('Enrollment status:')
+    })
+  })
+
+  describe('Phase/16 open AWAITING entry', () => {
+    it('open AWAITING surfaced → renders BP + id + resume instruction', () => {
+      const out = service.buildPatientContext(
+        buildContext({
+          openAwaiting: {
+            id: 'await-1',
+            systolicBP: 195,
+            diastolicBP: 122,
+            measuredAt: new Date('2026-06-17T14:32:00.000Z'),
+          },
+        }),
+      )
+      expect(out).toContain('Open AWAITING entry:')
+      expect(out).toContain('195/122')
+      expect(out).toContain('id=await-1')
+      expect(out).toContain('confirmatory')
+    })
+
+    it('null openAwaiting → no AWAITING line emitted', () => {
+      const out = service.buildPatientContext(buildContext({ openAwaiting: null }))
+      expect(out).not.toContain('Open AWAITING entry:')
+    })
+
+    it('openAwaiting with null BP fields → no AWAITING line emitted (defensive)', () => {
+      const out = service.buildPatientContext(
+        buildContext({
+          openAwaiting: {
+            id: 'await-2',
+            systolicBP: null,
+            diastolicBP: null,
+            measuredAt: NOW,
+          },
+        }),
+      )
+      expect(out).not.toContain('Open AWAITING entry:')
+    })
+  })
+
+  describe('Phase/16 alignment block (Items 1–7) — present in V1 prompt', () => {
+    it('verbal confirmation gate (Item 1) appears in the assembled system prompt', () => {
+      const out = service.buildSystemPrompt()
+      expect(out).toContain('VERBAL CONFIRMATION GATE')
+      expect(out).toContain('verbalise the values back')
+    })
+
+    it('Option D AWAITING flow (Item 2) appears with decline + resume guidance', () => {
+      const out = service.buildSystemPrompt()
+      expect(out).toContain('OPTION D — EMERGENCY-RANGE CONFIRMATORY FLOW')
+      expect(out).toContain('confirms_entry_id')
+      expect(out).toContain('decline_confirmation')
+      expect(out).toContain('RULE_UNCONFIRMED_EMERGENCY')
+    })
+
+    it('symptom-override 911 rule (Item 3) appears with the verbatim 911 line', () => {
+      const out = service.buildSystemPrompt()
+      expect(out).toContain('SYMPTOM-OVERRIDE 911')
+      expect(out).toContain('Please call 911 now')
+      expect(out).toContain('chest_pain_or_dyspnea')
+    })
+
+    it('Q3 multi-reading session (Item 4) appears with AFib proactive prompt', () => {
+      const out = service.buildSystemPrompt()
+      expect(out).toContain('Q3 MULTI-READING SESSION')
+      expect(out).toContain('AFib')
+      expect(out).toContain('session_id')
+    })
+
+    it('edit-window guidance (Item 5) appears with 5-min boundary + flag_reading_error fallback', () => {
+      const out = service.buildSystemPrompt()
+      expect(out).toContain('EDIT WINDOW')
+      expect(out).toContain('5 minutes')
+      expect(out).toContain('flag_reading_error')
+    })
+
+    it('enrollment-aware messaging (Item 6) names both branches', () => {
+      const out = service.buildSystemPrompt()
+      expect(out).toContain('ENROLLMENT-AWARE MESSAGING')
+      expect(out).toContain('NOT_ENROLLED')
+      expect(out).toContain('ENROLLED')
+    })
+
+    it('session boundary (Item 7) describes close_session per use case', () => {
+      const out = service.buildSystemPrompt()
+      expect(out).toContain('SESSION BOUNDARY')
+      expect(out).toContain('close_session')
+      expect(out).toContain('AWAITING')
     })
   })
 })

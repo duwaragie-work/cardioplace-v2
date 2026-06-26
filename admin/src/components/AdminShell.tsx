@@ -14,6 +14,7 @@ import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import AdminSidebar from './AdminSidebar';
 import AdminTopBar from './AdminTopBar';
+import ZeroPracticeModal from './ZeroPracticeModal';
 
 const PUBLIC_PATHS = new Set<string>(['/', '/home', '/about', '/sign-in', '/terms', '/privacy']);
 
@@ -29,8 +30,13 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   // Bypass on landing / auth / invite-activation routes — they keep
   // their own chrome (and the invitee has no session yet, so the admin
   // sidebar/top bar would just bounce them back to /sign-in).
+  //
+  // The whole /sign-in/* flow is chrome-free too — the practice selector,
+  // MFA challenge, and forced TOTP enrollment are sign-in steps, not app
+  // pages, so they must not render the sidebar / top bar.
   if (
     PUBLIC_PATHS.has(pathname) ||
+    pathname.startsWith('/sign-in/') ||   // pre-session sub-routes: select-practice, MFA challenge, forced TOTP enroll
     pathname.startsWith('/auth/') ||
     pathname.startsWith('/activate/')
   ) {
@@ -89,6 +95,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             "Skip to main content" link move focus here (not just scroll). */}
         <main id="main" tabIndex={-1} className="flex-1 min-h-0">{children}</main>
       </div>
+      {/* Phase/practice-identity — defensive zero-state block when a
+          practice-bound user lands without an active practice (e.g. their
+          last membership was revoked while signed in). */}
+      <ZeroPracticeModal />
     </div>
   );
 }

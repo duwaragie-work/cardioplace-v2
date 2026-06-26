@@ -36,13 +36,34 @@ export async function signInAdmin(
   // instead — so coordinator specs pass a wider pattern. Defaults to the
   // /dashboard landing every other admin role gets.
   landingPattern: RegExp = /\/dashboard/,
+  // Multi-practice accounts (2+ PracticeProvider / PracticeMedicalDirector
+  // memberships) route to /sign-in/select-practice BEFORE tokens are issued.
+  // Pass the practice name to pick a specific one; omit to take the first.
+  practiceName?: string,
 ): Promise<void> {
   await page.goto(`${adminBaseUrl}/sign-in`)
   await page.locator(byTestId(T.admin.signInEmail)).fill(email)
   await page.locator(byTestId(T.admin.signInSendOtp)).click()
   await page.locator(byTestId(T.admin.signInOtp)).fill(DEMO_OTP)
   await page.locator(byTestId(T.admin.signInVerify)).click()
-  await page.waitForURL(landingPattern, { timeout: 30_000 })
+  // After verify, a single-practice (or org-wide) account lands directly on
+  // its dashboard; a multi-practice account is routed to the selector first.
+  // Wait for whichever resolves, then drive the selector if present.
+  await page.waitForURL(
+    (url) =>
+      landingPattern.test(url.pathname) ||
+      /\/sign-in\/select-practice/.test(url.pathname),
+    { timeout: 30_000 },
+  )
+  if (/\/sign-in\/select-practice/.test(new URL(page.url()).pathname)) {
+    // Each practice is a <li><button> carrying its name + a "Continue →"
+    // affordance. Pick by name when given, else the first listed practice.
+    const option = practiceName
+      ? page.locator('main ul li button', { hasText: practiceName })
+      : page.locator('main ul li button')
+    await option.first().click()
+    await page.waitForURL(landingPattern, { timeout: 30_000 })
+  }
 }
 
 /** Sign out via the patient profile page. */

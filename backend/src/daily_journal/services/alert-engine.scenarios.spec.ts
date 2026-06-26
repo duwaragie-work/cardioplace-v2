@@ -933,6 +933,10 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   })
 
   it('Scenario 34 — Tachy patient + pulse 105 + prior elevated (102) → RULE_TACHY_HR', async () => {
+    // Chunk B fix-up — the Gate A probe is now the FIRST journalEntry.findFirst
+    // call; feed it null (no later reading) so the blanket prior-entry stub
+    // below only serves the tachy consecutive-check + prior-reading queries.
+    prisma.journalEntry.findFirst.mockResolvedValueOnce(null)
     prisma.journalEntry.findFirst.mockResolvedValue({ pulse: 102 })
     const { result, createArgs } = await run(
       buildSession({ systolicBP: 128, diastolicBP: 80, pulse: 105 }),
@@ -2548,5 +2552,376 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
     ).map((c) => c[0].data.ruleId)
     expect(ruleIds).toContain('RULE_MEDICATION_MISSED')
     expect(ruleIds).not.toContain('RULE_FIRST_MONTH_ADHERENCE_NUDGE')
+  })
+
+  // ========================================================================
+  // Chunk B + fix-up — DelayBand gating (Manisha Backdated Readings sign-off
+  // 2026-06-06, docs/clinical-signoffs/MANISHA_2026_06_06_OPEN_DECISIONS_AND_
+  // BACKDATING_SIGNOFF.md). The signed dual-gate framework:
+  //   Gate A (structural): an entry that is not the user's new-latest reading
+  //     fires NO alerts of any tier (engine-entry pre-filter).
+  //   Gate B (time-window): HISTORICAL_ENTRY (≥24h lag) fires NO alerts of
+  //     any tier. DELAYED_ENTRY (1–24h) fires everything, with the patient
+  //     911 CTA suppressed, the signed L2 physician delayed-entry wording
+  //     (Recheck #1 refinement), and the L1 provider-only disclaimer
+  //     (Recheck #2). The patient "recorded but won't alert" note renders off
+  //     serializeEntry's delayBand / alertsSuppressedReason (Chunk C scope).
+  // ========================================================================
+  describe('Chunk B — DelayBand gating', () => {
+    it('BP_LEVEL_2 fires normally on a REAL_TIME entry (911 intact, no delayed wording)', async () => {
+      const { result, createArgs } = await run(
+        buildSession({ systolicBP: 190, diastolicBP: 105, pulse: 88, delayBand: 'REAL_TIME' }),
+        buildCtx({ profile: { diagnosedHypertension: true } }),
+      )
+      expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+      expect(createArgs.data.tier).toBe('BP_LEVEL_2')
+      expect(createArgs.data.patientMessage).toMatch(/911/)
+      expect(createArgs.data.physicianMessage).not.toContain('DELAYED ENTRY')
+      expect(createArgs.data.physicianMessage).not.toContain('Delayed entry:')
+    })
+
+    it('BP_LEVEL_2 on DELAYED_ENTRY fires with patient 911 CTA suppressed + the signed physician wording', async () => {
+      const { result, createArgs } = await run(
+        buildSession({
+          systolicBP: 190,
+          diastolicBP: 105,
+          pulse: 88,
+          delayBand: 'DELAYED_ENTRY',
+          delayHours: 5,
+        }),
+        buildCtx({ profile: { diagnosedHypertension: true } }),
+      )
+      expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+      expect(createArgs.data.tier).toBe('BP_LEVEL_2')
+      expect(createArgs.data.patientMessage).not.toMatch(/911/)
+      expect(createArgs.data.patientMessage).toContain('care team')
+      // Recheck #1 refinement — signed verbatim, with [BP]/[date/time]/[X]
+      // templated. FIXED_NOW (2026-04-22T10:00Z) renders 6:00 AM in the
+      // fixture timezone America/New_York (EDT). \s tolerates the narrow
+      // no-break space some ICU versions emit before the meridiem.
+      expect(createArgs.data.physicianMessage).toMatch(
+        /^Delayed entry: patient reported 190\/105 mmHg for Apr 22, 2026, 6:00\sAM\. Reading entered 5 hours later\. Verify current BP and assess for headache, visual changes, chest pain, or dyspnea\. If unable to reach patient, escalate per standard protocol\. /u,
+      )
+      // The Chunk B generic band-only badge is gone (replaced by signed text).
+      expect(createArgs.data.physicianMessage).not.toContain('[DELAYED ENTRY')
+    })
+
+    it('BP_LEVEL_2_SYMPTOM_OVERRIDE on DELAYED_ENTRY fires with CTA suppressed + signed wording (singular hour)', async () => {
+      const { result, createArgs } = await run(
+        buildSession({
+          systolicBP: 122,
+          diastolicBP: 76,
+          pulse: 74,
+          symptoms: { ...noSymptoms(), severeHeadache: true },
+          delayBand: 'DELAYED_ENTRY',
+          delayHours: 1,
+        }),
+        buildCtx({ profile: { diagnosedHypertension: true } }),
+      )
+      expect(result?.ruleId).toBe('RULE_SYMPTOM_OVERRIDE_GENERAL')
+      expect(createArgs.data.tier).toBe('BP_LEVEL_2_SYMPTOM_OVERRIDE')
+      expect(createArgs.data.patientMessage).not.toMatch(/911/)
+      expect(createArgs.data.physicianMessage).toContain(
+        'Delayed entry: patient reported 122/76 mmHg for',
+      )
+      // Plural-aware [X]: 1 → "1 hour" (grammatical instantiation of the
+      // signed "[X] hours" template, approved 2026-06-10).
+      expect(createArgs.data.physicianMessage).toContain('Reading entered 1 hour later.')
+      expect(createArgs.data.physicianMessage).toContain(
+        'escalate per standard protocol.',
+      )
+    })
+
+    it('HISTORICAL_ENTRY suppresses BP_LEVEL_2 — and every other tier — at engine entry', async () => {
+      const { result } = await run(
+        buildSession({ systolicBP: 190, diastolicBP: 105, pulse: 88, delayBand: 'HISTORICAL_ENTRY' }),
+        buildCtx({ profile: { diagnosedHypertension: true } }),
+      )
+      expect(result).toBeNull()
+      expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+      // The early return precedes profile resolution — structural proof that
+      // no pass (BP/HR, adherence, surveillance, nudge) can ever run.
+      expect(profileResolver.resolve).not.toHaveBeenCalled()
+    })
+
+    it('HISTORICAL_ENTRY suppresses BP_LEVEL_2_SYMPTOM_OVERRIDE', async () => {
+      const { result } = await run(
+        buildSession({
+          systolicBP: 122,
+          diastolicBP: 76,
+          pulse: 74,
+          symptoms: { ...noSymptoms(), severeHeadache: true },
+          delayBand: 'HISTORICAL_ENTRY',
+        }),
+        buildCtx({ profile: { diagnosedHypertension: true } }),
+      )
+      expect(result).toBeNull()
+      expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+    })
+
+    // FLIPPED (fix-up) — Chunk B as shipped asserted L1 still fired on
+    // HISTORICAL_ENTRY; the signed policy suppresses ALL tiers.
+    it('BP_LEVEL_1_HIGH does NOT fire on HISTORICAL_ENTRY (signed policy: no alerts, any tier)', async () => {
+      const { result } = await run(
+        buildSession({ systolicBP: 144, diastolicBP: 88, pulse: 82, delayBand: 'HISTORICAL_ENTRY' }),
+        buildCtx({ isPregnant: true }),
+      )
+      expect(result).toBeNull()
+      expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+    })
+
+    // FLIPPED (fix-up) — same as above for Tier 1 contraindications.
+    it('TIER_1_CONTRAINDICATION does NOT fire on HISTORICAL_ENTRY', async () => {
+      const { result } = await run(
+        buildSession({ systolicBP: 130, diastolicBP: 82, pulse: 78, delayBand: 'HISTORICAL_ENTRY' }),
+        buildCtx({ isPregnant: true, profile: { historyHDP: true }, contextMeds: [buildMed()] }),
+      )
+      expect(result).toBeNull()
+      expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+    })
+
+    it('BP_LEVEL_1_LOW does NOT fire on HISTORICAL_ENTRY', async () => {
+      const { result } = await run(
+        buildSession({ systolicBP: 85, diastolicBP: 60, pulse: 78, delayBand: 'HISTORICAL_ENTRY' }),
+        buildCtx({}),
+      )
+      expect(result).toBeNull()
+      expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+    })
+
+    it('Tier 2 adherence + Tier 3 surveillance passes are unreachable on HISTORICAL_ENTRY', async () => {
+      const { result } = await run(
+        buildSession({
+          systolicBP: 125,
+          diastolicBP: 78,
+          pulse: 44,
+          medicationTaken: false,
+          delayBand: 'HISTORICAL_ENTRY',
+        }),
+        buildCtx({ profile: { hasBradycardia: true } }),
+      )
+      expect(result).toBeNull()
+      expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+      expect(profileResolver.resolve).not.toHaveBeenCalled()
+    })
+
+    describe('Gate A — structural "is new latest?" pre-filter (fix-up)', () => {
+      it('an entry older than an existing later reading fires nothing (any tier)', async () => {
+        // First journalEntry.findFirst call in evaluate() is the Gate A probe.
+        prisma.journalEntry.findFirst.mockResolvedValueOnce({ id: 'newer-entry' })
+        const { result } = await run(
+          buildSession({
+            systolicBP: 190,
+            diastolicBP: 105,
+            pulse: 88,
+            delayBand: 'DELAYED_ENTRY',
+            delayHours: 5,
+          }),
+          buildCtx({ profile: { diagnosedHypertension: true } }),
+        )
+        expect(result).toBeNull()
+        expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+        expect(profileResolver.resolve).not.toHaveBeenCalled()
+        // Strictly-greater predicate: session siblings (measuredAt <= session
+        // max) can never suppress each other; equal-timestamp ties fire (the
+        // (journalEntryId, ruleId) dedup guards double-fires).
+        expect(prisma.journalEntry.findFirst).toHaveBeenCalledWith({
+          where: { userId: 'user-1', measuredAt: { gt: FIXED_NOW } },
+          select: { id: true },
+        })
+      })
+
+      it('the new-latest entry passes Gate A and fires normally', async () => {
+        // Default journalEntry.findFirst mock resolves null = no later reading.
+        const { result, createArgs } = await run(
+          buildSession({ systolicBP: 190, diastolicBP: 105, pulse: 88, delayBand: 'REAL_TIME' }),
+          buildCtx({ profile: { diagnosedHypertension: true } }),
+        )
+        expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+        expect(createArgs.data.tier).toBe('BP_LEVEL_2')
+      })
+
+      it('first-ever entry from a new patient passes Gate A (MAX is null)', async () => {
+        prisma.journalEntry.findFirst.mockResolvedValueOnce(null)
+        const { result, createArgs } = await run(
+          buildSession({ systolicBP: 165, diastolicBP: 100, pulse: 80, delayBand: 'REAL_TIME' }),
+          buildCtx({}),
+        )
+        expect(result?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
+        expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+      })
+    })
+
+    describe('L1 DELAYED_ENTRY provider-only disclaimer (Recheck #2, fix-up)', () => {
+      it('BP_LEVEL_1_HIGH physician message carries the disclaimer; patient/caregiver unchanged', async () => {
+        const { result, createArgs } = await run(
+          buildSession({
+            systolicBP: 165,
+            diastolicBP: 100,
+            pulse: 80,
+            delayBand: 'DELAYED_ENTRY',
+            delayHours: 5,
+          }),
+          buildCtx({}),
+        )
+        expect(result?.ruleId).toBe('RULE_STANDARD_L1_HIGH')
+        expect(createArgs.data.tier).toBe('BP_LEVEL_1_HIGH')
+        expect(createArgs.data.physicianMessage).toContain(
+          'Note: this reading was entered 5 hours after measurement. Clinical context may have changed.',
+        )
+        // Recheck #2 — the patient already knows they backdated; patient +
+        // caregiver tiers stay byte-identical to real-time.
+        expect(createArgs.data.patientMessage).not.toContain('Note: this reading')
+        expect(createArgs.data.caregiverMessage).not.toContain('Note: this reading')
+      })
+
+      it('renders "1 hour" singular for a 1-hour lag', async () => {
+        const { createArgs } = await run(
+          buildSession({
+            systolicBP: 165,
+            diastolicBP: 100,
+            pulse: 80,
+            delayBand: 'DELAYED_ENTRY',
+            delayHours: 1,
+          }),
+          buildCtx({}),
+        )
+        expect(createArgs.data.physicianMessage).toContain(
+          'entered 1 hour after measurement',
+        )
+      })
+
+      it('non-BP-axis L1 (HF decompensation, BP_LEVEL_1_LOW) also carries it — dispatch is tier-based', async () => {
+        const { result, createArgs } = await run(
+          buildSession({
+            systolicBP: 118,
+            diastolicBP: 74,
+            pulse: 68,
+            symptoms: { ...noSymptoms(), legSwelling: true },
+            delayBand: 'DELAYED_ENTRY',
+            delayHours: 3,
+          }),
+          buildCtx({
+            profile: {
+              hasHeartFailure: true,
+              heartFailureType: 'HFREF',
+              resolvedHFType: 'HFREF',
+            },
+          }),
+        )
+        expect(result?.ruleId).toBe('RULE_HF_DECOMPENSATION')
+        expect(createArgs.data.tier).toBe('BP_LEVEL_1_LOW')
+        expect(createArgs.data.physicianMessage).toContain(
+          'entered 3 hours after measurement',
+        )
+      })
+
+      it('REAL_TIME L1 carries no disclaimer (snapshot-gate regression guard)', async () => {
+        const { createArgs } = await run(
+          buildSession({ systolicBP: 165, diastolicBP: 100, pulse: 80, delayBand: 'REAL_TIME' }),
+          buildCtx({}),
+        )
+        expect(createArgs.data.physicianMessage).not.toContain('Note: this reading')
+      })
+
+      it('TIER_1 on DELAYED_ENTRY stays unchanged — T1/T2 delayed disclaimers deferred pending Manisha', async () => {
+        const { result, createArgs } = await run(
+          buildSession({
+            systolicBP: 130,
+            diastolicBP: 82,
+            pulse: 78,
+            delayBand: 'DELAYED_ENTRY',
+            delayHours: 4,
+          }),
+          buildCtx({ isPregnant: true, profile: { historyHDP: true }, contextMeds: [buildMed()] }),
+        )
+        expect(result?.ruleId).toBe('RULE_PREGNANCY_ACE_ARB')
+        expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+        expect(createArgs.data.physicianMessage).not.toContain('Note: this reading')
+        expect(createArgs.data.physicianMessage).not.toContain('Delayed entry:')
+      })
+    })
+
+    // ====================================================================
+    // Option D — retake-to-confirm (Manisha 2026-06-12 Q2). The held AWAITING
+    // first-of-pair never reaches the engine; these cover the two resolutions
+    // that DO evaluate (CONFIRMATORY + UNCONFIRMED). Each is TERMINAL — exactly
+    // one outcome alert, no average-based co-fire.
+    // ====================================================================
+    describe('Option D — retake-to-confirm', () => {
+      it('CONFIRMATORY + second reading still ≥180/120 → RULE_ABSOLUTE_EMERGENCY (BP Level 2)', async () => {
+        const { result, createArgs } = await run(
+          buildSession({
+            emergencyConfirmation: 'CONFIRMATORY',
+            readingCount: 2,
+            systolicBP: 192,
+            diastolicBP: 121,
+            submittedSystolicBP: 195,
+            submittedDiastolicBP: 122,
+            optionDInitialSystolicBP: 190,
+            optionDInitialDiastolicBP: 120,
+          }),
+          buildCtx({}),
+        )
+        expect(result?.ruleId).toBe('RULE_ABSOLUTE_EMERGENCY')
+        expect(createArgs.data.tier).toBe('BP_LEVEL_2')
+        expect(prisma.deviationAlert.create.mock.calls.length).toBe(1)
+      })
+
+      it('CONFIRMATORY + second reading below threshold → RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL (Tier 3); names BP1+BP2, NOT the average; no spurious L1', async () => {
+        const { result, createArgs } = await run(
+          buildSession({
+            emergencyConfirmation: 'CONFIRMATORY',
+            readingCount: 2,
+            // Session AVERAGE of 195/120 + 135/85 — would fire STANDARD_L1_HIGH
+            // (≥160/100) if the resolution weren't terminal.
+            systolicBP: 165,
+            diastolicBP: 102,
+            // BP2 (confirmatory) — below the 180/120 emergency band.
+            submittedSystolicBP: 135,
+            submittedDiastolicBP: 85,
+            // BP1 (the held first-of-pair, emergency range).
+            optionDInitialSystolicBP: 195,
+            optionDInitialDiastolicBP: 120,
+          }),
+          buildCtx({}),
+        )
+        expect(result?.ruleId).toBe('RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL')
+        expect(createArgs.data.tier).toBe('TIER_3_INFO')
+        // BP1 (emergency) + BP2 (confirmatory) spelled out; the average is NOT.
+        expect(createArgs.data.physicianMessage).toContain('195/120 mmHg')
+        expect(createArgs.data.physicianMessage).toContain('135/85 mmHg')
+        expect(createArgs.data.physicianMessage).not.toContain('165/102')
+        // Provider-only + terminal (no average-based BP Level 1 co-fire).
+        expect(createArgs.data.patientMessage).toBeFalsy()
+        expect(createArgs.data.caregiverMessage).toBeFalsy()
+        expect(prisma.deviationAlert.create.mock.calls.length).toBe(1)
+      })
+
+      it('UNCONFIRMED → RULE_UNCONFIRMED_EMERGENCY (Tier 1 contraindication), provider-only, no L2/L1 co-fire on the lone ≥180/120 reading', async () => {
+        const { result, createArgs } = await run(
+          buildSession({
+            emergencyConfirmation: 'UNCONFIRMED',
+            readingCount: 1,
+            singleReadingFinalized: true,
+            systolicBP: 195,
+            diastolicBP: 120,
+            submittedSystolicBP: 195,
+            submittedDiastolicBP: 120,
+          }),
+          buildCtx({}),
+        )
+        expect(result?.ruleId).toBe('RULE_UNCONFIRMED_EMERGENCY')
+        expect(createArgs.data.tier).toBe('TIER_1_CONTRAINDICATION')
+        expect(createArgs.data.physicianMessage).toContain(
+          'Single unconfirmed emergency-range reading',
+        )
+        expect(createArgs.data.physicianMessage).toContain('195/120 mmHg')
+        expect(createArgs.data.patientMessage).toBeFalsy()
+        expect(createArgs.data.caregiverMessage).toBeFalsy()
+        // Lone ≥180/120 reading must NOT also fire ABSOLUTE_EMERGENCY / L1.
+        expect(prisma.deviationAlert.create.mock.calls.length).toBe(1)
+      })
+    })
   })
 })

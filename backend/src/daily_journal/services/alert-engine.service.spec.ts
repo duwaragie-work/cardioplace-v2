@@ -536,8 +536,13 @@ describe('AlertEngineService (orchestrator)', () => {
   })
 
   // Bug 4 — tachy must check the immediately previous reading, not any prior.
+  // Chunk B fix-up — the Gate A "is new latest?" probe is now the FIRST
+  // journalEntry.findFirst call in evaluate(); each test feeds it null (no
+  // later reading) so the blanket prior-entry stub only serves the tachy
+  // consecutive-check + prior-reading queries.
   describe('Bug 4 — tachycardia consecutive check', () => {
     it('prior reading pulse 80 (normal) → no tachy alert even at current 105', async () => {
+      prisma.journalEntry.findFirst.mockResolvedValueOnce(null) // Gate A probe
       prisma.journalEntry.findFirst.mockResolvedValue({ pulse: 80 })
       sessionAverager.averageForEntry.mockResolvedValue(
         baseSession({ pulse: 105 }),
@@ -551,6 +556,7 @@ describe('AlertEngineService (orchestrator)', () => {
     })
 
     it('prior reading pulse 102 + current 105 → tachy alert fires', async () => {
+      prisma.journalEntry.findFirst.mockResolvedValueOnce(null) // Gate A probe
       prisma.journalEntry.findFirst.mockResolvedValue({ pulse: 102 })
       sessionAverager.averageForEntry.mockResolvedValue(
         baseSession({ pulse: 105 }),
@@ -563,6 +569,7 @@ describe('AlertEngineService (orchestrator)', () => {
     })
 
     it('prior entry with pulse=null → no false positive', async () => {
+      prisma.journalEntry.findFirst.mockResolvedValueOnce(null) // Gate A probe
       prisma.journalEntry.findFirst.mockResolvedValue({ pulse: null })
       sessionAverager.averageForEntry.mockResolvedValue(
         baseSession({ pulse: 105 }),
@@ -582,7 +589,9 @@ describe('AlertEngineService (orchestrator)', () => {
         baseCtx({ profile: { ...baseCtx().profile, hasTachycardia: true } }),
       )
       await service.evaluate('entry-1')
-      const findFirstCall = prisma.journalEntry.findFirst.mock.calls[0][0]
+      // calls[0] is the Gate A probe (Chunk B fix-up); the tachy
+      // prior-reading lookup is the second findFirst.
+      const findFirstCall = prisma.journalEntry.findFirst.mock.calls[1][0]
       expect(findFirstCall.where.pulse).toBeUndefined()
       expect(findFirstCall.orderBy).toEqual({ measuredAt: 'desc' })
     })

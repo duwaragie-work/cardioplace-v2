@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -24,12 +25,30 @@ import {
   LEGACY_REFRESH_COOKIE,
   scopeForRoles,
 } from './cookie-scope.js'
+import { ActiveContext } from './decorators/active-context.decorator.js'
 import { Public } from './decorators/public.decorator.js'
 import { ConsentDto } from './dto/consent.dto.js'
 import { ProfileDto } from './dto/profile.dto.js'
 import { RefreshDto } from './dto/refresh.dto.js'
+import { SelectPracticeDto, SwitchPracticeDto } from './dto/select-practice.dto.js'
 import { SendOtpDto } from './dto/send-otp.dto.js'
 import { VerifyOtpDto } from './dto/verify-otp.dto.js'
+import {
+  AdminResetMfaDto,
+  EnrollCompleteDto,
+  MfaChallengeDto,
+  MfaRecoveryDto,
+} from './dto/mfa.dto.js'
+import {
+  AdminResetPatientBiometricDto,
+  WebAuthnAuthOptionsDto,
+  WebAuthnAuthVerifyDto,
+  WebAuthnRecoverySignInDto,
+  WebAuthnRegisterStartDto,
+  WebAuthnRegisterVerifyDto,
+  WebAuthnRenameDto,
+} from './dto/webauthn.dto.js'
+import { Roles } from './decorators/roles.decorator.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
 
 @Controller('v2/auth')
@@ -59,13 +78,70 @@ export class AuthController {
     ipAddress?: string
     userAgent?: string
     timezone?: string
+    deviceType?: string
   } {
+    const userAgent = req.headers['user-agent']
     return {
       deviceId: req.headers['x-device-id'] as string | undefined,
       ipAddress: this.extractIpAddress(req),
-      userAgent: req.headers['user-agent'],
+      userAgent,
       timezone: req.headers['x-timezone'] as string | undefined,
+      deviceType: this.resolveDeviceType(
+        req.headers['x-device-platform'] as string | undefined,
+        userAgent,
+      ),
     }
+  }
+
+  /**
+   * Resolve the canonical device type for AuthSession.deviceType. The
+   * explicit `x-device-platform` header (sent by the mobile shell) wins;
+   * otherwise we fall back to a basic User-Agent mobile-token scan so
+   * regular browser sessions still pick the right idle threshold
+   * (Phase 2: 15 min web / 5 min mobile).
+   */
+  private resolveDeviceType(
+    platform: string | undefined,
+    userAgent: string | undefined,
+  ): 'web' | 'mobile' {
+    const normalized = platform?.trim().toLowerCase()
+    if (normalized === 'mobile' || normalized === 'ios' || normalized === 'android') {
+      return 'mobile'
+    }
+    if (normalized === 'web') return 'web'
+    if (userAgent && /Mobi|Android|iPhone|iPad|iPod|Mobile/i.test(userAgent)) {
+      return 'mobile'
+    }
+    return 'web'
+  }
+
+  /** Set the app-scoped access + refresh cookies from an issued token pair.
+   *  Shared by the MFA challenge/recovery handlers (mirrors /otp/verify). */
+  private issueSessionCookies(
+    res: Response,
+    result: { accessToken: string; refreshToken: string; roles: UserRole[] },
+  ): void {
+    const scope = scopeForRoles(result.roles)
+    this.setAccessCookie(res, result.accessToken, scope)
+    this.setRefreshCookie(res, result.refreshToken, scope)
+  }
+
+  /** Upsert/track the calling device after a successful sign-in (mirrors the
+   *  device-tracking step in /otp/verify). No-op when no device id is sent. */
+  private async trackDevice(
+    req: Request,
+    context: { deviceId?: string; userAgent?: string },
+    userId: string,
+  ): Promise<void> {
+    if (!context.deviceId) return
+    await this.authService.upsertOrTrackDevice({
+      deviceId: context.deviceId,
+      userId,
+      platform: req.headers['x-device-platform'] as string | undefined,
+      deviceType: req.headers['x-device-type'] as string | undefined,
+      deviceName: req.headers['x-device-name'] as string | undefined,
+      userAgent: context.userAgent,
+    })
   }
 
   /* ═══ DISABLED – OTP-only auth ═══════════════════════════════════════════════
@@ -103,6 +179,24 @@ export class AuthController {
     }
     const context = { ...baseContext, deviceId, appContext: dto.appContext }
     const result = await this.authService.verifyOtp(dto.email, dto.otp, context)
+    // Phase/practice-identity — multi-practice provider gets a challenge
+    // token instead of the real token pair. Return the discriminator shape
+    // verbatim; the FE selector page POSTs /select-practice next.
+    if ('status' in result && result.status === 'PRACTICE_SELECT_REQUIRED') {
+      return result
+    }
+    // MFA gate — an enrolled provider/admin gets a challenge, not tokens.
+    // Pass the discriminator through verbatim; the FE routes to the TOTP
+    // challenge page and POSTs /mfa/challenge next.
+    if ('status' in result && result.status === 'MFA_REQUIRED') {
+      return result
+    }
+    // Patient biometric gate — a patient with a registered device gets a
+    // WebAuthn challenge instead of tokens. Return it verbatim; the patient FE
+    // fetches options + POSTs /webauthn/authenticate/verify next.
+    if ('status' in result && result.status === 'WEBAUTHN_REQUIRED') {
+      return result
+    }
     // Scope cookies to the destination app (admin-role users land on the
     // admin app — including via the patient→admin sign-in bridge, where
     // this POST's Origin is the patient origin but the session is admin's).
@@ -120,6 +214,308 @@ export class AuthController {
       })
     }
     return result
+  }
+
+  // ─── Practice Selector + Switcher ──────────────────────────────────────────
+  // Phase/practice-identity (Manisha 2026-06-12 Access Control §1).
+  //
+  // select-practice  — exchange a practice-select challenge token (issued by
+  //                    /otp/verify or /magic-link/verify when the user has
+  //                    2+ memberships) for the real token pair, with the
+  //                    chosen practice persisted on the new AuthSession.
+  // switch-practice  — mid-session active-practice swap. No new tokens.
+
+  @Public()
+  @Post('select-practice')
+  async selectPractice(
+    @Body() dto: SelectPracticeDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.selectPractice(
+      dto.challengeToken,
+      dto.practiceId,
+      context,
+    )
+    // MFA already cleared before the selector (Manisha 2026-06-12 §6), so
+    // selectPractice always issues the real token pair here.
+    const scope = scopeForRoles(result.roles)
+    this.setAccessCookie(res, result.accessToken, scope)
+    this.setRefreshCookie(res, result.refreshToken, scope)
+    return result
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('switch-practice')
+  async switchPractice(
+    @Body() dto: SwitchPracticeDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { id } = req.user as { id: string }
+    // Identify WHICH AuthSession on this device the user is acting on.
+    // Read the refresh-token cookie (same shape as the /refresh handler);
+    // service-side resolves it to the AuthSession.refreshTokenId.
+    const scope = deriveCookieScope(req)
+    const cookies = (req.cookies as Record<string, string>) ?? {}
+    const rawRefreshToken =
+      cookies[cookieName(scope, 'refresh')] ?? cookies[LEGACY_REFRESH_COOKIE]
+    if (!rawRefreshToken) {
+      throw new BadRequestException(
+        'No active session — sign in again to switch practices.',
+      )
+    }
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.switchPracticeByRefreshToken(
+      id,
+      rawRefreshToken,
+      dto.practiceId,
+      context,
+    )
+    // Mint replaces the access cookie so the next request carries the new
+    // activePracticeId JWT claim immediately.
+    this.setAccessCookie(res, result.accessToken, scope)
+    return result
+  }
+
+  // ─── MFA — TOTP second factor (Manisha 2026-06-12 Access Control §6) ────────
+
+  // Enrollment is performed by an authenticated (post-first-factor) user, so
+  // these two routes rely on the default JwtAuthGuard and read req.user.
+
+  @Post('mfa/enroll/start')
+  async mfaEnrollStart(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.startTotpEnrollment(id, this.buildAuthContext(req))
+  }
+
+  @Post('mfa/enroll/complete')
+  async mfaEnrollComplete(@Body() dto: EnrollCompleteDto, @Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.completeTotpEnrollment(
+      id,
+      dto.enrollmentToken,
+      dto.code,
+      this.buildAuthContext(req),
+    )
+  }
+
+  // Regenerate recovery codes for an already-enrolled user (profile Security
+  // surface). Authenticated; the enrolled user passes the MfaRequiredGuard.
+  @Post('mfa/recovery-codes/regenerate')
+  async mfaRegenerateRecoveryCodes(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.regenerateRecoveryCodes(id, this.buildAuthContext(req))
+  }
+
+  // Challenge + recovery run pre-token (the user only holds the short-lived
+  // challenge token), so they're Public and issue + set cookies on success.
+
+  @Public()
+  @Post('mfa/challenge')
+  async mfaChallenge(
+    @Body() dto: MfaChallengeDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.mfaChallenge(
+      dto.challengeToken,
+      dto.code,
+      context,
+    )
+    // Multi-practice provider: second factor cleared, now pick a practice. No
+    // tokens/cookies yet — the FE routes to /sign-in/select-practice.
+    if ('status' in result && result.status === 'PRACTICE_SELECT_REQUIRED') {
+      return result
+    }
+    this.issueSessionCookies(res, result)
+    await this.trackDevice(req, context, result.userId)
+    return result
+  }
+
+  @Public()
+  @Post('mfa/recovery')
+  async mfaRecovery(
+    @Body() dto: MfaRecoveryDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.mfaRecovery(
+      dto.challengeToken,
+      dto.recoveryCode,
+      context,
+    )
+    // Multi-practice provider: recovery code accepted, now pick a practice.
+    if ('status' in result && result.status === 'PRACTICE_SELECT_REQUIRED') {
+      return result
+    }
+    this.issueSessionCookies(res, result)
+    await this.trackDevice(req, context, result.userId)
+    return result
+  }
+
+  @Roles(UserRole.SUPER_ADMIN, UserRole.HEALPLACE_OPS)
+  @Post('admin/mfa/reset/:userId')
+  async adminResetMfa(
+    @Param('userId') userId: string,
+    @Body() dto: AdminResetMfaDto,
+    @Req() req: Request,
+  ) {
+    const { id } = req.user as { id: string }
+    return this.authService.adminResetMfa(
+      id,
+      userId,
+      dto.reason,
+      this.buildAuthContext(req),
+    )
+  }
+
+  // ─── WebAuthn — patient biometric second factor (Face ID / fingerprint) ─────
+
+  // Registration is performed by an authenticated patient (post first factor),
+  // so these two routes rely on the default JwtAuthGuard and read req.user.
+
+  @Post('webauthn/register/start')
+  async webAuthnRegisterStart(
+    @Body() dto: WebAuthnRegisterStartDto,
+    @Req() req: Request,
+  ) {
+    const { id } = req.user as { id: string }
+    return this.authService.startWebAuthnRegistration(id, dto.mode ?? 'platform')
+  }
+
+  @Post('webauthn/register/verify')
+  async webAuthnRegisterVerify(
+    @Body() dto: WebAuthnRegisterVerifyDto,
+    @Req() req: Request,
+  ) {
+    const { id } = req.user as { id: string }
+    return this.authService.completeWebAuthnRegistration(
+      id,
+      dto.registrationToken,
+      dto.response,
+      dto.deviceName,
+      this.buildAuthContext(req),
+    )
+  }
+
+  // Authentication runs pre-token (the patient only holds the short-lived
+  // challenge token), so options / verify / recovery are Public.
+
+  @Public()
+  @Post('webauthn/authenticate/options')
+  async webAuthnAuthOptions(@Body() dto: WebAuthnAuthOptionsDto) {
+    return this.authService.webAuthnAuthenticationOptions(dto.challengeToken)
+  }
+
+  @Public()
+  @Post('webauthn/authenticate/verify')
+  async webAuthnAuthVerify(
+    @Body() dto: WebAuthnAuthVerifyDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.webAuthnAuthenticate(
+      dto.challengeToken,
+      dto.response,
+      context,
+    )
+    this.issueSessionCookies(res, result)
+    await this.trackDevice(req, context, result.userId)
+    return result
+  }
+
+  // Recovery-code sign-in — the only fallback when biometric can't be used on
+  // this device. Consumes a code, regenerates the set, issues the session.
+  @Public()
+  @Post('webauthn/authenticate/recovery')
+  async webAuthnAuthRecovery(
+    @Body() dto: WebAuthnRecoverySignInDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const context = this.buildAuthContext(req)
+    const result = await this.authService.webAuthnRecoverySignIn(
+      dto.challengeToken,
+      dto.recoveryCode,
+      context,
+    )
+    this.issueSessionCookies(res, result)
+    await this.trackDevice(req, context, result.userId)
+    return result
+  }
+
+  @Get('webauthn/credentials')
+  async webAuthnListCredentials(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.listWebAuthnCredentials(id)
+  }
+
+  @Patch('webauthn/credentials/:id')
+  async webAuthnRenameCredential(
+    @Param('id') credentialRowId: string,
+    @Body() dto: WebAuthnRenameDto,
+    @Req() req: Request,
+  ) {
+    const { id } = req.user as { id: string }
+    return this.authService.renameWebAuthnCredential(
+      id,
+      credentialRowId,
+      dto.deviceName,
+      this.buildAuthContext(req),
+    )
+  }
+
+  @Delete('webauthn/credentials/:id')
+  async webAuthnDeleteCredential(
+    @Param('id') credentialRowId: string,
+    @Req() req: Request,
+  ) {
+    const { id } = req.user as { id: string }
+    return this.authService.deleteWebAuthnCredential(
+      id,
+      credentialRowId,
+      this.buildAuthContext(req),
+    )
+  }
+
+  // ─── Recovery codes (patient biometric backup) ──────────────────────────────
+
+  @Get('webauthn/recovery-codes')
+  async webAuthnRecoveryStatus(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.patientRecoveryStatus(id)
+  }
+
+  @Post('webauthn/recovery-codes/regenerate')
+  async webAuthnRegenerateRecovery(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.regeneratePatientRecoveryCodes(
+      id,
+      this.buildAuthContext(req),
+    )
+  }
+
+  // Admin support — wipe a patient's biometric + recovery codes when they've
+  // lost both (re-enrolls on next sign-in). SUPER_ADMIN / HEALPLACE_OPS only.
+  @Roles(UserRole.SUPER_ADMIN, UserRole.HEALPLACE_OPS)
+  @Post('admin/webauthn/reset/:userId')
+  async adminResetPatientBiometric(
+    @Param('userId') userId: string,
+    @Body() dto: AdminResetPatientBiometricDto,
+    @Req() req: Request,
+  ) {
+    const { id } = req.user as { id: string }
+    return this.authService.adminResetPatientBiometric(
+      id,
+      userId,
+      dto.reason,
+      this.buildAuthContext(req),
+    )
   }
 
   // ─── Magic Link ────────────────────────────────────────────────────────────────
@@ -146,6 +542,33 @@ export class AuthController {
     try {
       const context = this.buildAuthContext(req)
       const result = await this.authService.verifyMagicLink(token, context)
+      // Phase/practice-identity — magic-link can also surface the selector
+      // requirement when the recipient is a multi-practice provider. Redirect
+      // to the FE selector page carrying the short-lived challenge token.
+      if ('status' in result && result.status === 'PRACTICE_SELECT_REQUIRED') {
+        const sp = new URLSearchParams({
+          challengeToken: result.challengeToken,
+          practices: JSON.stringify(result.practices),
+        })
+        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/select-practice?${sp.toString()}`)
+        return
+      }
+      // MFA gate — if an enrolled provider/admin ever arrives via magic link,
+      // bounce to the TOTP challenge page carrying the challenge token (mirrors
+      // the selector redirect above). Patients have no TOTP so never hit this.
+      if ('status' in result && result.status === 'MFA_REQUIRED') {
+        const sp = new URLSearchParams({ challengeToken: result.challengeToken })
+        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/mfa-challenge?${sp.toString()}`)
+        return
+      }
+      // Patient biometric gate — a patient with a registered device bounces to
+      // the patient app's biometric page carrying the challenge token. Always
+      // the patient app (biometric is patient-side; providers use TOTP above).
+      if ('status' in result && result.status === 'WEBAUTHN_REQUIRED') {
+        const sp = new URLSearchParams({ challengeToken: result.challengeToken })
+        res.redirect(`${patientAppUrl}/sign-in/biometric?${sp.toString()}`)
+        return
+      }
       // Magic-link verify is a top-level GET (clicked from an email) so the
       // browser sends no Origin — derive scope from the verified roles, the
       // same signal that picks targetUrl below.
@@ -197,6 +620,12 @@ export class AuthController {
   ) {
     const context = this.buildAuthContext(req)
     const result = await this.authService.acceptInvite(token, context)
+    // Admin-role activation issues no session (sign-in required) — return the
+    // discriminator verbatim so the FE redirects to /sign-in. No cookies, no
+    // device tracking, since there's no token pair.
+    if ('status' in result && result.status === 'SIGN_IN_REQUIRED') {
+      return result
+    }
     // Scope cookies to the destination app — same logic as
     // verifyMagicLink / verifyOtp: admin-role users land on admin.
     const scope = scopeForRoles(result.roles)
@@ -298,9 +727,12 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get('profile')
-  getProfile(@Req() req: Request) {
+  getProfile(
+    @Req() req: Request,
+    @ActiveContext() ctx: { practiceId: string | null },
+  ) {
     const { id } = req.user as { id: string }
-    return this.authService.getProfile(id)
+    return this.authService.getProfile(id, ctx)
   }
 
   @UseGuards(JwtAuthGuard)

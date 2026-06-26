@@ -124,6 +124,11 @@ export interface PatientJournalEntry {
   // Manisha 5/24 Q1 — narrow pulse pressure (<15) flagged at entry as a
   // possible measurement artifact (physician-only, no patient alert tier).
   narrowPpArtifact?: boolean
+  /** Option D (Item B) — retake-to-confirm state. AWAITING = first-of-pair
+   *  emergency reading; CONFIRMATORY = the second reading; null = ordinary. */
+  emergencyConfirmation?: 'AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED' | null
+  /** On a CONFIRMATORY entry, the id of the AWAITING first-of-pair it confirms. */
+  confirmsEntryId?: string | null
   failedConditions: string[]
   notes: string | null
   source: string

@@ -263,7 +263,7 @@ export class ChatService {
     // Phase/16 — pull full ResolvedContext from ProfileResolverService (single
     // source of truth, shared with the alert engine) and v2-shape DeviationAlert
     // rows with tier/ruleId/patientMessage/physicianMessage for chat context.
-    const [recentEntries, activeAlerts, user, resolvedContext, intakeStatus] = await Promise.all([
+    const [recentEntries, activeAlerts, user, resolvedContext, intakeStatus, openAwaiting] = await Promise.all([
       this.prisma.journalEntry.findMany({
         where: { userId },
         orderBy: { measuredAt: 'desc' },
@@ -284,6 +284,12 @@ export class ChatService {
           name: true, timezone: true, communicationPreference: true,
           preferredLanguage: true,
           dateOfBirth: true,
+          // Phase/16 Item 6 — enrollment-aware messaging. Surface to the LLM
+          // so it can pick the right post-submit success line (NOT_ENROLLED →
+          // "care team will start reviewing once enrollment is complete"
+          // vs ENROLLED → "your care team has been notified").
+          enrollmentStatus: true,
+          enrolledAt: true,
         },
       }),
       this.profileResolver.resolve(userId).catch((err: unknown) => {
@@ -294,6 +300,28 @@ export class ChatService {
       // DailyJournalService.create. Sub-ms; runs in parallel with the four
       // other prompt-context queries.
       this.intakeStatusService.getStatus(userId),
+      // Phase/16 Item 2 — Option D AWAITING conversational resume. If the
+      // patient walked away from a held emergency-range reading and comes
+      // back via chat, surface the AWAITING entry so the model can ask for
+      // the confirmatory second reading (or accept a decline) in the new
+      // session. `singleReadingFinalized:false` excludes ones the cron has
+      // already finalized. `sessionClosedAt:null` excludes confirmed-and-
+      // closed pairs (defensive — AWAITING-and-closed shouldn't exist).
+      this.prisma.journalEntry.findFirst({
+        where: {
+          userId,
+          emergencyConfirmation: 'AWAITING',
+          singleReadingFinalized: false,
+          sessionClosedAt: null,
+        },
+        orderBy: { measuredAt: 'desc' },
+        select: {
+          id: true,
+          measuredAt: true,
+          systolicBP: true,
+          diastolicBP: true,
+        },
+      }),
     ])
 
     // Trailing 7-day mean — single source of truth lives in
@@ -324,6 +352,15 @@ export class ChatService {
       dateOfBirth: user?.dateOfBirth ?? null,
       resolvedContext,
       intakeStatus,
+      enrollmentStatus: user?.enrollmentStatus ?? null,
+      openAwaiting: openAwaiting
+        ? {
+            id: openAwaiting.id,
+            systolicBP: openAwaiting.systolicBP != null ? Number(openAwaiting.systolicBP) : null,
+            diastolicBP: openAwaiting.diastolicBP != null ? Number(openAwaiting.diastolicBP) : null,
+            measuredAt: openAwaiting.measuredAt,
+          }
+        : null,
       toneMode: 'PATIENT',
     })
 

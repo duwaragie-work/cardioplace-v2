@@ -80,6 +80,15 @@ export interface CheckinSummary {
   medicationTaken?: boolean
   symptoms: string[]
   saved: boolean
+  /**
+   * Bug 60 — whether the patient has ANY active (non-discontinued,
+   * non-rejected, non-PRN) medications on file. When false, frontend
+   * renderers (CheckinCard popup, verbal audio summary, My Readings card)
+   * SUPPRESS the medication label entirely — otherwise the vacuously-true
+   * `medicationTaken=true` we save for 0-meds patients (per Bug 53) gets
+   * rendered as the misleading "All medications taken ✓" pill.
+   */
+  hasActiveMedications?: boolean
 }
 
 export interface UpdateSummary {
@@ -91,6 +100,8 @@ export interface UpdateSummary {
   medicationTaken?: boolean
   symptoms: string[]
   updated: boolean
+  /** Bug 60 — see CheckinSummary.hasActiveMedications. */
+  hasActiveMedications?: boolean
 }
 
 export interface DeleteSummary {
@@ -1107,7 +1118,7 @@ export class VoiceService implements OnModuleDestroy {
       // SystemPromptService.buildPatientContext() give voice the same
       // conditions / meds / threshold / active-alert block (including the
       // three-tier patientMessage bodies) that the text chatbot sees.
-      const [user, entries, activeAlerts, sessionData, resolvedContext, intakeStatus] = await Promise.all([
+      const [user, entries, activeAlerts, sessionData, resolvedContext, intakeStatus, openAwaiting] = await Promise.all([
         this.prisma.user.findUnique({
           where: { id: userId },
           select: {
@@ -1116,6 +1127,9 @@ export class VoiceService implements OnModuleDestroy {
             preferredLanguage: true,
             timezone: true,
             communicationPreference: true,
+            // Phase/16 Item 6 — drives enrollment-aware post-submit messaging.
+            enrollmentStatus: true,
+            enrolledAt: true,
           },
         }),
         this.prisma.journalEntry.findMany({
@@ -1152,6 +1166,19 @@ export class VoiceService implements OnModuleDestroy {
         // Cheap PK-scoped findUnique; renders the INTAKE STATUS block in the
         // patient-context. Mirrors chat.service.ts.
         this.intakeStatusService.getStatus(userId),
+        // Phase/16 Item 2 — open AWAITING entry for Option D resume. Mirrors
+        // chat.service.ts so voice and text behave identically when the
+        // patient walked away from a held emergency-range reading.
+        this.prisma.journalEntry.findFirst({
+          where: {
+            userId,
+            emergencyConfirmation: 'AWAITING',
+            singleReadingFinalized: false,
+            sessionClosedAt: null,
+          },
+          orderBy: { measuredAt: 'desc' },
+          select: { id: true, measuredAt: true, systolicBP: true, diastolicBP: true },
+        }),
       ])
 
       // Trailing 7-day mean — shared helper in @cardioplace/shared/derivatives
@@ -1185,6 +1212,15 @@ export class VoiceService implements OnModuleDestroy {
         dateOfBirth: user?.dateOfBirth ?? null,
         resolvedContext,
         intakeStatus,
+        enrollmentStatus: user?.enrollmentStatus ?? null,
+        openAwaiting: openAwaiting
+          ? {
+              id: openAwaiting.id,
+              systolicBP: openAwaiting.systolicBP != null ? Number(openAwaiting.systolicBP) : null,
+              diastolicBP: openAwaiting.diastolicBP != null ? Number(openAwaiting.diastolicBP) : null,
+              measuredAt: openAwaiting.measuredAt,
+            }
+          : null,
         toneMode: 'PATIENT',
         // Voice-only: never inline per-reading BP numbers. Native-audio LLMs
         // echo prompt-injected numbers as if the patient just said them. The

@@ -341,6 +341,27 @@ export default function AlertCard({
                 {alert.mode === 'PERSONALIZED' ? 'Personalized' : 'Standard'}
               </span>
             )}
+            {/* Bug 7 (live-test 2026-06-15) — trigger-source signal. A
+                RULE_UNCONFIRMED_EMERGENCY alert exists because the patient logged
+                an emergency-range reading but did NOT complete the confirmatory
+                measurement (they declined, or the app closed and the cron
+                finalized it). The patient may not realize an alert exists, so
+                phone outreach is the action — flag it on the row so a provider
+                scanning the list can prioritize it over routine alerts. */}
+            {alert.ruleId === 'RULE_UNCONFIRMED_EMERGENCY' && (
+              <span
+                data-testid={`admin-alert-unconfirmed-badge-${alert.id}`}
+                title="Unconfirmed emergency-range reading — the patient did not complete the confirmatory measurement (declined or app-closed). Recommend phone outreach to verify current status."
+                aria-label="Unconfirmed emergency-range reading — recommend phone outreach"
+                className="inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full cursor-help"
+                style={{
+                  backgroundColor: 'var(--brand-warning-amber-light, #fef3c7)',
+                  color: 'var(--brand-warning-amber-text, #92400e)',
+                }}
+              >
+                Unconfirmed
+              </span>
+            )}
             {/* F27 + Manisha 2026-06-12 — pre-enrollment dispatch
                 transparency, now two-state. A NOT_ENROLLED patient who was
                 NEVER enrolled had ALL dispatch deferred → "no dispatch" badge.

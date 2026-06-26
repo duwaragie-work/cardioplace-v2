@@ -5,6 +5,14 @@ import { PrismaModule } from '../prisma/prisma.module.js'
 import { MonthlyReportCron } from './monthly-report.cron.js'
 import { ReportsController } from './reports.controller.js'
 import { ReportsService } from './reports.service.js'
+import { AdherenceController } from './adherence.controller.js'
+import { AdherenceService } from './adherence.service.js'
+import { QuarterlyController } from './quarterly.controller.js'
+import { QuarterlyService } from './quarterly.service.js'
+import { SlaController } from './sla.controller.js'
+import { SlaService } from './sla.service.js'
+import { CohortController } from './cohort.controller.js'
+import { CohortService } from './cohort.service.js'
 
 /**
  * Phase/24 — Monthly Practice Analytics Report.
@@ -20,8 +28,28 @@ import { ReportsService } from './reports.service.js'
  */
 @Module({
   imports: [PrismaModule, EmailModule, ConfigModule],
-  controllers: [ReportsController],
-  providers: [ReportsService, MonthlyReportCron],
-  exports: [ReportsService, MonthlyReportCron],
+  controllers: [
+    ReportsController,
+    AdherenceController,
+    QuarterlyController,
+    SlaController,
+    CohortController,
+  ],
+  providers: [
+    ReportsService,
+    MonthlyReportCron,
+    AdherenceService,
+    QuarterlyService,
+    SlaService,
+    CohortService,
+  ],
+  exports: [
+    ReportsService,
+    MonthlyReportCron,
+    AdherenceService,
+    QuarterlyService,
+    SlaService,
+    CohortService,
+  ],
 })
 export class ReportsModule {}
