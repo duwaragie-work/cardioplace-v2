@@ -153,7 +153,17 @@ function MfaEnrollInner() {
   }
 
   function finish() {
-    router.push('/dashboard');
+    // First-time-enrolling MULTI-practice provider: a practice_select challenge
+    // was stashed at sign-in. They must pick a practice before the dashboard
+    // (the backend PracticeRequiredGuard enforces it), so hand off to the
+    // selector instead of /dashboard. Other enrollees go straight in.
+    let practicePending = false;
+    try {
+      practicePending = !!sessionStorage.getItem('cp_admin_practice_challenge');
+    } catch {
+      /* sessionStorage unavailable */
+    }
+    router.push(practicePending ? '/sign-in/select-practice' : '/dashboard');
   }
 
   return (

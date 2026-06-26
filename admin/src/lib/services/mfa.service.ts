@@ -25,6 +25,15 @@ export type MfaRequiredResponse = {
   challengeToken: string;
 };
 
+/** Returned by /mfa/challenge and /mfa/recovery for a MULTI-practice provider:
+ *  the second factor is cleared, but they must still pick a practice before
+ *  tokens are issued. The FE stashes this and routes to /sign-in/select-practice. */
+export type PracticeSelectResponse = {
+  status: 'PRACTICE_SELECT_REQUIRED';
+  challengeToken: string;
+  practices: Array<{ id: string; name: string }>;
+};
+
 export type EnrollStartResponse = {
   provisioningUri: string;
   qrCodeDataUrl: string;
@@ -111,7 +120,7 @@ export async function regenerateRecoveryCodes(): Promise<EnrollCompleteResponse>
 export async function verifyChallenge(
   challengeToken: string,
   code: string,
-): Promise<AdminAuthResponse> {
+): Promise<AdminAuthResponse | PracticeSelectResponse> {
   const res = await fetch(`${API_URL}/api/v2/auth/mfa/challenge`, {
     method: 'POST',
     credentials: 'include',
@@ -127,7 +136,7 @@ export async function verifyChallenge(
       typeof data.errorCode === 'string' ? data.errorCode : undefined;
     throw err;
   }
-  return data as unknown as AdminAuthResponse;
+  return data as unknown as AdminAuthResponse | PracticeSelectResponse;
 }
 
 /** Sign in with a one-time recovery code. Standard backup login — the code is
@@ -135,7 +144,7 @@ export async function verifyChallenge(
 export async function verifyRecovery(
   challengeToken: string,
   recoveryCode: string,
-): Promise<AdminAuthResponse> {
+): Promise<AdminAuthResponse | PracticeSelectResponse> {
   const res = await fetch(`${API_URL}/api/v2/auth/mfa/recovery`, {
     method: 'POST',
     credentials: 'include',
@@ -146,7 +155,7 @@ export async function verifyRecovery(
   if (!res.ok) {
     throw new Error(messageFrom(data, 'Invalid or already-used recovery code.'));
   }
-  return data as unknown as AdminAuthResponse;
+  return data as unknown as AdminAuthResponse | PracticeSelectResponse;
 }
 
 // ─── Admin reset (authenticated, SUPER_ADMIN / HEALPLACE_OPS) ──────────────────

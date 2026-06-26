@@ -17,11 +17,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { KeyRound, ShieldCheck, Loader2 } from 'lucide-react';
-import { useAuth } from '@/lib/auth-context';
+import { useAuth, type AdminAuthResponse } from '@/lib/auth-context';
 import {
   MFA_CHALLENGE_STORAGE_KEY,
   verifyChallenge,
   verifyRecovery,
+  type PracticeSelectResponse,
 } from '@/lib/services/mfa.service';
 import LandingHeader from '@/components/LandingHeader';
 import LandingFooter from '@/components/LandingFooter';
@@ -111,15 +112,37 @@ export default function MfaChallengePage() {
     );
   }
 
+  // Second factor cleared. A multi-practice provider still has to pick a
+  // practice (the backend returns PRACTICE_SELECT_REQUIRED instead of tokens);
+  // everyone else gets a session and goes to the dashboard.
+  function routeAfterMfa(data: AdminAuthResponse | PracticeSelectResponse) {
+    clearStoredChallenge();
+    if ('status' in data && data.status === 'PRACTICE_SELECT_REQUIRED') {
+      try {
+        sessionStorage.setItem(
+          'cp_admin_practice_challenge',
+          JSON.stringify({
+            challengeToken: data.challengeToken,
+            practices: data.practices,
+          }),
+        );
+      } catch {
+        /* sessionStorage unavailable — selector reads URL params */
+      }
+      router.push('/sign-in/select-practice');
+      return;
+    }
+    login(data);
+    router.push('/dashboard');
+  }
+
   async function handleVerifyTotp() {
     if (submitting || code.length !== CODE_LENGTH || !challengeToken) return;
     setSubmitting(true);
     setError(null);
     try {
       const data = await verifyChallenge(challengeToken, code);
-      clearStoredChallenge();
-      login(data);
-      router.push('/dashboard');
+      routeAfterMfa(data);
     } catch (err) {
       const e = err as Error & { errorCode?: string };
       // A hard lockout invalidates this challenge — bounce to sign-in.
@@ -139,12 +162,9 @@ export default function MfaChallengePage() {
     setError(null);
     try {
       const data = await verifyRecovery(challengeToken, recoveryCode.trim());
-      clearStoredChallenge();
-      login(data);
-      // Standard backup login — the authenticator is untouched, so go straight
-      // to the dashboard. A user who actually lost their app re-enrolls from
-      // settings; we don't force it here.
-      router.push('/dashboard');
+      // Standard backup login — the authenticator is untouched. A multi-practice
+      // provider still routes through the selector; others go to the dashboard.
+      routeAfterMfa(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid recovery code.');
       setSubmitting(false);

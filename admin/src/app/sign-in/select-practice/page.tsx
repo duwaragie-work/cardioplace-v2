@@ -16,9 +16,12 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Building2, ArrowRight, Loader2, AlertTriangle } from 'lucide-react';
 import { useAuth, type AdminAuthResponse } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { MFA_CHALLENGE_STORAGE_KEY } from '@/lib/services/mfa.service';
+import LandingHeader from '@/components/LandingHeader';
+import LandingFooter from '@/components/LandingFooter';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -73,22 +76,40 @@ export default function SelectPracticePage() {
 
   if (!challenge.challengeToken) {
     return (
-      <main className="min-h-screen flex items-center justify-center px-4">
-        <div className="max-w-md text-center">
-          <h1 className="text-2xl font-semibold mb-3">
-            {t('signIn.selectPractice.expired.title')}
-          </h1>
-          <p className="text-gray-600 mb-6">
-            {t('signIn.selectPractice.expired.body')}
-          </p>
-          <a
-            href="/sign-in"
-            className="inline-block rounded-lg bg-purple-600 px-5 py-2.5 text-white"
-          >
-            {t('signIn.selectPractice.expired.back')}
-          </a>
-        </div>
-      </main>
+      <div className="bg-white flex flex-col min-h-screen">
+        <LandingHeader activeLink="" />
+        <main
+          id="main"
+          tabIndex={-1}
+          className="flex-1 pt-24 lg:pt-[64px] pb-12 px-4 sm:px-6 flex items-start lg:items-center justify-center"
+        >
+          <div className="w-full max-w-md flex flex-col items-center text-center">
+            <span
+              className="w-14 h-14 rounded-2xl flex items-center justify-center text-white mb-4"
+              style={{
+                background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+                boxShadow: '0 4px 16px rgba(123,0,224,0.28)',
+              }}
+              aria-hidden
+            >
+              <AlertTriangle className="w-7 h-7" />
+            </span>
+            <h1 className="text-2xl font-semibold text-gray-900 mb-2">
+              {t('signIn.selectPractice.expired.title')}
+            </h1>
+            <p className="text-gray-600 text-sm mb-6">
+              {t('signIn.selectPractice.expired.body')}
+            </p>
+            <a
+              href="/sign-in"
+              className="inline-flex items-center justify-center h-12 px-6 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm hover:bg-[#6600BC] transition-colors"
+            >
+              {t('signIn.selectPractice.expired.back')}
+            </a>
+          </div>
+        </main>
+        <LandingFooter />
+      </div>
     );
   }
 
@@ -152,57 +173,99 @@ export default function SelectPracticePage() {
   }
 
   return (
-    <main
-      id="main"
-      tabIndex={-1}
-      className="min-h-screen bg-white px-4 py-12 flex items-start justify-center"
-    >
-      <div className="w-full max-w-xl">
-        <h1 className="text-3xl font-semibold text-gray-900 mb-2">
-          {t('signIn.selectPractice.title')}
-        </h1>
-        <p className="text-gray-600 mb-8">{t('signIn.selectPractice.intro')}</p>
-
-        {error && (
-          <div
-            role="alert"
-            className="mb-6 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700"
-          >
-            {error}
+    <div className="bg-white flex flex-col min-h-screen">
+      <LandingHeader activeLink="" />
+      <main
+        id="main"
+        tabIndex={-1}
+        className="flex-1 pt-24 lg:pt-[64px] pb-12 px-4 sm:px-6 flex items-start lg:items-center justify-center"
+      >
+        <div className="w-full max-w-md">
+          <div className="flex flex-col items-center text-center mb-6">
+            <span
+              className="w-14 h-14 rounded-2xl flex items-center justify-center text-white mb-4"
+              style={{
+                background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+                boxShadow: '0 4px 16px rgba(123,0,224,0.28)',
+              }}
+              aria-hidden
+            >
+              <Building2 className="w-7 h-7" />
+            </span>
+            <h1 className="text-2xl font-semibold text-gray-900">
+              {t('signIn.selectPractice.title')}
+            </h1>
+            <p className="text-gray-600 mt-2 text-sm">
+              {t('signIn.selectPractice.intro')}
+            </p>
           </div>
-        )}
 
-        <ul className="space-y-3">
-          {challenge.practices.map((p) => {
-            const isSubmitting = submitting === p.id;
-            return (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  onClick={() => void selectPractice(p.id)}
-                  disabled={submitting !== null}
-                  className="w-full rounded-xl border border-gray-200 bg-white px-5 py-4 text-left transition hover:border-purple-400 hover:bg-purple-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-gray-900">{p.name}</span>
-                    <span className="text-sm text-gray-500">
-                      {isSubmitting
-                        ? t('signIn.selectPractice.signingIn')
-                        : `${t('signIn.selectPractice.continue')} →`}
-                    </span>
-                  </div>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+          {error && (
+            <div
+              role="alert"
+              className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+              {error}
+            </div>
+          )}
 
-        <p className="mt-8 text-sm text-gray-500">
-          <a href="/sign-in" className="text-purple-700 underline">
-            {t('signIn.selectPractice.contactAdmin')}
-          </a>
-        </p>
-      </div>
-    </main>
+          <ul className="space-y-3">
+            {challenge.practices.map((p) => {
+              const isSubmitting = submitting === p.id;
+              return (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => void selectPractice(p.id)}
+                    disabled={submitting !== null}
+                    className="group w-full rounded-2xl border border-[#e5d9f2] bg-white px-4 py-4 text-left transition-all hover:border-[#7B00E0] hover:bg-[rgba(243,232,255,0.35)] hover:shadow-[0px_8px_20px_rgba(123,0,224,0.12)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7B00E0] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <div className="flex items-center gap-4">
+                      <span
+                        className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[rgba(243,232,255,0.6)] text-[#7B00E0] transition-colors group-hover:bg-[#7B00E0] group-hover:text-white"
+                        aria-hidden
+                      >
+                        <Building2 className="w-5 h-5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate font-semibold text-[#170c1d]">
+                          {p.name}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-[#737373]">
+                          {isSubmitting
+                            ? t('signIn.selectPractice.signingIn')
+                            : t('signIn.selectPractice.continue')}
+                        </span>
+                      </div>
+                      {isSubmitting ? (
+                        <Loader2
+                          className="w-5 h-5 shrink-0 animate-spin text-[#7B00E0]"
+                          aria-hidden
+                        />
+                      ) : (
+                        <ArrowRight
+                          className="w-5 h-5 shrink-0 text-[#737373] transition-colors group-hover:text-[#7B00E0]"
+                          aria-hidden
+                        />
+                      )}
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          <p className="mt-8 text-center text-sm text-[#737373]">
+            <a
+              href="/sign-in"
+              className="font-medium text-[#7B00E0] hover:underline"
+            >
+              {t('signIn.selectPractice.contactAdmin')}
+            </a>
+          </p>
+        </div>
+      </main>
+      <LandingFooter />
+    </div>
   );
 }

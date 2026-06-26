@@ -1486,6 +1486,15 @@ const de: Record<TranslationKey, string> = {
   'intake.caregivers.subtitle': 'Ein Familienmitglied oder Freund, den wir benachrichtigen können, wenn ein ernster Gesundheitsalarm auftritt. Sie werden nur bei vom Behandlungsteam genehmigten Alarmen kontaktiert und erst, nachdem Sie zugestimmt haben. Sie können dies überspringen und später in Ihrem Profil jemanden hinzufügen.',
   'intake.caregivers.audio': 'Optional können Sie eine Betreuungsperson hinzufügen, ein Familienmitglied oder Freund, den wir benachrichtigen können, wenn ein ernster Gesundheitsalarm auftritt. Sie werden erst kontaktiert, nachdem Sie zugestimmt haben. Sie können dies überspringen und später in Ihrem Profil jemanden hinzufügen.',
   'chat.orTypePlaceholder': 'Oder eine Nachricht eingeben...',
+
+  // ─── Auth — Banner für Sitzungsinaktivität (nur Patienten-App) ──────────────
+  'auth.sessionExpired.title': 'Hinweis: Sie wurden abgemeldet',
+  'auth.sessionExpired.body':
+    'Ihre Sitzung wurde wegen Inaktivität beendet. Bitte melden Sie sich erneut an, um fortzufahren.',
+  'auth.idleWarning.title': 'Warnung: Sie werden bald abgemeldet',
+  'auth.idleWarning.body':
+    'Sie werden in etwa 60 Sekunden wegen Inaktivität abgemeldet. Bewegen Sie die Maus oder drücken Sie eine Taste, um angemeldet zu bleiben.',
+  'auth.idleWarning.stay': 'Angemeldet bleiben',
 };
 
 export default de;

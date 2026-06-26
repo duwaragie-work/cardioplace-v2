@@ -64,6 +64,15 @@ export interface AuthResponse extends TokenPair {
    *  FE redirects straight to the enrollment page instead of the dashboard,
    *  so the gate appears immediately after sign-in (Manisha 2026-06-12 §6). */
   mfaEnrollmentRequired?: boolean
+  /** Practice-select handoff for a first-time-enrolling MULTI-practice provider.
+   *  Enrollment needs a session, so tokens ARE issued (with activePracticeId
+   *  null), but the FE must route enroll → /sign-in/select-practice → dashboard
+   *  and never let a null-practice session reach the dashboard. The selector
+   *  page exchanges `practiceSelectChallengeToken` (a practice_select JWT) for a
+   *  fresh practice-scoped token pair. Only set in that one branch. */
+  practiceSelectRequired?: boolean
+  practiceSelectChallengeToken?: string
+  practices?: Array<{ id: string; name: string }>
 }
 
 /**
@@ -719,6 +728,169 @@ export class AuthService {
   }
 
   /**
+   * Shared first-factor finalizer (Manisha 2026-06-12 §1 + §6). Ordering:
+   * authenticate the PERSON fully (second factor) BEFORE they pick a practice
+   * context, then hand off to the selector. So the sequence is:
+   *   first factor (OTP / magic-link) → MFA (challenge or forced enroll)
+   *     → practice select → dashboard.
+   *
+   * Returns one of:
+   *   • MFA_REQUIRED        — enrolled MFA role; FE → /sign-in/mfa-challenge.
+   *                           For a multi-practice user the challenge carries a
+   *                           null practiceId; the post-MFA finalizer re-resolves
+   *                           and returns PRACTICE_SELECT_REQUIRED.
+   *   • WEBAUTHN_REQUIRED   — patient with a registered biometric.
+   *   • AuthResponse(+enroll)— forced first-time enrollment. Tokens issued so the
+   *                           enroll endpoints work; if a practice pick is still
+   *                           pending we also mint a practice_select challenge and
+   *                           flag it so the FE goes enroll → select-practice.
+   *   • PRACTICE_SELECT_REQUIRED — no second factor needed, multi-practice.
+   *   • AuthResponse        — fully resolved; tokens issued.
+   */
+  private async resolveSecondFactorOrTokens(
+    user: MinimalUser,
+    context: SessionContext | undefined,
+    loginMethod: 'otp' | 'magic_link',
+  ): Promise<AuthVerifyResult> {
+    const resolution = await this.resolvePracticeContext(user.id, user.roles)
+    if (resolution.kind === 'blocked') {
+      throw new ForbiddenException(
+        'No practice membership — contact your admin to be added to a practice before signing in.',
+      )
+    }
+    const resolvedPracticeId =
+      resolution.kind === 'auto' ? resolution.activePracticeId : null
+    const pendingPracticeSelect = resolution.kind === 'select'
+
+    // 1) MFA challenge (enrolled MFA-required role) — runs BEFORE practice
+    //    selection. The resolved practiceId (null for multi-practice) rides in
+    //    the challenge; mfaChallenge/mfaRecovery re-resolve when it's null.
+    if (await this.shouldChallengeMfa(user.id, user.roles)) {
+      const challengeToken = await this.signMfaChallenge(user.id, resolvedPracticeId)
+      return { status: 'MFA_REQUIRED', challengeToken }
+    }
+
+    // 2) Patient biometric second factor (WebAuthn). Patients resolve to the
+    //    'none' practice kind, so no selector follows.
+    if (await this.shouldChallengeWebAuthn(user.id, user.roles)) {
+      const challengeToken = await this.startWebAuthnAuthentication(
+        user.id,
+        resolvedPracticeId,
+      )
+      return { status: 'WEBAUTHN_REQUIRED', challengeToken }
+    }
+
+    // 3) Forced first-time enrollment (enforcement on, MFA role, not enrolled).
+    //    Tokens are issued (enrollment needs a session) but the FE redirects to
+    //    TOTP setup. For a multi-practice user the session is null-practice and
+    //    we hand off a practice_select challenge so the post-enroll step is the
+    //    selector — the PracticeRequiredGuard blocks the dashboard until it's set.
+    if (await this.shouldForceMfaEnrollment(user.id, user.roles)) {
+      const tokens = await this.issueTokenPair(user, {
+        ...context,
+        activePracticeId: resolvedPracticeId,
+      })
+      const resp = this.buildAuthResponse(tokens, user, loginMethod)
+      if (pendingPracticeSelect) {
+        const challengeToken = await this.signPracticeSelectChallenge(user.id)
+        return {
+          ...resp,
+          activePracticeId: null,
+          // activePractice stays null (none chosen yet) but expose the
+          // memberships so the FE knows this is a multi-practice session with a
+          // pending choice — the header hides the Dashboard button until one is
+          // picked (and the chip dropdown has its list ready post-select).
+          availablePractices: resolution.practices,
+          mfaEnrollmentRequired: true,
+          practiceSelectRequired: true,
+          practiceSelectChallengeToken: challengeToken,
+          practices: resolution.practices,
+        }
+      }
+      // Bundle so the admin chip renders on first paint without the
+      // /auth/profile rehydrate race (mirrors select/switch-practice).
+      const bundle = await this.resolvePracticeBundle(user, resolvedPracticeId)
+      return {
+        ...resp,
+        activePracticeId: resolvedPracticeId,
+        activePractice: bundle.activePractice,
+        availablePractices: bundle.availablePractices,
+        mfaEnrollmentRequired: true,
+      }
+    }
+
+    // 4) No second factor pending. Multi-practice users still pick a practice.
+    if (pendingPracticeSelect) {
+      const challengeToken = await this.signPracticeSelectChallenge(user.id)
+      return {
+        status: 'PRACTICE_SELECT_REQUIRED',
+        challengeToken,
+        practices: resolution.practices,
+      }
+    }
+    const tokens = await this.issueTokenPair(user, {
+      ...context,
+      activePracticeId: resolvedPracticeId,
+    })
+    const resp = this.buildAuthResponse(tokens, user, loginMethod)
+    // Bundle so the FE sets activePractice + availablePractices synchronously
+    // on login() — no chip flash waiting for /auth/profile.
+    const bundle = await this.resolvePracticeBundle(user, resolvedPracticeId)
+    return {
+      ...resp,
+      activePracticeId: resolvedPracticeId,
+      activePractice: bundle.activePractice,
+      availablePractices: bundle.availablePractices,
+    }
+  }
+
+  /**
+   * Post-second-factor finalizer for the MFA challenge/recovery paths. The
+   * challenge token carries the practiceId resolved at first-factor time; for a
+   * multi-practice provider that was null, so re-resolve now and route to the
+   * selector instead of issuing tokens. Single-practice (auto) and org-wide
+   * (none) users issue tokens directly.
+   */
+  private async finalizeAfterSecondFactor(
+    user: MinimalUser,
+    challengePracticeId: string | null,
+    context: SessionContext | undefined,
+    loginMethod: 'otp' | 'magic_link',
+  ): Promise<AuthResponse | PracticeSelectRequired> {
+    let activePracticeId = challengePracticeId
+    if (activePracticeId === null) {
+      const resolution = await this.resolvePracticeContext(user.id, user.roles)
+      if (resolution.kind === 'blocked') {
+        throw new ForbiddenException(
+          'No practice membership — contact your admin to be added to a practice before signing in.',
+        )
+      }
+      if (resolution.kind === 'select') {
+        const challengeToken = await this.signPracticeSelectChallenge(user.id)
+        return {
+          status: 'PRACTICE_SELECT_REQUIRED',
+          challengeToken,
+          practices: resolution.practices,
+        }
+      }
+      if (resolution.kind === 'auto') {
+        activePracticeId = resolution.activePracticeId
+      }
+      // 'none' (org-wide) → activePracticeId stays null by design.
+    }
+    const tokens = await this.issueTokenPair(user, { ...context, activePracticeId })
+    const resp = this.buildAuthResponse(tokens, user, loginMethod)
+    // Bundle so the chip renders on first paint after the MFA step, no rehydrate race.
+    const bundle = await this.resolvePracticeBundle(user, activePracticeId)
+    return {
+      ...resp,
+      activePracticeId,
+      activePractice: bundle.activePractice,
+      availablePractices: bundle.availablePractices,
+    }
+  }
+
+  /**
    * Exchange a practice-select challenge for the real token pair. Verifies
    * the challenge JWT (TTL + kind), confirms the chosen practiceId is in
    * the user's memberships, then issues tokens with `activePracticeId` set
@@ -728,7 +900,7 @@ export class AuthService {
     challengeToken: string,
     practiceId: string,
     context?: SessionContext,
-  ): Promise<AuthResponse | MfaRequired> {
+  ): Promise<AuthResponse> {
     let payload: { sub: string; kind: string }
     try {
       payload = await this.jwtService.verifyAsync(challengeToken)
@@ -750,13 +922,9 @@ export class AuthService {
     if (!(await this.isPracticeMember(user.id, practiceId))) {
       throw new ForbiddenException('Not a member of that practice')
     }
-    // MFA gate (Manisha 2026-06-12 §6) — multi-practice provider/admin path.
-    // Now that the practice is chosen, an enrolled user is challenged before
-    // tokens; the resolved practiceId rides inside the challenge token.
-    if (await this.shouldChallengeMfa(user.id, user.roles)) {
-      const mfaChallengeToken = await this.signMfaChallenge(user.id, practiceId)
-      return { status: 'MFA_REQUIRED', challengeToken: mfaChallengeToken }
-    }
+    // MFA already happened upstream (Manisha 2026-06-12 §6) — the second factor
+    // now precedes the practice selector, so by the time we reach here the
+    // person is fully authenticated and we just issue practice-scoped tokens.
     const tokens = await this.issueTokenPair(user, {
       ...context,
       activePracticeId: practiceId,
@@ -775,11 +943,11 @@ export class AuthService {
     // PR #90 Bug A — carry the resolved practice name + memberships so the
     // admin chip renders "Acting as: <name>" on the fresh select window
     // (pre-fix it fell back to the "Acting as practice" placeholder until
-    // /auth/profile resolved the name post-refresh). Merged with the MFA
-    // enrollment gate (Manisha §6): this return is only reached when the
-    // user is NOT MFA-challenged (enrolled users returned MFA_REQUIRED at the
-    // gate above), so an enforcement-on-but-not-yet-enrolled user still gets
-    // tokens + the redirect-to-enroll flag alongside their practice context.
+    // /auth/profile resolved the name post-refresh). The MFA second factor now
+    // runs BEFORE this step, so an enrolled user is already past it; the
+    // mfaEnrollmentRequired flag below only stays true for an enforcement-on
+    // user who reached the selector without finishing setup — the FE bounces
+    // them back to /sign-in/mfa-enroll.
     const bundle = await this.resolvePracticeBundle(user, practiceId)
     const mfaEnrollmentRequired = await this.shouldForceMfaEnrollment(
       user.id,
@@ -1258,12 +1426,14 @@ export class AuthService {
     return user
   }
 
-  /** Exchange an MFA challenge + 6-digit code for the real token pair. */
+  /** Exchange an MFA challenge + 6-digit code for the real token pair — or, for
+   *  a multi-practice provider, a PRACTICE_SELECT_REQUIRED handoff (the practice
+   *  is chosen AFTER the second factor). */
   async mfaChallenge(
     challengeToken: string,
     code: string,
     context?: SessionContext,
-  ): Promise<AuthResponse> {
+  ): Promise<AuthResponse | PracticeSelectRequired> {
     const { userId, activePracticeId } =
       await this.verifyMfaChallenge(challengeToken)
     await this.assertNotMfaLocked(userId)
@@ -1289,7 +1459,6 @@ export class AuthService {
       throw new UnauthorizedException('Invalid code')
     }
     const user = await this.loadActiveUser(userId)
-    const tokens = await this.issueTokenPair(user, { ...context, activePracticeId })
     await this.logAuthEvent({
       event: 'mfa_challenge_succeeded',
       userId,
@@ -1299,8 +1468,9 @@ export class AuthService {
       practiceContext: activePracticeId,
       success: true,
     })
-    const resp = this.buildAuthResponse(tokens, user, 'otp')
-    return { ...resp, activePracticeId }
+    // Second factor cleared. A multi-practice provider (null challenge practice)
+    // now picks a practice; everyone else gets tokens.
+    return this.finalizeAfterSecondFactor(user, activePracticeId, context, 'otp')
   }
 
   /** Sign in with a one-time recovery code. Standard backup-login behaviour:
@@ -1312,7 +1482,7 @@ export class AuthService {
     challengeToken: string,
     recoveryCode: string,
     context?: SessionContext,
-  ): Promise<AuthResponse> {
+  ): Promise<AuthResponse | PracticeSelectRequired> {
     const { userId, activePracticeId } =
       await this.verifyMfaChallenge(challengeToken)
     const unused = await this.prisma.mfaRecoveryCode.findMany({
@@ -1345,7 +1515,6 @@ export class AuthService {
       data: { usedAt: new Date() },
     })
     const user = await this.loadActiveUser(userId)
-    const tokens = await this.issueTokenPair(user, { ...context, activePracticeId })
     await this.logAuthEvent({
       event: 'mfa_recovery_code_used',
       userId,
@@ -1355,8 +1524,8 @@ export class AuthService {
       practiceContext: activePracticeId,
       success: true,
     })
-    const resp = this.buildAuthResponse(tokens, user, 'otp')
-    return { ...resp, activePracticeId }
+    // Backup second factor cleared — same practice-select handoff as the TOTP path.
+    return this.finalizeAfterSecondFactor(user, activePracticeId, context, 'otp')
   }
 
   /** Admin MFA reset — SUPER_ADMIN / HEALPLACE_OPS only; never self-reset.
@@ -1615,7 +1784,15 @@ export class AuthService {
       success: true,
     })
     const resp = this.buildAuthResponse(tokens, user, 'otp')
-    return { ...resp, activePracticeId }
+    // Symmetric with the other auth-issuing paths — patients resolve to a null
+    // practice (no chip), but the response shape stays consistent.
+    const bundle = await this.resolvePracticeBundle(user, activePracticeId)
+    return {
+      ...resp,
+      activePracticeId,
+      activePractice: bundle.activePractice,
+      availablePractices: bundle.availablePractices,
+    }
   }
 
   /** Generate + persist a fresh set of recovery codes for a user, replacing
@@ -1693,9 +1870,13 @@ export class AuthService {
       metadata: { remaining: recoveryRemaining },
       success: true,
     })
+    // Symmetric with the other auth-issuing paths (patients have no chip).
+    const bundle = await this.resolvePracticeBundle(user, activePracticeId)
     return {
       ...this.buildAuthResponse(tokens, user, 'otp'),
       activePracticeId,
+      activePractice: bundle.activePractice,
+      availablePractices: bundle.availablePractices,
       recoveryRemaining,
     }
   }
@@ -2744,62 +2925,10 @@ export class AuthService {
       success: true,
     })
 
-    // Phase/practice-identity — resolve practice context BEFORE issuing
-    // tokens. A multi-practice provider gets a challenge token, not the
-    // real token pair; they must POST /auth/select-practice to choose
-    // which one they're acting as.
-    const resolution = await this.resolvePracticeContext(user.id, user.roles)
-    if (resolution.kind === 'blocked') {
-      throw new ForbiddenException(
-        'No practice membership — contact your admin to be added to a practice before signing in.',
-      )
-    }
-    if (resolution.kind === 'select') {
-      const challengeToken = await this.signPracticeSelectChallenge(user.id)
-      return {
-        status: 'PRACTICE_SELECT_REQUIRED',
-        challengeToken,
-        practices: resolution.practices,
-      }
-    }
-    const activePracticeId =
-      resolution.kind === 'auto' ? resolution.activePracticeId : null
-
-    // MFA gate (Manisha 2026-06-12 §6) — an MFA-enrolled provider/admin does
-    // NOT get tokens here; they get a challenge carrying the resolved practice
-    // context. The multi-practice path is gated later in selectPractice (after
-    // the selector), so it isn't reachable in this auto/none branch.
-    if (await this.shouldChallengeMfa(user.id, user.roles)) {
-      const challengeToken = await this.signMfaChallenge(user.id, activePracticeId)
-      return { status: 'MFA_REQUIRED', challengeToken }
-    }
-
-    // Patient biometric second factor (WebAuthn) — if this patient has
-    // registered a device, require the Face ID / fingerprint assertion before
-    // tokens. Patients without a registered device are unaffected.
-    if (await this.shouldChallengeWebAuthn(user.id, user.roles)) {
-      const challengeToken = await this.startWebAuthnAuthentication(
-        user.id,
-        activePracticeId,
-      )
-      return { status: 'WEBAUTHN_REQUIRED', challengeToken }
-    }
-
-    const tokens = await this.issueTokenPair(user, {
-      userAgent: context?.userAgent,
-      deviceId: context?.deviceId,
-      ipAddress: context?.ipAddress,
-      deviceType: context?.deviceType,
-      activePracticeId,
-    })
-    const resp = this.buildAuthResponse(tokens, user, 'otp')
-    // Force-enrollment signal — tokens ARE issued (enrollment needs a session)
-    // but the FE redirects straight to TOTP setup instead of the dashboard.
-    const mfaEnrollmentRequired = await this.shouldForceMfaEnrollment(
-      user.id,
-      user.roles,
-    )
-    return { ...resp, activePracticeId, mfaEnrollmentRequired }
+    // Phase/practice-identity + MFA (Manisha 2026-06-12 §1 + §6). Authenticate
+    // the person fully (second factor) BEFORE the practice selector, then issue
+    // tokens. See resolveSecondFactorOrTokens for the full ordering.
+    return this.resolveSecondFactorOrTokens(user, context, 'otp')
   }
 
   // ─── Device Tracking ────────────────────────────────────────────────────────
@@ -3194,49 +3323,11 @@ export class AuthService {
       success: true,
     })
 
-    // Phase/practice-identity — same selector branch as verifyOtp.
-    const resolution = await this.resolvePracticeContext(user.id, user.roles)
-    if (resolution.kind === 'blocked') {
-      throw new ForbiddenException(
-        'No practice membership — contact your admin to be added to a practice before signing in.',
-      )
-    }
-    if (resolution.kind === 'select') {
-      const challengeToken = await this.signPracticeSelectChallenge(user.id)
-      return {
-        status: 'PRACTICE_SELECT_REQUIRED',
-        challengeToken,
-        practices: resolution.practices,
-      }
-    }
-    const activePracticeId =
-      resolution.kind === 'auto' ? resolution.activePracticeId : null
-
-    // MFA gate — symmetric with verifyOtp. An enrolled provider/admin gets a
-    // challenge instead of tokens (patients have no TOTP, so this no-ops them).
-    if (await this.shouldChallengeMfa(user.id, user.roles)) {
-      const mfaChallengeToken = await this.signMfaChallenge(user.id, activePracticeId)
-      return { status: 'MFA_REQUIRED', challengeToken: mfaChallengeToken }
-    }
-
-    // Patient biometric second factor (WebAuthn) — symmetric with verifyOtp.
-    if (await this.shouldChallengeWebAuthn(user.id, user.roles)) {
-      const webAuthnChallengeToken = await this.startWebAuthnAuthentication(
-        user.id,
-        activePracticeId,
-      )
-      return { status: 'WEBAUTHN_REQUIRED', challengeToken: webAuthnChallengeToken }
-    }
-
-    const tokens = await this.issueTokenPair(user, {
-      userAgent: context?.userAgent,
-      deviceId: context?.deviceId,
-      ipAddress: context?.ipAddress,
-      deviceType: context?.deviceType,
-      activePracticeId,
-    })
-    const resp = this.buildAuthResponse(tokens, user, 'magic_link')
-    return { ...resp, activePracticeId }
+    // Phase/practice-identity + MFA — symmetric with verifyOtp. Second factor
+    // (where applicable) BEFORE the practice selector. Magic-link is patient-
+    // only (admin app is OTP-only), so in practice this resolves the patient
+    // WebAuthn / no-second-factor branches.
+    return this.resolveSecondFactorOrTokens(user, context, 'magic_link')
   }
 
   // ─── Admin-app role gate ────────────────────────────────────────────────────
