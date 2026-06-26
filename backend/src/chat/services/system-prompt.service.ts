@@ -2,6 +2,13 @@ import { Injectable, Optional } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { ResolvedContext } from '@cardioplace/shared'
 import { kgToLbs } from '../../common/units.js'
+// Round 3 Item C / Bug 24 — chat patient-context renders the engine's
+// effective threshold (pregnancy / HFrEF / CAD / personalized overrides
+// applied) so the bot quotes the same number the dashboard does and the
+// engine alerts on. Without this, a pregnant patient's "what's my goal?"
+// quoted the raw provider-set PatientThreshold (which can be ~196) instead
+// of the effective 140/90 the engine actually fires at.
+import { computeEffectiveThreshold } from '../../daily_journal/services/profile-resolver.service.js'
 
 /**
  * Scaffolding for future chat routing — phase/16 always sends PATIENT. The
@@ -132,7 +139,7 @@ When a patient says a date without a year, use the current year (${now.getUTCFul
 
 EMERGENCY — only trigger for EXPLICIT, PRESENT-TENSE symptoms:
 Call 911 ONLY if the patient clearly states they are experiencing RIGHT NOW: crushing/severe chest pain, sudden inability to breathe, sudden numbness/weakness on one side, sudden vision loss, or feeling like a heart attack/stroke is happening right now.
-If triggered, say ONLY: "Please call 911 right now or have someone take you to the emergency room."
+If triggered, follow the full SYMPTOM-OVERRIDE 911 procedure in the PHASE/16 block below (it requires you to call submit_checkin AND deliver the 911 line in the same turn — do NOT skip the tool call or the care team gets NOTHING).
 Do NOT trigger 911 for: vague complaints ("I feel sick"), uncertainty ("I don't know how I feel"), mild symptoms, past symptoms, or general questions. Instead, ask more questions to understand their situation.
 
 WHEN A PATIENT REPORTS FEELING UNWELL (not an emergency):
@@ -834,11 +841,18 @@ Before calling submit_checkin you MUST verbalise the values back to the patient 
 TRIGGER: a NEW submit_checkin where SBP ≥ 180 OR DBP ≥ 120, AND the patient reports NO co-occurring Level-2 symptoms (chest pain, severe headache, focal neuro, AMS, severe epigastric pain, visual changes, throat tightness, face swelling). Co-occurring symptoms take the SYMPTOM-OVERRIDE 911 path (Item 3) instead — never both.
 AFTER the submit_checkin succeeds (backend creates the entry as emergencyConfirmation=AWAITING), the response in the SAME assistant turn MUST be: "That reading is in the high range. To make sure, can you sit calmly for one minute and then take another reading? I'll wait." Don't add extra advice; don't ask other questions; just the confirmatory ask.
 RESUME — if the patient context shows an "Open AWAITING entry: …" line, the patient is mid-Option-D from a prior turn. On their next message, gently resume: "I see you had a high reading at <time> — 195 over 120. Did you get a chance to take that second reading?" (use the exact id from context). When the patient gives the confirmatory numbers, call submit_checkin with confirms_entry_id = <the AWAITING id> AND close_session: true. Backend pairs them and fires RULE_ABSOLUTE_EMERGENCY (still emergency-range) or RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL (second reading dropped below 180/120).
+CONFIRMED-NORMAL VERBAL OUTCOME (Bug 26 — handoff 2026-06-18). After the confirmatory submit_checkin succeeds, you have the BP values you just submitted in your own context — branch on them locally:
+  • If the confirmatory SBP < 180 AND confirmatory DBP < 120: say verbatim (placeholder pending Manisha sign-off): "Good news — your second reading came back lower, below the emergency range, so no emergency alert was needed. Your care team can see both readings. If you develop chest pain, severe headache, vision changes, weakness, or trouble breathing, call 911 right away." This mirrors the rule the backend fires (RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL) — whose patient/caregiver message is intentionally empty in the registry because the chat surface owns the spoken outcome. The 911 safety-net sentence is clinically required — never drop it.
+  • If the confirmatory SBP ≥ 180 OR confirmatory DBP ≥ 120: the SYMPTOM-OVERRIDE 911 / standard emergency wording from elsewhere in this prompt applies; do NOT use the confirmed-normal phrasing. Backend fires RULE_ABSOLUTE_EMERGENCY and the standard Tier-1 alert flow takes over.
 DECLINE PATH — if the patient explicitly refuses ("I can't right now", "later", "no, skip it", "I don't want to take another"), call submit_checkin with decline_confirmation: true and confirms_entry_id = <AWAITING id>. Leave BP fields as 0/omitted — backend bypasses entry creation and flips the held AWAITING entry to UNCONFIRMED immediately, firing RULE_UNCONFIRMED_EMERGENCY Tier 1 without waiting for the 4-hour cron. Then say verbatim: "OK — I've sent the first reading to your care team. If you feel unwell, please call your doctor or 911 right away."
 
 (Item 3) SYMPTOM-OVERRIDE 911 — hard rule, no exceptions.
-TRIGGER: submit_checkin with SBP ≥ 180 OR DBP ≥ 120 AND ANY of these structured symptoms set true: chest_pain_or_dyspnea, severe_headache, focal_neuro_deficit, altered_mental_status, severe_epigastric_pain, throatTightness, faceSwelling (ACE-inhibitor cohort).
-You MUST do BOTH in the SAME turn: (1) call submit_checkin (backend's symptom-override path fires Tier 1 instantly, NOT AWAITING — Option D does NOT apply here); (2) immediately tell the patient verbatim: "Your blood pressure is very high and you have <symptom>. Please call 911 now. Your care team has been notified." Do NOT ask follow-up questions. Do NOT ask for a confirmatory reading. The 911 message is primary; everything else waits.
+TRIGGER: patient reports BP ≥ 180/120 AND ANY of these symptoms NOW: crushing chest pain, severe headache, focal weakness/numbness, sudden visual change, confusion/altered mental status, severe epigastric pain, throat tightness, face swelling.
+ORDER MATTERS — you MUST do these IN THIS EXACT ORDER in the SAME turn:
+  STEP 1 (REQUIRED — never skip): Call submit_checkin with the BP numbers + the matching symptom boolean set true (e.g. chest_pain_or_dyspnea: true for chest pain). This is what notifies the care team. WITHOUT this tool call your "care team has been notified" claim in step 2 is a LIE — the team gets nothing. Step 1 MUST run before step 2's text reaches the patient.
+  STEP 2 (AFTER step 1 succeeds): In the SAME response, deliver verbatim: "Your blood pressure is very high and you have <symptom>. Please call 911 now. Your care team has been notified."
+If the patient hasn't given you all 6 required submit_checkin fields, infer reasonable defaults (entry_date = today, measurement_time = now, position = SITTING unless they said otherwise, medication_taken = false if unknown, measurement_conditions can be empty) — the symptom-override path bypasses the normal "ask every field" gate because the priority is getting the alert to the care team NOW. Do NOT ask clarifying questions before firing submit_checkin in this branch.
+Backend's symptom-override engine path fires Tier 1 instantly (NOT AWAITING — Option D does NOT apply when symptoms are present).
 
 (Item 4) Q3 MULTI-READING SESSION (chat-initiated).
 When the patient says "I took 3 readings: 130/85, 132/86, 128/82" (or any batched-reading phrasing): summarise back ("Got it — three readings: 130/85, 132/86, 128/82, sitting. Should I send these as one reading session to your care team?"); on yes, generate ONE UUID for session_id and call submit_checkin THREE times with the SAME session_id, close_session: false on the first two and close_session: true on the LAST one. Backend groups + averages per existing logic.
@@ -846,7 +860,7 @@ For AFib patients (the patient context will say "Atrial fibrillation (AFib)" in 
 
 (Item 5) EDIT WINDOW — 5-min server-authoritative.
 When the patient asks to change or delete a reading ("wait, change my last to 132/86" / "delete that one I just took"), call get_recent_readings(days=1) and look at the target entry's engineEvaluationDeferredUntil. (NOT YET surfaced in the readings payload — for now, treat any entry where the patient's measurement is within the last 5 minutes as in-window.) If in-window: confirm ("I'll change your reading from 130/85 to 132/86 — confirm?") and on yes call update_checkin (or delete_checkin). Backend honors the edit cleanly without re-firing the engine (CTO no-re-trigger policy).
-If OUTSIDE the 5-min window: do NOT call update_checkin / delete_checkin. Say verbatim: "That reading is locked — I can't change readings older than 5 minutes. If it's an error, I can flag it for your care team — should I?" On yes, call flag_emergency with kind: 'reading_error_flag' and a brief patient-reported reason in emergency_situation (e.g. "Patient reports the reading from 8:30 AM was a typo — actual value 132/85, not 232/85").
+If OUTSIDE the 5-min window: do NOT call update_checkin / delete_checkin. Say verbatim: "That reading is locked — I can't change readings older than 5 minutes. If it's an error, I can flag it for your care team — should I?" On yes, call flag_reading_error with entry_id = <the locked entry's id, from get_recent_readings> and reason = the patient's brief note (e.g. "typo — actual value 132/85, not 232/85"). DO NOT use flag_emergency for this — flag_emergency is reserved for true 911-class events.
 
 (Item 6) ENROLLMENT-AWARE MESSAGING — drives the post-submit success line.
 The patient context contains "Enrollment status: NOT_ENROLLED" or "Enrollment status: ENROLLED". After a successful submit_checkin save:
@@ -1354,22 +1368,47 @@ export function renderThresholdAxis(
   return null
 }
 
-function appendThreshold(lines: string[], ctx: ResolvedContext): void {
+// Exported so the Round-3 Item C unit tests can drive it with a synthetic
+// ResolvedContext (pregnancy / CAD-ramp / personalized) without instantiating
+// the full SystemPromptService + buildPatientContext fixture.
+export function appendThreshold(lines: string[], ctx: ResolvedContext): void {
+  // Round 3 Item C / Bug 24 (2026-06-18) — the effective goal is what the
+  // engine alerts on, so it's what the bot must quote. computeEffectiveThreshold
+  // resolves pregnancy / HFrEF / CAD overrides on top of any custom
+  // PatientThreshold (handoff 2026-06-18 §"Item C"). The chat patient-context
+  // used to render only `ctx.threshold` (raw provider goals), so a pregnant
+  // patient who asked "what's my BP goal?" heard the wrong number — or
+  // "Provider has not yet set a personal BP goal" while the engine quietly
+  // alerted at 140/90. Reuse the shared compute; never re-derive locally.
+  const eff = computeEffectiveThreshold(ctx)
+  const alertSuffix = eff.toleranceMmHg > 0
+    ? ` — alerts begin at ${eff.sbpHighAlertThreshold}/${eff.dbpHighAlertThreshold} (goal + ${eff.toleranceMmHg} tolerance)`
+    : ` — this is the alert threshold (no tolerance band when an override applies)`
+  const reasonSuffix = eff.overrideReason
+    ? `, driven by ${eff.overrideReason} override`
+    : ''
+  lines.push(
+    `Effective BP goal: aim below ${eff.sbpGoal}/${eff.dbpGoal} mmHg${reasonSuffix}${alertSuffix}.`,
+  )
+
+  // Keep the raw provider-set row for clinical context (so the model can
+  // explain to the patient that their provider chose different targets if
+  // the override is overriding them). When no PatientThreshold exists, skip
+  // it — effective threshold already conveys what they need to know.
   const t = ctx.threshold
-  if (!t) {
-    lines.push('Provider-set BP goal: Provider has not yet set a personal BP goal.')
-    lines.push('')
-    return
+  if (t) {
+    const parts: string[] = []
+    const sbp = renderThresholdAxis('SBP', t.sbpLowerTarget, t.sbpUpperTarget, 'mmHg')
+    if (sbp) parts.push(sbp)
+    const dbp = renderThresholdAxis('DBP', t.dbpLowerTarget, t.dbpUpperTarget, 'mmHg')
+    if (dbp) parts.push(dbp)
+    const hr = renderThresholdAxis('HR', t.hrLowerTarget, t.hrUpperTarget, 'bpm')
+    if (hr) parts.push(hr)
+    if (parts.length > 0) {
+      const setOn = new Date(t.setAt).toISOString().slice(0, 10)
+      lines.push(`Provider-set goals (for context): ${parts.join(', ')}, set ${setOn}.`)
+    }
   }
-  const parts: string[] = []
-  const sbp = renderThresholdAxis('SBP', t.sbpLowerTarget, t.sbpUpperTarget, 'mmHg')
-  if (sbp) parts.push(sbp)
-  const dbp = renderThresholdAxis('DBP', t.dbpLowerTarget, t.dbpUpperTarget, 'mmHg')
-  if (dbp) parts.push(dbp)
-  const hr = renderThresholdAxis('HR', t.hrLowerTarget, t.hrUpperTarget, 'bpm')
-  if (hr) parts.push(hr)
-  const setOn = new Date(t.setAt).toISOString().slice(0, 10)
-  lines.push(`Provider-set goals: ${parts.join(', ')}, set ${setOn}.`)
   lines.push('')
 }
 

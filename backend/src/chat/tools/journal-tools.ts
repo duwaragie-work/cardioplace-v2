@@ -641,6 +641,34 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
       },
     },
     {
+      // Phase/16 Item 5 — out-of-window reading flag. The patient can edit
+      // entries within the 5-min window via update_checkin / delete_checkin;
+      // outside the window the entry is locked. This tool is the documented
+      // escape: write a non-blocking, non-emergency audit row so the care
+      // team can review the flagged reading on its own schedule.
+      name: 'flag_reading_error',
+      description:
+        "Flag a past reading as possibly wrong when the patient asks to correct it but it's outside the 5-minute edit window. " +
+        'This is NOT an emergency — it writes a non-blocking audit note for the care team to review on their next chart visit. ' +
+        'DO NOT call for: in-window edits (use update_checkin), real emergencies (use flag_emergency), or routine questions.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          entry_id: {
+            type: Type.STRING,
+            description:
+              'The id of the entry the patient wants flagged. Get it from a get_recent_readings call FIRST so you have the right row.',
+          },
+          reason: {
+            type: Type.STRING,
+            description:
+              "Brief note in the patient's own words explaining what they think the correct value should be (e.g. 'typo — actual was 132/85, not 232/85').",
+          },
+        },
+        required: ['entry_id', 'reason'],
+      },
+    },
+    {
       name: 'evaluate_reading',
       description:
         "Ask the patient's personalised rule engine what a BP / HR reading means FOR THIS PATIENT. " +
@@ -1001,12 +1029,53 @@ export async function executeJournalTool(
             typeof args.confirms_entry_id === 'string' && args.confirms_entry_id.trim()
               ? args.confirms_entry_id.trim()
               : undefined,
-          // Session boundary — true closes the session immediately (Bug 19 /
-          // Item 7). Single-reading check-ins always close; multi-reading
-          // sessions close on the LAST call; AWAITING first-of-pair never
-          // closes (backend ignores closeSession when emergencyConfirmation
-          // is AWAITING — guarded inside DailyJournalService.create).
-          closeSession: args.close_session === true,
+          // Phase/16 Item 2 — Option D AWAITING auto-detection for the chat
+          // path. The FE buffer sets beginEmergencyConfirmation when the
+          // patient goes through Screen A; chat has no Screen A so the
+          // dispatcher auto-detects emergency-range + no co-occurring
+          // symptoms (the symptom-override path fires Tier 1 instantly and
+          // does NOT belong in Option D). This is what makes the bot's
+          // "can you sit calmly for one minute" ask actually correspond to
+          // an AWAITING entry — without it the cron safety net never fires
+          // RULE_UNCONFIRMED_EMERGENCY because the entry never enters the
+          // hold state. NEVER set true on confirms_entry_id calls (those
+          // are the SECOND reading) or decline calls.
+          beginEmergencyConfirmation: (() => {
+            if (args.confirms_entry_id) return false
+            const sbp = Number(args.systolic_bp)
+            const dbp = Number(args.diastolic_bp)
+            const emergencyRange = sbp >= 180 || dbp >= 120
+            if (!emergencyRange) return false
+            const hasOverrideSymptom =
+              finalFlags.chestPainOrDyspnea === true ||
+              finalFlags.severeHeadache === true ||
+              finalFlags.focalNeuroDeficit === true ||
+              finalFlags.alteredMentalStatus === true ||
+              finalFlags.severeEpigastricPain === true ||
+              finalFlags.throatTightness === true ||
+              finalFlags.faceSwelling === true
+            // Symptom-override path: backend fires Tier 1 instantly via the
+            // engine, NOT AWAITING. Only the symptom-free emergency-range
+            // reading enters Option D hold.
+            return !hasOverrideSymptom
+          })(),
+          // Session boundary — Phase/16 Item 7 (Nivakaran chat-v2 handoff
+          // 2026-06-17). Handoff: "every chat-initiated createJournalEntry
+          // defaults to closeSession: true (single reading = one session =
+          // closed immediately on commit)". We can't always trust the LLM
+          // to thread the flag explicitly, so default-by-shape:
+          //   • model explicitly set close_session → honour it verbatim
+          //   • model passed session_id (Q3 / continuation) → leave false
+          //     unless the model opts in (handoff: "true on the LAST")
+          //   • single reading (no session_id) → true (matches Bug 19 /
+          //     handoff intent)
+          // Backend still ignores closeSession when emergencyConfirmation
+          // is AWAITING (guarded in DailyJournalService.create), so the
+          // Option D first-of-pair never closes prematurely.
+          closeSession:
+            args.close_session !== undefined
+              ? args.close_session === true
+              : !args.session_id,
         } as any)
         ctx.onPatientDataMutated?.(userId)
         // Bug 54 — include weight_display so the LLM verbalises back in the
@@ -1505,6 +1574,37 @@ export async function executeJournalTool(
         emergency_situation: args.emergency_situation ?? 'Emergency detected',
         message: 'Emergency flagged. Continue responding to the patient with 911 guidance.',
       })
+    }
+
+    case 'flag_reading_error': {
+      // Phase/16 Item 5 — out-of-window reading flag (Nivakaran chat-v2
+      // handoff 2026-06-17). NOT a clinical emergency; writes a
+      // PATIENT_REPORT row on ProfileVerificationLog so the care team can
+      // review the flagged reading on their next chart visit. No
+      // escalation, no dispatch.
+      const entryId = typeof args.entry_id === 'string' ? args.entry_id.trim() : ''
+      const reason = typeof args.reason === 'string' ? args.reason : ''
+      if (!entryId) {
+        return JSON.stringify({
+          flagged: false,
+          reason: 'MISSING_ENTRY_ID',
+          message: 'entry_id is required — call get_recent_readings first to look up the entry.',
+        })
+      }
+      try {
+        const result = await journalService.flagReadingError(userId, entryId, reason)
+        return JSON.stringify({
+          flagged: true,
+          entry_id: result.entryId,
+          message:
+            'Flagged for care-team review. Tell the patient their care team will look at the flagged reading on their next chart review.',
+        })
+      } catch (err: any) {
+        return JSON.stringify({
+          flagged: false,
+          message: err?.message ?? 'Failed to flag reading.',
+        })
+      }
     }
 
     case 'evaluate_reading': {

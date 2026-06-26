@@ -186,15 +186,22 @@ export function formatMonthLabel(monthYear: string): string {
   })
 }
 
-/** Seconds → "1h 23m" / "23m" / "47s" / "—" (nulls). */
+/** Seconds → "14d" / "2d 3h" / "1h 23m" / "23m" / "47s" / "—" (nulls).
+ *  Rolls hours up into days past 24h so long SLA targets read as "14 d"
+ *  rather than "336h". */
 export function formatDuration(seconds: number | null): string {
   if (seconds === null || seconds === undefined) return '—'
   if (seconds < 60) return `${Math.round(seconds)}s`
   const mins = Math.round(seconds / 60)
   if (mins < 60) return `${mins}m`
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  return m === 0 ? `${h}h` : `${h}h ${m}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) {
+    const m = mins % 60
+    return m === 0 ? `${hours}h` : `${hours}h ${m}m`
+  }
+  const days = Math.floor(hours / 24)
+  const h = hours % 24
+  return h === 0 ? `${days}d` : `${days}d ${h}h`
 }
 
 /** "TIER_1_CONTRAINDICATION" → "Tier 1 — Contraindication" style label. */

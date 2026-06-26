@@ -262,7 +262,11 @@ export class TestControlService {
   async resetTestPatients(): Promise<{ usersTouched: number; rowsDeleted: number }> {
     const users = await this.prisma.user.findMany({
       where: {
-        email: { endsWith: '.cardioplace.test' },
+        // Seed/test patient emails are `<name>@cardioplace.test`. The previous
+        // `.cardioplace.test` matcher (leading dot) matched NONE of them — the
+        // char before "cardioplace.test" is "@", not "." — so this reset was a
+        // silent no-op and spec 33's report assertions saw stale seed readings.
+        email: { endsWith: '@cardioplace.test' },
         roles: { has: 'PATIENT' },
       },
       select: { id: true, email: true },
@@ -386,6 +390,40 @@ export class TestControlService {
     }
     // Unreachable — the loop either returns or rethrows on the final attempt.
     return { rowsDeleted: 0 }
+  }
+
+  /**
+   * Wipe a user's entire MFA footprint so the E2E suite starts each MFA spec
+   * from a clean "never enrolled" baseline — without this, enrolling TOTP on a
+   * seed admin (or registering a passkey on a seed patient) would leave the
+   * account permanently "MFA required" and break the plain OTP→dashboard auth
+   * specs that share these seed accounts.
+   *
+   * Clears all three independent MFA tables for the user, plus the recent
+   * failed-attempt AuthLog rows:
+   *   • TotpCredential      — provider/admin authenticator secret (1:1)
+   *   • MfaRecoveryCode     — TOTP backup codes (1:many)
+   *   • WebAuthnCredential  — patient biometric / passkeys (1:many)
+   *   • AuthLog(mfa_challenge_failed) — so the 5-fails/15-min lockout counter
+   *     resets too; otherwise a lockout spec would leave the account locked for
+   *     the other MFA specs that share it.
+   *
+   * Test-infra only — there is no production path that bulk-wipes MFA.
+   */
+  async resetUserMfa(userId: string): Promise<{ rowsDeleted: number }> {
+    const [totp, recovery, webauthn, failedLogs] =
+      await this.prisma.$transaction([
+        this.prisma.totpCredential.deleteMany({ where: { userId } }),
+        this.prisma.mfaRecoveryCode.deleteMany({ where: { userId } }),
+        this.prisma.webAuthnCredential.deleteMany({ where: { userId } }),
+        this.prisma.authLog.deleteMany({
+          where: { userId, event: 'mfa_challenge_failed' },
+        }),
+      ])
+    return {
+      rowsDeleted:
+        totp.count + recovery.count + webauthn.count + failedLogs.count,
+    }
   }
 
   /**

@@ -808,6 +808,27 @@ const fr: Record<TranslationKey, string> = {
   'timeline.filter.readings': 'Relevés', // EN: Readings
   'alerts.badge.thresholdPending':
     'Seuil du patient en attente — définissez le seuil personnalisé et examinez l’alerte', // EN: Patient threshold pending — set personalized threshold and review alert
+  // --- Phase/practice-identity — sign-in selector + top-bar switcher chip ---
+  'signIn.selectPractice.title': 'Au nom de quel cabinet agissez-vous ?', // EN: Which practice are you acting as?
+  'signIn.selectPractice.intro':
+    'Vous êtes membre de plus d’un cabinet. Choisissez celui dans lequel vous travaillerez pour cette session — chaque action sera consignée sous le cabinet choisi. Vous pourrez changer plus tard depuis la barre supérieure.', // EN: You're a member of more than one practice...
+  'signIn.selectPractice.continue': 'Continuer', // EN: Continue
+  'signIn.selectPractice.signingIn': 'Connexion en cours…', // EN: Signing in…
+  'signIn.selectPractice.contactAdmin':
+    'Votre cabinet n’apparaît pas ? Déconnectez-vous et contactez votre administrateur.', // EN: Not seeing the right practice?...
+  'signIn.selectPractice.error': 'Impossible de sélectionner le cabinet', // EN: Unable to select practice
+  'signIn.selectPractice.expired.title': 'Session de connexion expirée', // EN: Sign-in session expired
+  'signIn.selectPractice.expired.body':
+    'Pour votre sécurité, la sélection du cabinet a une fenêtre de 5 minutes. Veuillez vous reconnecter pour continuer.', // EN: For your security...5-minute window.
+  'signIn.selectPractice.expired.back': 'Retour à la connexion', // EN: Back to sign in
+  'signIn.zeroPractice.title': 'Aucun cabinet associé', // EN: No practice membership
+  'signIn.zeroPractice.body':
+    'Vous n’êtes encore membre d’aucun cabinet. Contactez votre administrateur pour être ajouté avant de vous connecter.', // EN: You aren't a member of any practice yet...
+  'topBar.actingAs.label': 'Au nom de', // EN: Acting as
+  'topBar.actingAs.switchTo': 'Changer de cabinet', // EN: Switch practice
+  'topBar.actingAs.switching': 'Changement en cours…', // EN: Switching…
+  'topBar.actingAs.switched': 'Vous agissez désormais au nom de', // EN: Now acting as
+  'topBar.actingAs.current': 'Actuel', // EN: Current
 };
 
 export default fr;

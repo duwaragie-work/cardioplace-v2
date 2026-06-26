@@ -106,6 +106,9 @@ const de: Record<TranslationKey, string> = {
   // #89 — English placeholder; flagged for Niva translation pass.
   'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
   'dashboard.goalTolerance': 'Hohe Warnungen beginnen bei {value}, Ihr Ziel plus eine kleine Toleranz.',
+  'dashboard.goalOverridePregnancy': 'Warnungen beginnen während der Schwangerschaft bei {value}.',
+  'dashboard.goalOverrideHfref': 'Warnungen beginnen bei {value} für Ihre Herzinsuffizienz-Betreuung.',
+  'dashboard.goalOverrideCad': 'Warnungen beginnen bei {value} für Ihre Herzerkrankung.',
   'dashboard.setByCareTeam': '· festgelegt von Ihrem Behandlungsteam',
   'dashboard.chartDateAxis': 'Datum',
   'dashboard.chartAt': 'um',
@@ -248,6 +251,8 @@ const de: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': 'Wir haben Ihren Messwert gespeichert und Ihr Behandlungsteam informiert, dass es sich bei Ihnen melden soll.',
   'checkin.optionD.screenC.safetyFooter': 'Wenn Sie sich gerade unwohl fühlen, rufen Sie bitte Ihren Arzt oder den Notruf 911 an.',
   'checkin.optionD.screenC.done': 'Zurück zur Übersicht',
+  'checkin.optionD.confirmedNormal.title': 'Ihre zweite Messung sieht besser aus',
+  'checkin.optionD.confirmedNormal.body': 'Ihre Kontrollmessung liegt in einem sichereren Bereich. Wir haben beide Messungen gespeichert und Ihr Behandlungsteam informiert — es meldet sich möglicherweise trotzdem bei Ihnen.',
   // Resume intro — Screen A auto-resume (2026-06-16). PLATZHALTER (Manisha ausstehend).
   'checkin.optionD.resumeIntro': 'Lassen Sie uns Ihre Messung von vorhin abschließen',
   // Part 1 — FE buffer review screen. PLATZHALTER (Manisha ausstehend).
@@ -635,9 +640,11 @@ const de: Record<TranslationKey, string> = {
   'readings.crisis': 'Krise',
 
   // ─── Readings (audit sweep additions) ──────────────────────────────────────
-  'readings.validate.bpBoth': 'Geben Sie beide Blutdruckwerte ein (oder löschen Sie beide).',
+  'readings.validate.bpBoth': 'Geben Sie beide Blutdruckwerte ein.',
   'readings.validate.weightRange': 'Das Gewicht muss zwischen 20 und 600 liegen.',
   'readings.validate.missedReason': 'Bitte wählen Sie für jedes ausgelassene Medikament einen Grund.',
+  'readings.validate.timeCollision': 'Sie haben bereits eine Messung zu genau dieser Zeit. Ändern Sie die Zeit oder bearbeiten Sie die vorhandene Messung.',
+  'readings.edit.secondsNote': 'Sie können auch die Sekunden einstellen — praktisch, wenn zwei Messungen in dieselbe Minute fallen.',
   'readings.sameMinute': 'gleiche Minute',
   'readings.sessionReadings': 'Sitzung · {count} Messungen',
   'readings.readingsCount': '{count} Messungen',

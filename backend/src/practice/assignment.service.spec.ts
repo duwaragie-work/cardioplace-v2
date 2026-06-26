@@ -117,6 +117,38 @@ describe('AssignmentService — May 2026 hardening', () => {
       expect(r.statusCode).toBe(201)
       expect(prisma.patientProviderAssignment.create).toHaveBeenCalledTimes(1)
     })
+
+    // Phase/practice-identity (Manisha 2026-06-12 §1, HIPAA 45 CFR
+    // §164.312(a)(2)(i)) — assignment changes are clinical-staff actions and
+    // must capture WHICH practice the admin was acting under.
+    it('persists practiceContext on ProfileVerificationLog when ctx provided', async () => {
+      await service.create(
+        opsActor,
+        PATIENT_USER,
+        {
+          practiceId: PRACTICE_A,
+          primaryProviderId: PROV_X,
+          backupProviderId: PROV_Y,
+          medicalDirectorId: MD_Z,
+        },
+        { practiceId: 'p-bridge' },
+      )
+      expect(prisma.profileVerificationLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ practiceContext: 'p-bridge' }),
+      })
+    })
+
+    it('falls back to null practiceContext when ctx omitted (org-wide actor)', async () => {
+      await service.create(opsActor, PATIENT_USER, {
+        practiceId: PRACTICE_A,
+        primaryProviderId: PROV_X,
+        backupProviderId: PROV_Y,
+        medicalDirectorId: MD_Z,
+      })
+      expect(prisma.profileVerificationLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ practiceContext: null }),
+      })
+    })
   })
 
   // ────────────────────────────────────────────────────────────────────────

@@ -1,20 +1,27 @@
 model AuthLog {
-  id         String   @id @default(ulid())
-  event      String
-  identifier String?
-  userId     String?
-  method     String?
-  deviceId   String?
-  ipAddress  String?
-  userAgent  String?
-  metadata   Json?
-  success    Boolean  @default(false)
-  errorCode  String?
-  createdAt  DateTime @default(now())
-  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id              String   @id @default(ulid())
+  event           String
+  identifier      String?
+  userId          String?
+  method          String?
+  deviceId        String?
+  ipAddress       String?
+  userAgent       String?
+  metadata        Json?
+  success         Boolean  @default(false)
+  errorCode       String?
+  // June 2026 — practice-context attribution (Manisha 2026-06-12 Access
+  // Control §1, HIPAA 45 CFR §164.312(a)(2)(i)). The activePracticeId on
+  // the actor's AuthSession at the time of the event. NULL for
+  // SUPER_ADMIN / HEALPLACE_OPS / system-issued events / pre-policy
+  // rows. Indexed for "audit by practice" queries.
+  practiceContext String?
+  createdAt       DateTime @default(now())
+  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([identifier])
   @@index([event])
   @@index([createdAt])
+  @@index([practiceContext, createdAt])
 }

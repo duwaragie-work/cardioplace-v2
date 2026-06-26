@@ -6,6 +6,8 @@
 // under the same firstname.lastname@ / role@ scheme — no recreation.
 import { prisma, DEMO_OTP, hashPassword, hashOtp, seedPermaOtp } from './helpers.js'
 
+const SEED_TEST_FIXTURES = process.env.SEED_TEST_FIXTURES === 'true'
+
 export async function seedAdmins() {
   const pwdhash = await hashPassword('demo-password')
   const otpHash = await hashOtp(DEMO_OTP)
@@ -138,6 +140,62 @@ export async function seedAdmins() {
   console.log(`  ops: ${opsUser.email}`)
   console.log(`  coordinator: ${coordinator.email} (practice seed-cedar-hill)`)
 
+  // ─── Multi-practice provider fixture (phase/practice-identity) ───────────
+  // Behind SEED_TEST_FIXTURES so production seeds stay single-practice. Drives
+  // Playwright specs 34/35/36: this provider is a member of BOTH Cedar Hill
+  // and BridgePoint, so sign-in surfaces the selector and the top-bar chip
+  // becomes a switcher. PracticeProvider memberships are added in the same
+  // gate (no-op when SEED_TEST_FIXTURES is unset because Practice B doesn't
+  // exist).
+  let multiPracticeProvider: Awaited<
+    ReturnType<typeof prisma.user.upsert>
+  > | null = null
+  if (SEED_TEST_FIXTURES) {
+    multiPracticeProvider = await prisma.user.upsert({
+      where: { email: 'multi-practice-provider@cardioplace.test' },
+      update: { roles: ['PROVIDER'] },
+      create: {
+        email: 'multi-practice-provider@cardioplace.test',
+        pwdhash,
+        name: 'Dr. Aisha Nasser',
+        roles: ['PROVIDER'],
+        isVerified: true,
+        onboardingStatus: 'COMPLETED',
+        timezone: 'America/New_York',
+      },
+    })
+    await seedPermaOtp('multi-practice-provider@cardioplace.test', otpHash)
+    await prisma.practiceProvider.upsert({
+      where: {
+        practiceId_userId: {
+          practiceId: 'seed-cedar-hill',
+          userId: multiPracticeProvider.id,
+        },
+      },
+      update: {},
+      create: {
+        practiceId: 'seed-cedar-hill',
+        userId: multiPracticeProvider.id,
+      },
+    })
+    await prisma.practiceProvider.upsert({
+      where: {
+        practiceId_userId: {
+          practiceId: 'seed-bridgepoint',
+          userId: multiPracticeProvider.id,
+        },
+      },
+      update: {},
+      create: {
+        practiceId: 'seed-bridgepoint',
+        userId: multiPracticeProvider.id,
+      },
+    })
+    console.log(
+      `  multi-practice provider: ${multiPracticeProvider.email} (cedar-hill + bridgepoint, SEED_TEST_FIXTURES)`,
+    )
+  }
+
   return {
     manishaPatel,
     supportAdmin,
@@ -146,6 +204,7 @@ export async function seedAdmins() {
     medicalDirector,
     opsUser,
     coordinator,
+    multiPracticeProvider,
   }
 }
 

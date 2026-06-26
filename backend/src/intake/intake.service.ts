@@ -717,6 +717,7 @@ export class IntakeService {
     actor: ActorUser,
     patientUserId: string,
     dto: VerifyProfileDto,
+    ctx?: { practiceId: string | null },
   ) {
     await this.access.assertCanAccessPatient(actor, patientUserId)
     const profile = await this.prisma.patientProfile.findUnique({
@@ -765,6 +766,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_VERIFY,
           rationale: dto.rationale,
+          practiceContext: ctx?.practiceId ?? null,
         },
       }),
     ])
@@ -790,6 +792,7 @@ export class IntakeService {
     actor: ActorUser,
     patientUserId: string,
     dto: { fields: string[]; rationale?: string },
+    ctx?: { practiceId: string | null },
   ) {
     await this.access.assertCanAccessPatient(actor, patientUserId)
     const profile = await this.prisma.patientProfile.findUnique({
@@ -823,6 +826,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_VERIFY,
           rationale: dto.rationale,
+          practiceContext: ctx?.practiceId ?? null,
         })),
       })
     }
@@ -841,14 +845,17 @@ export class IntakeService {
     actor: ActorUser,
     patientUserId: string,
     dto: { field: string; rationale?: string },
+    ctx?: { practiceId: string | null },
   ) {
     if (!dto.field || typeof dto.field !== 'string') {
       throw new BadRequestException('field is required')
     }
-    return this.confirmProfileFields(actor, patientUserId, {
-      fields: [dto.field],
-      rationale: dto.rationale,
-    })
+    return this.confirmProfileFields(
+      actor,
+      patientUserId,
+      { fields: [dto.field], rationale: dto.rationale },
+      ctx,
+    )
   }
 
   // Returns the most recent changeType per `profile.{field}` fieldPath for the
@@ -879,6 +886,7 @@ export class IntakeService {
     actor: ActorUser,
     patientUserId: string,
     dto: { field: string; rationale?: string },
+    ctx?: { practiceId: string | null },
   ) {
     await this.access.assertCanAccessPatient(actor, patientUserId)
     const profile = await this.prisma.patientProfile.findUnique({
@@ -935,6 +943,7 @@ export class IntakeService {
           changeType: VerificationChangeType.ADMIN_REJECT,
           rationale: dto.rationale,
           discrepancyFlag: true,
+          practiceContext: ctx?.practiceId ?? null,
         },
       }),
       // Also write a status-flip log so the timeline shows why the profile
@@ -949,6 +958,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_REJECT,
           rationale: `Reverted to unverified — ${dto.field} rejected`,
+          practiceContext: ctx?.practiceId ?? null,
         },
       }),
     ])
@@ -989,6 +999,7 @@ export class IntakeService {
     actor: ActorUser,
     patientUserId: string,
     dto: CorrectProfileDto,
+    ctx?: { practiceId: string | null },
   ) {
     await this.access.assertCanAccessPatient(actor, patientUserId)
     return this.prisma.$transaction(async (tx) => {
@@ -1058,6 +1069,7 @@ export class IntakeService {
         changeType: VerificationChangeType.ADMIN_CORRECT,
         discrepancyFlag: true,
         rationale: dto.rationale,
+        practiceContext: ctx?.practiceId ?? null,
       })
 
       // Joint Commission NPSG.03.06.01 audit trail — DOB corrections need
@@ -1080,6 +1092,7 @@ export class IntakeService {
             changeType: VerificationChangeType.ADMIN_CORRECT,
             discrepancyFlag: true,
             rationale: dto.rationale,
+            practiceContext: ctx?.practiceId ?? null,
           },
         })
       }
@@ -1113,6 +1126,7 @@ export class IntakeService {
     actor: ActorUser,
     medicationId: string,
     dto: VerifyMedicationDto,
+    ctx?: { practiceId: string | null },
   ) {
     const med = await this.prisma.patientMedication.findUnique({
       where: { id: medicationId },
@@ -1173,6 +1187,10 @@ export class IntakeService {
           changeType,
           rationale: dto.rationale,
           discrepancyFlag: changeType === VerificationChangeType.ADMIN_REJECT,
+          // Phase/practice-identity (Manisha 2026-06-12 §1, HIPAA 45 CFR
+          // §164.312(a)(2)(i)) — capture WHICH practice the admin/provider
+          // was acting under at verification time.
+          practiceContext: ctx?.practiceId ?? null,
         },
       }),
     ])
@@ -1324,6 +1342,7 @@ export class IntakeService {
     actor: ActorUser,
     patientUserId: string,
     dto: AdminAddMedicationDto,
+    ctx?: { practiceId: string | null },
   ) {
     await this.access.assertCanAccessPatient(actor, patientUserId)
 
@@ -1390,6 +1409,7 @@ export class IntakeService {
           rationale: angioedemaHold
             ? 'Admin-added ACE/ARB on angioedema-contraindicated patient — auto-held (PROVIDER_DIRECTED_HOLD).'
             : 'Admin-added medication.',
+          practiceContext: ctx?.practiceId ?? null,
         },
       })
       return med
@@ -1408,6 +1428,7 @@ export class IntakeService {
     actor: ActorUser,
     medicationId: string,
     dto: AdminEditMedicationDto,
+    ctx?: { practiceId: string | null },
   ) {
     const med = await this.prisma.patientMedication.findUnique({
       where: { id: medicationId },
@@ -1488,6 +1509,7 @@ export class IntakeService {
           rationale: angioedemaHold
             ? 'Admin edit to ACE/ARB on angioedema-contraindicated patient — auto-held.'
             : 'Admin edit to medication.',
+          practiceContext: ctx?.practiceId ?? null,
         },
       })
       return row
@@ -1892,6 +1914,8 @@ export class IntakeService {
       changeType: VerificationChangeType
       discrepancyFlag?: boolean
       rationale?: string
+      /** Phase/practice-identity — populated only on admin-actor paths. */
+      practiceContext?: string | null
     },
   ) {
     if (!params.changes.length) return
@@ -1906,6 +1930,7 @@ export class IntakeService {
         changeType: params.changeType,
         discrepancyFlag: params.discrepancyFlag ?? false,
         rationale: params.rationale,
+        practiceContext: params.practiceContext ?? null,
       })),
     })
   }

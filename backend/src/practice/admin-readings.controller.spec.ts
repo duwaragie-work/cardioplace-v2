@@ -72,55 +72,68 @@ describe('AdminReadingsController', () => {
   })
 
   describe('runtime scope check (assertCanAccessPatient)', () => {
-    it('POST checks scope BEFORE delegating, passes actor through', async () => {
+    // Phase/practice-identity — every handler now takes @ActiveContext() as
+    // its trailing param. Unit tests invoke handlers directly and pass the
+    // ctx object explicitly (the Nest decorator pipeline doesn't run here).
+    const ctxNull = { practiceId: null }
+    const ctxBridge = { practiceId: 'p-bridge' }
+
+    it('POST checks scope BEFORE delegating, passes actor + practiceContext through', async () => {
       mockAccess.assertCanAccessPatient.mockResolvedValueOnce(undefined)
       mockJournal.create.mockResolvedValueOnce({ statusCode: 202 })
 
       const dto: any = { measuredAt: '2026-06-12T10:00:00Z', systolicBP: 140, diastolicBP: 90 }
-      await controller.create(req('md-1', [UserRole.MEDICAL_DIRECTOR]), 'patient-1', dto)
+      await controller.create(req('md-1', [UserRole.MEDICAL_DIRECTOR]), 'patient-1', dto, ctxBridge)
 
       expect(mockAccess.assertCanAccessPatient).toHaveBeenCalledWith(
         { id: 'md-1', roles: [UserRole.MEDICAL_DIRECTOR] },
         'patient-1',
       )
-      expect(mockJournal.create).toHaveBeenCalledWith('patient-1', dto, {
-        id: 'md-1',
-        roles: [UserRole.MEDICAL_DIRECTOR],
-      })
+      expect(mockJournal.create).toHaveBeenCalledWith(
+        'patient-1',
+        dto,
+        { id: 'md-1', roles: [UserRole.MEDICAL_DIRECTOR] },
+        ctxBridge,
+      )
       const scopeOrder = mockAccess.assertCanAccessPatient.mock.invocationCallOrder[0]
       const createOrder = mockJournal.create.mock.invocationCallOrder[0]
       expect(scopeOrder).toBeLessThan(createOrder)
     })
 
-    it('PUT passes (patientUserId, entryId, dto, actor) to the service', async () => {
+    it('PUT passes (patientUserId, entryId, dto, actor, ctx) to the service', async () => {
       mockAccess.assertCanAccessPatient.mockResolvedValueOnce(undefined)
       mockJournal.update.mockResolvedValueOnce({ statusCode: 200 })
 
       const dto: any = { systolicBP: 145 }
-      await controller.update(req('prov-1', [UserRole.PROVIDER]), 'patient-1', 'entry-1', dto)
+      await controller.update(req('prov-1', [UserRole.PROVIDER]), 'patient-1', 'entry-1', dto, ctxBridge)
 
-      expect(mockJournal.update).toHaveBeenCalledWith('patient-1', 'entry-1', dto, {
-        id: 'prov-1',
-        roles: [UserRole.PROVIDER],
-      })
+      expect(mockJournal.update).toHaveBeenCalledWith(
+        'patient-1',
+        'entry-1',
+        dto,
+        { id: 'prov-1', roles: [UserRole.PROVIDER] },
+        ctxBridge,
+      )
     })
 
-    it('DELETE passes (patientUserId, entryId, actor) to the service', async () => {
+    it('DELETE passes (patientUserId, entryId, actor, ctx) to the service', async () => {
       mockAccess.assertCanAccessPatient.mockResolvedValueOnce(undefined)
       mockJournal.delete.mockResolvedValueOnce({ statusCode: 200 })
 
-      await controller.delete(req(), 'patient-1', 'entry-1')
+      await controller.delete(req(), 'patient-1', 'entry-1', ctxNull)
 
-      expect(mockJournal.delete).toHaveBeenCalledWith('patient-1', 'entry-1', {
-        id: 'admin-1',
-        roles: [UserRole.SUPER_ADMIN],
-      })
+      expect(mockJournal.delete).toHaveBeenCalledWith(
+        'patient-1',
+        'entry-1',
+        { id: 'admin-1', roles: [UserRole.SUPER_ADMIN] },
+        ctxNull,
+      )
     })
 
     it.each([
-      ['create', () => controller.create(req('md-2', [UserRole.MEDICAL_DIRECTOR]), 'p-out', {} as any)],
-      ['update', () => controller.update(req('prov-2', [UserRole.PROVIDER]), 'p-out', 'e1', {} as any)],
-      ['delete', () => controller.delete(req('prov-2', [UserRole.PROVIDER]), 'p-out', 'e1')],
+      ['create', () => controller.create(req('md-2', [UserRole.MEDICAL_DIRECTOR]), 'p-out', {} as any, ctxNull)],
+      ['update', () => controller.update(req('prov-2', [UserRole.PROVIDER]), 'p-out', 'e1', {} as any, ctxNull)],
+      ['delete', () => controller.delete(req('prov-2', [UserRole.PROVIDER]), 'p-out', 'e1', ctxNull)],
     ])('out-of-scope MED_DIR/PROVIDER → 403 from %s, service never reached', async (_name, call) => {
       mockAccess.assertCanAccessPatient.mockRejectedValueOnce(
         new ForbiddenException('Patient p-out is outside your role scope'),

@@ -635,9 +635,120 @@ export const T = {
     noPractices: 'report-no-practices',
   },
 
+  // ─── Admin: reports v2 — quarterly / SLA / cohort / adherence (phase/26) ──
+  //
+  // /reports is a 5-tab surface. The Monthly tab uses the `reports` testids
+  // above (phase/24); the four phase/26 tabs each own a `<kind>-*` namespace
+  // on their panel. Role gate (canViewReports): MEDICAL_DIRECTOR,
+  // HEALPLACE_OPS, SUPER_ADMIN — a plain PROVIDER gets `admin-reports-access-denied`.
+  reportTabs: {
+    monthly: 'report-tab-monthly',
+    quarterly: 'report-tab-quarterly',
+    sla: 'report-tab-sla',
+    cohorts: 'report-tab-cohorts',
+    adherence: 'report-tab-adherence',
+  },
+  sla: {
+    table: 'sla-table',
+    monthPicker: 'sla-month-picker',
+    practicePicker: 'sla-practice-picker',
+    practiceLocked: 'sla-practice-locked',
+    downloadCsv: 'sla-download-csv',
+    downloadPdf: 'sla-download-pdf',
+    error: 'sla-error',
+    skeleton: 'sla-skeleton',
+  },
+  quarterly: {
+    table: 'quarterly-control-table',
+    quarterPicker: 'quarterly-quarter-picker',
+    practicePicker: 'quarterly-practice-picker',
+    practiceLocked: 'quarterly-practice-locked',
+    downloadCsv: 'quarterly-download-csv',
+    downloadPdf: 'quarterly-download-pdf',
+    error: 'quarterly-error',
+    skeleton: 'quarterly-skeleton',
+  },
+  cohort: {
+    table: 'cohort-table',
+    monthPicker: 'cohort-month-picker',
+    practicePicker: 'cohort-practice-picker',
+    practiceLocked: 'cohort-practice-locked',
+    downloadCsv: 'cohort-download-csv',
+    downloadPdf: 'cohort-download-pdf',
+    error: 'cohort-error',
+    skeleton: 'cohort-skeleton',
+  },
+  adherence: {
+    table: 'adherence-patient-table',
+    windowPicker: 'adherence-window-picker',
+    practicePicker: 'adherence-practice-picker',
+    practiceLocked: 'adherence-practice-locked',
+    downloadCsv: 'adherence-download-csv',
+    downloadPdf: 'adherence-download-pdf',
+    error: 'adherence-error',
+    skeleton: 'adherence-skeleton',
+    emptyPatients: 'adherence-empty-patients',
+    noPractices: 'adherence-no-practices',
+  },
+
   // ─── Invite activation (/activate/[token], patient + admin apps) ────────
   activate: {
     confirm: 'activate-confirm',
+  },
+
+  // ─── MFA (phase/27 — Manisha 2026-06-12 Access Control §6) ──────────────
+  //
+  // Admin = TOTP (authenticator app) + recovery codes; patient = WebAuthn
+  // (Face ID / fingerprint) + recovery codes. Testids reconciled against the
+  // real components:
+  //   admin/src/app/sign-in/mfa-enroll/page.tsx
+  //   admin/src/app/sign-in/mfa-challenge/page.tsx
+  //   admin/src/components/settings/SettingsScreen.tsx
+  //   admin/src/components/profile/RecoveryCodesModal.tsx
+  //   frontend/src/app/sign-in/biometric/page.tsx
+  //   frontend/src/components/cardio/RecoveryCodesPanel.tsx
+  mfa: {
+    // Admin TOTP enrollment wizard (/sign-in/mfa-enroll)
+    adminEnrollBegin: 'admin-mfa-begin',
+    adminEnrollCode: 'admin-mfa-enroll-code',
+    adminEnrollVerify: 'admin-mfa-enroll-verify',
+    adminEnrollRecoveryCodes: 'admin-mfa-recovery-codes',
+    adminEnrollSavedAck: 'admin-mfa-saved-ack',
+    adminEnrollFinish: 'admin-mfa-finish',
+
+    // Admin TOTP sign-in challenge (/sign-in/mfa-challenge)
+    adminChallengeCode: 'admin-mfa-code',
+    adminChallengeVerify: 'admin-mfa-verify',
+    adminChallengeRecovery: 'admin-mfa-recovery',
+    adminChallengeRecoveryVerify: 'admin-mfa-recovery-verify',
+
+    // Admin settings (/settings) — security cards + regenerate modal
+    adminSettingsMfaLink: 'admin-settings-mfa-link',
+    adminSettingsRecoveryCodes: 'admin-settings-recovery-codes',
+    adminRecoveryModal: 'admin-recovery-codes-modal',
+    adminRecoveryGenerate: 'admin-recovery-codes-generate',
+    adminRecoveryList: 'admin-recovery-codes-list',
+    adminRecoveryDone: 'admin-recovery-codes-done',
+
+    // Patient WebAuthn biometric challenge (/sign-in/biometric)
+    biometricPromptBtn: 'biometric-prompt-btn',
+    biometricUseRecoveryBtn: 'use-recovery-code-btn',
+    biometricRecoveryInput: 'recovery-code-input',
+    biometricRecoverySubmit: 'recovery-code-submit',
+    biometricSetupHere: 'biometric-setup-here',
+
+    // Patient recovery-codes panel (shown on first biometric setup / regen)
+    recoveryCodesList: 'recovery-codes-list',
+    recoveryCodesAck: 'recovery-codes-ack',
+    recoveryCodesContinue: 'recovery-codes-continue',
+
+    // Patient settings — device management + recovery regen. Device rows have
+    // no per-row testid; rename/remove are reached via their aria-labels
+    // ("Rename device" / "Remove device" / "Save name").
+    settingsEnableBiometric: 'settings-enable-biometric',
+    settingsAddAnotherDevice: 'settings-add-another-device',
+    settingsRenameInput: 'settings-rename-input',
+    settingsRegenerateCodes: 'settings-regenerate-codes',
   },
 } as const
 

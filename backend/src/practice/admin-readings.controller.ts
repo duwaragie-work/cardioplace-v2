@@ -10,6 +10,7 @@ import {
   Req,
 } from '@nestjs/common'
 import type { Request } from 'express'
+import { ActiveContext } from '../auth/decorators/active-context.decorator.js'
 import { Roles } from '../auth/decorators/roles.decorator.js'
 import {
   ActorUser,
@@ -20,7 +21,9 @@ import { CreateJournalEntryDto } from '../daily_journal/dto/create-journal-entry
 import { UpdateJournalEntryDto } from '../daily_journal/dto/update-journal-entry.dto.js'
 import { UserRole } from '../generated/prisma/enums.js'
 
-type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
+type AuthedReq = Request & {
+  user: { id: string; roles: UserRole[]; activePracticeId?: string | null }
+}
 
 // Care-team CRUD on patient readings — clinic-floor entry on the patient's
 // behalf (coordinator/provider keying in cuff readings) + transcription-error
@@ -57,10 +60,11 @@ export class AdminReadingsController {
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Body() dto: CreateJournalEntryDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     const actor = this.actorOf(req)
     await this.access.assertCanAccessPatient(actor, patientUserId)
-    return this.journal.create(patientUserId, dto, actor)
+    return this.journal.create(patientUserId, dto, actor, ctx)
   }
 
   /**
@@ -73,12 +77,13 @@ export class AdminReadingsController {
     @Param('userId') patientUserId: string,
     @Param('entryId') entryId: string,
     @Body() dto: UpdateJournalEntryDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     const actor = this.actorOf(req)
     await this.access.assertCanAccessPatient(actor, patientUserId)
     // Service scopes the lookup to {entryId, patientUserId} — an entryId
     // belonging to a different patient 404s without confirming existence.
-    return this.journal.update(patientUserId, entryId, dto, actor)
+    return this.journal.update(patientUserId, entryId, dto, actor, ctx)
   }
 
   /**
@@ -91,13 +96,18 @@ export class AdminReadingsController {
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Param('entryId') entryId: string,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     const actor = this.actorOf(req)
     await this.access.assertCanAccessPatient(actor, patientUserId)
-    return this.journal.delete(patientUserId, entryId, actor)
+    return this.journal.delete(patientUserId, entryId, actor, ctx)
   }
 
   private actorOf(req: AuthedReq): ActorUser {
-    return { id: req.user.id, roles: req.user.roles }
+    return {
+      id: req.user.id,
+      roles: req.user.roles,
+      activePracticeId: req.user.activePracticeId,
+    }
   }
 }

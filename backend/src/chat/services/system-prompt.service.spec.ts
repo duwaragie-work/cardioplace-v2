@@ -470,9 +470,13 @@ describe('SystemPromptService', () => {
   // A.5 PatientThreshold rendering
   // ==========================================================================
   describe('A.5 threshold rendering', () => {
-    it('null threshold → "Provider has not yet set a personal BP goal"', () => {
+    it('null threshold → effective standard goal 140/90 rendered (Round-3 Item C — no more "Provider has not yet set" fallback; the chat surface ALWAYS surfaces an effective goal so the bot quotes the same number the engine alerts on)', () => {
       const out = service.buildPatientContext(buildContext())
-      expect(out).toContain('Provider has not yet set a personal BP goal')
+      expect(out).toContain('Effective BP goal: aim below 140/90 mmHg')
+      // The old fallback wording must NOT appear — its removal is the point
+      // of the Item C fix (a pregnant patient with no custom row used to
+      // hear "no goal set" while the engine alerted at 140/90).
+      expect(out).not.toContain('Provider has not yet set a personal BP goal')
     })
 
     it('full threshold → rendered with all axes', () => {
@@ -841,11 +845,11 @@ describe('SystemPromptService', () => {
       expect(out).toContain('session_id')
     })
 
-    it('edit-window guidance (Item 5) appears with 5-min boundary + flag fallback', () => {
+    it('edit-window guidance (Item 5) appears with 5-min boundary + flag_reading_error fallback', () => {
       const out = service.buildSystemPrompt()
       expect(out).toContain('EDIT WINDOW')
       expect(out).toContain('5 minutes')
-      expect(out).toContain('reading_error_flag')
+      expect(out).toContain('flag_reading_error')
     })
 
     it('enrollment-aware messaging (Item 6) names both branches', () => {

@@ -47,7 +47,12 @@ export class ThresholdService {
     private readonly enrollment: EnrollmentService,
   ) {}
 
-  async create(actor: ActorUser, patientUserId: string, dto: UpsertThresholdDto) {
+  async create(
+    actor: ActorUser,
+    patientUserId: string,
+    dto: UpsertThresholdDto,
+    ctx?: { practiceId: string | null },
+  ) {
     // Role-scope gate: PROVIDER must be in panel; MED_DIR must head the
     // patient's practice. OPS/SUPER short-circuit through.
     await this.access.assertCanAccessPatient(actor, patientUserId)
@@ -69,6 +74,7 @@ export class ThresholdService {
         actor.id,
         Prisma.JsonNull,
         this.thresholdSnapshot(threshold),
+        ctx?.practiceId ?? null,
       )
       // IVR-04 — if this threshold clears the re-enrollment gate for a patient
       // who was auto-reverted, restore enrollment + catch up deferred alerts.
@@ -126,7 +132,12 @@ export class ThresholdService {
     }
   }
 
-  async update(actor: ActorUser, patientUserId: string, dto: UpsertThresholdDto) {
+  async update(
+    actor: ActorUser,
+    patientUserId: string,
+    dto: UpsertThresholdDto,
+    ctx?: { practiceId: string | null },
+  ) {
     await this.access.assertCanAccessPatient(actor, patientUserId)
     const existing = await this.prisma.patientThreshold.findUnique({
       where: { userId: patientUserId },
@@ -159,6 +170,7 @@ export class ThresholdService {
       actor.id,
       this.thresholdSnapshot(existing),
       this.thresholdSnapshot(updated),
+      ctx?.practiceId ?? null,
     )
     // IVR-04 — restore enrollment if this update clears the gate for an
     // auto-reverted patient (e.g. a threshold edit that finally fits).
@@ -178,7 +190,11 @@ export class ThresholdService {
    * still REQUIRES one (§4.2), drops an enrolled patient back to NOT_ENROLLED
    * via the enrollment-gap revert. Writes a JCAHO "threshold cleared" audit row.
    */
-  async delete(actor: ActorUser, patientUserId: string) {
+  async delete(
+    actor: ActorUser,
+    patientUserId: string,
+    ctx?: { practiceId: string | null },
+  ) {
     await this.access.assertCanAccessPatient(actor, patientUserId)
     const existing = await this.prisma.patientThreshold.findUnique({
       where: { userId: patientUserId },
@@ -199,6 +215,7 @@ export class ThresholdService {
         changedByRole: VerifierRole.ADMIN,
         changeType: VerificationChangeType.ADMIN_THRESHOLD_UPDATE,
         rationale: 'Personalized threshold cleared.',
+        practiceContext: ctx?.practiceId ?? null,
       },
     })
     // Cascade: a still-mandatory enrolled patient must drop back to NOT_ENROLLED.
@@ -252,6 +269,7 @@ export class ThresholdService {
     adminId: string,
     previousValue: ThresholdSnapshot | typeof Prisma.JsonNull,
     newValue: ThresholdSnapshot,
+    practiceContext: string | null = null,
   ): Promise<void> {
     await this.prisma.profileVerificationLog.create({
       data: {
@@ -264,6 +282,7 @@ export class ThresholdService {
         changedByRole: VerifierRole.ADMIN,
         changeType: VerificationChangeType.ADMIN_THRESHOLD_UPDATE,
         rationale: newValue.notes ?? null,
+        practiceContext,
       },
     })
   }

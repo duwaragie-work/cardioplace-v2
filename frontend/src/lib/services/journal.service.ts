@@ -152,11 +152,28 @@ export class ImplausibleReadingError extends Error {
   }
 }
 
+/**
+ * Bug 25 — thrown when create/update hits the @@unique([userId, measuredAt])
+ * constraint (backend ConflictException → HTTP 409). The readings edit modal
+ * catches this as the safety net behind its pre-submit collision check and
+ * shows the same friendly "you already have a reading at this time" message.
+ */
+export class ReadingTimeConflictError extends Error {
+  readonly code = 'reading-time-conflict' as const
+  constructor(reason?: string) {
+    super(reason || 'A reading already exists at this exact time.')
+    this.name = 'ReadingTimeConflictError'
+  }
+}
+
 async function unwrap<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     if (res.status === 403 && err?.message === 'clinical-intake-required') {
       throw new ClinicalIntakeRequiredError(err.reason)
+    }
+    if (res.status === 409) {
+      throw new ReadingTimeConflictError(err.message)
     }
     throw new Error(err.message || `Request failed: ${res.status}`)
   }

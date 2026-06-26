@@ -38,6 +38,7 @@ import { ValidationPipe } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import cookieParser from 'cookie-parser'
+import helmet from 'helmet'
 import { IoAdapter } from '@nestjs/platform-socket.io'
 import { AppModule } from './app.module.js'
 
@@ -62,6 +63,23 @@ async function bootstrap() {
 
   app.useWebSocketAdapter(new IoAdapter(app))
   app.use(cookieParser())
+
+  // Security headers (Helmet). Two defaults are disabled because they would
+  // break this app's cross-origin setup:
+  //   • contentSecurityPolicy — backend serves JSON + images (OCR previews,
+  //     Swagger), not first-party HTML pages; the strict default CSP would
+  //     block them. Tighten this later as a separate, tested change.
+  //   • crossOriginResourcePolicy — the patient (3000) and admin (3001) apps
+  //     load resources cross-origin from the API (4000); the default
+  //     `same-origin` value would block those loads.
+  // Everything else (X-Frame-Options, nosniff, HSTS in prod, Referrer-Policy)
+  // stays on and is transparent to the app.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: false,
+    }),
+  )
 
   app.useGlobalPipes(
     new ValidationPipe({

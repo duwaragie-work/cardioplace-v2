@@ -299,6 +299,16 @@ export class TestControl {
   }
 
   /**
+   * phase/27 MFA — wipe a user's TOTP secret + recovery codes + WebAuthn
+   * credentials so an MFA spec starts from a clean "never enrolled" baseline.
+   * Without this, enrolling on a shared seed account leaves it permanently
+   * MFA-required and breaks the plain OTP→dashboard auth specs. Idempotent.
+   */
+  async resetUserMfa(userId: string): Promise<{ rowsDeleted: number }> {
+    return this.post('test-control/reset/user-mfa', { userId })
+  }
+
+  /**
    * Cluster 8 §D — wipe ALL of a user's PatientMedication rows. Use before
    * `setUserMedication` when the test needs an exact roster (e.g., ARB-only
    * angioedema variant on Aisha, who ships with Lisinopril+Amlodipine —

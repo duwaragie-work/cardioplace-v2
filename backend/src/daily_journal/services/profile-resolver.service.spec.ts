@@ -2,7 +2,10 @@ import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
 import { ProfileNotFoundException } from '@cardioplace/shared'
 import { PrismaService } from '../../prisma/prisma.service.js'
-import { ProfileResolverService } from './profile-resolver.service.js'
+import {
+  ProfileResolverService,
+  computeEffectiveThreshold,
+} from './profile-resolver.service.js'
 
 describe('ProfileResolverService', () => {
   let service: ProfileResolverService
@@ -459,5 +462,91 @@ describe('ProfileResolverService', () => {
         medicalDirectorId: 'prov-md',
       })
     })
+  })
+})
+
+// Item C / Bug 24 — effective-threshold computation (pure). Mirrors the engine's
+// rule selection so the dashboard advertises the same alert point the engine
+// fires on.
+describe('computeEffectiveThreshold', () => {
+  function ctx(over: Record<string, any> = {}): any {
+    return {
+      pregnancyThresholdsActive: false,
+      personalizedEligible: false,
+      threshold: null,
+      enrolledAt: null,
+      practiceName: null,
+      ...over,
+      profile: {
+        resolvedHFType: 'NOT_APPLICABLE',
+        hasCAD: false,
+        ...(over.profile ?? {}),
+      },
+    }
+  }
+
+  it('pregnant, no custom → 140/90, tolerance 0, override=pregnancy', () => {
+    const r = computeEffectiveThreshold(ctx({ pregnancyThresholdsActive: true }))
+    expect(r.sbpHighAlertThreshold).toBe(140)
+    expect(r.dbpHighAlertThreshold).toBe(90)
+    expect(r.sbpGoal).toBe(140)
+    expect(r.toleranceMmHg).toBe(0)
+    expect(r.overrideReason).toBe('pregnancy')
+    expect(r.basedOn).toContain('pregnancy')
+  })
+
+  it('pregnant + custom 176/120 → pregnancy wins (140/90), basedOn includes both', () => {
+    const r = computeEffectiveThreshold(
+      ctx({
+        pregnancyThresholdsActive: true,
+        personalizedEligible: true,
+        threshold: { sbpUpperTarget: 176, dbpUpperTarget: 120 },
+      }),
+    )
+    expect(r.sbpHighAlertThreshold).toBe(140)
+    expect(r.sbpGoal).toBe(140)
+    expect(r.overrideReason).toBe('pregnancy')
+    expect(r.basedOn).toEqual(expect.arrayContaining(['pregnancy', 'personalized']))
+  })
+
+  it('non-pregnant + custom 140/90 (eligible) → goal 140/90, alert 160, tolerance 20, no override', () => {
+    const r = computeEffectiveThreshold(
+      ctx({
+        personalizedEligible: true,
+        threshold: { sbpUpperTarget: 140, dbpUpperTarget: 90 },
+      }),
+    )
+    expect(r.sbpGoal).toBe(140)
+    expect(r.sbpHighAlertThreshold).toBe(160)
+    expect(r.toleranceMmHg).toBe(20)
+    expect(r.overrideReason).toBeNull()
+    expect(r.basedOn).toEqual(['personalized'])
+  })
+
+  it('non-pregnant, no custom → standard goal 140/90, alert 160/100, tolerance 20', () => {
+    const r = computeEffectiveThreshold(ctx())
+    expect(r.sbpGoal).toBe(140)
+    expect(r.dbpGoal).toBe(90)
+    expect(r.sbpHighAlertThreshold).toBe(160)
+    expect(r.dbpHighAlertThreshold).toBe(100)
+    expect(r.toleranceMmHg).toBe(20)
+    expect(r.overrideReason).toBeNull()
+    expect(r.basedOn).toEqual(['standard'])
+  })
+
+  it('HFrEF (non-pregnant, no custom) → 160 SBP, override=hfref, tolerance 0', () => {
+    const r = computeEffectiveThreshold(ctx({ profile: { resolvedHFType: 'HFREF', hasCAD: false } }))
+    expect(r.sbpHighAlertThreshold).toBe(160)
+    expect(r.overrideReason).toBe('hfref')
+    expect(r.toleranceMmHg).toBe(0)
+  })
+
+  it('pregnant + HFrEF → MIN(140, 160) = 140, override=pregnancy (highest priority)', () => {
+    const r = computeEffectiveThreshold(
+      ctx({ pregnancyThresholdsActive: true, profile: { resolvedHFType: 'HFREF', hasCAD: false } }),
+    )
+    expect(r.sbpHighAlertThreshold).toBe(140)
+    expect(r.overrideReason).toBe('pregnancy')
+    expect(r.basedOn).toEqual(expect.arrayContaining(['pregnancy', 'hfref']))
   })
 })
