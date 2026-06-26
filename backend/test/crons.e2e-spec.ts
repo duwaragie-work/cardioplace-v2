@@ -6,6 +6,7 @@ import { GapAlertService } from '../src/crons/gap-alert.service.js'
 import { MonthlyReaskService } from '../src/crons/monthly-reask.service.js'
 import { EmailService } from '../src/email/email.service.js'
 import { PrismaService } from '../src/prisma/prisma.service.js'
+import { generateTestDisplayId } from './helpers/generate-test-display-id.js'
 
 // Phase/17 — gap-alert + monthly re-ask crons.
 //
@@ -91,6 +92,7 @@ describe('Crons (e2e)', () => {
           onboardingStatus: 'COMPLETED',
           enrollmentStatus: 'ENROLLED',
           createdAt: tenDaysAgo,
+          displayId: generateTestDisplayId(['PATIENT']),
         },
       })
       const gappy = await prisma.user.create({
@@ -102,6 +104,7 @@ describe('Crons (e2e)', () => {
           onboardingStatus: 'COMPLETED',
           enrollmentStatus: 'ENROLLED',
           createdAt: tenDaysAgo,
+          displayId: generateTestDisplayId(['PATIENT']),
         },
       })
       const empty = await prisma.user.create({
@@ -113,6 +116,7 @@ describe('Crons (e2e)', () => {
           onboardingStatus: 'COMPLETED',
           enrollmentStatus: 'ENROLLED',
           createdAt: tenDaysAgo,
+          displayId: generateTestDisplayId(['PATIENT']),
         },
       })
       // Unenrolled — identity-onboarded patients still pending admin's
@@ -127,6 +131,7 @@ describe('Crons (e2e)', () => {
           onboardingStatus: 'COMPLETED',
           enrollmentStatus: 'NOT_ENROLLED',
           createdAt: tenDaysAgo,
+          displayId: generateTestDisplayId(['PATIENT']),
         },
       })
       freshId = fresh.id
@@ -241,6 +246,7 @@ describe('Crons (e2e)', () => {
           accountStatus: 'ACTIVE',
           onboardingStatus: 'COMPLETED',
           enrollmentStatus: 'ENROLLED',
+          displayId: generateTestDisplayId(['PATIENT']),
         },
       })
       const fresh = await prisma.user.create({
@@ -251,6 +257,7 @@ describe('Crons (e2e)', () => {
           accountStatus: 'ACTIVE',
           onboardingStatus: 'COMPLETED',
           enrollmentStatus: 'ENROLLED',
+          displayId: generateTestDisplayId(['PATIENT']),
         },
       })
       dueId = due.id
@@ -313,6 +320,7 @@ describe('Crons (e2e)', () => {
           accountStatus: 'ACTIVE',
           onboardingStatus: 'COMPLETED',
           enrollmentStatus: 'ENROLLED',
+          displayId: generateTestDisplayId(['PATIENT']),
         },
       })
       try {
@@ -337,6 +345,7 @@ describe('Crons (e2e)', () => {
           accountStatus: 'ACTIVE',
           onboardingStatus: 'COMPLETED',
           enrollmentStatus: 'ENROLLED',
+          displayId: generateTestDisplayId(['PATIENT']),
         },
       })
       const fortyFiveDaysAgo = new Date(now.getTime() - 45 * 24 * 3600 * 1000)
