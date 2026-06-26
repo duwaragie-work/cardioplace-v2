@@ -1486,6 +1486,15 @@ const es: Record<TranslationKey, string> = {
   'intake.caregivers.subtitle': 'Un familiar o amigo a quien podemos avisar si surge una alerta de salud grave. Solo se les contacta para alertas aprobadas por el equipo de atención y únicamente después de que usted dé su consentimiento. Puede omitir esto y agregar a alguien más tarde desde su perfil.',
   'intake.caregivers.audio': 'Opcionalmente, agregue un cuidador: un familiar o amigo a quien podemos avisar si surge una alerta de salud grave. Solo se les contacta después de que usted dé su consentimiento. Puede omitir esto y agregar a alguien más tarde desde su perfil.',
   'chat.orTypePlaceholder': 'O escriba un mensaje...',
+
+  // ─── Auth — banners de sesión inactiva (solo app del paciente) ──────────────
+  'auth.sessionExpired.title': 'Aviso: se cerró tu sesión',
+  'auth.sessionExpired.body':
+    'Tu sesión finalizó por inactividad. Inicia sesión de nuevo para continuar.',
+  'auth.idleWarning.title': 'Advertencia: cierre de sesión próximo',
+  'auth.idleWarning.body':
+    'Se cerrará tu sesión en unos 60 segundos por inactividad. Mueve el ratón o pulsa cualquier tecla para seguir conectado.',
+  'auth.idleWarning.stay': 'Seguir conectado',
 };
 
 export default es;

@@ -1486,6 +1486,15 @@ const fr: Record<TranslationKey, string> = {
   'intake.caregivers.subtitle': 'Un membre de la famille ou un ami que nous pouvons prévenir en cas d’alerte de santé grave. Ils ne sont contactés que pour les alertes approuvées par l’équipe soignante, et seulement après votre consentement. Vous pouvez ignorer cette étape et ajouter quelqu’un plus tard depuis votre profil.',
   'intake.caregivers.audio': 'Vous pouvez ajouter un proche aidant, un membre de la famille ou un ami que nous pouvons prévenir en cas d’alerte de santé grave. Ils ne sont contactés qu’après votre consentement. Vous pouvez ignorer cette étape et ajouter quelqu’un plus tard depuis votre profil.',
   'chat.orTypePlaceholder': 'Ou tapez un message...',
+
+  // ─── Auth — bannières de session inactive (app patient uniquement) ──────────
+  'auth.sessionExpired.title': 'Avis : vous avez été déconnecté',
+  'auth.sessionExpired.body':
+    'Votre session a pris fin en raison d’une inactivité. Veuillez vous reconnecter pour continuer.',
+  'auth.idleWarning.title': 'Avertissement : déconnexion imminente',
+  'auth.idleWarning.body':
+    'Vous serez déconnecté dans environ 60 secondes en raison d’une inactivité. Bougez la souris ou appuyez sur une touche pour rester connecté.',
+  'auth.idleWarning.stay': 'Rester connecté',
 };
 
 export default fr;
