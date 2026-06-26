@@ -23,5 +23,8 @@
       "onnxruntime-node": "1.20.1"
     },
     "onnxruntime-node": "1.20.1"
+  },
+  "devDependencies": {
+    "enhanced-resolve": "^5.24.1"
   }
 }
