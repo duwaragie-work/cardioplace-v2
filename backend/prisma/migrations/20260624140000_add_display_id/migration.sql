@@ -188,7 +188,9 @@ DECLARE
     cls TEXT;
     prefix TEXT;
     body TEXT;
+    check_char TEXT;
     canonical TEXT;
+    display_form TEXT;
     attempt INT;
     issued BOOLEAN;
 BEGIN
@@ -206,10 +208,17 @@ BEGIN
         issued := FALSE;
         FOR attempt IN 1..5 LOOP
             body := _displayid_random_body();
-            canonical := 'CP' || prefix || body || _displayid_check_digit(body);
+            check_char := _displayid_check_digit(body);
+            -- Canonical (no-hyphen) form is the lock-forever anchor stored in
+            -- both DisplayId.value and User.displayId. The display column gets
+            -- the hyphenated presentation form CP-PAT-XXXXXXX-C, matching
+            -- DisplayIdService.formatForDisplay() so backfilled rows are
+            -- byte-identical to runtime-issued ones.
+            canonical := 'CP' || prefix || body || check_char;
+            display_form := 'CP-' || prefix || '-' || body || '-' || check_char;
             BEGIN
                 INSERT INTO "DisplayId" ("value", "display", "class", "userId", "issuedVia")
-                    VALUES (canonical, canonical, cls::"DisplayIdClass", rec."id", 'BACKFILL_MIGRATION_20260624');
+                    VALUES (canonical, display_form, cls::"DisplayIdClass", rec."id", 'BACKFILL_MIGRATION_20260624');
                 UPDATE "User" SET "displayId" = canonical WHERE "id" = rec."id";
                 issued := TRUE;
                 EXIT;
