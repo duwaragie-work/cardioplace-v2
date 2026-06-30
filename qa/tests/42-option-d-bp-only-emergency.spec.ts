@@ -501,6 +501,10 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
       expect(decline.status()).toBeLessThan(300)
 
       // Fresh ordinary reading ~now (well within the 5-min proximity window).
+      // closeSession commits it immediately (buffer fast-fire) so it leaves the
+      // 5-min editable hold and is visible on the provider Readings tab — its
+      // own sessionId is set explicitly, so the distinct-session assertion below
+      // is unaffected.
       const second = await api.post('daily-journal', {
         data: {
           measuredAt: new Date().toISOString(),
@@ -508,6 +512,7 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
           diastolicBP: 85,
           position: 'SITTING',
           sessionId: randomUUID(),
+          closeSession: true,
         },
       })
       expect(second.status()).toBe(202)
