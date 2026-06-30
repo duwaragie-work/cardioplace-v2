@@ -7,6 +7,7 @@
 // optional alert tier banner, and an audio button reading the saved
 // summary aloud (reuses humanizeReading() prose style).
 
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   CheckCircle,
@@ -14,11 +15,15 @@ import {
   Heart,
   AlertTriangle,
   ExternalLink,
+  Clock,
+  Check,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useLanguage } from '@/contexts/LanguageContext';
 import AudioButton from '@/components/intake/AudioButton';
 import type { CheckinSummary } from '@/hooks/useVoiceSession';
+import { isEditableBadgeVisible } from '@/lib/readingEdit';
+import { finalizeSingleReadingSession } from '@/lib/services/journal.service';
 
 const STRUCTURED_SYMPTOM_LABELS: Record<string, string> = {
   severeHeadache: 'Severe headache',
@@ -62,6 +67,38 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
     : null;
   const audioText = buildAudio(summary);
 
+  // Editable-buffer-window parity. While editableUntil is in the future the
+  // reading is HELD (no alert, not surfaced to the care team); show a live
+  // countdown and an "I'm good" button that finalizes it early. Tick once a
+  // second so the countdown + auto-hide stay honest. `finalized` latches the
+  // local state the moment the patient confirms so the badge clears instantly.
+  const [now, setNow] = useState(() => Date.now());
+  const [finalized, setFinalized] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  const editable =
+    !finalized && summary.saved && isEditableBadgeVisible(summary.editableUntil, now);
+  useEffect(() => {
+    if (!editable) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [editable]);
+  const remainingMs = summary.editableUntil
+    ? Math.max(0, new Date(summary.editableUntil).getTime() - now)
+    : 0;
+  const remainingLabel = fmtMMSS(remainingMs);
+  async function handleImGood() {
+    if (!summary.entryId || finalizing) return;
+    setFinalizing(true);
+    try {
+      await finalizeSingleReadingSession(summary.entryId);
+    } catch {
+      // Non-fatal — the server-side cron finalizes the window regardless.
+    } finally {
+      setFinalized(true);
+      setFinalizing(false);
+    }
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16, scale: 0.97 }}
@@ -104,6 +141,26 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
         </div>
         <AudioButton size="sm" text={audioText} lang="en" />
       </div>
+
+      {/* Editable-window strip — mirrors the check-in form's "editable for a few
+          more minutes" badge. Shown only while the reading is HELD (no alert,
+          not yet sent to the care team). Tell the patient they can still change
+          it, with a live countdown. */}
+      {editable && (
+        <div
+          className="px-5 py-2.5 flex items-center gap-2 text-[0.75rem] font-semibold"
+          style={{
+            backgroundColor: 'var(--brand-warning-amber-light)',
+            color: 'var(--brand-warning-amber-text)',
+            borderBottom: '1px solid var(--brand-border)',
+          }}
+        >
+          <Clock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+          <span aria-live="polite">
+            {t('chat.card.editableWindow').replace('{time}', remainingLabel)}
+          </span>
+        </div>
+      )}
 
       {/* BP big-number row */}
       {summary.systolicBP != null && summary.diastolicBP != null && (
@@ -329,22 +386,48 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
           {t('chat.card.viewOnReadings')}
           <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
         </Link>
-        <button
-          onClick={onDismiss}
-          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] text-white transition hover:opacity-90"
-          style={{
-            background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
-            boxShadow: '0 4px 14px rgba(123,0,224,0.28)',
-          }}
-        >
-          {t('chat.card.dismiss')}
-        </button>
+        {editable && summary.entryId ? (
+          // "I'm good / all set" — finalize the held reading now (sends it to
+          // the care team) instead of waiting out the window. Mirrors the
+          // form's BufferReviewScreen "I'm good" action.
+          <button
+            onClick={handleImGood}
+            disabled={finalizing}
+            className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] text-white transition hover:opacity-90 inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+            style={{
+              background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
+              boxShadow: '0 4px 14px rgba(123,0,224,0.28)',
+            }}
+          >
+            <Check className="w-3.5 h-3.5" aria-hidden="true" />
+            {finalizing ? t('chat.card.sending') : t('chat.card.imGood')}
+          </button>
+        ) : (
+          <button
+            onClick={onDismiss}
+            className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] text-white transition hover:opacity-90"
+            style={{
+              background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
+              boxShadow: '0 4px 14px rgba(123,0,224,0.28)',
+            }}
+          >
+            {t('chat.card.dismiss')}
+          </button>
+        )}
       </div>
     </motion.div>
   );
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
+
+/** Format a millisecond duration as M:SS for the editable-window countdown. */
+function fmtMMSS(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 function bpStatus(
   sbp: number | undefined,

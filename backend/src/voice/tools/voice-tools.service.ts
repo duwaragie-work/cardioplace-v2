@@ -25,6 +25,11 @@ import {
 } from '../../chat/emergency-events.js'
 import { isoFromTzWallclock, tzWallclockFromIso } from '../../common/datetime.js'
 import { kgToLbs, normaliseWeightToKg } from '../../common/units.js'
+import {
+  JOURNAL_NOTE_MAX_LENGTH,
+  JOURNAL_CUSTOM_SYMPTOM_MAX_LENGTH,
+  JOURNAL_CUSTOM_SYMPTOMS_MAX_COUNT,
+} from '@cardioplace/shared'
 
 // Voice-tool I/O — argument shapes are stable contract with the Gemini Live
 // system prompt; field-name and sentinel-value changes ripple into the
@@ -52,6 +57,16 @@ export interface CheckinSummary {
    * doesn't render as the misleading "All medications taken ✓" pill.
    */
   hasActiveMedications?: boolean
+  /**
+   * Editable-buffer-window parity. `entryId` is the saved entry; `editableUntil`
+   * is engineEvaluationDeferredUntil (ISO) — when in the future, the reading is
+   * held in its 5-min editable window (no alert, not surfaced to the care team).
+   * The voice saved-card uses these to render the countdown badge and to call
+   * finalize_checkin when the patient confirms. Both undefined when the reading
+   * fast-fired (emergency / explicit close / Option D confirmatory).
+   */
+  entryId?: string
+  editableUntil?: string
 }
 
 export interface UpdateSummary {
@@ -187,6 +202,39 @@ export class VoiceToolsService {
                 'reading to an EXISTING session beyond the 5-min proximity window, first call ' +
                 'get_recent_readings, read sessionId off an entry in that session, and reuse it on the ' +
                 'new submit_checkin. Omit for one-off check-ins. "" = omit.',
+            },
+            // Option D parity with the text-chat tool (journal-tools.ts).
+            // These three drive the emergency-range retake-to-confirm flow.
+            // The hold itself (beginEmergencyConfirmation) is auto-detected in
+            // the dispatcher — NOT a tool param — so native-audio Gemini never
+            // has to thread a niche boolean.
+            close_session: {
+              type: Type.BOOLEAN,
+              description:
+                'Mark this reading as the FINAL one in the current measurement session. Defaults to false. ' +
+                'Set true when:\n' +
+                '  • Single-reading check-in: always true (one reading = one session, closed immediately).\n' +
+                '  • Multi-reading session: true on the LAST submit_checkin call only (prior calls stay false).\n' +
+                '  • Option D AWAITING (the FIRST emergency-range reading): NEVER true — the session waits for the confirmatory entry to close it.\n' +
+                '  • Option D CONFIRMATORY (the second-of-pair): true (the confirmatory entry closes the pair).',
+            },
+            confirms_entry_id: {
+              type: Type.STRING,
+              description:
+                'Option D pair-link. Set ONLY when the patient is taking the CONFIRMATORY (second) reading after an ' +
+                'earlier emergency-range reading was held as AWAITING. Pass the AWAITING entry id (surfaced in the ' +
+                '"Open AWAITING entry … (id=…)" patient-context line). Backend marks the AWAITING entry resolved and ' +
+                'decides whether the pair fires the absolute-emergency rule (still ≥180/120) or the ' +
+                'confirmed-normal rule (second reading dropped below threshold). Omit on every other call. "" = omit.',
+            },
+            decline_confirmation: {
+              type: Type.BOOLEAN,
+              description:
+                'Option D decline path. Set true ONLY when the patient explicitly REFUSES to take the confirmatory ' +
+                'second reading after an AWAITING entry exists ("I can\'t right now", "later", "no, skip it"). ' +
+                'When true, the BP fields are NOT required — pass zeros or omit. Backend skips creating a new entry ' +
+                'and routes the AWAITING entry to the care team immediately (no 4-hour cron wait). ' +
+                'MUST be accompanied by confirms_entry_id. Default false.',
             },
           },
           // Bug 50 — chat-voice parity. Chat tool schema marks the same
@@ -429,6 +477,54 @@ export class VoiceToolsService {
     args: Record<string, unknown>,
     ctx: ToolContext,
   ): Promise<DispatchResult> {
+    // Option D decline path (parity with journal-tools.ts ~780-807). The model
+    // routes the patient's refusal of the confirmatory retake ("I can't right
+    // now" / "later" / "no") through submit_checkin with
+    // decline_confirmation:true + confirms_entry_id pointing at the held
+    // AWAITING entry. Bypass ALL field validation — no new JournalEntry is
+    // created; instead the held entry flips to UNCONFIRMED immediately so the
+    // care team is paged without waiting for the 4-hour cron safety net. This
+    // MUST sit above the BP-range / asymmetric / ghost-save / medication guards
+    // because a decline carries 0/omitted BP and would otherwise be rejected.
+    if (toBool(args.decline_confirmation, false) === true) {
+      const declineId = asString(args.confirms_entry_id, '').trim()
+      if (!declineId) {
+        return {
+          llmResponse: {
+            saved: false,
+            reason: 'DECLINE_WITHOUT_ID',
+            message:
+              'decline_confirmation:true requires confirms_entry_id pointing at the AWAITING entry the patient is declining.',
+          },
+          events: [],
+        }
+      }
+      try {
+        const result = await this.dailyJournal.finalizeUnconfirmedEmergency(
+          ctx.userId,
+          declineId,
+        )
+        return {
+          llmResponse: {
+            declined: true,
+            message:
+              'Confirmatory reading declined. The original reading has been sent to the care team.',
+            data: result,
+          },
+          events: [],
+        }
+      } catch (err) {
+        this.logger.error('submit_checkin: decline_confirmation failed', err)
+        return {
+          llmResponse: {
+            saved: false,
+            message: (err as Error)?.message ?? 'Failed to decline confirmation.',
+          },
+          events: [],
+        }
+      }
+    }
+
     const sbp = toInt(args.systolic_bp, 0)
     const dbp = toInt(args.diastolic_bp, 0)
     // Anti-hallucination guard: a BP reading is two numbers — if the LLM
@@ -458,6 +554,25 @@ export class VoiceToolsService {
         llmResponse: {
           saved: false,
           message: `BP values out of range (got ${sbp}/${dbp}). Systolic must be 60-250, diastolic 40-150. Please ask the patient to repeat.`,
+        },
+        events: [],
+      }
+    }
+    // Transposition pre-check (strike 1). The backend rejects DBP ≥ SBP as
+    // 'implausible-reading' (daily_journal.service.ts), which almost always
+    // means the patient stated the numbers in the wrong order (e.g. 80/120
+    // instead of 120/80). Catch it here so the patient hears a friendly
+    // re-ask instead of the model retrying the same flipped values.
+    // Clinical copy — placeholder pending Dr. Singal sign-off.
+    if (sbpProvided && dbpProvided && dbp >= sbp) {
+      this.logger.warn(`BP transposed: ${sbp}/${dbp} (dbp >= sbp) — re-ask`)
+      return {
+        llmResponse: {
+          saved: false,
+          reason: 'IMPLAUSIBLE_READING',
+          message:
+            'The numbers look flipped — the top number should be larger than the bottom. ' +
+            'Ask the patient to read both numbers again and re-call submit_checkin with the corrected values.',
         },
         events: [],
       }
@@ -554,17 +669,12 @@ export class VoiceToolsService {
       }
     }
 
-    const detail = `BP=${sbp}/${dbp} meds=${medicationTaken ? 'taken' : 'missed'} symptoms=${
-      symptoms.length ? symptoms.join(',') : 'none'
-    } weight=${weight || 'N/A'}`
-
-    const events: ToolEvent[] = [
-      { kind: 'action', type: 'submitting_checkin', detail },
-    ]
-
-    // Resolve date+time in patient timezone.
+    // Resolve date+time in patient timezone (moved above the pre-flight guards
+    // so future-date / 30-day rejects return BEFORE we emit a "submitting"
+    // action event the caller would have to reconcile).
     const nowParts = formatInTz(new Date(), ctx.timezone)
-    let resolvedDate = `${nowParts.y}-${nowParts.mo}-${nowParts.d}`
+    const todayLocal = `${nowParts.y}-${nowParts.mo}-${nowParts.d}`
+    let resolvedDate = todayLocal
     const entryDate = asString(args.entry_date, '').trim()
     if (entryDate && /^\d{4}-\d{2}-\d{2}$/.test(entryDate)) {
       resolvedDate = entryDate
@@ -582,13 +692,93 @@ export class VoiceToolsService {
       }
     }
 
+    // Future-date guard — parity with journal-tools.ts ~869-876 and the form's
+    // measuredAt window. Compare against the patient's LOCAL calendar day.
+    if (resolvedDate > todayLocal) {
+      return {
+        llmResponse: {
+          saved: false,
+          reason: 'FUTURE_DATE',
+          message:
+            `Can't save a check-in for a future date (${resolvedDate}). ` +
+            'Readings are only for today or past dates — ask the patient for the correct date.',
+        },
+        events: [],
+      }
+    }
+    // 30-day stale-reading guard — parity with journal-tools.ts ~882-890 and
+    // the form's 30-day limit, so backfilling old readings can't skew the
+    // session-averaging window or the pre-day-3 personalization gate.
+    const STALE_READING_MS = 30 * 24 * 60 * 60 * 1000
+    const entryAgeMs = Date.now() - new Date(`${resolvedDate}T12:00:00.000Z`).getTime()
+    if (entryAgeMs > STALE_READING_MS) {
+      return {
+        llmResponse: {
+          saved: false,
+          reason: 'STALE_READING',
+          message:
+            `Can't save a reading older than 30 days (${resolvedDate}). ` +
+            'The BP check-in form has the same limit — ask the patient if they meant a more recent date.',
+        },
+        events: [],
+      }
+    }
+
+    // Pulse range pre-check (30-220). The DTO 422s on out-of-range; catch it
+    // here for a friendly re-ask. 0 = not provided (skipped) — never rejected.
+    const pulse = toInt(args.pulse, 0)
+    if (pulse > 0 && (pulse < 30 || pulse > 220)) {
+      return {
+        llmResponse: {
+          saved: false,
+          reason: 'PULSE_OUT_OF_RANGE',
+          message:
+            `That pulse (${pulse}) is outside the plausible 30-220 bpm range. ` +
+            'Ask the patient to re-read just the pulse number before saving.',
+        },
+        events: [],
+      }
+    }
+
+    // Weight range pre-check. Backend stores kg (20-300); normalise first so
+    // an out-of-range lbs value gets a unit-aware re-ask instead of a 422.
+    const weightUnitArg =
+      typeof args.weight_unit === 'string' ? args.weight_unit : undefined
+    const weightKg = weight > 0 ? normaliseWeightToKg(weight, weightUnitArg) : 0
+    if (weight > 0 && weightKg > 0 && (weightKg < 20 || weightKg > 300)) {
+      const unitLabel =
+        typeof weightUnitArg === 'string' && weightUnitArg.toUpperCase() === 'KG'
+          ? 'kg (20-300 allowed)'
+          : 'lbs (about 45-661 allowed)'
+      return {
+        llmResponse: {
+          saved: false,
+          reason: 'WEIGHT_OUT_OF_RANGE',
+          message:
+            `That weight (${weight} ${unitLabel}) is outside the plausible range. ` +
+            'Ask the patient to re-read just the weight before saving.',
+        },
+        events: [],
+      }
+    }
+
+    const detail = `BP=${sbp}/${dbp} meds=${medicationTaken ? 'taken' : 'missed'} symptoms=${
+      symptoms.length ? symptoms.join(',') : 'none'
+    } weight=${weight || 'N/A'}`
+
+    const events: ToolEvent[] = [
+      { kind: 'action', type: 'submitting_checkin', detail },
+    ]
+
     const measuredAtIso = isoFromTzWallclock(resolvedDate, resolvedTime, ctx.timezone)
 
     const dto: Record<string, unknown> = {
       measuredAt: measuredAtIso,
       medicationTaken,
       symptoms,
-      notes: asString(args.notes, ''),
+      // Defensive clamp to the DTO's JOURNAL_NOTE_MAX_LENGTH (1000) so an
+      // over-long note silently truncates instead of 422-ing the whole save.
+      notes: asString(args.notes, '').slice(0, JOURNAL_NOTE_MAX_LENGTH),
     }
     if (bpProvided) {
       dto.systolicBP = sbp
@@ -599,14 +789,9 @@ export class VoiceToolsService {
     // when the LLM omits the unit. JournalEntry.weight stores kg, so
     // normalise here. The submitCheckin response below still echoes raw
     // patient lbs for the frontend CheckinCard (which displays lbs).
-    if (weight > 0) {
-      const kg = normaliseWeightToKg(
-        weight,
-        typeof args.weight_unit === 'string' ? args.weight_unit : undefined,
-      )
-      if (kg > 0) dto.weight = kg
-    }
-    const pulse = toInt(args.pulse, 0)
+    // weightKg + pulse were computed and range-checked in the pre-flight guards
+    // above; just attach them here.
+    if (weightKg > 0) dto.weight = weightKg
     if (pulse > 0) dto.pulse = pulse
     const position = asString(args.position, '').trim().toUpperCase()
     if (['SITTING', 'STANDING', 'LYING'].includes(position)) {
@@ -697,11 +882,62 @@ export class VoiceToolsService {
         otherSymptomsRaw,
         flagsForDedupe,
       )
-      if (dedupedOther && dedupedOther.length) dto.otherSymptoms = dedupedOther
+      if (dedupedOther && dedupedOther.length) {
+        // Defensive clamp to the DTO's custom-symptom caps (≤20 items, each
+        // ≤120 chars) so a runaway model can't 422 the whole save.
+        dto.otherSymptoms = dedupedOther
+          .slice(0, JOURNAL_CUSTOM_SYMPTOMS_MAX_COUNT)
+          .map((s) => s.slice(0, JOURNAL_CUSTOM_SYMPTOM_MAX_LENGTH))
+      }
     }
 
     const sessionId = asString(args.session_id, '').trim()
     if (sessionId) dto.sessionId = sessionId
+
+    // ── Option D — emergency-range retake-to-confirm (parity with text chat) ──
+    // confirms_entry_id present → this is the CONFIRMATORY (second) reading;
+    // backend resolves the held AWAITING entry and fires the absolute-emergency
+    // or confirmed-normal rule from the pair. No extra branch needed here.
+    const confirmsId = asString(args.confirms_entry_id, '').trim()
+    if (confirmsId) dto.confirmsEntryId = confirmsId
+    // beginEmergencyConfirmation is AUTO-DETECTED (not a tool param), mirroring
+    // journal-tools.ts ~1043-1061. The FE form sets this via Screen A; voice
+    // has no Screen A, so the dispatcher computes it: a NEW emergency-range
+    // reading (SBP≥180 OR DBP≥120) with NO co-occurring Level-2 / airway
+    // symptom enters the AWAITING hold (engine NOT run, no immediate fire).
+    // Co-occurring override symptoms take the symptom-override Tier-1 path
+    // instead — backend fires instantly, so they must NOT enter the hold.
+    // NEVER set on a confirmatory (second) reading.
+    dto.beginEmergencyConfirmation = (() => {
+      if (confirmsId) return false
+      const emergencyRange = sbp >= 180 || dbp >= 120
+      if (!emergencyRange) return false
+      const hasOverrideSymptom =
+        dto.chestPainOrDyspnea === true ||
+        dto.severeHeadache === true ||
+        dto.focalNeuroDeficit === true ||
+        dto.alteredMentalStatus === true ||
+        dto.severeEpigastricPain === true ||
+        dto.throatTightness === true ||
+        dto.faceSwelling === true
+      return !hasOverrideSymptom
+    })()
+    // Session boundary — editable-buffer-window parity with the form (mirrors
+    // journal-tools.ts). DEFER single non-emergency readings instead of closing
+    // them immediately, so the backend's engineEvaluationDeferredUntil hold
+    // gives the patient a 5-min editable window (no alert, not surfaced to the
+    // care team) before the cron finalizes. "I'm good / all set" → finalize_checkin
+    // fires it early; edits → update_checkin never re-trigger. Honour an explicit
+    // close_session (e.g. true on the LAST multi-reading); Option D confirmatory
+    // (confirms_entry_id) closes + fast-fires the pair; everything else defers.
+    // Emergency rules fire on create regardless of the hold, and closeSession is
+    // ignored while AWAITING, so emergencies are unaffected.
+    dto.closeSession =
+      args.close_session !== undefined
+        ? toBool(args.close_session, false)
+        : confirmsId
+          ? true
+          : false
 
     if (args.measurement_conditions && typeof args.measurement_conditions === 'object') {
       const allowed = new Set([
@@ -732,15 +968,29 @@ export class VoiceToolsService {
     let saved = false
     let savedMessage = 'There was a problem saving the check-in. Please try again later.'
     let intakeIncomplete = false
+    let savedEntryId: string | null = null
+    let editableUntil: string | null = null
+    let deferred = false
     try {
       // Same DTO shape NestJS daily-journal controller expects (validated by
       // CreateJournalEntryDto). Calling the service directly skips network +
       // ValidationPipe, but we shape the payload to match so behaviour stays
       // identical.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await this.dailyJournal.create(ctx.userId, dto as any)
+      const createResult = await this.dailyJournal.create(ctx.userId, dto as any)
       saved = true
-      savedMessage = `Check-in saved successfully for ${resolvedDate} at ${resolvedTime}. The care team has been notified.`
+      // Editable-buffer-window parity: a deferred (non fast-fired) entry carries
+      // engineEvaluationDeferredUntil in the future — held for ~5 min, no alert,
+      // not surfaced to the care team yet. Capture the id + deadline so the LLM
+      // can tell the patient it's editable and call finalize_checkin on "I'm
+      // good", and the frontend can show the countdown badge.
+      const created = (createResult as { data?: { id?: string; engineEvaluationDeferredUntil?: string | null } })?.data
+      savedEntryId = created?.id ?? null
+      editableUntil = created?.engineEvaluationDeferredUntil ?? null
+      deferred = editableUntil != null && new Date(editableUntil).getTime() > Date.now()
+      savedMessage = deferred
+        ? `Check-in saved for ${resolvedDate} at ${resolvedTime}. It's editable for the next few minutes — tell the patient they can change anything, or say they're all set and I'll finalize it.`
+        : `Check-in saved successfully for ${resolvedDate} at ${resolvedTime}. The care team has been notified.`
     } catch (err) {
       this.logger.error('submit_checkin: dailyJournal.create failed', err)
       saved = false
@@ -758,12 +1008,15 @@ export class VoiceToolsService {
           "Before I can save a check-in I need you to complete your one-time intake form. " +
           "Please go to /clinical-intake and come back when you're done."
       } else if (err instanceof UnprocessableEntityException) {
-        // "implausible-reading" — diastolic ≥ systolic. Almost always a BP
-        // transpose at the tool-call layer. Tell the LLM to re-ask both
-        // numbers; do NOT silently retry with the same args.
+        // "implausible-reading" — diastolic ≥ systolic. The pre-flight
+        // transposition guard above should have caught the obvious case and
+        // already re-asked once (strike 1); reaching the backend means the
+        // re-submitted values are STILL flipped, so escalate to strike 2.
+        // Clinical copy — placeholder pending Dr. Singal sign-off.
         savedMessage =
-          "The numbers look transposed — the top number should be bigger than the bottom. " +
-          "Ask the patient to repeat both numbers and re-call submit_checkin with the corrected values."
+          "I'm still getting a top number that isn't larger than the bottom. " +
+          "Let's double-check the cuff display together — the bigger number is the top (systolic) reading. " +
+          'Ask the patient to read it again and re-call submit_checkin with the corrected values.'
       } else if (err instanceof ConflictException) {
         // P2002 unique constraint on (userId, measuredAt). Two readings
         // resolved to the same minute (patient took two within a minute,
@@ -803,6 +1056,11 @@ export class VoiceToolsService {
       symptoms,
       saved,
       hasActiveMedications: activeMeds,
+      // Editable-buffer-window parity — drives the voice saved-card countdown
+      // badge and the "I'm good" confirm affordance. Null when the reading
+      // fast-fired (emergency / explicit close / Option D confirmatory).
+      entryId: savedEntryId ?? undefined,
+      editableUntil: editableUntil ?? undefined,
     }
     events.push({ kind: 'checkin_saved', payload: checkinSummary })
     events.push({
@@ -844,6 +1102,12 @@ export class VoiceToolsService {
         // Bug 60 — propagate so the LLM doesn't say "I saved your check-in
         // and you took all your medications" to a 0-meds patient.
         has_active_medications: activeMeds,
+        // Editable-buffer-window parity — the entry id to pass to
+        // finalize_checkin when the patient says "I'm good / all set", and
+        // whether the reading is currently held in its editable window.
+        entry_id: savedEntryId,
+        editable_until: editableUntil,
+        deferred,
         message: savedMessage,
       },
       events,

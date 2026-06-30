@@ -761,7 +761,15 @@ export class ProviderService {
     }
 
     const recentEntries = await this.prisma.journalEntry.findMany({
-      where: { userId },
+      // Editable-buffer-window parity: hide readings still held in their 5-min
+      // editable window (not yet committed to the care team) — see getPatientJournal.
+      where: {
+        userId,
+        NOT: {
+          singleReadingFinalized: false,
+          engineEvaluationDeferredUntil: { gt: new Date() },
+        },
+      },
       orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
       take: 14,
       select: {
@@ -851,9 +859,21 @@ export class ProviderService {
   async getPatientJournal(userId: string, page: number, limit: number) {
     const skip = (page - 1) * limit
 
+    // Editable-buffer-window parity: a reading still HELD in its 5-min editable
+    // window (singleReadingFinalized=false AND engineEvaluationDeferredUntil in
+    // the future) has not committed to the care team and fires no alert yet —
+    // it must not surface to providers until it finalizes, exactly as a form
+    // reading isn't persisted until the patient commits. Exclude held entries.
+    const notHeld = {
+      NOT: {
+        singleReadingFinalized: false,
+        engineEvaluationDeferredUntil: { gt: new Date() },
+      },
+    }
+
     const [entries, total] = await Promise.all([
       this.prisma.journalEntry.findMany({
-        where: { userId },
+        where: { userId, ...notHeld },
         orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: limit,
@@ -885,7 +905,7 @@ export class ProviderService {
           },
         },
       }),
-      this.prisma.journalEntry.count({ where: { userId } }),
+      this.prisma.journalEntry.count({ where: { userId, ...notHeld } }),
     ])
 
     return {

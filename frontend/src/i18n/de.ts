@@ -427,6 +427,9 @@ const de: Record<TranslationKey, string> = {
   'chat.card.viewAlerts': 'Warnungen anzeigen',
   'chat.card.dismiss': 'Schließen',
   'chat.card.done': 'Fertig',
+  'chat.card.editableWindow': 'Noch {time} bearbeitbar — noch nicht an Ihr Behandlungsteam gesendet',
+  'chat.card.imGood': 'Alles gut',
+  'chat.card.sending': 'Wird gesendet…',
 
   // ─── Notifications ─────────────────────────────────────────────────────────
   'notifications.title': 'Benachrichtigungen',
