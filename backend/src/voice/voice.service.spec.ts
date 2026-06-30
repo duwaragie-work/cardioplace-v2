@@ -106,7 +106,14 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
       ),
     }
     configService = {
-      get: jest.fn().mockImplementation((key: string, dflt?: string) => dflt),
+      // Voice service constructs its Live client via the Vertex factory
+      // (buildGoogleGenAIClient). The factory reads GOOGLE_CLOUD_PROJECT
+      // and throws if unset, so stub a project here. GOOGLE_CLOUD_LOCATION
+      // defaults to us-central1 in the factory — no need to stub.
+      get: jest.fn().mockImplementation((key: string, dflt?: string) => {
+        if (key === 'GOOGLE_CLOUD_PROJECT') return 'test-gcp-project'
+        return dflt
+      }),
       getOrThrow: jest.fn().mockReturnValue('test-secret'),
     }
     // Bug 17 — voice now fetches the rolling session summary from

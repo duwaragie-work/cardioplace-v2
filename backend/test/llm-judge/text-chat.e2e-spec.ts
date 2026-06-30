@@ -5,8 +5,12 @@
  * verifies tool calls + emergency detection, and judges response quality.
  * All results logged to LangSmith.
  *
- * Requires: GOOGLE_API_KEY, DATABASE_URL, JWT_ACCESS_SECRET
- * Optional: LANGSMITH_API_KEY, LANGSMITH_PROJECT
+ * Requires: DATABASE_URL, JWT_ACCESS_SECRET, GOOGLE_CLOUD_PROJECT.
+ *           Auth via ADC: set GOOGLE_APPLICATION_CREDENTIALS (local / CI)
+ *           or attach a runtime SA (prod). Cardioplace runs Gemini
+ *           exclusively on Vertex AI in GCP — there's no AI Studio path.
+ * Optional: GOOGLE_CLOUD_LOCATION (defaults us-central1), LANGSMITH_API_KEY,
+ *           LANGSMITH_PROJECT.
  *
  * Run: npm run test:e2e -- --testPathPattern=llm-judge/text
  */
@@ -16,7 +20,9 @@ import request from 'supertest'
 import { JudgeService, EvalResult } from './judge.service.js'
 import { setupTestApp, teardownTestApp, TestContext } from './test-helpers.js'
 
-const skip = !process.env.GOOGLE_API_KEY
+// Skip when Vertex creds aren't available — mirrors the production
+// factory's required-env guard.
+const skip = !process.env.GOOGLE_CLOUD_PROJECT
 const descr = skip ? describe.skip : describe
 
 descr('Text Chat — Real E2E + LLM-as-Judge', () => {

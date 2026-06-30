@@ -21,6 +21,7 @@ import { ConversationHistoryService } from '../chat/services/conversation-histor
 import { SystemPromptService } from '../chat/services/system-prompt.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
+import { buildGoogleGenAIClient } from '../gemini/google-genai-client.factory.js'
 import { IntakeStatusService } from '../intake/intake-status.service.js'
 import { INTAKE_EVENTS, type IntakeUpdatedPayload } from '../intake/intake-events.js'
 import { JOURNAL_EVENTS } from '../daily_journal/constants/events.js'
@@ -193,11 +194,13 @@ export class VoiceService implements OnModuleDestroy {
 
   // Default to a Live-capable model. Override via GEMINI_VOICE_MODEL.
   private readonly voiceModel: string
-  // Dedicated GoogleGenAI client pinned to v1alpha for Live API. The shared
-  // `GeminiService.clientInstance` defaults to v1beta (for text/embeddings
-  // /OCR) where Live's bidiGenerateContent isn't exposed — caused the
-  // "model not found for API version v1beta" error. v1alpha is the
-  // documented Live endpoint on the Gemini Developer API (AI Studio key).
+  // Dedicated GoogleGenAI client pinned to the Live API's apiVersion. The
+  // shared `GeminiService.clientInstance` uses the SDK default (suitable
+  // for text / embeddings / OCR) where Live's bidiGenerateContent isn't
+  // exposed — caused the "model not found for API version v1beta" error
+  // on the legacy AI Studio path. On Vertex AI (the only provider we
+  // support post-migration), Live ships under v1beta1, which is what we
+  // pin to in the constructor below.
   private readonly liveClient: GoogleGenAI
 
   constructor(
@@ -210,18 +213,21 @@ export class VoiceService implements OnModuleDestroy {
     private readonly voiceTools: VoiceToolsService,
     private readonly intakeStatusService: IntakeStatusService,
   ) {
-    // Default to a Live-capable model verified present via ListModels on
-    // the Gemini Developer API. `gemini-2.5-flash-native-audio-preview-
-    // 09-2025` exposes bidiGenerateContent and produces native-audio
-    // output (better voice quality vs. cascading models). Override via
-    // GEMINI_VOICE_MODEL env var.
+    // Default to the GA Live-capable native-audio model on Vertex AI.
+    // `gemini-live-2.5-flash-native-audio` exposes bidiGenerateContent and
+    // produces native-audio output (better voice quality vs. cascading
+    // models). It replaces the preview model
+    // `gemini-live-2.5-flash-preview-native-audio-09-2025`, which was
+    // deprecated and removed on 2026-03-19. Override via GEMINI_VOICE_MODEL
+    // env var only if Google ships a newer Live-capable variant.
     this.voiceModel =
       this.config.get<string>('GEMINI_VOICE_MODEL') ??
-      'gemini-2.5-flash-native-audio-preview-09-2025'
-    const apiKey = this.config.getOrThrow<string>('GOOGLE_API_KEY')
-    this.liveClient = new GoogleGenAI({
-      apiKey,
-      apiVersion: 'v1alpha',
+      'gemini-live-2.5-flash-native-audio'
+    // Vertex AI ships the Live API under apiVersion v1beta1 (NOT the SDK
+    // default). Without this override the constructed client points at a
+    // text-only surface and `client.live.connect(...)` 404s.
+    this.liveClient = buildGoogleGenAIClient(this.config, {
+      apiVersion: 'v1beta1',
     })
   }
 
@@ -319,8 +325,10 @@ export class VoiceService implements OnModuleDestroy {
     }
 
     // ── Open Gemini Live session (Step 4 — replaces ADK gRPC stream) ──
-    // Use the dedicated v1alpha client (see constructor). The shared
-    // `GeminiService.clientInstance` is on v1beta for text/OCR/embeddings.
+    // Use the dedicated Vertex Live client (see constructor — pinned to
+    // apiVersion v1beta1, which is where Vertex hosts the Live surface).
+    // The shared `GeminiService.clientInstance` uses the SDK default,
+    // which exposes text/OCR/embeddings but not bidiGenerateContent.
     const client = this.liveClient
     // B.4 — resolve the v2 flag via ConfigService (same source + exact
     // `=== 'true'` check as the text chat) so voice and text never drift.
