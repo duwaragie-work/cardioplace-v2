@@ -24,6 +24,7 @@ import {
   Mail,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
 import {
   isBiometricSupported,
   registerBiometric,
@@ -58,6 +59,7 @@ function looksLikePhone(name: string | null): boolean {
 
 export default function SettingsPage() {
   const { user, isLoading } = useAuth();
+  const { t } = useLanguage();
 
   const [supported, setSupported] = useState(false);
   const [credentials, setCredentials] = useState<WebAuthnCredentialRow[]>([]);
@@ -113,8 +115,8 @@ export default function SettingsPage() {
       } else {
         setNotice(
           mode === 'platform'
-            ? 'Biometric sign-in is on for this device.'
-            : 'Your other device was added.',
+            ? t('settings.bio.noticeOn')
+            : t('settings.bio.noticeAdded'),
         );
       }
       await load();
@@ -164,7 +166,7 @@ export default function SettingsPage() {
     try {
       await deleteBiometricCredential(id);
       setCredentials((prev) => prev.filter((c) => c.id !== id));
-      setNotice('Device removed.');
+      setNotice(t('settings.bio.deviceRemoved'));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove device.');
@@ -220,10 +222,10 @@ export default function SettingsPage() {
           </div>
           <div className="min-w-0">
             <h1 className="text-xl font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
-              Settings
+              {t('settings.title')}
             </h1>
             <p className="text-[12px] truncate" style={{ color: 'var(--brand-text-muted)' }}>
-              Manage how you sign in and keep your account secure.
+              {t('settings.subtitle')}
             </p>
           </div>
         </div>
@@ -233,7 +235,7 @@ export default function SettingsPage() {
           className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
           style={{ color: 'var(--brand-text-muted)' }}
         >
-          Sign-in &amp; security
+          {t('settings.security')}
         </p>
 
         {/* Factor 1 — Email one-time code (always on, read-only) */}
@@ -255,7 +257,7 @@ export default function SettingsPage() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                  Email one-time code
+                  {t('settings.email.title')}
                 </h2>
                 <span
                   className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide"
@@ -265,11 +267,11 @@ export default function SettingsPage() {
                   }}
                 >
                   <Check className="w-3 h-3" />
-                  Always on
+                  {t('settings.badge.alwaysOn')}
                 </span>
               </div>
               <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-                A 6-digit code (or magic link) is sent to your email each time you sign in.
+                {t('settings.email.desc')}
               </p>
             </div>
           </div>
@@ -283,7 +285,7 @@ export default function SettingsPage() {
                   className="text-[11px] font-semibold uppercase tracking-wide"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
-                  Codes are sent to
+                  {t('settings.email.sentTo')}
                 </p>
                 <p
                   className="mt-0.5 text-[13.5px] font-medium truncate"
@@ -293,7 +295,7 @@ export default function SettingsPage() {
                 </p>
               </div>
               <span className="shrink-0 text-[11.5px]" style={{ color: 'var(--brand-text-muted)' }}>
-                Can&apos;t be changed here
+                {t('settings.email.cantChange')}
               </span>
             </div>
           </div>
@@ -318,7 +320,7 @@ export default function SettingsPage() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                  Face ID / fingerprint
+                  {t('settings.bio.title')}
                 </h2>
                 {hasBiometric ? (
                   <span
@@ -329,7 +331,7 @@ export default function SettingsPage() {
                     }}
                   >
                     <Check className="w-3 h-3" />
-                    On
+                    {t('settings.badge.on')}
                   </span>
                 ) : (
                   <span
@@ -339,14 +341,12 @@ export default function SettingsPage() {
                       color: 'var(--brand-primary-purple)',
                     }}
                   >
-                    Recommended
+                    {t('settings.badge.recommended')}
                   </span>
                 )}
               </div>
               <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-                After your email code, confirm with Face ID or your fingerprint.
-                Keep your recovery codes safe — they&apos;re the only way in if you
-                can&apos;t use biometric.
+                {t('settings.bio.desc')}
               </p>
             </div>
           </div>
@@ -427,18 +427,18 @@ export default function SettingsPage() {
                               if (e.key === 'Enter') { e.preventDefault(); void handleRename(c.id); }
                               if (e.key === 'Escape') setEditingId(null);
                             }}
-                            placeholder="Device name"
+                            placeholder={t('settings.bio.deviceName')}
                             className="w-full h-8 px-2 rounded-lg border border-[#e5d9f2] text-[13.5px] outline-none focus:ring-2 focus:ring-[#7B00E0]"
                             style={{ color: 'var(--brand-text-primary)' }}
                           />
                         ) : (
                           <>
                             <p className="text-[13.5px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
-                              {c.deviceName || 'Registered device'}
+                              {c.deviceName || t('settings.bio.registeredDevice')}
                             </p>
                             <p className="text-[11.5px]" style={{ color: 'var(--brand-text-muted)' }}>
-                              Added {formatDate(c.createdAt)}
-                              {c.lastUsedAt ? ` · last used ${formatDate(c.lastUsedAt)}` : ''}
+                              {t('settings.bio.added')} {formatDate(c.createdAt)}
+                              {c.lastUsedAt ? ` · ${t('settings.bio.lastUsed')} ${formatDate(c.lastUsedAt)}` : ''}
                             </p>
                           </>
                         )}
@@ -449,7 +449,7 @@ export default function SettingsPage() {
                             type="button"
                             onClick={() => void handleRename(c.id)}
                             disabled={savingRename || !editName.trim()}
-                            aria-label="Save name"
+                            aria-label={t('settings.bio.saveNameAria')}
                             className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-primary-purple-light)] disabled:opacity-50 cursor-pointer"
                             style={{ color: 'var(--brand-primary-purple)' }}
                           >
@@ -471,7 +471,7 @@ export default function SettingsPage() {
                           <button
                             type="button"
                             onClick={() => startRename(c.id, c.deviceName)}
-                            aria-label="Rename device"
+                            aria-label={t('settings.bio.renameAria')}
                             className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-primary-purple-light)] cursor-pointer"
                             style={{ color: 'var(--brand-text-muted)' }}
                           >
@@ -481,7 +481,7 @@ export default function SettingsPage() {
                             type="button"
                             onClick={() => void handleRemove(c.id)}
                             disabled={removingId === c.id}
-                            aria-label="Remove device"
+                            aria-label={t('settings.bio.removeAria')}
                             className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-alert-red-light)] disabled:opacity-50 cursor-pointer"
                             style={{ color: 'var(--brand-alert-red)' }}
                           >
@@ -506,10 +506,8 @@ export default function SettingsPage() {
                 >
                   <Smartphone className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>
-                    <strong>Add your phone too.</strong> A computer passkey only
-                    works on that computer. On a phone, tap “Set up” below; or
-                    from this computer, choose “use a phone” and scan the QR with
-                    your phone.
+                    <strong>{t('settings.bio.nudgeTitle')}</strong>{' '}
+                    {t('settings.bio.nudgeBody')}
                   </span>
                 </div>
               )}
@@ -522,8 +520,10 @@ export default function SettingsPage() {
                 >
                   <Info className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>
-                    You&apos;ve reached the maximum of {MAX_BIOMETRIC_DEVICES}{' '}
-                    devices. Remove one above to add another.
+                    {t('settings.bio.maxReached').replace(
+                      '{count}',
+                      String(MAX_BIOMETRIC_DEVICES),
+                    )}
                   </span>
                 </div>
               )}
@@ -540,12 +540,12 @@ export default function SettingsPage() {
                   {enabling === 'platform' ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Setting up…
+                      {t('settings.bio.settingUp')}
                     </>
                   ) : (
                     <>
                       <Plus className="w-4 h-4" />
-                      {hasBiometric ? 'Set up this device' : 'Set up Face ID / fingerprint'}
+                      {hasBiometric ? t('settings.bio.setupThis') : t('settings.bio.setupFirst')}
                     </>
                   )}
                 </button>
@@ -558,10 +558,7 @@ export default function SettingsPage() {
                   style={{ backgroundColor: 'var(--brand-background, #FAFBFF)', color: 'var(--brand-text-muted)' }}
                 >
                   <Info className="w-4 h-4 mt-0.5 shrink-0" />
-                  <span>
-                    Face ID or fingerprint isn&apos;t available on this device —
-                    but you can still add a phone or tablet below.
-                  </span>
+                  <span>{t('settings.bio.notSupported')}</span>
                 </div>
               )}
 
@@ -578,12 +575,12 @@ export default function SettingsPage() {
                     {enabling === 'cross-platform' ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        Waiting for the other device…
+                        {t('settings.bio.waitingOther')}
                       </>
                     ) : (
                       <>
                         <Smartphone className="w-4 h-4" />
-                        Add another device (phone / tablet)
+                        {t('settings.bio.addAnother')}
                       </>
                     )}
                   </button>
@@ -596,10 +593,8 @@ export default function SettingsPage() {
                   >
                     <Bluetooth className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                     <span>
-                      <strong>Turn Bluetooth ON on both devices first.</strong>{' '}
-                      Then on the next screen choose{' '}
-                      <strong>“use a phone or tablet”</strong>, scan the QR with
-                      that device, and confirm with its Face ID / fingerprint.
+                      <strong>{t('settings.bio.bluetoothTitle')}</strong>{' '}
+                      {t('settings.bio.bluetoothBody')}
                     </span>
                   </div>
                 </div>
@@ -625,7 +620,7 @@ export default function SettingsPage() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                    Recovery codes
+                    {t('settings.recovery.title')}
                   </h2>
                   {(recovery?.remaining ?? 0) <= 3 ? (
                     <span
@@ -635,7 +630,7 @@ export default function SettingsPage() {
                         color: 'var(--brand-warning-amber, #92400E)',
                       }}
                     >
-                      Running low
+                      {t('settings.recovery.runningLow')}
                     </span>
                   ) : (
                     <span
@@ -645,15 +640,18 @@ export default function SettingsPage() {
                         color: 'var(--brand-text-muted)',
                       }}
                     >
-                      Fallback
+                      {t('settings.recovery.fallback')}
                     </span>
                   )}
                 </div>
                 <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-                  Use one to sign in if you can&apos;t use Face ID / fingerprint.
+                  {t('settings.recovery.desc')}
                   <span className="font-semibold">
                     {' '}
-                    {recovery?.remaining ?? 0} of 10 left.
+                    {t('settings.recovery.remaining').replace(
+                      '{count}',
+                      String(recovery?.remaining ?? 0),
+                    )}
                   </span>
                 </p>
               </div>
@@ -667,10 +665,10 @@ export default function SettingsPage() {
                 className="w-full h-11 rounded-full border border-[#7B00E0] font-semibold text-sm text-[#7B00E0] hover:bg-[#7B00E0]/5 transition-colors disabled:opacity-50 cursor-pointer inline-flex items-center justify-center gap-2"
               >
                 {regenerating && <Loader2 className="w-4 h-4 animate-spin" />}
-                {regenerating ? 'Generating…' : 'Generate new codes'}
+                {regenerating ? t('settings.recovery.generating') : t('settings.recovery.generate')}
               </button>
               <p className="text-[11.5px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
-                Generating new codes replaces your old ones.
+                {t('settings.recovery.replaceNote')}
               </p>
             </div>
           </section>
@@ -694,7 +692,7 @@ export default function SettingsPage() {
             </button>
             <RecoveryCodesPanel
               codes={codesToShow}
-              acknowledgeLabel="Done"
+              acknowledgeLabel={t('settings.recovery.done')}
               onAcknowledge={() => setCodesToShow(null)}
             />
           </div>

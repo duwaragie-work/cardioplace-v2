@@ -314,7 +314,7 @@ export default function Navbar() {
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
                   <UserIcon className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
-                  Profile
+                  {t('profile.title')}
                 </Link>
                 <Link
                   href="/settings"
@@ -325,7 +325,7 @@ export default function Navbar() {
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
                   <Settings className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
-                  Settings
+                  {t('settings.title')}
                 </Link>
                 <button
                   type="button"
@@ -339,7 +339,7 @@ export default function Navbar() {
                   }}
                 >
                   <LogOut className="w-4 h-4" />
-                  Sign out
+                  {t('profile.signOut')}
                 </button>
               </div>
             )}
