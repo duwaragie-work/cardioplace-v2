@@ -213,7 +213,7 @@ export class VoiceToolsService {
               description:
                 'Mark this reading as the FINAL one in the current measurement session. Defaults to false. ' +
                 'Set true when:\n' +
-                '  • Single-reading check-in: always true (one reading = one session, closed immediately).\n' +
+                '  • Single-reading check-in: leave FALSE / unset — the reading is HELD in a 5-min editable window; the patient finalises early by saying "I\'m good" (→ finalize_checkin) or it auto-finalises on timeout. (The backend forces a bare single reading to defer regardless.)\n' +
                 '  • Multi-reading session: true on the LAST submit_checkin call only (prior calls stay false).\n' +
                 '  • Option D AWAITING (the FIRST emergency-range reading): NEVER true — the session waits for the confirmatory entry to close it.\n' +
                 '  • Option D CONFIRMATORY (the second-of-pair): true (the confirmatory entry closes the pair).',
@@ -932,12 +932,19 @@ export class VoiceToolsService {
     // (confirms_entry_id) closes + fast-fires the pair; everything else defers.
     // Emergency rules fire on create regardless of the hold, and closeSession is
     // ignored while AWAITING, so emergencies are unaffected.
-    dto.closeSession =
-      args.close_session !== undefined
-        ? toBool(args.close_session, false)
-        : confirmsId
-          ? true
-          : false
+    dto.closeSession = (() => {
+      // Option D confirmatory closes + fast-fires the pair.
+      if (confirmsId) return true
+      // Multi-reading session: honour the explicit flag (true only on the LAST).
+      if (sessionId) return toBool(args.close_session, false)
+      // Bare single reading: ALWAYS defer for the 5-min editable window, even
+      // if the model passed close_session:true (legacy "close single readings"
+      // guidance). Forcing false here is what gives voice the editable window —
+      // "I'm good" finalises via finalize_checkin, the cron finalises on
+      // timeout. Honouring the model's true was the bug that suppressed the
+      // editable badge (reading fast-fired instead).
+      return false
+    })()
 
     if (args.measurement_conditions && typeof args.measurement_conditions === 'object') {
       const allowed = new Set([

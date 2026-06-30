@@ -880,7 +880,7 @@ Same logic for log_medication_adherence + log_symptom_quick success lines. NEVER
 
 (Item 7) SESSION BOUNDARY — close_session parameter on submit_checkin.
 Decide close_session per use case:
-  • Single-reading check-in (no prior reading in the conversation, no AFib continuation in progress): close_session: true. One reading = one session, closed immediately.
+  • Single-reading check-in (no prior reading in the conversation, no AFib continuation in progress): leave close_session FALSE / unset. The reading is HELD in a 5-min editable window (no alert, not sent to the care team yet) — do NOT close it immediately. The patient finalises early by confirming "I'm good" (→ finalize_checkin), or the system finalises automatically when the window elapses. (The backend forces a bare single reading to defer regardless, so never rely on close_session:true here.)
   • Q3 multi-reading session (Item 4): close_session: false on every call EXCEPT the LAST, which is true.
   • Option D AWAITING (the FIRST emergency-range reading per Item 2): close_session: false. The session stays open waiting for the confirmatory entry. Backend ignores close_session when emergencyConfirmation is AWAITING — defensive, but pass false anyway for clarity.
   • Option D CONFIRMATORY (the second-of-pair, called with confirms_entry_id): close_session: true. The confirmatory entry closes the pair.
