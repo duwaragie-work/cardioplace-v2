@@ -73,10 +73,14 @@ test.describe('Spec 36 — admin invite flow', () => {
     })
     await tc.dispose()
 
-    // Staff activate on the ADMIN app and land on the dashboard (no patient
-    // onboarding gate for staff roles).
-    await activateInviteViaUI(page, ADMIN_BASE_URL, token, /\/dashboard/)
-    await expect(page).toHaveURL(/\/dashboard/)
+    // Staff are activated but NOT auto-logged-in (phase/27 MFA): the activate
+    // page hands off to /sign-in?activated=1 so they complete OTP (+ TOTP).
+    // See admin/src/app/activate/[token]/page.tsx. Full sign-in is covered by
+    // the auth/MFA specs; here we assert the activation→sign-in handoff.
+    await activateInviteViaUI(page, ADMIN_BASE_URL, token, /\/sign-in\?activated=1/)
+    await expect(page).toHaveURL(/\/sign-in\?activated=1/)
+    // Email is prefilled for the OTP step.
+    await expect(page).toHaveURL(/email=/)
   })
 
   test('36.3 — invite scoping: disallowed caller→role pairs return 403', async ({}, testInfo) => {

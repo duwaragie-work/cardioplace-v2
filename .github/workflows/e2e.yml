@@ -58,6 +58,10 @@ jobs:
       JWT_ACCESS_EXPIRES_IN: 15m
       JWT_REFRESH_SECRET: ci-jwt-refresh-secret
       JWT_REFRESH_EXPIRES_IN: 30d
+      # MFA (TOTP) — EncryptionService requires a 32-byte key as 64 hex chars
+      # (^[0-9a-fA-F]{64}$). Without it every mfa/enroll/complete returns 500
+      # (specs 66/66b). CI-only throwaway key; prod sets a real secret.
+      MFA_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
       WEB_APP_URL: http://localhost:3000,http://localhost:3001
       ADMIN_BASE_URL: http://localhost:3001
       COOKIE_SAME_SITE: lax

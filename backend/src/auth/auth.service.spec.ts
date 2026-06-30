@@ -604,6 +604,98 @@ describe('AuthService', () => {
     })
   })
 
+  // Practice-chip hydration race (2026-06-25): every auth-issuing response must
+  // ship the resolved practice bundle (activePractice + availablePractices) so
+  // the admin chip renders on first paint without waiting for /auth/profile.
+  describe('verifyOtp — practice bundle in response (chip hydration fix)', () => {
+    const armOtp = () => {
+      ;(bcryptService.compare as jest.Mock).mockResolvedValue(true)
+      ;(bcryptService.hash as jest.Mock).mockResolvedValue('hashed_refresh_token')
+      ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue({ ...mockOtpCode })
+      ;(prisma.otpCode.delete as jest.Mock).mockResolvedValue({})
+      ;(prisma.authLog.create as jest.Mock).mockResolvedValue({})
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        tokenHash: 'hash',
+        expiresAt: new Date(),
+      })
+    }
+
+    it('single-practice PROVIDER → response carries activePractice + availablePractices', async () => {
+      armOtp()
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        ...mockUser,
+        roles: [UserRole.PROVIDER],
+      })
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practiceId: 'p-a', practice: { id: 'p-a', name: 'Cedar Hill' } },
+      ])
+
+      const result = await service.verifyOtp('test@example.com', '123456', mockContext)
+
+      expect(result).toMatchObject({
+        activePracticeId: 'p-a',
+        activePractice: { id: 'p-a', name: 'Cedar Hill' },
+        availablePractices: [{ id: 'p-a', name: 'Cedar Hill' }],
+      })
+    })
+
+    it('org-wide SUPER_ADMIN → activePractice null + availablePractices [] (never queries memberships)', async () => {
+      armOtp()
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        ...mockUser,
+        roles: [UserRole.SUPER_ADMIN],
+      })
+
+      const result = await service.verifyOtp('test@example.com', '123456', mockContext)
+
+      expect(result).toMatchObject({
+        activePracticeId: null,
+        activePractice: null,
+        availablePractices: [],
+      })
+      expect(prisma.practiceProvider.findMany).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('mfaChallenge — practice bundle in response (chip hydration fix)', () => {
+    it('enrolled provider → carries activePractice + availablePractices', async () => {
+      ;(prisma.authLog.create as jest.Mock).mockResolvedValue({})
+      ;(prisma.authLog as unknown as { count: jest.Mock }).count = jest
+        .fn()
+        .mockResolvedValue(0)
+      ;(bcryptService.hash as jest.Mock).mockResolvedValue('hashed_refresh_token')
+      ;(prisma.refreshToken.create as jest.Mock).mockResolvedValue({
+        tokenHash: 'hash',
+        expiresAt: new Date(),
+      })
+      ;(jwtService.verifyAsync as jest.Mock).mockResolvedValueOnce({
+        sub: 'user-prov',
+        kind: 'mfa_challenge',
+        activePracticeId: 'p-a',
+      })
+      ;(prisma.totpCredential.findUnique as jest.Mock).mockResolvedValue({
+        secretEncrypted: 'enc-secret',
+        enrolledAt: new Date(),
+      })
+      ;(prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        ...mockUser,
+        id: 'user-prov',
+        roles: [UserRole.PROVIDER],
+      })
+      ;(prisma.practiceProvider.findMany as jest.Mock).mockResolvedValue([
+        { practiceId: 'p-a', practice: { id: 'p-a', name: 'Cedar Hill' } },
+      ])
+
+      const result = await service.mfaChallenge('challenge.jwt', '123456', mockContext)
+
+      expect(result).toMatchObject({
+        activePracticeId: 'p-a',
+        activePractice: { id: 'p-a', name: 'Cedar Hill' },
+        availablePractices: [{ id: 'p-a', name: 'Cedar Hill' }],
+      })
+    })
+  })
+
   describe('TASK-17: verifyOtp - Failure Paths', () => {
     it('should increment attempts counter on wrong OTP', async () => {
       const otpCode = { ...mockOtpCode, attempts: 0 }

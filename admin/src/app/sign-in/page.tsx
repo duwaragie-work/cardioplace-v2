@@ -276,6 +276,23 @@ export default function RegisterPage() {
       // we just don't flash the dashboard on the way.
       const forceEnroll = !!(data && data.mfaEnrollmentRequired);
       if (forceEnroll) skipAuthedRedirect.current = true;
+      // First-time-enrolling MULTI-practice provider: tokens are issued with a
+      // null practice, but they must pick one after setup. Stash the practice
+      // challenge now so the enroll page can hand off to the selector (and the
+      // backend PracticeRequiredGuard blocks the dashboard until they do).
+      if (data && data.practiceSelectRequired && data.practiceSelectChallengeToken) {
+        try {
+          sessionStorage.setItem(
+            'cp_admin_practice_challenge',
+            JSON.stringify({
+              challengeToken: data.practiceSelectChallengeToken,
+              practices: data.practices,
+            }),
+          );
+        } catch {
+          // sessionStorage unavailable — the selector reads URL params too.
+        }
+      }
       login(data as AdminAuthResponse);
       if (forceEnroll) {
         router.push("/sign-in/mfa-enroll?required=1");

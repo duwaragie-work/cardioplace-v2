@@ -111,6 +111,17 @@ export async function fetchWithAuth(
         window.location.href = '/sign-in/mfa-enroll?required=1';
         return response;
       }
+      // Practice-selection gate (Manisha 2026-06-12 §1). A multi-practice
+      // clinician with a null-practice session (e.g. reloaded the dashboard
+      // mid-flow) is bounced to the selector. The selector page itself is
+      // exempt server-side, so this can't loop.
+      if (
+        data?.errorCode === 'practice_select_required' &&
+        !window.location.pathname.startsWith('/sign-in/select-practice')
+      ) {
+        window.location.href = '/sign-in/select-practice';
+        return response;
+      }
     } catch {
       // Not JSON — fall through and return the 403 to the caller.
     }

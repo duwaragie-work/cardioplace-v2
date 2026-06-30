@@ -48,6 +48,13 @@ export type AdminAuthResponse = {
   /** MFA — true when enforcement is on and this user hasn't enrolled TOTP. The
    *  sign-in page redirects to /sign-in/mfa-enroll instead of the dashboard. */
   mfaEnrollmentRequired?: boolean;
+  /** Practice-select handoff for a first-time-enrolling MULTI-practice provider.
+   *  Tokens are issued (enrollment needs a session) with activePracticeId null;
+   *  the FE stashes the challenge and routes enroll → /sign-in/select-practice
+   *  so a null-practice session never lands on the dashboard. */
+  practiceSelectRequired?: boolean;
+  practiceSelectChallengeToken?: string;
+  practices?: Array<{ id: string; name: string }>;
 };
 
 /** Phase/practice-identity — discriminated response shape returned by
@@ -305,6 +312,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     if (response.availablePractices) {
       setAvailablePractices(response.availablePractices);
+    } else {
+      // Every auth-issuing response now carries the bundle, so an absent list
+      // means "no memberships" — reset rather than keep a stale array.
+      setAvailablePractices([]);
     }
     // Refresh token deliberately NOT persisted client-side — the backend
     // already set the HttpOnly refresh_token cookie on the verify-OTP
