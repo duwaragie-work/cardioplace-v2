@@ -1143,9 +1143,9 @@ export class TestControlService {
   // ─── Invite + magic-link token minting (specs 36/37/40) ───────────────────
   //
   // Both UserInvite and MagicLink persist only a SHA-256 hash of the raw
-  // token — the raw value is e-mailed and never stored. In CI the Resend key
-  // is a dummy, so a Playwright spec can never read the e-mail to recover the
-  // token. These two helpers mint a row directly and RETURN the raw token,
+  // token — the raw value is e-mailed and never stored. In CI the SMTP
+  // credentials are a dummy, so a Playwright spec can never read the e-mail to
+  // recover the token. These two helpers mint a row directly and RETURN the raw token,
   // hashing it exactly the way auth.service.ts does so the real production
   // accept/verify endpoints (which the specs drive) accept it unchanged.
 
