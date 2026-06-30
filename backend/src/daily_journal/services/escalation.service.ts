@@ -115,7 +115,7 @@ export class EscalationService {
             `${name} is set to "${url}" in production. Escalation emails will ` +
               `contain unclickable localhost links and will likely trip ` +
               `spam filters (domain-URL mismatch). Set this env var to the ` +
-              `production domain (e.g. https://app.cardioplace.ai) before ` +
+              `production domain (e.g. https://cardioplace.ai) before ` +
               `the next deploy.`,
           )
         }
