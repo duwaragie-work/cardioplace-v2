@@ -205,8 +205,11 @@ describe('AuthService', () => {
                 JWT_REFRESH_EXPIRES_IN: '30d',
                 GOOGLE_CLIENT_ID: 'mock-google-client-id',
                 APPLE_CLIENT_ID: 'mock-apple-client-id',
-                RESEND_API_KEY: 'test-resend-key',
-                EMAIL_FROM: 'Cardioplace <onboarding@resend.dev>',
+                SMTP_HOST: 'smtp.example.com',
+                SMTP_PORT: '587',
+                SMTP_USER: 'test@example.com',
+                SMTP_PASS: 'test-smtp-pass',
+                SMTP_FROM: 'Cardioplace <no-reply@example.com>',
               }
               return config[key] ?? defaultValue
             }),

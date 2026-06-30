@@ -99,12 +99,11 @@ export class EscalationService {
       .get<string>('PATIENT_BASE_URL', 'http://localhost:3000')
       .replace(/\/+$/, '')
 
-    // 2026-06-07 user-flagged — a localhost URL leaked into a Resend email
+    // 2026-06-07 user-flagged — a localhost URL leaked into an outbound email
     // would (a) be unclickable for recipients, (b) trigger spam-filter
-    // mismatched-domain heuristics that Resend specifically warns about.
-    // Loud warning at boot if NODE_ENV is production but the URLs still
-    // contain localhost — catches a missed deploy-time env var without
-    // breaking local dev.
+    // mismatched-domain heuristics. Loud warning at boot if NODE_ENV is
+    // production but the URLs still contain localhost — catches a missed
+    // deploy-time env var without breaking local dev.
     const nodeEnv = config.get<string>('NODE_ENV', 'development')
     if (nodeEnv === 'production') {
       for (const [name, url] of [
@@ -114,7 +113,7 @@ export class EscalationService {
         if (url.includes('localhost') || url.includes('127.0.0.1')) {
           this.logger.error(
             `${name} is set to "${url}" in production. Escalation emails will ` +
-              `contain unclickable localhost links and will likely trip Resend ` +
+              `contain unclickable localhost links and will likely trip ` +
               `spam filters (domain-URL mismatch). Set this env var to the ` +
               `production domain (e.g. https://app.cardioplace.ai) before ` +
               `the next deploy.`,
@@ -1279,7 +1278,7 @@ export class EscalationService {
   /**
    * Gap 5 — caregiver dispatch. For each consented, active caregiver on a
    * real channel, delivers the signed-off caregiverMessage (Minimum Necessary
-   * — no other PHI) via their channel: EMAIL (Resend), DASHBOARD (account
+   * — no other PHI) via their channel: EMAIL (SMTP), DASHBOARD (account
    * caregiver inbox), or SMS (NoopSmsService until a provider is wired). A
    * CaregiverDispatchLog row (unique on alert+caregiver+channel) makes re-fired
    * alerts idempotent. Gated behind CAREGIVER_DISPATCH_ENABLED so production

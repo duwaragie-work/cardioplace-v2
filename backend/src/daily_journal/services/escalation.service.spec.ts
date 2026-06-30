@@ -1077,7 +1077,7 @@ describe('EscalationService', () => {
       // still WRITTEN (the bell query hides it); the EMAIL row is still WRITTEN.
       expect(patientNotifs.some((c) => c[0].data.channel === 'PUSH')).toBe(true)
       expect(patientNotifs.some((c) => c[0].data.channel === 'EMAIL')).toBe(true)
-      // And the real Resend email STILL dispatches (the regression lock — the
+      // And the real SMTP email STILL dispatches (the regression lock — the
       // read filter must never suppress the actual patient email send).
       expect(email.sendEmail).toHaveBeenCalled()
     })

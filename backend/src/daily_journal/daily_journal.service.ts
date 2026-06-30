@@ -87,7 +87,7 @@ const AUDIT_SYMPTOM_FLAGS = [
 /**
  * Channel-aware predicate for the in-app bell LIST + unread COUNT. Both
  * exclusions are READ-SIDE ONLY — the escalation write path
- * (`Notification.create`) and the Resend email send are untouched.
+ * (`Notification.create`) and the SMTP email send are untouched.
  *  • EMAIL rows — outbound deliveries, not in-app bell state. A patient with
  *    both a PUSH and an EMAIL row for one event was seeing it twice while the
  *    badge counted it once (H3 #80).
