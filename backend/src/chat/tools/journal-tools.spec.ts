@@ -304,6 +304,97 @@ describe('journal-tools', () => {
       }))
     })
 
+    it('transposed BP (dbp >= sbp) is caught pre-flight → strike-1 re-ask, create() not called', async () => {
+      const todayISO = new Date().toISOString().slice(0, 10)
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 80,
+          diastolic_bp: 120,
+          medication_taken: true,
+          symptoms: [],
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed.saved).toBe(false)
+      expect(parsed.reason).toBe('IMPLAUSIBLE_READING')
+      expect(parsed.message).toMatch(/flipped/i)
+      expect(mockJournalService.create).not.toHaveBeenCalled()
+    })
+
+    it('backend implausible-reading 422 → strike-2 escalation', async () => {
+      const { UnprocessableEntityException } = await import('@nestjs/common')
+      mockJournalService.create.mockRejectedValue(
+        new UnprocessableEntityException({ message: 'implausible-reading' }),
+      )
+      const todayISO = new Date().toISOString().slice(0, 10)
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 138,
+          diastolic_bp: 85,
+          medication_taken: true,
+          symptoms: [],
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed.saved).toBe(false)
+      expect(parsed.message).toMatch(/still getting/i)
+    })
+
+    it('pulse out of range (30-220) → re-ask, create() not called', async () => {
+      const todayISO = new Date().toISOString().slice(0, 10)
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 80,
+          pulse: 300,
+          medication_taken: true,
+          symptoms: [],
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed.saved).toBe(false)
+      expect(parsed.reason).toBe('PULSE_OUT_OF_RANGE')
+      expect(mockJournalService.create).not.toHaveBeenCalled()
+    })
+
+    it('weight out of range → unit-aware re-ask, create() not called', async () => {
+      const todayISO = new Date().toISOString().slice(0, 10)
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 80,
+          weight: 5,
+          weight_unit: 'KG',
+          medication_taken: true,
+          symptoms: [],
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed.saved).toBe(false)
+      expect(parsed.reason).toBe('WEIGHT_OUT_OF_RANGE')
+      expect(mockJournalService.create).not.toHaveBeenCalled()
+    })
+
     it('should reject submit_checkin when missing required fields', async () => {
       const result = await executeJournalTool(
         'submit_checkin',
@@ -1436,7 +1527,7 @@ describe('journal-tools', () => {
       )
     })
 
-    it('close_session omitted on a single-reading (no session_id) defaults to true (Item 7 — handoff: "every chat-initiated entry defaults to closeSession: true")', async () => {
+    it('close_session omitted on a single-reading (no session_id) now defaults to FALSE — editable-buffer-window parity (was true; deferred so the reading gets a 5-min editable window before its alert)', async () => {
       mockJournalService.create.mockResolvedValue({
         data: { id: 'j2', systolicBP: 130, diastolicBP: 85 },
       })
@@ -1455,8 +1546,57 @@ describe('journal-tools', () => {
       )
       expect(mockJournalService.create).toHaveBeenCalledWith(
         'user-1',
-        expect.objectContaining({ closeSession: true }),
+        expect.objectContaining({ closeSession: false }),
       )
+    })
+
+    it('Option D confirmatory (confirms_entry_id) defaults closeSession to true to close + fast-fire the pair', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'j2d', systolicBP: 185, diastolicBP: 121 },
+      })
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 185,
+          diastolic_bp: 121,
+          medication_taken: true,
+          symptoms: [],
+          confirms_entry_id: 'awaiting-1',
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ closeSession: true, confirmsEntryId: 'awaiting-1' }),
+      )
+    })
+
+    it('deferred reading surfaces deferred:true + entry_id + editable_until from the create result', async () => {
+      const future = new Date(Date.now() + 5 * 60 * 1000).toISOString()
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'held-9', systolicBP: 130, diastolicBP: 80, engineEvaluationDeferredUntil: future },
+      })
+      const result = await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 80,
+          medication_taken: true,
+          symptoms: [],
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      const parsed = JSON.parse(result)
+      expect(parsed.saved).toBe(true)
+      expect(parsed.deferred).toBe(true)
+      expect(parsed.entry_id).toBe('held-9')
+      expect(parsed.editable_until).toBe(future)
     })
 
     it('close_session omitted WITH session_id (Q3 multi-reading mid-batch) defaults to false', async () => {
