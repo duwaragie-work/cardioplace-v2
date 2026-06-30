@@ -765,10 +765,14 @@ export class ProviderService {
       // editable window (not yet committed to the care team) — see getPatientJournal.
       where: {
         userId,
-        NOT: {
-          singleReadingFinalized: false,
-          engineEvaluationDeferredUntil: { gt: new Date() },
-        },
+        // NULL-safe held-exclusion (see getPatientJournal): include a reading
+        // unless it is unfinalized AND deferred into the future. A plain
+        // NOT(finalized=false AND deferred>now) drops NULL-deferral rows.
+        OR: [
+          { singleReadingFinalized: true },
+          { engineEvaluationDeferredUntil: null },
+          { engineEvaluationDeferredUntil: { lte: new Date() } },
+        ],
       },
       orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
       take: 14,
@@ -864,11 +868,20 @@ export class ProviderService {
     // the future) has not committed to the care team and fires no alert yet —
     // it must not surface to providers until it finalizes, exactly as a form
     // reading isn't persisted until the patient commits. Exclude held entries.
+    // A reading is HELD (still in its 5-min editable window) iff it is NOT
+    // finalized AND its engine-evaluation deferral is still in the future.
+    // Express the INCLUDE filter as an explicit OR (de Morgan) instead of
+    // NOT(finalized=false AND deferred>now): for a reading with no deferral
+    // (engineEvaluationDeferredUntil IS NULL) the predicate `null > now` is SQL
+    // NULL, so the NOT(...) collapses to NULL and Postgres drops the row — which
+    // silently hid every normal non-finalized reading (e.g. all seeded/back-
+    // dated history). The OR form below is NULL-safe.
     const notHeld = {
-      NOT: {
-        singleReadingFinalized: false,
-        engineEvaluationDeferredUntil: { gt: new Date() },
-      },
+      OR: [
+        { singleReadingFinalized: true },
+        { engineEvaluationDeferredUntil: null },
+        { engineEvaluationDeferredUntil: { lte: new Date() } },
+      ],
     }
 
     const [entries, total] = await Promise.all([
