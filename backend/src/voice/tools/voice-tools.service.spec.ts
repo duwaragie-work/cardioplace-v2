@@ -398,6 +398,17 @@ describe('VoiceToolsService.dispatch', () => {
     expect(savedEvent?.payload?.entryId).toBe('held-1')
   })
 
+  it('editable window — close_session:true on a BARE single reading is FORCE-DEFERRED to false', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({ data: { id: 'x1' } } as never)
+    await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: true, symptoms: [], close_session: true },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1]
+    expect(dto.closeSession).toBe(false)
+  })
+
   it('Option D — decline_confirmation flips the AWAITING entry, creates NO new entry', async () => {
     const r = await service.dispatch(
       'submit_checkin',

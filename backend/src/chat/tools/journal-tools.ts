@@ -1144,12 +1144,21 @@ export async function executeJournalTool(
           // Backend still ignores closeSession when emergencyConfirmation is
           // AWAITING, and emergency rules fire on create regardless of the
           // hold, so emergencies are unaffected.
-          closeSession:
-            args.close_session !== undefined
-              ? args.close_session === true
-              : args.confirms_entry_id
-                ? true
-                : false,
+          closeSession: (() => {
+            // Option D confirmatory closes + fast-fires the pair.
+            if (args.confirms_entry_id) return true
+            // Multi-reading session: honour the explicit flag — true only on
+            // the LAST reading, false on the intermediates.
+            if (args.session_id) return args.close_session === true
+            // Bare single reading: ALWAYS defer for the 5-min editable window,
+            // even if the model passed close_session:true (it follows the
+            // legacy "close single readings immediately" guidance). Forcing
+            // false here is what actually gives chat the editable window —
+            // "I'm good" finalises via finalize_checkin, the cron finalises on
+            // timeout. Honouring the model's true here was the bug that made
+            // the editable badge never appear (reading fast-fired instead).
+            return false
+          })(),
         } as any)
         ctx.onPatientDataMutated?.(userId)
         // Bug 54 — include weight_display so the LLM verbalises back in the

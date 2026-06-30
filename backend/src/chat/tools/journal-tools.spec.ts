@@ -1503,9 +1503,34 @@ describe('journal-tools', () => {
       expect(props).toHaveProperty('session_id')
     })
 
-    it('close_session=true threads into journalService.create as closeSession', async () => {
+    it('close_session=true is HONOURED on the LAST reading of a multi-reading session (has session_id)', async () => {
       mockJournalService.create.mockResolvedValue({
         data: { id: 'j1', systolicBP: 130, diastolicBP: 85 },
+      })
+      await executeJournalTool(
+        'submit_checkin',
+        {
+          entry_date: todayISO,
+          measurement_time: '08:30',
+          systolic_bp: 130,
+          diastolic_bp: 85,
+          medication_taken: true,
+          symptoms: [],
+          session_id: 'multi-session-1',
+          close_session: true,
+        },
+        mockJournalService as any,
+        'user-1',
+      )
+      expect(mockJournalService.create).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({ closeSession: true }),
+      )
+    })
+
+    it('close_session=true on a BARE single reading (no session_id) is FORCE-DEFERRED to false — editable-window guarantee', async () => {
+      mockJournalService.create.mockResolvedValue({
+        data: { id: 'j1b', systolicBP: 130, diastolicBP: 85 },
       })
       await executeJournalTool(
         'submit_checkin',
@@ -1523,7 +1548,7 @@ describe('journal-tools', () => {
       )
       expect(mockJournalService.create).toHaveBeenCalledWith(
         'user-1',
-        expect.objectContaining({ closeSession: true }),
+        expect.objectContaining({ closeSession: false }),
       )
     })
 
