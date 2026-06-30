@@ -461,6 +461,10 @@ export class ProviderService {
 
       return {
         id: u.id,
+        // Permanent public identifier (CP-PAT-...). Used by admin UI as the
+        // patient's at-a-glance handle and quoted in escalation emails. See
+        // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+        displayId: u.displayId,
         name: u.name,
         email: u.email,
         riskTier: this.deriveRiskTier(profile, u.dateOfBirth),
@@ -726,6 +730,9 @@ export class ProviderService {
 
     const patient = {
       id: user.id,
+      // Permanent public identifier (CP-PAT-...). See
+      // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+      displayId: user.displayId,
       name: user.name,
       email: user.email,
       riskTier: this.deriveRiskTier(profile, user.dateOfBirth),
@@ -754,7 +761,19 @@ export class ProviderService {
     }
 
     const recentEntries = await this.prisma.journalEntry.findMany({
-      where: { userId },
+      // Editable-buffer-window parity: hide readings still held in their 5-min
+      // editable window (not yet committed to the care team) — see getPatientJournal.
+      where: {
+        userId,
+        // NULL-safe held-exclusion (see getPatientJournal): include a reading
+        // unless it is unfinalized AND deferred into the future. A plain
+        // NOT(finalized=false AND deferred>now) drops NULL-deferral rows.
+        OR: [
+          { singleReadingFinalized: true },
+          { engineEvaluationDeferredUntil: null },
+          { engineEvaluationDeferredUntil: { lte: new Date() } },
+        ],
+      },
       orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
       take: 14,
       select: {
@@ -844,9 +863,30 @@ export class ProviderService {
   async getPatientJournal(userId: string, page: number, limit: number) {
     const skip = (page - 1) * limit
 
+    // Editable-buffer-window parity: a reading still HELD in its 5-min editable
+    // window (singleReadingFinalized=false AND engineEvaluationDeferredUntil in
+    // the future) has not committed to the care team and fires no alert yet —
+    // it must not surface to providers until it finalizes, exactly as a form
+    // reading isn't persisted until the patient commits. Exclude held entries.
+    // A reading is HELD (still in its 5-min editable window) iff it is NOT
+    // finalized AND its engine-evaluation deferral is still in the future.
+    // Express the INCLUDE filter as an explicit OR (de Morgan) instead of
+    // NOT(finalized=false AND deferred>now): for a reading with no deferral
+    // (engineEvaluationDeferredUntil IS NULL) the predicate `null > now` is SQL
+    // NULL, so the NOT(...) collapses to NULL and Postgres drops the row — which
+    // silently hid every normal non-finalized reading (e.g. all seeded/back-
+    // dated history). The OR form below is NULL-safe.
+    const notHeld = {
+      OR: [
+        { singleReadingFinalized: true },
+        { engineEvaluationDeferredUntil: null },
+        { engineEvaluationDeferredUntil: { lte: new Date() } },
+      ],
+    }
+
     const [entries, total] = await Promise.all([
       this.prisma.journalEntry.findMany({
-        where: { userId },
+        where: { userId, ...notHeld },
         orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: limit,
@@ -878,7 +918,7 @@ export class ProviderService {
           },
         },
       }),
-      this.prisma.journalEntry.count({ where: { userId } }),
+      this.prisma.journalEntry.count({ where: { userId, ...notHeld } }),
     ])
 
     return {
@@ -1097,6 +1137,8 @@ export class ProviderService {
           select: {
             id: true,
             name: true,
+            // Permanent display ID surfaced on the alert row alongside name.
+            displayId: true,
             dateOfBirth: true,
             communicationPreference: true,
             patientProfile: { select: this.profileSelect },
@@ -1288,6 +1330,8 @@ export class ProviderService {
           select: {
             id: true,
             name: true,
+            // Permanent display ID surfaced on the alert detail row.
+            displayId: true,
             dateOfBirth: true,
             communicationPreference: true,
             patientProfile: { select: this.profileSelect },
@@ -1454,6 +1498,9 @@ export class ProviderService {
         createdAt: alert.createdAt,
         patient: {
           id: alert.user?.id ?? '',
+          // Permanent public-facing identifier surfaced on the alert row.
+          // See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+          displayId: alert.user?.displayId ?? null,
           name: alert.user?.name ?? 'Unknown',
           dateOfBirth: alert.user?.dateOfBirth ?? null,
           communicationPreference: commPref ?? null,

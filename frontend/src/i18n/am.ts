@@ -429,6 +429,9 @@ const am: Record<TranslationKey, string> = {
   'chat.card.viewAlerts': 'ማንቂያዎችን ይመልከቱ',
   'chat.card.dismiss': 'አስወግድ',
   'chat.card.done': 'ተጠናቋል',
+  'chat.card.editableWindow': 'ለ{time} ሊስተካከል ይችላል — ገና ለእንክብካቤ ቡድንዎ አልተላከም',
+  'chat.card.imGood': 'ደህና ነኝ',
+  'chat.card.sending': 'በመላክ ላይ…',
 
   // ─── Notifications ─────────────────────────────────────────────────────────
   'notifications.title': 'ማሳወቂያዎች',

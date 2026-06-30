@@ -121,6 +121,17 @@ export interface CheckinSummary {
   pulsePressureWide?: boolean;
   /** ISO measuredAt string — used in card header */
   measuredAt?: string;
+  /**
+   * Editable-buffer-window parity. `entryId` is the saved entry; `editableUntil`
+   * is engineEvaluationDeferredUntil (ISO). While `editableUntil` is in the
+   * future the reading is HELD in its 5-min editable window — no alert, not
+   * surfaced to the care team — and the card shows a countdown badge + an
+   * "I'm good" button that finalizes it early (mirrors the check-in form).
+   * Both undefined when the reading fast-fired (emergency / explicit close /
+   * Option D confirmatory).
+   */
+  entryId?: string;
+  editableUntil?: string;
 }
 
 export interface UpdateSummary {

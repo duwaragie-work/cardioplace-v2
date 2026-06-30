@@ -57,7 +57,7 @@ async function setupAndTriggerAlert(
   prep: (tc: TestControl, userId: string) => Promise<void>,
   trigger: { faceSwelling?: boolean; throatTightness?: boolean; pulse?: number; systolicBP?: number; diastolicBP?: number; medicationTaken?: boolean },
   expectedRuleId: string,
-  opts: { twoReadingSession?: boolean } = {},
+  opts: { twoReadingSession?: boolean; commitReading?: boolean } = {},
 ): Promise<{ tc: TestControl; userId: string; patientName: string; alertId: string; alertTier: string }> {
   const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
   const u = await tc.findUser(patientEmail)
@@ -93,6 +93,11 @@ async function setupAndTriggerAlert(
         throatTightness: trigger.throatTightness,
         medicationTaken: trigger.medicationTaken,
         sessionId: crypto.randomUUID(),
+        // commitReading fast-fires (closeSession) so the reading leaves the
+        // 5-min editable hold and is visible on the provider Readings tab —
+        // needed by tests that assert on the reading card itself (e.g. the
+        // brady-surveillance pill), not just the alert surface.
+        ...(opts.commitReading ? { closeSession: true } : {}),
       })
     }
   } finally {
@@ -517,6 +522,7 @@ test.describe('Cluster 8 §D-ADMIN — brady-surveillance + CAD admin surfaces',
       async () => {},
       { pulse: 45 },
       'RULE_BRADY_SURVEILLANCE',
+      { commitReading: true },
     )
     try {
       await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)

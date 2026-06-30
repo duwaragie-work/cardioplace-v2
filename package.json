@@ -23,5 +23,18 @@
       "onnxruntime-node": "1.20.1"
     },
     "onnxruntime-node": "1.20.1"
+  },
+  "devDependencies": {
+    "enhanced-resolve": "^5.24.1"
+  },
+  "optionalDependencies": {
+    "lightningcss-linux-x64-gnu": "*",
+    "lightningcss-linux-x64-musl": "*",
+    "@tailwindcss/oxide-linux-x64-gnu": "*",
+    "@tailwindcss/oxide-linux-x64-musl": "*",
+    "@napi-rs/canvas-linux-x64-gnu": "0.1.80",
+    "@napi-rs/canvas-linux-x64-musl": "0.1.80",
+    "@napi-rs/canvas-darwin-x64": "0.1.80",
+    "@napi-rs/canvas-darwin-arm64": "0.1.80"
   }
 }

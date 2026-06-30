@@ -64,9 +64,29 @@ import {
   type EnrollmentGateReason,
 } from '@/lib/services/practice.service';
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Formats a canonical display ID ("CPPATK8M2R4N7") with hyphens for human
+ * display ("CP-PAT-K8M2R4N-7"). Defensive: if input is already hyphenated
+ * or off the expected length, returns it verbatim. Mirrors the formatter
+ * in DisplayIdService.formatForDisplay — kept local so the admin app
+ * doesn't reach into backend internals.
+ */
+function formatDisplayId(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value;
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Patient {
   id: string;
+  // Permanent public-facing identifier (CP-PAT-...). Set at account
+  // creation; locked forever. Surfaced under the patient name on row +
+  // detail header so coordinators can quote it on calls and clinicians
+  // can paste it into other systems. See
+  // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+  displayId: string | null;
   name: string | null;
   email: string | null;
   riskTier: string;
@@ -633,6 +653,15 @@ function PatientModal({
             <div>
               <h3 className="text-white font-bold text-[16px]">{patient.name ?? 'Unknown'}</h3>
               <p className="text-white text-[12px]">{patient.email ?? '--'}</p>
+              {patient.displayId ? (
+                <p
+                  className="text-white/80 text-[11px] font-mono mt-0.5"
+                  data-testid="patient-display-id"
+                  title="Cardioplace ID — quote this on support calls"
+                >
+                  {formatDisplayId(patient.displayId)}
+                </p>
+              ) : null}
             </div>
           </div>
           <button

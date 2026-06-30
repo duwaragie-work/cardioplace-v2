@@ -60,9 +60,21 @@ export class JudgeService {
   private ai: GoogleGenAI
 
   constructor() {
-    const key = process.env.GOOGLE_API_KEY
-    if (!key) throw new Error('GOOGLE_API_KEY required for judge')
-    this.ai = new GoogleGenAI({ apiKey: key })
+    // Cardioplace is Vertex-AI-only — production GeminiService +
+    // VoiceService both construct via the Vertex factory at
+    // backend/src/gemini/google-genai-client.factory.ts. Judge mirrors
+    // the same env contract so CI grades the prod calls under the same
+    // provider that serves them. Auth via ADC (GOOGLE_APPLICATION_CREDENTIALS
+    // in dev / CI; attached runtime SA in prod).
+    const project = process.env.GOOGLE_CLOUD_PROJECT
+    if (!project) {
+      throw new Error(
+        'GOOGLE_CLOUD_PROJECT is not defined — the LLM judge runs on Vertex AI. ' +
+          'Set GOOGLE_CLOUD_PROJECT (+ GOOGLE_APPLICATION_CREDENTIALS for local dev) in your env.',
+      )
+    }
+    const location = process.env.GOOGLE_CLOUD_LOCATION ?? 'us-central1'
+    this.ai = new GoogleGenAI({ vertexai: true, project, location })
   }
 
   async evaluate(opts: {

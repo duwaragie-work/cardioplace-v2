@@ -437,6 +437,9 @@ const en = {
   'chat.card.viewAlerts': 'View alerts',
   'chat.card.dismiss': 'Dismiss',
   'chat.card.done': 'Done',
+  'chat.card.editableWindow': 'Editable for {time} — not sent to your care team yet',
+  'chat.card.imGood': "I'm good",
+  'chat.card.sending': 'Sending…',
 
   // ─── Notifications ─────────────────────────────────────────────────────────
   'notifications.title': 'Notifications',

@@ -18,6 +18,7 @@ import {
   Trash2,
   Camera,
   Loader2,
+  Clock,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '@/lib/auth-context';
@@ -52,6 +53,7 @@ import BpPhotoConfirmModal from '@/components/intake/BpPhotoConfirmModal';
 import { transcribeAudio } from '@/lib/services/chat.service';
 import { kgToLbs } from '@/lib/units';
 import CheckinCard from '@/components/cardio/cards/CheckinCard';
+import { isEditableBadgeVisible } from '@/lib/readingEdit';
 import UpdateCard from '@/components/cardio/cards/UpdateCard';
 import DeleteCard from '@/components/cardio/cards/DeleteCard';
 import MedicationAdherenceCard from '@/components/cardio/cards/MedicationAdherenceCard';
@@ -773,12 +775,40 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
     : isProcessing ? 'linear-gradient(135deg, #f59e0b, #d97706)'
     : 'linear-gradient(135deg, #7B00E0, #9333EA)';
 
-  // Auto-dismiss checkin after 3s — AI resumes talking, no user action needed
+  // Editable-buffer-window parity: a deferred (held) reading carries
+  // editableUntil in the future — no alert, not yet sent to the care team. Keep
+  // its card up for the whole window with a live countdown (the patient edits /
+  // confirms by voice via update_checkin / finalize_checkin), and tick once a
+  // second so the countdown stays honest. Non-deferred saves keep the 3s
+  // auto-dismiss.
+  const [now, setNow] = useState(() => Date.now());
+  const checkinEditable =
+    !!pendingCheckin?.saved && isEditableBadgeVisible(pendingCheckin?.editableUntil, now);
+  useEffect(() => {
+    if (!isCheckin || !checkinEditable) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [isCheckin, checkinEditable]);
+
+  // Auto-dismiss: non-deferred after 3s; a deferred reading stays until its
+  // editable window ends (the server-side cron finalizes it at that point).
   useEffect(() => {
     if (!isCheckin || !pendingCheckin) return;
-    const timer = setTimeout(onDismissCheckin, 3000);
+    const editableUntilMs = pendingCheckin.editableUntil
+      ? new Date(pendingCheckin.editableUntil).getTime()
+      : 0;
+    const deferred = !!pendingCheckin.saved && editableUntilMs > Date.now();
+    const delay = deferred ? Math.max(0, editableUntilMs - Date.now()) : 3000;
+    const timer = setTimeout(onDismissCheckin, delay);
     return () => clearTimeout(timer);
   }, [isCheckin, pendingCheckin, onDismissCheckin]);
+
+  const checkinRemainingLabel = (() => {
+    if (!pendingCheckin?.editableUntil) return '';
+    const ms = Math.max(0, new Date(pendingCheckin.editableUntil).getTime() - now);
+    const total = Math.floor(ms / 1000);
+    return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, '0')}`;
+  })();
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6 relative overflow-hidden" style={{ backgroundColor: '#FAFBFF' }}>
@@ -927,11 +957,34 @@ function VoiceActiveScreen({ state, pendingCheckin, onDismissCheckin, pendingUpd
               })()}
             </div>
 
-            {/* Auto-dismiss countdown */}
-            <motion.div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
-              <motion.div className="h-full rounded-full" style={{ backgroundColor: 'var(--brand-success-green)' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
-            </motion.div>
-            <p className="text-[0.625rem] mt-2" style={{ color: 'var(--brand-text-muted)' }}>AI will continue talking...</p>
+            {checkinEditable ? (
+              // Editable-window state — held, not yet sent to the care team. The
+              // patient can change it or say "I'm good" (handled by voice via
+              // update_checkin / finalize_checkin).
+              <>
+                <div
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[0.75rem] font-semibold"
+                  style={{
+                    backgroundColor: 'var(--brand-warning-amber-light)',
+                    color: 'var(--brand-warning-amber-text)',
+                  }}
+                >
+                  <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span aria-live="polite">Editable for {checkinRemainingLabel}</span>
+                </div>
+                <p className="text-[0.625rem] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
+                  Tell me what to change, or say you&apos;re all set.
+                </p>
+              </>
+            ) : (
+              <>
+                {/* Auto-dismiss countdown */}
+                <motion.div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--brand-border)' }}>
+                  <motion.div className="h-full rounded-full" style={{ backgroundColor: 'var(--brand-success-green)' }} initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 3, ease: 'linear' }} />
+                </motion.div>
+                <p className="text-[0.625rem] mt-2" style={{ color: 'var(--brand-text-muted)' }}>AI will continue talking...</p>
+              </>
+            )}
           </motion.div>
         )}
 
@@ -1816,6 +1869,16 @@ export default function AIChatInterface() {
                 ? (d.otherSymptoms as string[])
                 : undefined,
               saved: true,
+              // Editable-buffer-window parity — entry id + deferral deadline so
+              // the card can show the countdown badge + "I'm good" finalize.
+              // Prefer the dispatcher's top-level fields; fall back to data.
+              entryId:
+                ((result as { entry_id?: string }).entry_id ??
+                  (d.id as string | undefined)) || undefined,
+              editableUntil:
+                ((result as { editable_until?: string | null }).editable_until ??
+                  (d.engineEvaluationDeferredUntil as string | undefined)) ||
+                undefined,
             });
           } else if (tool === 'update_checkin' && (result as { updated?: boolean }).updated) {
             const d = (result as { data?: Record<string, unknown> }).data ?? {};

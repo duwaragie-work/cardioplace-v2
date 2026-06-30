@@ -4,9 +4,18 @@
 // (back-compat admins + provider trio + ops). §E adds the missing matrix
 // rows (Practice B MD/provider, unassigned secondary, SUSPENDED provider)
 // under the same firstname.lastname@ / role@ scheme — no recreation.
+import { DisplayIdClass } from '../../src/generated/prisma/enums.js'
+import { getOrGenerateDisplayIdForEmail } from './display-ids.js'
 import { prisma, DEMO_OTP, hashPassword, hashOtp, seedPermaOtp } from './helpers.js'
 
 const SEED_TEST_FIXTURES = process.env.SEED_TEST_FIXTURES === 'true'
+
+// Wrapper for the common admin pattern: every admin upsert must supply a
+// displayId in its `create` clause now that User.displayId is NOT NULL.
+// Idempotent — re-running the seed reuses the existing value.
+async function staffDisplayId(email: string): Promise<string> {
+  return getOrGenerateDisplayIdForEmail(prisma, email, DisplayIdClass.STAFF)
+}
 
 export async function seedAdmins() {
   const pwdhash = await hashPassword('demo-password')
@@ -26,6 +35,7 @@ export async function seedAdmins() {
       dateOfBirth: new Date('1972-05-14'),
       timezone: 'America/New_York',
       preferredLanguage: 'en',
+      displayId: await staffDisplayId('manisha.patel@cardioplace.test'),
     },
   })
   await seedPermaOtp('manisha.patel@cardioplace.test', otpHash)
@@ -42,6 +52,7 @@ export async function seedAdmins() {
       onboardingStatus: 'COMPLETED',
       timezone: 'America/New_York',
       preferredLanguage: 'en',
+      displayId: await staffDisplayId('support@healplace.com'),
     },
   })
   await seedPermaOtp('support@healplace.com', otpHash)
@@ -59,6 +70,7 @@ export async function seedAdmins() {
       isVerified: true,
       onboardingStatus: 'COMPLETED',
       timezone: 'America/New_York',
+      displayId: await staffDisplayId('primary-provider@cardioplace.test'),
     },
   })
   await seedPermaOtp('primary-provider@cardioplace.test', otpHash)
@@ -74,6 +86,7 @@ export async function seedAdmins() {
       isVerified: true,
       onboardingStatus: 'COMPLETED',
       timezone: 'America/New_York',
+      displayId: await staffDisplayId('backup-provider@cardioplace.test'),
     },
   })
   await seedPermaOtp('backup-provider@cardioplace.test', otpHash)
@@ -89,6 +102,7 @@ export async function seedAdmins() {
       isVerified: true,
       onboardingStatus: 'COMPLETED',
       timezone: 'America/New_York',
+      displayId: await staffDisplayId('medical-director@cardioplace.test'),
     },
   })
   await seedPermaOtp('medical-director@cardioplace.test', otpHash)
@@ -104,6 +118,7 @@ export async function seedAdmins() {
       isVerified: true,
       onboardingStatus: 'COMPLETED',
       timezone: 'America/New_York',
+      displayId: await staffDisplayId('ops@healplace.com'),
     },
   })
   await seedPermaOtp('ops@healplace.com', otpHash)
@@ -125,6 +140,7 @@ export async function seedAdmins() {
       isVerified: true,
       onboardingStatus: 'COMPLETED',
       timezone: 'America/New_York',
+      displayId: await staffDisplayId('coordinator.fernando@cardioplace.test'),
     },
   })
   await seedPermaOtp('coordinator.fernando@cardioplace.test', otpHash)
@@ -162,6 +178,9 @@ export async function seedAdmins() {
         isVerified: true,
         onboardingStatus: 'COMPLETED',
         timezone: 'America/New_York',
+        displayId: await staffDisplayId(
+          'multi-practice-provider@cardioplace.test',
+        ),
       },
     })
     await seedPermaOtp('multi-practice-provider@cardioplace.test', otpHash)

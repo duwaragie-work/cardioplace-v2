@@ -52,11 +52,17 @@ test.describe('Phase 3 §E — patient-detail tabs (Readings/CareTeam/Meds/Alert
 
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString()
+    // closeSession commits the reading immediately (buffer fast-fire) instead
+    // of leaving it in the 5-min editable hold, which the provider Readings tab
+    // filters out — so a finished single-reading check-in is what a provider
+    // actually sees. Without it these reads stay held and the tab shows empty.
     await postJournalEntry(api, {
       measuredAt: threeDaysAgo, systolicBP: 120, diastolicBP: 78, pulse: 70,
+      closeSession: true,
     })
     await postJournalEntry(api, {
       measuredAt: new Date().toISOString(), systolicBP: 145, diastolicBP: 92, pulse: 74,
+      closeSession: true,
     })
     await api.dispose()
 

@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core'
 import { JwtModule } from '@nestjs/jwt'
 import { PassportModule } from '@nestjs/passport'
 import { PrismaModule } from '../prisma/prisma.module.js'
+import { UsersModule } from '../users/users.module.js'
 import { AuthController } from './auth.controller.js'
 import { AuthService } from './auth.service.js'
 import { GeolocationService } from './geolocation.service.js'
@@ -24,6 +25,10 @@ export { Public }
     PrismaModule,
     PassportModule,
     ConfigModule,
+    // For DisplayIdService at the 4 user-create sites (OAuth, OTP,
+    // magic-link, invite-accept). UsersModule does NOT import AuthModule,
+    // so this does not create a circular dependency.
+    UsersModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({

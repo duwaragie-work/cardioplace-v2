@@ -7,6 +7,7 @@ import { JwtService } from '@nestjs/jwt'
 import { AppModule } from '../../src/app.module.js'
 import { PrismaService } from '../../src/prisma/prisma.service.js'
 import { UserRole } from '../../src/generated/prisma/enums.js'
+import { generateTestDisplayId } from '../helpers/generate-test-display-id.js'
 
 export interface TestContext {
   app: INestApplication
@@ -43,6 +44,7 @@ export async function setupTestApp(): Promise<TestContext> {
         preferredLanguage: 'en',
         dateOfBirth: new Date('1975-06-15'),
         roles: [UserRole.PATIENT],
+        displayId: generateTestDisplayId([UserRole.PATIENT]),
       },
     })
   } else if (!user.roles?.includes(UserRole.PATIENT)) {

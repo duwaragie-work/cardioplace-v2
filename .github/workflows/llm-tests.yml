@@ -72,6 +72,11 @@ jobs:
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       DATABASE_URL: postgresql://test:test@localhost:5432/healplace_test
+      # Vertex AI — the LLM-judge specs self-skip when GOOGLE_CLOUD_PROJECT is
+      # unset (skip = !process.env.GOOGLE_CLOUD_PROJECT). Set it so they run;
+      # the SA-key step below supplies ADC creds for the actual Vertex calls.
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+      GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -87,6 +92,18 @@ jobs:
         run: |
           npx prisma generate
           npx prisma migrate deploy
+      # Vertex AI ADC: @google/genai authenticates via Application Default
+      # Credentials, which loads a key-file PATH from
+      # GOOGLE_APPLICATION_CREDENTIALS. The secret holds the JSON, so write it
+      # to a temp file and point ADC at it (env: + printf so the JSON body
+      # can't break the shell).
+      - name: Write GCP service-account key
+        env:
+          GCP_SA_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+        run: |
+          printf '%s' "$GCP_SA_JSON" > "$RUNNER_TEMP/gcp-sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp-sa.json" >> "$GITHUB_ENV"
+
       - name: Run text chat E2E + LLM-as-Judge
         working-directory: backend
         run: npm run test:e2e -- --testPathPatterns=text-chat.e2e --forceExit
@@ -109,6 +126,11 @@ jobs:
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       DATABASE_URL: postgresql://test:test@localhost:5432/healplace_test
+      # Vertex AI — the LLM-judge specs self-skip when GOOGLE_CLOUD_PROJECT is
+      # unset (skip = !process.env.GOOGLE_CLOUD_PROJECT). Set it so they run;
+      # the SA-key step below supplies ADC creds for the actual Vertex calls.
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+      GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -124,6 +146,15 @@ jobs:
         run: |
           npx prisma generate
           npx prisma migrate deploy
+      # Vertex AI ADC — see the text-chat job; materialize the SA key for the
+      # @google/genai client + the LLM judge.
+      - name: Write GCP service-account key
+        env:
+          GCP_SA_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+        run: |
+          printf '%s' "$GCP_SA_JSON" > "$RUNNER_TEMP/gcp-sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp-sa.json" >> "$GITHUB_ENV"
+
       - name: Run voice chat E2E + LLM-as-Judge
         working-directory: backend
         run: npm run test:e2e -- --testPathPatterns=voice-chat.e2e --forceExit

@@ -20,6 +20,7 @@ import { EmailService } from '../email/email.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { AuthService } from './auth.service.js'
 import { BcryptService } from './bcrypt.service.js'
+import { DisplayIdService } from '../users/display-id.service.js'
 import { GeolocationService } from './geolocation.service.js'
 import { MfaService } from './mfa.service.js'
 import { WebAuthnService } from './webauthn.service.js'
@@ -204,8 +205,11 @@ describe('AuthService', () => {
                 JWT_REFRESH_EXPIRES_IN: '30d',
                 GOOGLE_CLIENT_ID: 'mock-google-client-id',
                 APPLE_CLIENT_ID: 'mock-apple-client-id',
-                RESEND_API_KEY: 'test-resend-key',
-                EMAIL_FROM: 'Cardioplace <onboarding@resend.dev>',
+                SMTP_HOST: 'smtp.example.com',
+                SMTP_PORT: '587',
+                SMTP_USER: 'test@example.com',
+                SMTP_PASS: 'test-smtp-pass',
+                SMTP_FROM: 'Cardioplace <no-reply@example.com>',
               }
               return config[key] ?? defaultValue
             }),
@@ -263,6 +267,28 @@ describe('AuthService', () => {
             verifyAuthentication: jest.fn(async () => ({ verified: false })),
             encodePublicKey: jest.fn(() => 'mock-pubkey'),
             decodePublicKey: jest.fn(() => new Uint8Array()),
+          },
+        },
+        {
+          // Stub that returns a deterministic canonical value so any spec
+          // that creates a user gets a stable displayId in the mock.
+          provide: DisplayIdService,
+          useValue: {
+            issue: jest.fn(async () => ({
+              value: 'CPPATTESTING0',
+              display: 'CP-PAT-TESTING-0',
+            })),
+            // issueForCreate is a higher-order helper: it generates a displayId
+            // and runs the caller's create closure with it, returning the created
+            // row. Invoke the closure so the underlying tx.user.create still fires.
+            issueForCreate: jest.fn(
+              async (
+                _tx: unknown,
+                _cls: unknown,
+                _via: unknown,
+                createUserFn: (displayId: string) => Promise<unknown>,
+              ) => createUserFn('CPPATTESTING0'),
+            ),
           },
         },
       ],
@@ -559,6 +585,9 @@ describe('AuthService', () => {
           email: 'test@example.com',
           isVerified: true,
           roles: [UserRole.PATIENT],
+          // user INSERT now routes through DisplayIdService.issueForCreate, so the
+          // pre-generated displayId is part of the create payload.
+          displayId: expect.any(String),
         },
       })
     })

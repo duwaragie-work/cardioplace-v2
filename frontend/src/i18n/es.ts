@@ -427,6 +427,9 @@ const es: Record<TranslationKey, string> = {
   'chat.card.viewAlerts': 'Ver alertas',
   'chat.card.dismiss': 'Descartar',
   'chat.card.done': 'Listo',
+  'chat.card.editableWindow': 'Editable por {time} — aún no enviado a su equipo de cuidado',
+  'chat.card.imGood': 'Estoy bien',
+  'chat.card.sending': 'Enviando…',
 
   // ─── Notifications ─────────────────────────────────────────────────────────
   'notifications.title': 'Notificaciones',

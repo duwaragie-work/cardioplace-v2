@@ -11,13 +11,19 @@ import { createHash, randomBytes, randomInt } from 'crypto'
 import type { Profile } from 'passport-google-oauth20'
 import { POLICY_VERSION } from '@cardioplace/shared'
 import { EmailService } from '../email/email.service.js'
-import { magicLinkEmailHtml, otpEmailHtml } from '../email/email-templates.js'
+import {
+  magicLinkEmailHtml,
+  otpEmailHtml,
+  welcomeEmailHtml,
+} from '../email/email-templates.js'
 import {
   AccountStatus,
+  DisplayIdClass,
   OnboardingStatus,
   UserRole,
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { DisplayIdService } from '../users/display-id.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
 import { MfaService } from './mfa.service.js'
@@ -281,7 +287,31 @@ export class AuthService {
     private geolocation: GeolocationService,
     private mfaService: MfaService,
     private webAuthnService: WebAuthnService,
+    private displayIdService: DisplayIdService,
   ) {}
+
+  /**
+   * Sends the one-shot welcome email after a User row is first created.
+   * Carries the patient's permanent display ID so they have it handy for
+   * support calls. Fire-and-forget — EmailService.sendEmail already
+   * swallows transport failures, so we don't await this on the auth path.
+   * See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §5.
+   */
+  private dispatchWelcomeEmail(user: {
+    email: string | null
+    name: string | null
+    displayId: string | null
+    roles: UserRole[]
+  }): void {
+    if (!user.email || !user.displayId) return
+    const formatted = DisplayIdService.formatForDisplay(user.displayId)
+    const isPatient = user.roles.includes(UserRole.PATIENT)
+    void this.emailService.sendEmail(
+      user.email,
+      'Welcome to Cardioplace — your account ID',
+      welcomeEmailHtml(user.name ?? '', formatted, isPatient),
+    )
+  }
 
   // ─── Token Issuance ─────────────────────────────────────────────────────────
 
@@ -2656,17 +2686,32 @@ export class AuthService {
       }
     }
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: email ?? null,
-        name: name ?? null,
-        isVerified: emailVerified,
-        roles: [UserRole.PATIENT],
-        accounts: {
-          create: { provider, providerId, email },
-        },
-      },
-    })
+    // Pre-generate the permanent DisplayId and include it in the User
+    // INSERT — Postgres checks User.displayId's NOT NULL constraint at
+    // INSERT-statement-end. The service handles collision retry around
+    // the whole step. See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+    const user = await this.prisma.$transaction((tx) =>
+      this.displayIdService.issueForCreate(
+        tx,
+        DisplayIdClass.PATIENT,
+        'google_oauth',
+        (displayId) =>
+          tx.user.create({
+            data: {
+              email: email ?? null,
+              name: name ?? null,
+              isVerified: emailVerified,
+              roles: [UserRole.PATIENT],
+              displayId,
+              accounts: {
+                create: { provider, providerId, email },
+              },
+            },
+          }),
+      ),
+    )
+    // First-touch welcome email for the just-created social user.
+    this.dispatchWelcomeEmail(user)
     return user
   }
 
@@ -2863,13 +2908,26 @@ export class AuthService {
     })
 
     if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          email: normalizedEmail,
-          isVerified: true,
-          roles: [UserRole.PATIENT],
-        },
-      })
+      // Pre-generate the permanent DisplayId and include it in the User
+      // INSERT — see docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+      user = await this.prisma.$transaction((tx) =>
+        this.displayIdService.issueForCreate(
+          tx,
+          DisplayIdClass.PATIENT,
+          'otp',
+          (displayId) =>
+            tx.user.create({
+              data: {
+                email: normalizedEmail,
+                isVerified: true,
+                roles: [UserRole.PATIENT],
+                displayId,
+              },
+            }),
+        ),
+      )
+      // First-touch welcome email — only fires on this new-user branch.
+      this.dispatchWelcomeEmail(user)
     } else if (!user.isVerified) {
       user = await this.prisma.user.update({
         where: { id: user.id },
@@ -3047,6 +3105,7 @@ export class AuthService {
       where: { id: userId },
       select: {
         id: true,
+        displayId: true,
         email: true,
         name: true,
         roles: true,
@@ -3120,6 +3179,10 @@ export class AuthService {
 
     return {
       id: user.id,
+      // Permanent public-facing identifier (CP-PAT-... / CP-STF-...).
+      // Patients quote this on support calls. See
+      // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+      displayId: user.displayId,
       email: user.email,
       name: user.name,
       roles: user.roles,
@@ -3279,13 +3342,26 @@ export class AuthService {
     })
 
     if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          email: record.email,
-          isVerified: true,
-          roles: [UserRole.PATIENT],
-        },
-      })
+      // Same pre-generate pattern as OTP path — see
+      // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+      user = await this.prisma.$transaction((tx) =>
+        this.displayIdService.issueForCreate(
+          tx,
+          DisplayIdClass.PATIENT,
+          'magic_link',
+          (displayId) =>
+            tx.user.create({
+              data: {
+                email: record.email,
+                isVerified: true,
+                roles: [UserRole.PATIENT],
+                displayId,
+              },
+            }),
+        ),
+      )
+      // First-touch welcome email — only fires on this new-user branch.
+      this.dispatchWelcomeEmail(user)
     } else if (!user.isVerified) {
       user = await this.prisma.user.update({
         where: { id: user.id },
@@ -3480,6 +3556,7 @@ export class AuthService {
       // here; the matching `policy_acknowledged` AuthLog event is written
       // post-commit below.
       let userRow: typeof existing
+      let userWasCreated = false
       if (existing) {
         const merged = Array.from(new Set([...existing.roles, fresh.role]))
         userRow = await tx.user.update({
@@ -3492,15 +3569,29 @@ export class AuthService {
           },
         })
       } else {
-        userRow = await tx.user.create({
-          data: {
-            email: fresh.email,
-            name: fresh.name,
-            isVerified: true,
-            roles: [fresh.role],
-            onboardingStatus: OnboardingStatus.COMPLETED,
-          },
-        })
+        // Pre-generate DisplayId so the User INSERT can satisfy NOT NULL.
+        // Class derives from the invited role: PATIENT invites → PAT
+        // prefix; staff invites → STF. See
+        // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+        userRow = await this.displayIdService.issueForCreate(
+          tx,
+          fresh.role === UserRole.PATIENT
+            ? DisplayIdClass.PATIENT
+            : DisplayIdClass.STAFF,
+          'invite_accept',
+          (displayId) =>
+            tx.user.create({
+              data: {
+                email: fresh.email,
+                name: fresh.name,
+                isVerified: true,
+                roles: [fresh.role],
+                onboardingStatus: OnboardingStatus.COMPLETED,
+                displayId,
+              },
+            }),
+        )
+        userWasCreated = true
       }
 
       if (userRow.accountStatus !== AccountStatus.ACTIVE) {
@@ -3574,8 +3665,15 @@ export class AuthService {
         },
       })
 
-      return { user: userRow, invite: claimedInvite }
+      return { user: userRow, invite: claimedInvite, userWasCreated }
     })
+
+    // First-touch welcome email for the just-created invitee. The
+    // returning-user branch already has a displayId from their previous
+    // OTP/magic-link sign-in, so we skip them here to avoid spam.
+    if (result.userWasCreated) {
+      this.dispatchWelcomeEmail(result.user)
+    }
 
     await this.silentlyUpdateTimezone(result.user.id, context?.timezone)
 

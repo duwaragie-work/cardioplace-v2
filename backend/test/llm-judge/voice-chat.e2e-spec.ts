@@ -5,10 +5,12 @@
  * (simulating voice), verifies transcripts + tool events, and
  * judges response quality. All results logged to LangSmith.
  *
- * Requires: GOOGLE_API_KEY, DATABASE_URL, JWT_ACCESS_SECRET.
- *           Voice runs in-process via @google/genai's Live API; no
- *           separate ADK service is needed.
- * Optional: LANGSMITH_API_KEY, LANGSMITH_PROJECT, OTEL_EXPORTER_OTLP_ENDPOINT
+ * Requires: DATABASE_URL, JWT_ACCESS_SECRET, GOOGLE_CLOUD_PROJECT.
+ *           Auth via ADC: set GOOGLE_APPLICATION_CREDENTIALS (local / CI)
+ *           or attach a runtime SA (prod). Voice runs in-process via
+ *           @google/genai's Live API on Vertex (v1beta1 surface).
+ * Optional: GOOGLE_CLOUD_LOCATION (defaults us-central1), LANGSMITH_API_KEY,
+ *           LANGSMITH_PROJECT, OTEL_EXPORTER_OTLP_ENDPOINT.
  *
  * Run: npm run test:e2e -- --testPathPattern=llm-judge/voice
  */
@@ -17,7 +19,9 @@ import { io, Socket as ClientSocket } from 'socket.io-client'
 import { JudgeService, EvalResult } from './judge.service.js'
 import { setupTestApp, teardownTestApp, getBaseUrl, TestContext } from './test-helpers.js'
 
-const skip = !process.env.GOOGLE_API_KEY
+// Skip when Vertex creds aren't available — mirrors the production
+// factory's required-env guard.
+const skip = !process.env.GOOGLE_CLOUD_PROJECT
 const descr = skip ? describe.skip : describe
 
 function waitFor(fn: () => boolean, ms = 30_000, poll = 500): Promise<void> {
