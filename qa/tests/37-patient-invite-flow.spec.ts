@@ -18,9 +18,10 @@ import { byTestId, T } from '../helpers/selectors.js'
  * paths (single modal + bulk CSV) plus the patient-side activation landing.
  *
  * Coordinator specifics baked into these tests:
- *   • Role is locked to PATIENT (invitableRoles(coordinator) === ['PATIENT'])
- *     and the practice is implicit (server-fills from PracticeCoordinator),
- *     so the modal/CSV need only name + email.
+ *   • A coordinator can invite PATIENT / PROVIDER / MEDICAL_DIRECTOR
+ *     (invitableRoles(coordinator)); these patient tests pick PATIENT. The
+ *     practice is implicit (server-fills from PracticeCoordinator), so the
+ *     modal/CSV need only role + name + email (no practice picker).
  *   • CSV columns are `name,email,role,practiceId` (TEMPLATE_HEADERS);
  *     practiceId may be blank for a coordinator.
  *
@@ -43,8 +44,9 @@ test.describe('Spec 37 — patient invite flow', () => {
       timeout: 15_000,
     })
 
-    // Coordinator: role is locked to PATIENT and practice is implicit — only
-    // name + email are collected.
+    // Coordinator now picks a role (PATIENT / PROVIDER / MEDICAL_DIRECTOR);
+    // practice stays implicit (their own, filled server-side). Pick PATIENT.
+    await page.locator(byTestId(T.adminUsers.inviteRole)).selectOption('PATIENT')
     await page.locator(byTestId(T.adminUsers.inviteName)).fill('QA Patient One')
     await page.locator(byTestId(T.adminUsers.inviteEmail)).fill(email)
     await page.locator(byTestId(T.adminUsers.inviteSubmit)).click()

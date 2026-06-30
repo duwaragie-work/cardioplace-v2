@@ -97,15 +97,19 @@ function isCoordinatorOnly(roles: string[]): boolean {
 // in the admin app is clinical or operational chrome (Dashboard, Patients,
 // Practices, Alerts) that bounces them to /users.
 function isCoordinatorAllowed(pathname: string): boolean {
-  // /profile is every signed-in user's own-account page — allow it alongside
-  // the coordinator's /users surface. /practices is read-only for them (their
-  // own practice + staff; backend scopes it, CRUD buttons are OPS/SUPER-only).
+  // /profile and /settings are every signed-in user's own-account pages —
+  // allow them alongside the coordinator's /users surface. The sidebar already
+  // shows Settings to COORDINATOR (account security / 2FA), so the guard must
+  // let them in. /practices is read-only for them (their own practice + staff;
+  // backend scopes it, CRUD buttons are OPS/SUPER-only).
   return (
     pathname === '/users' ||
     pathname.startsWith('/users/') ||
     pathname === '/practices' ||
     pathname.startsWith('/practices/') ||
-    pathname === '/profile'
+    pathname === '/profile' ||
+    pathname === '/settings' ||
+    pathname.startsWith('/settings/')
   );
 }
 
