@@ -146,17 +146,22 @@ export class UsersService {
     }
 
     if (caller.roles.includes(UserRole.COORDINATOR)) {
-      // COORDINATOR can invite ONLY PATIENT — and only into their own
-      // practice. Reading PracticeCoordinator is the source of truth for
-      // "their" practice (one practice per coordinator by @unique).
-      if (targetRole !== UserRole.PATIENT) {
-        throw new ForbiddenException(
-          `COORDINATOR can only invite PATIENT users`,
-        )
+      // COORDINATOR can invite PATIENT, PROVIDER, and MEDICAL_DIRECTOR — but
+      // ONLY into their own practice. PracticeCoordinator is the source of
+      // truth for "their" practice (one practice per coordinator by @unique).
+      // They cannot mint COORDINATOR / HEALPLACE_OPS / SUPER_ADMIN accounts
+      // (org-level / cross-practice roles stay with OPS + SUPER_ADMIN).
+      const coordinatorAllowed: UserRole[] = [
+        UserRole.PATIENT,
+        UserRole.PROVIDER,
+        UserRole.MEDICAL_DIRECTOR,
+      ]
+      if (!coordinatorAllowed.includes(targetRole)) {
+        throw new ForbiddenException(`COORDINATOR cannot invite a ${targetRole}`)
       }
       if (!practiceId) {
         throw new BadRequestException(
-          `practiceId is required for PATIENT invites`,
+          `practiceId is required for COORDINATOR invites`,
         )
       }
       const own = await this.prisma.practiceCoordinator.findUnique({
@@ -168,7 +173,7 @@ export class UsersService {
       }
       if (own.practiceId !== practiceId) {
         throw new ForbiddenException(
-          'You can only invite patients into your own practice',
+          'You can only invite users into your own practice',
         )
       }
       return
@@ -800,34 +805,17 @@ export class UsersService {
       }
     }
 
-    if (caller.roles.includes(UserRole.COORDINATOR)) {
-      // COORDINATOR sees PATIENT users only — own practice's patients.
-      // Match by EITHER the full clinical assignment OR the invite back-
-      // reference: patients invited by the coordinator don't get a
-      // PatientProviderAssignment row at accept-time (it needs primary
-      // provider / backup / MD ids the invite flow doesn't carry), so
-      // without the OR they'd be invisible to the very coordinator who
-      // invited them until Provider Verify creates the real assignment.
-      userWhere.roles = { has: UserRole.PATIENT }
-      andGroups.push({
-        OR: [
-          {
-            providerAssignmentAsPatient: {
-              is: { practiceId: practiceIdFilter as string },
-            },
-          },
-          {
-            userInviteCreated: {
-              is: { practiceId: practiceIdFilter as string },
-            },
-          },
-        ],
-      })
-    } else if (practiceIdFilter) {
-      // OPS / SUPER explicit practice filter — accept any of: a patient
-      // assigned to that practice, a patient invited into that practice
-      // (assignment-pending), or a staff member of that practice
-      // (provider, MD, coordinator memberships).
+    if (practiceIdFilter) {
+      // Practice-scoped roster — for an explicit OPS / SUPER practice filter
+      // AND for COORDINATOR (locked to their own practice above). Accept any
+      // of: a patient assigned to that practice, a patient invited into that
+      // practice (assignment-pending), or a staff member of that practice
+      // (provider, MD, coordinator memberships) — so a coordinator sees the
+      // patients PLUS the providers, medical directors, and themselves.
+      // The invite back-reference matters because a patient invited by the
+      // coordinator has no PatientProviderAssignment until Provider Verify
+      // runs — without it they'd be invisible to the coordinator who invited
+      // them. An optional `query.role` further narrows the set (handled above).
       andGroups.push({
         OR: [
           {
@@ -956,28 +944,25 @@ export class UsersService {
         null,
     }))
 
-    // For COORDINATOR — strip everything except id, name, email, status.
-    // No clinical data, no roles other than 'patient'. `scopePractice`
-    // surfaces the coordinator's own practice (id + name) so the UI can
-    // show "Cedar Hill" in the header — the coordinator can't list
-    // practices to resolve the name client-side.
+    // COORDINATOR — return the same rich rows as OPS/SUPER (incl. roles) so the
+    // table can show the practice's patients, providers, medical directors, and
+    // the coordinator themselves. The set is already scoped to their practice
+    // by the where-clause. `scopePractice` surfaces the coordinator's own
+    // practice (id + name) for the header — they can't list practices to
+    // resolve the name client-side. Row-level actions stay restricted by the
+    // existing role checks (a coordinator can still only deactivate patients).
     if (caller.roles.includes(UserRole.COORDINATOR)) {
       return {
         statusCode: 200,
         message: 'Users retrieved',
-        data: withPractice.map((u) => ({
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          status: this.derivePatientStatus(u.accountStatus),
-        })),
+        data: withPractice,
         page,
         limit,
         total,
         invites: await this.fetchPendingInvites({
           caller,
           practiceIdFilter,
-          role: UserRole.PATIENT,
+          role: query.role,
           search: query.search,
         }),
         scopePractice: coordinatorScope,
@@ -1022,10 +1007,10 @@ export class UsersService {
         ]
       }
     }
-    // COORDINATOR — patients only.
-    if (params.caller.roles.includes(UserRole.COORDINATOR)) {
-      where.role = UserRole.PATIENT
-    }
+    // COORDINATOR is already scoped to their own practice via practiceIdFilter
+    // above; they now manage patients, providers, AND medical directors, so we
+    // no longer force PATIENT-only here (the optional `role` param still
+    // narrows it when a role filter is applied).
 
     const invites = await this.prisma.userInvite.findMany({
       where,
@@ -1044,19 +1029,6 @@ export class UsersService {
   }
 
   // ─── Misc helpers ─────────────────────────────────────────────────────────
-
-  /**
-   * Status label used by the COORDINATOR-scoped patient list. Maps the
-   * raw AccountStatus enum down to the three buckets the front desk
-   * actually cares about.
-   */
-  private derivePatientStatus(
-    status: AccountStatus,
-  ): 'Active' | 'Deactivated' | 'Blocked' {
-    if (status === AccountStatus.DEACTIVATED) return 'Deactivated'
-    if (status === AccountStatus.ACTIVE) return 'Active'
-    return 'Blocked'
-  }
 
   private normalizeInvite(dto: InviteUserDto): NormalizedInvite {
     return {

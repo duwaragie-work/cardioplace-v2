@@ -66,7 +66,10 @@ const PRIMARY_NAV: NavItem[] = [
     label: 'Practices',
     icon: Building2,
     matchPrefix: true,
-    show: (roles) => !isCoordinatorOnly(roles),
+    // COORDINATOR sees Practices too — read-only view of their own practice +
+    // staff (backend scopes it; CRUD buttons are OPS/SUPER-only). Dashboard /
+    // Patients stay hidden for them (clinical surfaces).
+    show: () => true,
   },
   // phase/23 — user management. Visible to COORDINATOR, HEALPLACE_OPS,
   // SUPER_ADMIN (controller-level @Roles on the backend). Anyone else

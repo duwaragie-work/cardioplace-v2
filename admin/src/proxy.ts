@@ -98,10 +98,13 @@ function isCoordinatorOnly(roles: string[]): boolean {
 // Practices, Alerts) that bounces them to /users.
 function isCoordinatorAllowed(pathname: string): boolean {
   // /profile is every signed-in user's own-account page — allow it alongside
-  // the coordinator's /users surface.
+  // the coordinator's /users surface. /practices is read-only for them (their
+  // own practice + staff; backend scopes it, CRUD buttons are OPS/SUPER-only).
   return (
     pathname === '/users' ||
     pathname.startsWith('/users/') ||
+    pathname === '/practices' ||
+    pathname.startsWith('/practices/') ||
     pathname === '/profile'
   );
 }
