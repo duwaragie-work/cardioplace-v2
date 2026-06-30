@@ -262,6 +262,17 @@ export class PatientAccessService {
       for (const r of pp) ids.add(r.practiceId)
     }
 
+    if (actor.roles.includes(UserRole.COORDINATOR)) {
+      // A coordinator staffs exactly one practice (PracticeCoordinator @unique).
+      // Read-only visibility into that practice (detail + staff list); they
+      // never get the clinical patient surfaces (those stay role-gated).
+      const coord = await this.prisma.practiceCoordinator.findUnique({
+        where: { userId: actor.id },
+        select: { practiceId: true },
+      })
+      if (coord) ids.add(coord.practiceId)
+    }
+
     return Array.from(ids)
   }
 }

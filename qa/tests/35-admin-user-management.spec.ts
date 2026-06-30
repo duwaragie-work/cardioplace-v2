@@ -14,8 +14,9 @@ import { byTestId, T } from '../helpers/selectors.js'
  *   • Gate: COORDINATOR / HEALPLACE_OPS / SUPER_ADMIN (canManageUsers).
  *     Everyone else gets the `admin-users-access-denied` 403 card.
  *   • SUPER_ADMIN / OPS see the full list + role/status/practice filters.
- *   • COORDINATOR sees a patients-only variant: NO role filter, a practice
- *     badge, and an "invite patient" CTA.
+ *   • COORDINATOR sees their own-practice variant: NO role filter (single
+ *     practice), a practice badge, and an invite CTA. The list now includes
+ *     that practice's patients, providers, and medical directors.
  *   • Rows + per-row action buttons are keyed by EMAIL.
  *
  * Read-only assertions run ungated. The invite + deactivate/reactivate write
@@ -78,7 +79,7 @@ test.describe('Spec 35 — admin user management', () => {
     ).toHaveCount(0)
   })
 
-  test('35.4 — COORDINATOR gets the patients-only variant (no role filter)', async ({
+  test('35.4 — COORDINATOR gets their own-practice variant (no role filter)', async ({
     page,
   }) => {
     test.setTimeout(90_000)
@@ -90,8 +91,9 @@ test.describe('Spec 35 — admin user management', () => {
       /\/(dashboard|users|patients)/,
     )
     await page.goto(`${ADMIN_BASE_URL}/users`)
-    // The invite-patient CTA + search render; the role filter does NOT (the
-    // coordinator only ever sees patients of their own practice).
+    // The invite CTA + search render; the role filter does NOT (the coordinator
+    // is scoped to a single practice, so a cross-practice/role picker is moot —
+    // they still see that practice's patients, providers, and medical directors).
     await expect(page.locator(byTestId(T.adminUsers.inviteSingle))).toBeVisible({
       timeout: 25_000,
     })

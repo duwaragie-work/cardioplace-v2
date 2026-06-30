@@ -202,23 +202,53 @@ export class PracticeService {
 
   /** Internal: unique staff count per practice id. */
   private async staffCounts(practiceIds: string[]): Promise<Map<string, number>> {
-    const assignments = await this.prisma.patientProviderAssignment.findMany({
-      where: { practiceId: { in: practiceIds } },
-      select: {
-        practiceId: true,
-        primaryProviderId: true,
-        backupProviderId: true,
-        medicalDirectorId: true,
-      },
-    })
+    // Count UNIQUE staff per practice from all sources, mirroring listStaff:
+    //   1. PatientProviderAssignment slots (primary/backup/MD) — legacy
+    //      derivation that still holds for practices with assigned patients.
+    //   2. PracticeProvider — explicit provider membership (invite/OPS add).
+    //   3. PracticeMedicalDirector — explicit MD membership.
+    //   4. PracticeCoordinator — the practice's coordinator.
+    // Without 2–4 a freshly-staffed practice with no patient assignments yet
+    // reported 0 staff even though providers/MDs/coordinators were members.
+    const [assignments, providers, mds, coordinators] = await Promise.all([
+      this.prisma.patientProviderAssignment.findMany({
+        where: { practiceId: { in: practiceIds } },
+        select: {
+          practiceId: true,
+          primaryProviderId: true,
+          backupProviderId: true,
+          medicalDirectorId: true,
+        },
+      }),
+      this.prisma.practiceProvider.findMany({
+        where: { practiceId: { in: practiceIds } },
+        select: { practiceId: true, userId: true },
+      }),
+      this.prisma.practiceMedicalDirector.findMany({
+        where: { practiceId: { in: practiceIds } },
+        select: { practiceId: true, userId: true },
+      }),
+      this.prisma.practiceCoordinator.findMany({
+        where: { practiceId: { in: practiceIds } },
+        select: { practiceId: true, userId: true },
+      }),
+    ])
     const buckets = new Map<string, Set<string>>()
-    for (const a of assignments) {
-      const set = buckets.get(a.practiceId) ?? new Set<string>()
-      set.add(a.primaryProviderId)
-      set.add(a.backupProviderId)
-      set.add(a.medicalDirectorId)
-      buckets.set(a.practiceId, set)
+    const add = (practiceId: string, userId: string | null | undefined) => {
+      if (!userId) return
+      const set = buckets.get(practiceId) ?? new Set<string>()
+      set.add(userId)
+      buckets.set(practiceId, set)
     }
+    for (const a of assignments) {
+      add(a.practiceId, a.primaryProviderId)
+      add(a.practiceId, a.backupProviderId)
+      add(a.practiceId, a.medicalDirectorId)
+    }
+    for (const p of providers) add(p.practiceId, p.userId)
+    for (const m of mds) add(m.practiceId, m.userId)
+    for (const c of coordinators) add(c.practiceId, c.userId)
+
     const out = new Map<string, number>()
     for (const [pid, set] of buckets) out.set(pid, set.size)
     return out
