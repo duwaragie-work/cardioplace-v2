@@ -18,6 +18,7 @@ const am: Record<TranslationKey, string> = {
   'common.submit': 'አስገባ',
   'common.loading': 'በመጫን ላይ...',
   'common.saving': 'በማስቀመጥ ላይ...',
+  'common.refresh': 'አድስ',
   'common.deleting': 'በመሰረዝ ላይ...',
   'common.delete': 'ሰርዝ',
   'common.edit': 'አርም',

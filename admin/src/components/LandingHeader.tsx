@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import { LayoutDashboard, Menu, X } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/lib/auth-context';
@@ -17,18 +18,29 @@ export default function LandingHeader(_props: LandingHeaderProps) {
   const { t } = useLanguage();
   const { isAuthenticated, isLoading, activePractice, availablePractices } =
     useAuth();
+  const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
-  // A first-time-enrolling multi-practice provider holds a real session (so
-  // isAuthenticated is true) but hasn't picked a practice yet — the backend
-  // PracticeRequiredGuard blocks the dashboard until they do. Don't tease the
-  // Dashboard button during that window; it reappears once a practice is set.
-  // Org-wide admins (no memberships) and single-practice users are unaffected.
+  // While the user is mid-sign-in — setting up the authenticator
+  // (/sign-in/mfa-enroll), clearing the MFA challenge (/sign-in/mfa-challenge),
+  // or picking a practice (/sign-in/select-practice) — they may already hold a
+  // session (forced enrollment issues tokens up front), so isAuthenticated is
+  // true even though they aren't done. Don't show the Dashboard button until
+  // they've finished and left the sign-in flow. Covers single-practice users
+  // too (the practicePending check below only catches multi-practice).
+  const onAuthFlow = pathname?.startsWith('/sign-in') ?? false;
+
+  // A first-time-enrolling MULTI-practice provider holds a real session but
+  // hasn't picked a practice yet — the backend PracticeRequiredGuard blocks the
+  // dashboard until they do. Belt-and-suspenders for a dashboard reload during
+  // that window (not a /sign-in route, so onAuthFlow wouldn't catch it).
   const practicePending =
     isAuthenticated && !activePractice && availablePractices.length > 1;
-  const showDashboard = isAuthenticated && !practicePending;
+
+  const hideCta = onAuthFlow || practicePending;
+  const showDashboard = isAuthenticated && !hideCta;
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-white/80 shadow-[0_1px_2px_rgba(76,29,149,0.05)]">
@@ -50,7 +62,7 @@ export default function LandingHeader(_props: LandingHeaderProps) {
 
         <div className="flex items-center gap-3">
           {/* Admin app is English-only — language selector intentionally hidden. */}
-          {mounted && !isLoading && !practicePending && (
+          {mounted && !isLoading && !hideCta && (
             showDashboard ? (
               <Link
                 href="/dashboard"
@@ -83,7 +95,7 @@ export default function LandingHeader(_props: LandingHeaderProps) {
       {menuOpen && (
         <div className="md:hidden bg-white border-t border-[#eedbff] px-6 py-4 flex flex-col gap-4">
           {/* Admin app is English-only — language selector intentionally hidden. */}
-          {mounted && !isLoading && !practicePending && (
+          {mounted && !isLoading && !hideCta && (
             showDashboard ? (
               <Link
                 href="/dashboard"

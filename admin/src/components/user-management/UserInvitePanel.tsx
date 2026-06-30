@@ -19,7 +19,7 @@
 // whenever filters / pagination change, or after any mutation.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, ChevronDown, Search, Users, X } from 'lucide-react';
+import { Building2, ChevronDown, RefreshCw, Search, Users, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
@@ -367,12 +367,13 @@ export default function UserInvitePanel() {
     [t],
   );
 
-  // Locked role/practice for COORDINATOR — backend resolves practiceId
-  // server-side so we don't need to send one. Bulk + CSV components
-  // still receive a `lockedRole='PATIENT'` so the role column collapses.
-  const lockedRole = coordinatorView ? ('PATIENT' as UserRole) : undefined;
-  // For COORDINATOR, the practiceId is implicit (server-side) — no
-  // value passed; UI just doesn't surface the field.
+  // COORDINATOR no longer has a locked role — they can invite patients,
+  // providers, AND medical directors into their own practice, so they get the
+  // normal role picker (scoped to invitableRoles(): PATIENT / PROVIDER /
+  // MEDICAL_DIRECTOR). The practice stays implicit: inviteRequiresPractice()
+  // is false for coordinators so no picker is shown, and the backend
+  // auto-fills their PracticeCoordinator.practiceId + scope-checks it.
+  const lockedRole = undefined;
   const lockedPracticeId = undefined;
 
   return (
@@ -434,9 +435,7 @@ export default function UserInvitePanel() {
             onClick={() => setInviteOpen(true)}
             className="btn-admin-primary"
           >
-            {coordinatorView
-              ? t('userManagement.invitePatientCta')
-              : t('userManagement.inviteSingleCta')}
+            {t('userManagement.inviteSingleCta')}
           </button>
           <button
             type="button"
@@ -582,6 +581,27 @@ export default function UserInvitePanel() {
                   activePalette="primary-light"
                 />
               )}
+
+              {/* Manual refresh — re-fetches the current user/invite list so a
+                  just-sent invite or status change shows without a full reload. */}
+              <button
+                type="button"
+                onClick={() => void refresh()}
+                disabled={loading}
+                aria-label={t('common.refresh')}
+                title={t('common.refresh')}
+                data-testid="admin-users-refresh"
+                className="shrink-0 h-9 px-3 inline-flex items-center gap-1.5 rounded-lg text-[12px] font-semibold border bg-white hover:bg-[var(--brand-primary-purple-light)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                style={{
+                  color: 'var(--brand-primary-purple)',
+                  borderColor: 'var(--brand-border)',
+                }}
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
+                />
+                <span className="hidden sm:inline">{t('common.refresh')}</span>
+              </button>
             </div>
           </div>
         );

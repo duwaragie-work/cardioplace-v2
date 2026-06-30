@@ -18,6 +18,7 @@ const fr: Record<TranslationKey, string> = {
   'common.submit': 'Soumettre',
   'common.loading': 'Chargement...',
   'common.saving': 'Enregistrement...',
+  'common.refresh': 'Actualiser',
   'common.deleting': 'Suppression...',
   'common.delete': 'Supprimer',
   'common.edit': 'Modifier',
