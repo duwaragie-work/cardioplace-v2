@@ -200,7 +200,7 @@ export default function MicButton({
   const stopLabel = t('intake.audio.dictateStop')
 
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="relative inline-flex items-center">
       <motion.button
         type="button"
         onClick={handleClick}
@@ -229,19 +229,28 @@ export default function MicButton({
         {listening ? <MicOff size={20} /> : <Mic size={20} />}
       </motion.button>
 
+      {/* Status / error float as a pill anchored to the button so a long label
+          (e.g. Amharic, or the multi-line dictate error in any language) never
+          grows the mic's box or breaks the surrounding input row. Anchored to
+          the button's right edge + top so it stays inside the row's right
+          boundary on narrow screens. */}
       {listening && (
         <span
           // role=status announces the listening state to screen readers; the
           // text label is the non-colour pairing required by WCAG 2.2 AA Task 8.
           role="status"
-          className="text-[0.75rem] font-medium"
-          style={{ color: 'var(--brand-alert-red)' }}
+          className="absolute right-0 top-full z-10 mt-1 whitespace-nowrap rounded-md px-2 py-0.5 text-[0.75rem] font-medium shadow-sm"
+          style={{ backgroundColor: 'var(--brand-alert-red)', color: 'white' }}
         >
           {t('intake.audio.dictateListening')}
         </span>
       )}
       {errorMsg && !listening && (
-        <span role="alert" className="text-[0.75rem]" style={{ color: 'var(--brand-alert-red)' }}>
+        <span
+          role="alert"
+          className="absolute right-0 top-full z-10 mt-1 w-max max-w-[14rem] rounded-md px-2 py-1 text-[0.75rem] leading-snug shadow-sm"
+          style={{ backgroundColor: 'var(--brand-alert-red)', color: 'white' }}
+        >
           {errorMsg}
         </span>
       )}
