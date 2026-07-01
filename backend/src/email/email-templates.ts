@@ -416,6 +416,29 @@ export function monthlyReportEmailHtml(params: {
   `)
 }
 
+/** Support System — ops reply to a user's ticket. Wrapped → carries the
+ *  standardized HIPAA confidentiality footer like every other outbound email. */
+export function supportReplyEmailHtml(
+  ticketNumber: string,
+  replyBody: string,
+): string {
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #7B00E0; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Support reply
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">A reply to your support request</h2>
+    <p style="color: #6b7280; font-size: 13px; margin: 0 0 12px;">Ticket ${ticketNumber}</p>
+    <div style="background: #fafafa; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+      <p style="color: #1f2937; font-size: 14px; line-height: 1.7; margin: 0; white-space: pre-wrap;">${replyBody}</p>
+    </div>
+    <p style="color: #6b7280; font-size: 13px; line-height: 1.6;">
+      Reply to this email if you need anything else, and our team will follow up.
+    </p>
+  `)
+}
+
 export function contactFormEmailHtml(
   senderEmail: string,
   message: string,
