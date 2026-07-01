@@ -18,9 +18,11 @@ import {
   UserPlus,
   ClipboardList,
   Settings,
+  LifeBuoy,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import {
+  canManageSupport,
   canManageUsers,
   canViewReports,
   isCoordinatorOnly,
@@ -102,6 +104,14 @@ const SECONDARY_NAV: NavItem[] = [
     label: 'Alerts',
     icon: Bell,
     show: (roles) => !isCoordinatorOnly(roles),
+  },
+  // Support ticket queue — HEALPLACE_OPS + SUPER_ADMIN only.
+  {
+    href: '/support',
+    label: 'Support',
+    icon: LifeBuoy,
+    matchPrefix: true,
+    show: (roles) => canManageSupport(roles),
   },
   // Account-level settings (security / 2FA today). Available to every
   // signed-in staff role, including COORDINATOR.

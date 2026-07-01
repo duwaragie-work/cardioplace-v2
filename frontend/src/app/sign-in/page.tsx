@@ -543,6 +543,16 @@ export default function RegisterPage() {
                   </a>
                   .
                 </p>
+                {/* Locked out — public support form (no auth required). */}
+                <p className="text-center mt-3">
+                  <a
+                    href="/support/locked-out"
+                    data-testid="signin-need-help"
+                    className="text-[0.6875rem] lg:text-xs font-medium text-[#7B00E0] hover:underline"
+                  >
+                    Need help signing in?
+                  </a>
+                </p>
                 {/* A2 — privacy assurance + A1 — medical disclaimer.
                     Mobile-only here: on md+ the right info panel is visible and
                     carries these two notices instead. When that panel collapses
