@@ -69,27 +69,32 @@ export default function IdleWarningToast() {
       role="alert"
       aria-live="assertive"
       aria-atomic="true"
-      className="fixed inset-x-0 top-4 z-[100] mx-auto flex max-w-[min(560px,calc(100vw-2rem))] items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3.5 shadow-[0px_12px_30px_rgba(123,0,224,0.12)] sm:items-center"
+      className="fixed inset-x-0 top-4 z-[100] mx-auto flex max-w-[min(560px,calc(100vw-2rem))] flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3.5 shadow-[0px_12px_30px_rgba(123,0,224,0.12)]"
       data-testid="idle-warning-toast"
     >
-      <AlertTriangle
-        aria-hidden="true"
-        className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 sm:mt-0"
-        strokeWidth={2.5}
-      />
-      <div className="flex-1 text-sm leading-relaxed text-[#4b5563]">
-        <strong className="block font-semibold text-amber-800">
-          Warning signing out soon
-        </strong>
-        <span>
-          You will be signed out in about 60 seconds because of inactivity.
-          Move the mouse or press any key to stay signed in.
-        </span>
+      <div className="flex items-start gap-2.5">
+        <AlertTriangle
+          aria-hidden="true"
+          className="mt-0.5 h-5 w-5 shrink-0 text-amber-600"
+          strokeWidth={2.5}
+        />
+        <div className="flex-1 text-sm leading-relaxed text-[#4b5563]">
+          <strong className="block font-semibold text-amber-800">
+            Warning signing out soon
+          </strong>
+          <span>
+            You will be signed out in about 60 seconds because of inactivity.
+            Move the mouse or press any key to stay signed in.
+          </span>
+        </div>
       </div>
+      {/* Action pinned to the bottom so the toast height is predictable no
+          matter how the message text wraps. Full-width on phones, natural
+          width and right-aligned from sm+. */}
       <button
         type="button"
         onClick={dismiss}
-        className="min-h-[44px] shrink-0 rounded-full bg-[#7B00E0] px-5 py-2 text-sm font-semibold text-white shadow-[0px_10px_15px_rgba(123,0,224,0.25)] transition-colors hover:bg-[#6600BC] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7B00E0]"
+        className="min-h-[44px] w-full rounded-full bg-[#7B00E0] px-5 py-2 text-sm font-semibold text-white shadow-[0px_10px_15px_rgba(123,0,224,0.25)] transition-colors hover:bg-[#6600BC] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7B00E0] sm:w-auto sm:self-end"
         data-testid="idle-warning-stay-signed-in"
       >
         Stay signed in
