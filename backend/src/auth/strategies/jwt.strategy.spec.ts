@@ -18,7 +18,10 @@ import { JwtStrategy } from './jwt.strategy.js'
  */
 describe('JwtStrategy.validate — practice membership probe', () => {
   function buildStrategy(prismaMock: any) {
-    const config = { get: () => 'test-secret' } as unknown as ConfigService
+    const config = {
+      get: () => 'test-secret',
+      getOrThrow: () => 'test-secret',
+    } as unknown as ConfigService
     return new JwtStrategy(config, prismaMock as any)
   }
 
@@ -153,6 +156,30 @@ describe('JwtStrategy.validate — practice membership probe', () => {
         activePracticeId: 'p-cedar',
       }),
     ).rejects.toThrow(UnauthorizedException)
+  })
+
+  // Humaira N4 — fail closed on a missing signing secret. With the old
+  // config.get(..., 'fallback-secret') default, an unset JWT_ACCESS_SECRET
+  // silently signed/verified tokens with the known constant 'fallback-secret',
+  // letting anyone who's read the source forge access tokens. getOrThrow makes
+  // the strategy constructor throw at boot, so the process never comes up in
+  // that state.
+  it('missing JWT_ACCESS_SECRET → constructor throws (fail closed, no fallback)', () => {
+    const prisma = {
+      practiceProvider: { findUnique: jest.fn() },
+      practiceMedicalDirector: { findUnique: jest.fn() },
+      practiceCoordinator: { findUnique: jest.fn() },
+    }
+    // Mirror ConfigService.getOrThrow's real behaviour when the key is absent.
+    const config = {
+      get: () => undefined,
+      getOrThrow: (key: string) => {
+        throw new Error(`Configuration key "${key}" does not exist`)
+      },
+    } as unknown as ConfigService
+    expect(() => new JwtStrategy(config, prisma as any)).toThrow(
+      /JWT_ACCESS_SECRET/,
+    )
   })
 
   it('no membership in ANY of the three relations → PRACTICE_MEMBERSHIP_REVOKED', async () => {

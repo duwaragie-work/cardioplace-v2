@@ -22,6 +22,8 @@ import { ProviderModule } from './provider/provider.module.js'
 import { EmailModule } from './email/email.module.js'
 import { VoiceModule } from './voice/voice.module.js'
 import { CommonModule } from './common/common.module.js'
+import { CardioplaceClsModule } from './common/cls/cls.module.js'
+import { AccessLogModule } from './access-log/access-log.module.js'
 import { OcrModule } from './ocr/ocr.module.js'
 import { DrugEnrichmentModule } from './drug-enrichment/drug-enrichment.module.js'
 import { CaregiverModule } from './caregiver/caregiver.module.js'
@@ -62,8 +64,10 @@ const TEST_CONTROL_MODULES = [TestControlModule]
       },
     ]),
 
+    CardioplaceClsModule,
     CommonModule,
     PrismaModule,
+    AccessLogModule,
     EmailModule,
     AuthModule,
     KnowledgebaseModule,
