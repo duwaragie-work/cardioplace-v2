@@ -5,6 +5,7 @@ import { Test, TestingModule } from '@nestjs/testing'
 import type { Request, Response } from 'express'
 import { AuthController } from './auth.controller.js'
 import { AuthService } from './auth.service.js'
+import { AccountLifecycleService } from '../users/account-lifecycle.service.js'
 
 describe('AuthController - OTP device ID enforcement', () => {
   let controller: AuthController
@@ -25,6 +26,15 @@ describe('AuthController - OTP device ID enforcement', () => {
           provide: ConfigService,
           useValue: {
             get: jest.fn(),
+          },
+        },
+        {
+          provide: AccountLifecycleService,
+          useValue: {
+            deactivate: jest.fn(),
+            requestSelfClose: jest.fn(),
+            verifySelfCloseToken: jest.fn(),
+            permanentClose: jest.fn(),
           },
         },
       ],
