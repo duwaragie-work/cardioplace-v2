@@ -337,6 +337,29 @@ export class PracticeService {
   }
 
   async removeProvider(practiceId: string, userId: string) {
+    // Reassign-stale guard (phase/28) — a provider who is still the primary or
+    // backup on any patient's assignment in this practice cannot be removed
+    // until an admin reassigns those patients. Block with 409 + the orphan list
+    // so the FE can drive the reassignment.
+    const orphans = await this.prisma.patientProviderAssignment.findMany({
+      where: {
+        practiceId,
+        OR: [{ primaryProviderId: userId }, { backupProviderId: userId }],
+      },
+      select: { userId: true, primaryProviderId: true, backupProviderId: true },
+    })
+    if (orphans.length > 0) {
+      throw new ConflictException({
+        message:
+          'This provider is still assigned to patients. Reassign them before removing the provider.',
+        errorCode: 'PROVIDER_HAS_ASSIGNMENTS',
+        orphanedPatients: orphans.map((o) => ({
+          patientId: o.userId,
+          role: o.primaryProviderId === userId ? 'PRIMARY' : 'BACKUP',
+        })),
+      })
+    }
+
     await this.prisma.practiceProvider.deleteMany({
       where: { practiceId, userId },
     })
@@ -361,6 +384,24 @@ export class PracticeService {
   }
 
   async removeMedicalDirector(practiceId: string, userId: string) {
+    // Reassign-stale guard (phase/28) — same rule as removeProvider, for the
+    // medicalDirector slot on the assignment.
+    const orphans = await this.prisma.patientProviderAssignment.findMany({
+      where: { practiceId, medicalDirectorId: userId },
+      select: { userId: true },
+    })
+    if (orphans.length > 0) {
+      throw new ConflictException({
+        message:
+          'This medical director is still assigned to patients. Reassign them before removing.',
+        errorCode: 'MEDICAL_DIRECTOR_HAS_ASSIGNMENTS',
+        orphanedPatients: orphans.map((o) => ({
+          patientId: o.userId,
+          role: 'MEDICAL_DIRECTOR',
+        })),
+      })
+    }
+
     await this.prisma.practiceMedicalDirector.deleteMany({
       where: { practiceId, userId },
     })

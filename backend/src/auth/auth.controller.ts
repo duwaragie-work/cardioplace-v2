@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -16,7 +17,9 @@ import {
 import { ConfigService } from '@nestjs/config'
 import type { Request, Response } from 'express'
 import { UserRole } from '../generated/prisma/enums.js'
+import { AccountLifecycleService } from '../users/account-lifecycle.service.js'
 import { AuthService } from './auth.service.js'
+import { PermanentCloseConfirmDto } from './dto/close-account.dto.js'
 import {
   type CookieScope,
   cookieName,
@@ -51,11 +54,16 @@ import {
 import { Roles } from './decorators/roles.decorator.js'
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js'
 
+type AuthedReq = Request & {
+  user: { id: string; email: string | null; roles: UserRole[] }
+}
+
 @Controller('v2/auth')
 export class AuthController {
   constructor(
     private authService: AuthService,
     private config: ConfigService,
+    private lifecycle: AccountLifecycleService,
   ) {}
 
   // ─── Helper: Extract IP Address ──────────────────────────────────────────────
@@ -277,6 +285,78 @@ export class AuthController {
     // activePracticeId JWT claim immediately.
     this.setAccessCookie(res, result.accessToken, scope)
     return result
+  }
+
+  // ─── Patient self-service account lifecycle (phase/28) ─────────────────────
+  //
+  // Authenticated + PATIENT-only: staff accounts are offboarded by an admin,
+  // never self-served (a self-deactivating provider could orphan patients).
+  // All three rely on the default JwtAuthGuard and read req.user.
+
+  private assertPatientSelfService(roles: UserRole[]): void {
+    if (roles.some((r) => r !== UserRole.PATIENT)) {
+      throw new ForbiddenException(
+        'Staff accounts are managed by an administrator, not self-service.',
+      )
+    }
+  }
+
+  private buildLifecycleCtx(req: Request): {
+    ipAddress?: string
+    userAgent?: string
+  } {
+    return {
+      ipAddress: this.extractIpAddress(req),
+      userAgent: req.headers['user-agent'],
+    }
+  }
+
+  @Post('account/deactivate')
+  async selfDeactivate(@Req() req: AuthedReq) {
+    this.assertPatientSelfService(req.user.roles)
+    await this.lifecycle.deactivate(req.user.id, {
+      actorId: req.user.id,
+      actorRoles: req.user.roles,
+      selfService: true,
+      ctx: this.buildLifecycleCtx(req),
+    })
+    return { statusCode: 200, message: 'Your account has been deactivated.' }
+  }
+
+  @Post('account/permanent-close/request')
+  async selfCloseRequest(@Req() req: AuthedReq) {
+    this.assertPatientSelfService(req.user.roles)
+    await this.lifecycle.requestSelfClose(req.user.id)
+    return {
+      statusCode: 200,
+      message: 'Check your email to confirm permanently closing your account.',
+    }
+  }
+
+  @Post('account/permanent-close/confirm')
+  async selfCloseConfirm(
+    @Req() req: AuthedReq,
+    @Body() dto: PermanentCloseConfirmDto,
+  ) {
+    this.assertPatientSelfService(req.user.roles)
+    const tokenUserId = await this.lifecycle.verifySelfCloseToken(
+      dto.confirmationToken,
+    )
+    if (tokenUserId !== req.user.id) {
+      throw new ForbiddenException(
+        'This closure link does not match your account.',
+      )
+    }
+    await this.lifecycle.permanentClose(req.user.id, {
+      actorId: req.user.id,
+      actorRoles: req.user.roles,
+      selfService: true,
+      ctx: this.buildLifecycleCtx(req),
+    })
+    return {
+      statusCode: 200,
+      message: 'Your account has been permanently closed.',
+    }
   }
 
   // ─── MFA — TOTP second factor (Manisha 2026-06-12 Access Control §6) ────────

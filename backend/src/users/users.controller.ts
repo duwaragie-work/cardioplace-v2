@@ -1,6 +1,8 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -15,6 +17,8 @@ import { RolesGuard } from '../auth/guards/roles.guard.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { BulkInviteUserDto } from './dto/bulk-invite-user.dto.js'
 import { DeactivateDto } from './dto/deactivate.dto.js'
+import { PermanentCloseDto } from './dto/permanent-close.dto.js'
+import { ReactivateDto } from './dto/reactivate.dto.js'
 import { InviteUserDto } from './dto/invite-user.dto.js'
 import { ListUsersQuery } from './dto/list-users.query.js'
 import type { Actor } from './users.service.js'
@@ -111,10 +115,46 @@ export class UsersController {
   }
 
   @Post(':id/reactivate')
-  reactivate(@Req() req: AuthedReq, @Param('id') id: string) {
+  reactivate(
+    @Req() req: AuthedReq,
+    @Param('id') id: string,
+    @Body() dto: ReactivateDto,
+  ) {
     return this.usersService.reactivate(
       this.actorFrom(req),
       id,
+      dto,
+      this.buildContext(req),
+    )
+  }
+
+  @Post(':id/permanent-close')
+  permanentClose(
+    @Req() req: AuthedReq,
+    @Param('id') id: string,
+    @Body() dto: PermanentCloseDto,
+  ) {
+    return this.usersService.permanentClose(
+      this.actorFrom(req),
+      id,
+      dto,
+      this.buildContext(req),
+    )
+  }
+
+  @Delete(':id/roles/:role')
+  removeRole(
+    @Req() req: AuthedReq,
+    @Param('id') id: string,
+    @Param('role') role: string,
+  ) {
+    if (!(role in UserRole)) {
+      throw new BadRequestException(`Unknown role: ${role}`)
+    }
+    return this.usersService.removeRole(
+      this.actorFrom(req),
+      id,
+      role as UserRole,
       this.buildContext(req),
     )
   }
