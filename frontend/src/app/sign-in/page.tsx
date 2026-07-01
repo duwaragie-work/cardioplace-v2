@@ -39,6 +39,8 @@ const BACKEND_MSG_KEY_MAP: Record<string, TranslationKey> = {
   'Verification failed': 'register.verificationFailed',
   'Account is suspended': 'register.accountSuspended',
   'Account is blocked': 'register.accountBlocked',
+  'Account is deactivated': 'register.accountDeactivated',
+  'Account is closed': 'register.accountClosed',
 };
 
 function backendMsgToKey(msg: string | undefined): TranslationKey | null {

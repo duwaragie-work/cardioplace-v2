@@ -13,8 +13,11 @@ import { activationEmailHtml, roleLabel } from '../email/email-templates.js'
 import type { Prisma } from '../generated/prisma/client.js'
 import { AccountStatus, UserRole } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { AccountLifecycleService } from './account-lifecycle.service.js'
 import type { BulkInviteUserDto } from './dto/bulk-invite-user.dto.js'
 import type { DeactivateDto } from './dto/deactivate.dto.js'
+import type { PermanentCloseDto } from './dto/permanent-close.dto.js'
+import type { ReactivateDto } from './dto/reactivate.dto.js'
 import type { InviteUserDto } from './dto/invite-user.dto.js'
 import { type ListUsersQuery, UserListStatus } from './dto/list-users.query.js'
 
@@ -85,6 +88,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly emailService: EmailService,
+    private readonly lifecycle: AccountLifecycleService,
   ) {}
 
   // ─── Authorization helpers ────────────────────────────────────────────────
@@ -663,19 +667,15 @@ export class UsersService {
     if (!target) throw new NotFoundException('User not found')
     await this.assertCanDeactivate(caller, target)
 
-    if (target.accountStatus === AccountStatus.DEACTIVATED) {
-      throw new BadRequestException('User is already deactivated')
-    }
-
-    const updated = await this.prisma.user.update({
-      where: { id: target.id },
-      data: { accountStatus: AccountStatus.DEACTIVATED },
-      select: {
-        id: true,
-        email: true,
-        roles: true,
-        accountStatus: true,
-      },
+    // Mechanics (status flip + session kill-switch + snapshot + audit) live in
+    // AccountLifecycleService, which also blocks the last-Super-Admin case and
+    // throws when the account is already deactivated / closed.
+    const updated = await this.lifecycle.deactivate(target.id, {
+      actorId: caller.id,
+      actorRoles: caller.roles,
+      selfService: false,
+      reason: dto.reason,
+      ctx,
     })
 
     await this.logEvent({
@@ -692,14 +692,15 @@ export class UsersService {
       success: true,
     })
 
-    return {
-      statusCode: 200,
-      message: 'User deactivated',
-      data: updated,
-    }
+    return { statusCode: 200, message: 'User deactivated', data: updated }
   }
 
-  async reactivate(caller: Actor, targetUserId: string, ctx?: InviteContext) {
+  async reactivate(
+    caller: Actor,
+    targetUserId: string,
+    dto: ReactivateDto,
+    ctx?: InviteContext,
+  ) {
     const target = await this.prisma.user.findUnique({
       where: { id: targetUserId },
       select: { id: true, email: true, roles: true, accountStatus: true },
@@ -707,19 +708,16 @@ export class UsersService {
     if (!target) throw new NotFoundException('User not found')
     await this.assertCanDeactivate(caller, target)
 
-    if (target.accountStatus === AccountStatus.ACTIVE) {
-      throw new BadRequestException('User is already active')
-    }
-
-    const updated = await this.prisma.user.update({
-      where: { id: target.id },
-      data: { accountStatus: AccountStatus.ACTIVE },
-      select: {
-        id: true,
-        email: true,
-        roles: true,
-        accountStatus: true,
-      },
+    // Default to restoring the pre-deactivation roles: admin deactivate is a
+    // reversible pause ("not a delete" — see the deactivate modal copy), so
+    // reactivate must hand the staff role back or the user returns powerless.
+    // An admin can still pass restoreRoles:false for a fresh re-authorization.
+    const restoreRoles = dto.restoreRoles ?? true
+    const updated = await this.lifecycle.reactivate(target.id, {
+      actorId: caller.id,
+      actorRoles: caller.roles,
+      restoreRoles,
+      ctx,
     })
 
     await this.logEvent({
@@ -731,15 +729,134 @@ export class UsersService {
       metadata: {
         targetUserId: updated.id,
         targetRoles: updated.roles,
+        restoreRoles,
       },
       success: true,
     })
 
-    return {
-      statusCode: 200,
-      message: 'User reactivated',
-      data: updated,
+    return { statusCode: 200, message: 'User reactivated', data: updated }
+  }
+
+  /** Admin permanent-close — irreversible tombstone, gated by an anti-typo
+   *  DisplayID confirmation. Cannot be used on your own account. */
+  async permanentClose(
+    caller: Actor,
+    targetUserId: string,
+    dto: PermanentCloseDto,
+    ctx?: InviteContext,
+  ) {
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: {
+        id: true,
+        email: true,
+        displayId: true,
+        roles: true,
+        accountStatus: true,
+      },
+    })
+    if (!target) throw new NotFoundException('User not found')
+    if (caller.id === target.id) {
+      throw new ForbiddenException(
+        'You cannot permanently close your own account from the admin console',
+      )
     }
+    await this.assertCanDeactivate(caller, target)
+    if (dto.confirmDisplayId !== target.displayId) {
+      throw new BadRequestException(
+        'confirmDisplayId does not match the target account',
+      )
+    }
+
+    const result = await this.lifecycle.permanentClose(target.id, {
+      actorId: caller.id,
+      actorRoles: caller.roles,
+      selfService: false,
+      reason: dto.reason,
+      ctx,
+    })
+
+    await this.logEvent({
+      event: 'user_permanently_closed',
+      userId: caller.id,
+      identifier: target.email ?? undefined,
+      ipAddress: ctx?.ipAddress,
+      userAgent: ctx?.userAgent,
+      metadata: {
+        targetUserId: target.id,
+        targetRoles: target.roles,
+        reason: dto.reason ?? null,
+      },
+      success: true,
+    })
+
+    return { statusCode: 200, message: 'Account permanently closed', data: result }
+  }
+
+  /** Remove a single role from a staff account. Bumps the token version +
+   *  kills live sessions so the dropped privilege stops working immediately. */
+  async removeRole(
+    caller: Actor,
+    targetUserId: string,
+    role: UserRole,
+    ctx?: InviteContext,
+  ) {
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, email: true, roles: true, accountStatus: true },
+    })
+    if (!target) throw new NotFoundException('User not found')
+    // Removing a role is at least as privileged as deactivating the account.
+    await this.assertCanDeactivate(caller, target)
+    if (
+      role === UserRole.SUPER_ADMIN &&
+      !caller.roles.includes(UserRole.SUPER_ADMIN)
+    ) {
+      throw new ForbiddenException(
+        'Only a Super Admin can remove the Super Admin role',
+      )
+    }
+    if (!target.roles.includes(role)) {
+      throw new BadRequestException(`User does not have role ${role}`)
+    }
+    if (role === UserRole.SUPER_ADMIN) {
+      const others = await this.prisma.user.count({
+        where: {
+          id: { not: target.id },
+          roles: { has: UserRole.SUPER_ADMIN },
+          accountStatus: AccountStatus.ACTIVE,
+        },
+      })
+      if (others === 0) {
+        throw new ForbiddenException(
+          'Cannot remove the last active Super Admin role',
+        )
+      }
+    }
+
+    const nextRoles = target.roles.filter((r) => r !== role)
+    const updated = await this.prisma.user.update({
+      where: { id: target.id },
+      data: { roles: { set: nextRoles }, tokenVersion: { increment: 1 } },
+      select: { id: true, email: true, roles: true, accountStatus: true },
+    })
+    await this.lifecycle.revokeAllSessions(target.id)
+
+    await this.logEvent({
+      event: 'user_role_removed',
+      userId: caller.id,
+      identifier: updated.email ?? undefined,
+      ipAddress: ctx?.ipAddress,
+      userAgent: ctx?.userAgent,
+      metadata: {
+        targetUserId: updated.id,
+        removedRole: role,
+        remainingRoles: updated.roles,
+      },
+      success: true,
+    })
+
+    return { statusCode: 200, message: `Role ${role} removed`, data: updated }
   }
 
   // ─── List ─────────────────────────────────────────────────────────────────
@@ -874,6 +991,12 @@ export class UsersService {
     // are 1:1 with AccountStatus.
     if (query.status) {
       userWhere.accountStatus = query.status as AccountStatus
+    } else {
+      // Hide permanently-closed accounts by default — they're anonymized
+      // tombstones (no name/email/roles), so they'd render as blank, non-
+      // actionable rows. Their history lives in AccountClosureLog. An explicit
+      // ?status=CLOSED still fetches them if ever needed.
+      userWhere.accountStatus = { not: AccountStatus.CLOSED }
     }
 
     const [users, total] = await Promise.all([
@@ -886,6 +1009,7 @@ export class UsersService {
           id: true,
           email: true,
           name: true,
+          displayId: true,
           roles: true,
           accountStatus: true,
           createdAt: true,
@@ -930,6 +1054,7 @@ export class UsersService {
       id: u.id,
       email: u.email,
       name: u.name,
+      displayId: u.displayId,
       roles: u.roles,
       accountStatus: u.accountStatus,
       createdAt: u.createdAt,

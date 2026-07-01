@@ -320,6 +320,13 @@ export class AuthService {
     activePracticeId?: string | null,
   ): Promise<string> {
     const expiresIn = this.config.get<string>('JWT_ACCESS_EXPIRES_IN', '15m')
+    // phase/28 — stamp the account's current tokenVersion so jwt.strategy can
+    // reject this token the instant the version is bumped (deactivate / close /
+    // role removal). One PK read at issue time (sign-in / refresh only).
+    const account = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { tokenVersion: true },
+    })
     // @ts-expect-error - NestJS JWT accepts string for expiresIn despite type definition
     return await this.jwtService.signAsync(
       {
@@ -330,6 +337,7 @@ export class AuthService {
         // PATIENT / no-practice users. Switching mints a fresh access
         // token so the FE picks up the new context immediately.
         activePracticeId: activePracticeId ?? null,
+        tokenVersion: account?.tokenVersion ?? 0,
       },
       { expiresIn },
     )
