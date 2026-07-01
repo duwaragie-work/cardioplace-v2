@@ -8,7 +8,11 @@ model AccessLog {
   actorType String // 'USER' | 'SYSTEM_ACTOR'
   action    String // 'READ' | 'WRITE' | 'DELETE'
   modelName String // 'JournalEntry' | 'DeviationAlert' | ...
-  recordId  String
+  // Nullable by design: list/aggregate ops (findMany, count, createMany,
+  // updateMany, deleteMany) log the query INTENT, not each record, so they
+  // carry no single recordId. Single-record ops pin the id from where.id /
+  // result.id.
+  recordId  String?
   ip        String?
   userAgent String?
   createdAt DateTime @default(now())

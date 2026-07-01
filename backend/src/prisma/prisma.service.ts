@@ -1,8 +1,10 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { ClsService } from 'nestjs-cls'
 import { PrismaClient } from '../generated/prisma/client.js'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
+import { accessLogExtension } from '../common/prisma-extensions/access-log.extension.js'
 
 /**
  * Prisma error codes that indicate a stale or closed connection — usually
@@ -59,7 +61,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
   private readonly logger = new Logger(PrismaService.name)
   private readonly configService: ConfigService
 
-  constructor(configService: ConfigService) {
+  constructor(configService: ConfigService, cls: ClsService) {
     const dbUrl = configService.get<string>('DATABASE_URL')!
     const isAccelerate = dbUrl.startsWith('prisma://')
 
@@ -94,6 +96,48 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     }
 
     this.configService = configService
+
+    // ── PHI audit trail wiring (Humaira N8 / 164.312-T7) ──────────────────
+    // `$extends` returns a NEW client rather than mutating `this`, but this
+    // service is injected as a class into 54 call sites that all do
+    // `this.prisma.<model>.<op>()` directly. To audit every one of them with
+    // zero call-site changes, build the extended (audited) client here and
+    // return a Proxy that routes the QUERY surface to it while keeping this
+    // class's own members (lifecycle hooks + withConnectionRetry) and the
+    // connection primitives on the base instance.
+    //
+    // The extension is handed the base `this` as its write client, so its
+    // AccessLog inserts never re-enter the extension (no recursion).
+    const extended = this.$extends(accessLogExtension(cls, this))
+
+    // Members that must resolve to THIS class instance, never the extended
+    // client: our prototype methods (onModuleInit, withConnectionRetry) and
+    // instance fields (logger, configService). Without this guard they'd match
+    // the lowercase-model heuristic below and wrongly route to `extended`.
+    const ownMembers = new Set<string>([
+      ...Object.getOwnPropertyNames(PrismaService.prototype),
+      'logger',
+      'configService',
+    ])
+
+    return new Proxy(this, {
+      get(target, prop, receiver) {
+        if (typeof prop === 'string' && !ownMembers.has(prop)) {
+          // Route to the audited client for:
+          //   • `$transaction` — so query auditing propagates into interactive
+          //     transactions (writes inside `tx.<model>` are logged too).
+          //   • model accessors — lowercase first char, not `$`-prefixed
+          //     (`user`, `journalEntry`, …). All other `$`-prefixed primitives
+          //     ($connect/$disconnect/$on/$queryRaw/$executeRaw) and internal
+          //     `_`-prefixed props fall through to the base instance.
+          if (prop === '$transaction' || (/^[a-z]/.test(prop) && !prop.startsWith('$'))) {
+            const value = (extended as Record<string, unknown>)[prop]
+            return typeof value === 'function' ? value.bind(extended) : value
+          }
+        }
+        return Reflect.get(target, prop, receiver)
+      },
+    })
   }
 
   async onModuleInit() {
