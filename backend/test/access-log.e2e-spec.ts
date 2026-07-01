@@ -1,7 +1,9 @@
 import { jest } from '@jest/globals'
-import { INestApplication } from '@nestjs/common'
+import { INestApplication, ValidationPipe } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
 import { Test, TestingModule } from '@nestjs/testing'
 import { ClsService } from 'nestjs-cls'
+import request from 'supertest'
 import { AppModule } from '../src/app.module.js'
 import { PrismaService } from '../src/prisma/prisma.service.js'
 import { UsersService } from '../src/users/users.service.js'
@@ -23,6 +25,10 @@ import { generateTestDisplayId } from './helpers/generate-test-display-id.js'
  *   • SYSTEM_ACTOR fallback when no CLS actor is set
  *   • lifecycle ($connect ran) + custom method (withConnectionRetry) still work
  *   • 3 real consumers share the audited singleton
+ *   • a REAL authenticated HTTP request attributes to actorType=USER (regression
+ *     guard for the CLS-mounted-as-middleware bug — middleware ran before the
+ *     JwtAuthGuard, so req.user was undefined and every request mis-logged as
+ *     SYSTEM_ACTOR; fixed by mounting CLS as an interceptor)
  *
  * Runs locally against docker `cardio-e2e-pg` (invoke with the [::1] loopback
  * DATABASE_URL). Not part of the Playwright CI gate.
@@ -33,15 +39,17 @@ describe('AccessLog PHI audit (e2e)', () => {
   let app: INestApplication
   let prisma: PrismaService
   let cls: ClsService
+  let jwt: JwtService
 
   const runTag = `access-log-e2e-${Date.now()}`
   const actor = `${runTag}-prov`
   const userEmail = `${runTag}-patient@example.com`
   let userId: string
+  let patientToken: string
   const systemActorRowIds: string[] = []
 
   // Run `fn` inside a CLS context carrying `actorId` — mirrors what the request
-  // middleware sets up per HTTP call.
+  // interceptor sets up per HTTP call.
   function asActor<T>(actorId: string, fn: () => Promise<T>): Promise<T> {
     return cls.run(async () => {
       cls.set('actorId', actorId)
@@ -72,10 +80,13 @@ describe('AccessLog PHI audit (e2e)', () => {
       imports: [AppModule],
     }).compile()
     app = moduleFixture.createNestApplication()
+    // Match main.ts — the ValidationPipe is only applied in bootstrap.
+    app.useGlobalPipes(new ValidationPipe({ transform: true }))
     await app.init()
 
     prisma = app.get(PrismaService)
     cls = app.get(ClsService)
+    jwt = app.get(JwtService)
 
     // PHI fixture — created under the test actor so its audit row is namespaced.
     const user = await asActor(actor, () =>
@@ -85,20 +96,34 @@ describe('AccessLog PHI audit (e2e)', () => {
           name: 'Audit Test Patient',
           roles: ['PATIENT'],
           isVerified: true,
-          onboardingStatus: 'NOT_COMPLETED',
+          onboardingStatus: 'COMPLETED',
           displayId: generateTestDisplayId(['PATIENT']),
         },
       }),
     )
     userId = user.id
+    patientToken = await jwt.signAsync(
+      { sub: user.id, email: user.email, roles: user.roles },
+      { expiresIn: '15m' },
+    )
   })
 
   afterAll(async () => {
-    // Remove exactly the audit rows this run produced (namespaced actor +
-    // captured system-actor rows), then the fixture user.
+    // Remove exactly the audit rows this run produced: namespaced test actors,
+    // rows attributed to / referencing the fixture user (incl. the guard's
+    // SYSTEM_ACTOR User reads, keyed by recordId=userId), and captured rows.
     await prisma.accessLog.deleteMany({
-      where: { OR: [{ actorId: { startsWith: runTag } }, { id: { in: systemActorRowIds } }] },
+      where: {
+        OR: [
+          { actorId: { startsWith: runTag } },
+          { actorId: userId },
+          { recordId: userId },
+          { id: { in: systemActorRowIds } },
+        ],
+      },
     })
+    await prisma.profileVerificationLog.deleteMany({ where: { userId } })
+    await prisma.patientProfile.deleteMany({ where: { userId } })
     await prisma.user.deleteMany({ where: { id: userId } })
     await app.close()
   })
@@ -110,8 +135,6 @@ describe('AccessLog PHI audit (e2e)', () => {
     const rows = await prisma.accessLog.findMany({
       where: { actorId: actor, modelName: 'User', action: 'WRITE', recordId: userId },
     })
-    // ≥1 (the fixture create also logged a WRITE, but with recordId=created.id
-    // which equals userId — so filter includes it; assert the update landed).
     expect(rows.length).toBeGreaterThanOrEqual(1)
     expect(rows[0]).toMatchObject({ actorType: 'USER', ip: '10.0.0.1', userAgent: 'int-test' })
   })
@@ -193,5 +216,44 @@ describe('AccessLog PHI audit (e2e)', () => {
     expect((users as unknown as { prisma: unknown }).prisma).toBe(prisma)
     expect((intake as unknown as { prisma: unknown }).prisma).toBe(prisma)
     expect((caregiver as unknown as { prisma: unknown }).prisma).toBe(prisma)
+  })
+
+  // ── Regression guard: real authenticated HTTP request → actorType=USER ──────
+  // This is the case my other tests miss: they set CLS manually via asActor().
+  // A real request must flow JwtAuthGuard (sets req.user) → ClsInterceptor
+  // (reads req.user) → handler → Prisma. If CLS is mounted as MIDDLEWARE it runs
+  // before the guard, req.user is undefined, and the handler's PatientProfile
+  // write is mis-logged as SYSTEM_ACTOR. Mounted as an interceptor, it's USER.
+  // PatientProfile is only touched by the handler here (the guard's validate()
+  // reads User, not PatientProfile), so a USER-attributed PatientProfile row is
+  // unambiguous proof the actor propagated through the full pipeline.
+  it('authenticated POST /intake/profile → PatientProfile audited as USER (not SYSTEM_ACTOR)', async () => {
+    // Delta baseline — scope the misattribution check to THIS request so
+    // pre-fix leftover rows from earlier runs don't skew it.
+    const sysBefore = await prisma.accessLog.count({
+      where: { modelName: 'PatientProfile', actorType: 'SYSTEM_ACTOR' },
+    })
+
+    const res = await request(app.getHttpServer())
+      .post('/intake/profile')
+      .set('Authorization', `Bearer ${patientToken}`)
+      .set('User-Agent', 'audit-http-test')
+      .send({ hasAFib: true })
+    expect(res.status).toBe(200)
+
+    await waitForLogs({ modelName: 'PatientProfile', actorId: userId }, 1)
+    const row = await prisma.accessLog.findFirst({
+      where: { modelName: 'PatientProfile', actorId: userId },
+      orderBy: { createdAt: 'desc' },
+    })
+    expect(row).not.toBeNull()
+    expect(row).toMatchObject({ actorType: 'USER', actorId: userId })
+
+    // Crucially: this request added NO SYSTEM_ACTOR PatientProfile row — the
+    // handler write propagated the actor through the full guard→interceptor path.
+    const sysAfter = await prisma.accessLog.count({
+      where: { modelName: 'PatientProfile', actorType: 'SYSTEM_ACTOR' },
+    })
+    expect(sysAfter).toBe(sysBefore)
   })
 })
