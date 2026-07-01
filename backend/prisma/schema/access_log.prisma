@@ -1,0 +1,18 @@
+// PHI access audit trail (Humaira N8 / 164.312-T7, HIPAA §164.312(b) audit
+// controls). One row per read/write/delete on a PHI model, written by the
+// access-log Prisma extension (behavior lands Thursday; this is the schema
+// half of the scaffolding). actorId is null when a system-actor cron writes.
+model AccessLog {
+  id        String   @id @default(ulid())
+  actorId   String? // null when system-actor cron writes
+  actorType String // 'USER' | 'SYSTEM_ACTOR'
+  action    String // 'READ' | 'WRITE' | 'DELETE'
+  modelName String // 'JournalEntry' | 'DeviationAlert' | ...
+  recordId  String
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([modelName, recordId, createdAt])
+}
