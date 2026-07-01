@@ -278,6 +278,17 @@ describe('AuthService', () => {
               value: 'CPPATTESTING0',
               display: 'CP-PAT-TESTING-0',
             })),
+            // issueForCreate is a higher-order helper: it generates a displayId
+            // and runs the caller's create closure with it, returning the created
+            // row. Invoke the closure so the underlying tx.user.create still fires.
+            issueForCreate: jest.fn(
+              async (
+                _tx: unknown,
+                _cls: unknown,
+                _via: unknown,
+                createUserFn: (displayId: string) => Promise<unknown>,
+              ) => createUserFn('CPPATTESTING0'),
+            ),
           },
         },
       ],
@@ -574,6 +585,9 @@ describe('AuthService', () => {
           email: 'test@example.com',
           isVerified: true,
           roles: [UserRole.PATIENT],
+          // user INSERT now routes through DisplayIdService.issueForCreate, so the
+          // pre-generated displayId is part of the create payload.
+          displayId: expect.any(String),
         },
       })
     })

@@ -16,7 +16,8 @@ import { byTestId, T } from '../helpers/selectors.js'
  *
  *   SUPER_ADMIN    → any role
  *   HEALPLACE_OPS  → PROVIDER / MEDICAL_DIRECTOR / HEALPLACE_OPS / COORDINATOR
- *   COORDINATOR    → PATIENT only
+ *   COORDINATOR    → PATIENT / PROVIDER / MEDICAL_DIRECTOR (own practice only;
+ *                    NOT COORDINATOR / HEALPLACE_OPS / SUPER_ADMIN)
  *   PROVIDER       → cannot invite (not on the /admin/users controller @Roles)
  *
  * Successful-invite tests mutate the DB (gated). The scoping-403 test rejects
@@ -91,15 +92,17 @@ test.describe('Spec 36 — admin invite flow', () => {
       role,
     })
 
-    // COORDINATOR may invite PATIENT only → inviting a PROVIDER is forbidden.
+    // COORDINATOR may invite PATIENT / PROVIDER / MEDICAL_DIRECTOR into their
+    // own practice, but NOT org-level roles → inviting a SUPER_ADMIN is
+    // forbidden (the role check rejects before any practice lookup or write).
     const coord = await authedApi(API_BASE_URL, ADMINS.coordinator.email, 'admin')
     // HEALPLACE_OPS may invite staff but NOT patients.
     const ops = await authedApi(API_BASE_URL, ADMINS.ops.email, 'admin')
     // PROVIDER is not on the /admin/users controller at all.
     const provider = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
     try {
-      const coordRes = await coord.post('admin/users/invite', { data: mk('PROVIDER') })
-      expect(coordRes.status(), 'coordinator→PROVIDER forbidden').toBe(403)
+      const coordRes = await coord.post('admin/users/invite', { data: mk('SUPER_ADMIN') })
+      expect(coordRes.status(), 'coordinator→SUPER_ADMIN forbidden').toBe(403)
 
       const opsRes = await ops.post('admin/users/invite', { data: mk('PATIENT') })
       expect(opsRes.status(), 'ops→PATIENT forbidden').toBe(403)
@@ -110,6 +113,33 @@ test.describe('Spec 36 — admin invite flow', () => {
       await coord.dispose()
       await ops.dispose()
       await provider.dispose()
+    }
+  })
+
+  test('36.4 — COORDINATOR invites a PROVIDER into their own practice', async ({}, testInfo) => {
+    test.skip(!process.env.RUN_WRITE_TESTS, 'creates an invite')
+    testInfo.setTimeout(90_000)
+    const coord = await authedApi(API_BASE_URL, ADMINS.coordinator.email, 'admin')
+    try {
+      const email = `qa.coord.prov.${randomUUID().slice(0, 8)}@cardioplace.test`
+      // No practiceId sent — the backend auto-fills the coordinator's own
+      // PracticeCoordinator practice and scope-checks it. PROVIDER + MED_DIR
+      // are now invitable by a coordinator (own practice only).
+      const res = await coord.post('admin/users/invite', {
+        data: { email, name: 'QA Coord Provider', role: 'PROVIDER' },
+      })
+      expect(
+        res.status(),
+        `coordinator→PROVIDER allowed: ${await res.text()}`,
+      ).toBe(201)
+      const body = await res.json()
+      const inviteId = body?.data?.id as string
+      expect(inviteId, 'invite id returned').toBeTruthy()
+      // Clean up so the email is freed + the list isn't polluted across reruns.
+      const revoke = await coord.post(`admin/users/invite/${inviteId}/revoke`)
+      expect(revoke.status(), 'coordinator can revoke their own invite').toBeLessThan(300)
+    } finally {
+      await coord.dispose()
     }
   })
 })

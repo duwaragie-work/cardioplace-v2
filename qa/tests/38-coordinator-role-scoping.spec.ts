@@ -11,10 +11,11 @@ import { byTestId, T } from '../helpers/selectors.js'
  * own practice and nothing clinical. This spec pins both halves of the
  * boundary from admin/src/lib/roleGates.ts:
  *
- *   ALLOWED  → /users (canManageUsers), GET /admin/users
+ *   ALLOWED  → /users (canManageUsers), GET /admin/users,
+ *              GET /admin/practices (read-only view of their own practice + staff)
  *   DENIED   → /reports (canViewReports excludes COORDINATOR),
  *              alert resolve (canResolveAlerts excludes),
- *              practice CRUD (canManagePractices excludes),
+ *              practice CRUD — create/update/staff (canManagePractices excludes),
  *              threshold edit (canEditThresholds excludes)
  *
  * For each denied surface we assert BOTH the UI (access-denied / no action)
@@ -75,7 +76,12 @@ test.describe('Spec 38 — coordinator role scoping', () => {
       })
       expect(resolve.status(), 'POST resolve forbidden').toBe(403)
 
-      // Practice CRUD — operational/admin function, excluded.
+      // Practice READ — coordinators now get a read-only view of their own
+      // practice (+ staff), scoped server-side. GET is allowed (200)…
+      const practiceList = await api.get('admin/practices')
+      expect(practiceList.status(), 'GET /admin/practices allowed (read-only)').toBe(200)
+
+      // …but practice CRUD stays an operational/admin function, excluded.
       const practice = await api.post('admin/practices', {
         data: { name: 'QA should-403' },
       })

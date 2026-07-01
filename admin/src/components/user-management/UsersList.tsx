@@ -226,23 +226,25 @@ export default function UsersList({
               >
                 {t('userManagement.field.email')}
               </th>
+              {/* Role is shown for everyone now — a coordinator manages their
+                  practice's patients, providers, and medical directors, so they
+                  need to tell them apart. Practice column stays hidden for
+                  coordinators (single, implicit practice). */}
+              <th
+                scope="col"
+                className="text-left px-5 py-3 text-[10px] font-bold uppercase tracking-wider"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('userManagement.field.role')}
+              </th>
               {!coordinatorView && (
-                <>
-                  <th
-                    scope="col"
-                    className="text-left px-5 py-3 text-[10px] font-bold uppercase tracking-wider"
-                    style={{ color: 'var(--brand-text-muted)' }}
-                  >
-                    {t('userManagement.field.role')}
-                  </th>
-                  <th
-                    scope="col"
-                    className="text-left px-5 py-3 text-[10px] font-bold uppercase tracking-wider"
-                    style={{ color: 'var(--brand-text-muted)' }}
-                  >
-                    {t('userManagement.field.practice')}
-                  </th>
-                </>
+                <th
+                  scope="col"
+                  className="text-left px-5 py-3 text-[10px] font-bold uppercase tracking-wider"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                >
+                  {t('userManagement.field.practice')}
+                </th>
               )}
               <th
                 scope="col"
@@ -271,7 +273,7 @@ export default function UsersList({
             {loading && (
               <tr>
                 <td
-                  colSpan={coordinatorView ? 5 : 7}
+                  colSpan={coordinatorView ? 6 : 7}
                   className="px-5 py-8 text-center text-[12px]"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
@@ -284,7 +286,7 @@ export default function UsersList({
             {!loading && combined.length === 0 && (
               <tr>
                 <td
-                  colSpan={coordinatorView ? 5 : 7}
+                  colSpan={coordinatorView ? 6 : 7}
                   className="px-5 py-12 text-center text-[13px]"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
@@ -299,8 +301,13 @@ export default function UsersList({
               combined.map((row) => {
                 const isPending = pendingRowId === row.id;
                 const isSelf = caller?.id === row.id;
+                // Coordinators manage people through invites (send / cancel on
+                // pending rows), not by deactivating active users — so they get
+                // no deactivate/reactivate ("delete") button on active rows.
                 const canAct =
-                  !isSelf && canDeactivateUser(caller, row.targetRoles);
+                  !isSelf &&
+                  !coordinatorView &&
+                  canDeactivateUser(caller, row.targetRoles);
                 const showDeactivate =
                   row.kind === 'user' && row.status === 'ACTIVE' && canAct;
                 const showReactivate =
@@ -353,21 +360,19 @@ export default function UsersList({
                         {row.email}
                       </span>
                     </td>
+                    <td className="px-5 py-3.5">
+                      {row.role ? (
+                        <RoleBadge role={row.role as UserRole} />
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     {!coordinatorView && (
-                      <>
-                        <td className="px-5 py-3.5">
-                          {row.role ? (
-                            <RoleBadge role={row.role as UserRole} />
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td className="px-5 py-3.5 text-[12px]">
-                          {row.practiceId
-                            ? practiceById.get(row.practiceId) ?? '—'
-                            : '—'}
-                        </td>
-                      </>
+                      <td className="px-5 py-3.5 text-[12px]">
+                        {row.practiceId
+                          ? practiceById.get(row.practiceId) ?? '—'
+                          : '—'}
+                      </td>
                     )}
                     <td className="px-5 py-3.5">
                       <StatusBadge status={row.status} />
@@ -602,10 +607,11 @@ export default function UsersList({
                   </div>
                 </div>
 
-                {/* Meta row: role · practice · invited */}
-                {(!coordinatorView || row.invitedAt) && (
+                {/* Meta row: role · practice · invited. Role shows for
+                    coordinators too; practice stays hidden for them. */}
+                {(row.role || (!coordinatorView && row.practiceId) || row.invitedAt) && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
-                    {!coordinatorView && row.role && (
+                    {row.role && (
                       <RoleBadge role={row.role as UserRole} />
                     )}
                     {!coordinatorView && row.practiceId && (

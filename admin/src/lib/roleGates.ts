@@ -278,7 +278,12 @@ export function invitableRoles(input: RoleInput | UserInput): UserRole[] {
     return ['PROVIDER', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS', 'COORDINATOR']
   }
   if (roles.includes('COORDINATOR')) {
-    return ['PATIENT']
+    // COORDINATOR staffs their own practice — they can invite patients plus
+    // the practice's clinicians (providers + medical directors). They cannot
+    // mint other coordinators or org-level roles (OPS / SUPER_ADMIN); the
+    // practice is always implicit (their own) — see inviteRequiresPractice +
+    // the server-side assertCanInvite scope check.
+    return ['PATIENT', 'PROVIDER', 'MEDICAL_DIRECTOR']
   }
   return []
 }

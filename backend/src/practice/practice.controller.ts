@@ -34,6 +34,10 @@ type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
   UserRole.MEDICAL_DIRECTOR,
   UserRole.HEALPLACE_OPS,
   UserRole.PROVIDER,
+  // COORDINATOR — read-only view of their own practice (list/detail/staff),
+  // scoped via practiceScopeIds. Every mutating endpoint below re-declares
+  // @Roles(SUPER_ADMIN, HEALPLACE_OPS), so this only grants the GETs.
+  UserRole.COORDINATOR,
 )
 export class PracticeController {
   constructor(private readonly service: PracticeService) {}

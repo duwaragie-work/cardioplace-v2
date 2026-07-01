@@ -53,6 +53,10 @@ export type CreateJournalEntry = {
   otherSymptoms?: string[]
   measurementConditions?: Record<string, boolean>
   medicationTaken?: boolean
+  // Buffer fast-fire: a finished check-in's last reading carries this so the
+  // engine evaluates + finalizes immediately (no 5-min editable hold). Tests
+  // that need the reading committed/provider-visible right away set it true.
+  closeSession?: boolean
 }
 
 export async function postJournalEntry(

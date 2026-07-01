@@ -76,7 +76,9 @@ export async function getOrGenerateDisplayIdForEmail(
 export async function seedDisplayIds(prisma: PrismaClient): Promise<void> {
   const candidates = await prisma.user.findMany({
     where: {
-      displayId: { not: null },
+      // displayId is NOT NULL (see user.prisma); a `{ not: null }` filter on a
+      // non-nullable column is rejected by Prisma 7+, so the only meaningful
+      // filter is the missing ledger row.
       displayIdLedger: null,
     },
     select: { id: true, roles: true, displayId: true },

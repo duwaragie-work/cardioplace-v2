@@ -18,6 +18,7 @@ const es: Record<TranslationKey, string> = {
   'common.submit': 'Enviar',
   'common.loading': 'Cargando...',
   'common.saving': 'Guardando...',
+  'common.refresh': 'Actualizar',
   'common.deleting': 'Eliminando...',
   'common.delete': 'Eliminar',
   'common.edit': 'Editar',

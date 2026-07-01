@@ -34,8 +34,10 @@ test.describe('Display ID — admin surface', () => {
   test('patient detail header shows the same CP-PAT-... ID', async ({ page }) => {
     await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
 
-    // Find Aisha in the patient list and click into her detail.
-    await page.goto('/patients')
+    // Find Aisha in the patient list and click into her detail. Admin specs
+    // must use the absolute ADMIN_BASE_URL — the config's baseURL is the
+    // PATIENT app, so a relative '/patients' would hit the wrong origin.
+    await page.goto(`${ADMIN_BASE_URL}/patients`)
     await page.getByText(PATIENTS.aisha.name).first().click()
     await page.waitForURL(/\/patients\/[^/?]+/, { timeout: 10_000 })
 
