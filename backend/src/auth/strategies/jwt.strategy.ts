@@ -70,7 +70,12 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
         fromAccessCookie,
       ]),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('JWT_ACCESS_SECRET', 'fallback-secret'),
+      // Fail closed: no fallback default. If JWT_ACCESS_SECRET is unset the
+      // process must refuse to start rather than sign/verify tokens with a
+      // known constant — a hardcoded fallback lets anyone who's read the
+      // source forge valid access tokens (Humaira N4). getOrThrow surfaces a
+      // clear "JWT_ACCESS_SECRET" error at boot.
+      secretOrKey: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
     })
   }
 
