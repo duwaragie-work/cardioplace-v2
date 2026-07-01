@@ -884,6 +884,9 @@ export class UsersService {
         orderBy: { createdAt: 'desc' },
         select: {
           id: true,
+          // Permanent public identifier (CP-PAT-... / CP-STF-...). Surfaced on
+          // each /users management row. See UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.
+          displayId: true,
           email: true,
           name: true,
           roles: true,
@@ -928,6 +931,7 @@ export class UsersService {
 
     const withPractice = users.map((u) => ({
       id: u.id,
+      displayId: u.displayId,
       email: u.email,
       name: u.name,
       roles: u.roles,

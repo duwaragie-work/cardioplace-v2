@@ -46,4 +46,33 @@ test.describe('Display ID — admin surface', () => {
     const text = (await displayIdEl.textContent())?.trim() ?? ''
     expect(text).toMatch(DISPLAY_ID_PATTERN)
   })
+
+  test('patient list search matches by displayId (canonical / hyphenated / lowercase)', async ({ page }) => {
+    await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients`)
+
+    // Grab the first row's displayId (hyphenated form, e.g. "CP-PAT-XQYV0XS-6").
+    const firstRowId = page.locator('[data-testid="patient-row-display-id"]').first()
+    await expect(firstRowId).toBeVisible({ timeout: 10_000 })
+    const hyphenated = (await firstRowId.textContent())?.trim() ?? ''
+    expect(hyphenated).toMatch(DISPLAY_ID_PATTERN)
+    const canonical = hyphenated.replace(/-/g, '') // CPPATXQYV0XS6
+
+    const search = page.locator('[data-testid="admin-patient-search-input"]')
+    // The matching row's ID cell, keyed on the exact hyphenated text.
+    const matchRow = page.locator('[data-testid="patient-row-display-id"]', { hasText: hyphenated })
+
+    for (const query of [canonical, hyphenated, hyphenated.toLowerCase()]) {
+      await search.fill('')
+      await search.fill(query)
+      await expect(matchRow).toBeVisible({ timeout: 10_000 })
+    }
+
+    // A well-formed but non-existent ID filters everything out.
+    await search.fill('')
+    await search.fill('CP-PAT-ZZZZZZZ-Z')
+    await expect(page.locator('[data-testid="patient-row-display-id"]')).toHaveCount(0, {
+      timeout: 10_000,
+    })
+  })
 })

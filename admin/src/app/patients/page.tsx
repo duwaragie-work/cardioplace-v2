@@ -954,9 +954,15 @@ export default function PatientsPage() {
     }
     if (search) {
       const q = search.toLowerCase();
+      // displayId search (proposal §4.5) — normalise both sides (strip hyphens +
+      // whitespace, uppercase) so a pasted ID matches whether it's canonical
+      // (CPPATXQYV0XS6), hyphenated (CP-PAT-XQYV0XS-6), or lowercased.
+      const norm = (s: string) => s.replace(/[\s-]/g, '').toUpperCase();
+      const qId = norm(search);
       return (
         (p.name ?? '').toLowerCase().includes(q) ||
-        (p.email ?? '').toLowerCase().includes(q)
+        (p.email ?? '').toLowerCase().includes(q) ||
+        (p.displayId ? norm(p.displayId).includes(qId) : false)
       );
     }
     return true;
@@ -1299,6 +1305,19 @@ export default function PatientsPage() {
                         <p className="text-[11px] truncate" style={{ color: 'var(--brand-text-muted)' }}>
                           {p.email ?? '--'}
                         </p>
+                        {/* Cardioplace ID inline on the row (proposal §9) — at-a-glance,
+                            searchable handle so coordinators can read it off the list
+                            without opening the modal/detail. */}
+                        {p.displayId ? (
+                          <p
+                            className="text-[10px] font-mono truncate mt-0.5"
+                            style={{ color: 'var(--brand-text-muted)' }}
+                            data-testid="patient-row-display-id"
+                            title="Cardioplace ID — quote this on support calls"
+                          >
+                            {formatDisplayId(p.displayId)}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
 

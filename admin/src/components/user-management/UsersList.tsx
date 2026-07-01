@@ -62,6 +62,9 @@ interface CombinedRow {
   kind: 'user' | 'invite';
   name: string;
   email: string;
+  /** Permanent CP-PAT-... / CP-STF-... ID for activated users; null for
+   *  pending invites (no account yet). */
+  displayId: string | null;
   role: string | null;
   /** Full role array of the target, used for the per-row deactivate gate.
    *  Empty for invite rows (they don't have an account yet). */
@@ -109,6 +112,13 @@ function formatDate(s: string | null): string {
   }
 }
 
+/** Hyphenate the canonical 13-char displayId → CP-PAT-XXXXXXX-C. Mirrors the
+ *  local copies in patients/page.tsx + ProfileScreen (no shared util yet). */
+function formatDisplayId(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value;
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`;
+}
+
 export default function UsersList({
   coordinatorView,
   response,
@@ -142,6 +152,9 @@ export default function UsersList({
         kind: 'user' as const,
         name: u.name ?? '—',
         email: u.email ?? '—',
+        // CoordinatorPatientRow is a minimal shape without displayId; UserRow
+        // carries it (backend listUsers now selects it for every caller).
+        displayId: isCoordinatorPatientRow(u) ? null : u.displayId ?? null,
         role: isCoordinatorPatientRow(u) ? null : u.roles[0] ?? null,
         // CoordinatorPatientRow is always a PATIENT (backend invariant);
         // UserRow carries the full roles array.
@@ -164,6 +177,7 @@ export default function UsersList({
       kind: 'invite' as const,
       name: inv.name,
       email: inv.email,
+      displayId: null,
       role: inv.role,
       targetRoles: [],
       practiceId: inv.practiceId,
@@ -354,6 +368,16 @@ export default function UsersList({
                       >
                         {row.name}
                       </span>
+                      {row.displayId ? (
+                        <span
+                          className="block text-[10px] font-mono mt-0.5"
+                          style={{ color: 'var(--brand-text-muted)' }}
+                          data-testid="user-row-display-id"
+                          title="Cardioplace ID — permanent, unique to this account"
+                        >
+                          {formatDisplayId(row.displayId)}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-5 py-3.5 text-[12px]">
                       <span style={{ color: 'var(--brand-text-secondary)' }}>

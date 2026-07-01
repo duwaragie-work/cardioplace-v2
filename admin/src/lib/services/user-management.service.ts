@@ -33,6 +33,9 @@ export type UserListStatus = AccountStatus | typeof INVITE_PENDING
 
 export interface UserRow {
   id: string
+  /** Permanent public identifier (CP-PAT-... / CP-STF-...). Shown on each
+   *  management row so staff IDs are visible. See the displayId proposal. */
+  displayId: string | null
   email: string | null
   name: string | null
   roles: UserRole[]

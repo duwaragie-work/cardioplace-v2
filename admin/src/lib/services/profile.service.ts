@@ -21,6 +21,10 @@ const API = process.env.NEXT_PUBLIC_API_URL
  *  and stay null/ignored for admin users — kept here for shape parity. */
 export interface MyProfile {
   id: string
+  /** Permanent public identifier (CP-PAT-... / CP-STF-...). Returned by
+   *  /auth/profile for every user; surfaced on the account page so staff can
+   *  quote their own ID. See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md. */
+  displayId: string | null
   email: string | null
   name: string | null
   roles: UserRole[]
@@ -74,6 +78,7 @@ export async function getMyProfile(): Promise<MyProfile> {
   )
   return {
     id: String(data.id),
+    displayId: (data.displayId as string | null) ?? null,
     email: (data.email as string | null) ?? null,
     name: (data.name as string | null) ?? null,
     roles: Array.isArray(data.roles) ? (data.roles as UserRole[]) : [],

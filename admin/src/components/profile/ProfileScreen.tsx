@@ -53,6 +53,13 @@ function formatDate(iso: string): string {
   });
 }
 
+/** Hyphenate the canonical 13-char displayId → CP-PAT-XXXXXXX-C. Mirrors the
+ *  local copies in patients/page.tsx + PatientDetailShell (no shared util yet). */
+function formatDisplayId(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value;
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`;
+}
+
 /** A label-left / value-right detail row. */
 function InfoRow({
   label,
@@ -304,6 +311,18 @@ export default function ProfileScreen() {
             )}
           </span>
         </InfoRow>
+
+        {profile.displayId ? (
+          <InfoRow label="Your Cardioplace ID">
+            <span
+              className="font-mono tracking-tight select-all"
+              data-testid="profile-display-id"
+              title="Quote this on support calls — it's permanent and unique to your account"
+            >
+              {formatDisplayId(profile.displayId)}
+            </span>
+          </InfoRow>
+        ) : null}
 
         <InfoRow label="Account status">
           <StatusBadge status={profile.accountStatus.toUpperCase() as UserListStatus} />

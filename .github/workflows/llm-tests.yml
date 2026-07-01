@@ -25,6 +25,11 @@ env:
   LANGSMITH_TRACING_V2: 'true'
   RESEND_API_KEY: re_dummy_key_for_ci
   EMAIL_FROM: 'Test <test@test.com>'
+  # Run the V2 chat/voice prompts — the ones the team develops against (local
+  # .env sets this too). The voice EMERGENCY reinforcement lives in promptV2,
+  # so CI must run V2 to exercise it. V1 stays the frozen, Manisha-signed prod
+  # default and is intentionally not modified.
+  CHAT_V2_PROMPT_ENABLED: 'true'
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────
