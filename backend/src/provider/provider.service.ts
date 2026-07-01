@@ -281,14 +281,18 @@ export class ProviderService {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
 
-    // Role scoping mirrors getPatients / getAlerts. PROVIDER counts only
-    // their panel; MED_DIR counts only their practice's patients; OPS/SUPER
-    // count everyone. Same patientScopeFilter shape both for direct user
-    // queries (totalActivePatients) and for joined queries (alerts/journals
-    // need the filter under `user: { is: ... }`).
+    // Two scopes, deliberately different (Manisha 2026-06 / Humaira N14):
+    //   • Population + engagement (Active Patients, readings, interactions,
+    //     BP-controlled %) mirror the patient LIST → practice-wide.
+    //   • Alert counters (open alerts, patients needing attention) mirror the
+    //     dashboard QUEUE → assigned-only for a plain PROVIDER.
+    // MED_DIR / OPS / SUPER are identical under both filters, so their cards
+    // are unaffected by the split.
     const patientScope = await this.access.patientScopeFilter(actor)
+    const alertScope = await this.access.alertQueueScopeFilter(actor)
     const userWhereScope = patientScope ?? {}
-    const joinedWhereScope = patientScope ? { user: { is: patientScope } } : {}
+    const journalWhereScope = patientScope ? { user: { is: patientScope } } : {}
+    const alertWhereScope = alertScope ? { user: { is: alertScope } } : {}
 
     const [totalActivePatients, monthlyInteractions, activeAlertsCount, readingsThisMonth, recentAlertPatients] =
       await Promise.all([
@@ -298,23 +302,23 @@ export class ProviderService {
           where: { enrollmentStatus: 'ENROLLED', ...userWhereScope },
         }),
         this.prisma.journalEntry.count({
-          where: { createdAt: { gte: startOfMonth }, ...joinedWhereScope },
+          where: { createdAt: { gte: startOfMonth }, ...journalWhereScope },
         }),
         this.prisma.deviationAlert.count({
-          where: { status: 'OPEN', ...joinedWhereScope },
+          where: { status: 'OPEN', ...alertWhereScope },
         }),
         this.prisma.journalEntry.count({
           where: {
             measuredAt: { gte: startOfMonth },
             systolicBP: { not: null },
-            ...joinedWhereScope,
+            ...journalWhereScope,
           },
         }),
         this.prisma.deviationAlert.findMany({
           where: {
             status: 'OPEN',
             createdAt: { gte: twentyFourHoursAgo },
-            ...joinedWhereScope,
+            ...alertWhereScope,
           },
           select: { userId: true },
           distinct: ['userId'],
@@ -394,6 +398,13 @@ export class ProviderService {
         // Threshold setAt drives the "needs threshold" list signal (missing /
         // stale). Only the timestamp is needed here.
         patientThreshold: { select: { setAt: true } },
+        // Provider slots on the assignment row — drive the patient-list
+        // "Yours" badge + mine-first sort. Practice-wide visibility is
+        // preserved (see patientScopeFilter); this only distinguishes
+        // ownership so a provider can spot their own caseload at a glance.
+        providerAssignmentAsPatient: {
+          select: { primaryProviderId: true, backupProviderId: true },
+        },
         journalEntries: {
           orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
@@ -459,6 +470,17 @@ export class ProviderService {
         alertsByTier[key] = (alertsByTier[key] ?? 0) + 1
       }
 
+      // True when the caller is the primary or backup provider on this
+      // patient's assignment. Drives the "Yours" badge + mine-first sort +
+      // "My patients only" filter chip on the patient list. Always false for
+      // MED_DIR / OPS / SUPER (never in a provider slot) — the UI suppresses
+      // the distinction for those roles.
+      const assignment = u.providerAssignmentAsPatient
+      const assignedToMe =
+        assignment != null &&
+        (filters.actor.id === assignment.primaryProviderId ||
+          filters.actor.id === assignment.backupProviderId)
+
       return {
         id: u.id,
         // Permanent public identifier (CP-PAT-...). Used by admin UI as the
@@ -505,6 +527,7 @@ export class ProviderService {
         // latestBaseline (rolling snapshot) is gone in v2. Frontend should
         // request the BP trend endpoint when it needs averages.
         latestBaseline: null,
+        assignedToMe,
         activeAlertsCount,
         alertsByTier,
         lastEntryDate: latestEntry?.measuredAt ?? null,
@@ -1121,10 +1144,12 @@ export class ProviderService {
     if (filters.escalated != null) {
       where.escalated = filters.escalated
     }
-    // Role-scoped filter — same path as getPatients. patientScopeFilter
-    // returns a `providerAssignmentAsPatient` fragment; nest it under `user`
-    // because Alert.user is the patient User row.
-    const patientScope = await this.access.patientScopeFilter(filters.actor)
+    // Dashboard alert queue = the provider's focused work list, NOT the whole
+    // practice (Manisha 2026-06 / Humaira HIPAA N14). alertQueueScopeFilter
+    // narrows a plain PROVIDER to assigned patients (primary OR backup);
+    // MED_DIR / org-wide roles stay practice-wide. This one swap also narrows
+    // /admin/notifications, which is served by this same endpoint.
+    const patientScope = await this.access.alertQueueScopeFilter(filters.actor)
     if (patientScope) {
       where.user = { is: patientScope }
     }

@@ -59,7 +59,8 @@ const PRIMARY_NAV: NavItem[] = [
     label: 'Patients',
     icon: Users,
     matchPrefix: true,
-    show: (roles) => !isCoordinatorOnly(roles),
+    // Visible to everyone incl. COORDINATOR — coordinators get a restricted,
+    // no-clinical roster + care-team assignment view (page-level branch).
   },
   {
     href: '/practices',

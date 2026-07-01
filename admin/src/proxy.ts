@@ -107,6 +107,10 @@ function isCoordinatorAllowed(pathname: string): boolean {
     pathname.startsWith('/users/') ||
     pathname === '/practices' ||
     pathname.startsWith('/practices/') ||
+    // Coordinators manage their practice's patient roster + care-team
+    // assignment on /patients (restricted, no clinical data — see the
+    // coordinator branch in admin/src/app/patients/page.tsx).
+    pathname === '/patients' ||
     pathname === '/profile' ||
     pathname === '/settings' ||
     pathname.startsWith('/settings/')
