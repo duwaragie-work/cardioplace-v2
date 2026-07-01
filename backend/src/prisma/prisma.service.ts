@@ -18,6 +18,42 @@ const RETRYABLE_PRISMA_CODES: ReadonlySet<string> = new Set([
   'P2028', // Transaction API error / failed to start
 ])
 
+/**
+ * HIPAA §164.312(e)(2)(ii) (transmission security) — classify the DB
+ * connection's transport from DATABASE_URL for the boot-time TLS audit line.
+ * Pure + exported so the classification paths are unit-testable without
+ * standing up a connection (Humaira N3 / 164.312-T21).
+ *
+ *   • 'prisma-postgres' — managed Prisma Postgres, which enforces
+ *     sslmode=require by default and refuses plaintext connections at the
+ *     driver level (Lakshitha's encryption report, 2026-06-24). Always TLS.
+ *   • 'sslmode'         — an explicit sslmode=require / sslmode=verify-* in
+ *     the connection string.
+ *   • 'missing-prod'    — no TLS signal AND NODE_ENV=production → the caller
+ *     must refuse to start.
+ *   • 'missing-dev'     — no TLS signal outside production (local dev) → warn
+ *     only.
+ */
+export type DbTlsClassification =
+  | 'prisma-postgres'
+  | 'sslmode'
+  | 'missing-prod'
+  | 'missing-dev'
+
+export function classifyDbTls(
+  url: string,
+  nodeEnv: string | undefined,
+): DbTlsClassification {
+  const isPrismaPostgres =
+    url.includes('db.prisma.io') || url.includes('pooled.db.prisma.io')
+  const hasSslMode = /sslmode=require|sslmode=verify/i.test(url)
+
+  if (isPrismaPostgres) return 'prisma-postgres'
+  if (hasSslMode) return 'sslmode'
+  if (nodeEnv === 'production') return 'missing-prod'
+  return 'missing-dev'
+}
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
   private readonly logger = new Logger(PrismaService.name)
@@ -71,6 +107,33 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       throw err
     }
     console.log('✅ Database connected')
+
+    // HIPAA §164.312(e)(2)(ii) — audit evidence that the running instance is
+    // actually TLS-connected. Prisma Postgres enforces sslmode=require by
+    // default and refuses plaintext connections; this line records that fact
+    // so compliance reviews can point at a log rather than infer it. In
+    // production a DATABASE_URL with no TLS signal at all is a hard stop.
+    switch (classifyDbTls(dbUrl, this.configService.get<string>('NODE_ENV'))) {
+      case 'prisma-postgres':
+        this.logger.log(
+          '🔐 Database connection: Prisma Postgres (TLS mandatory, always-on)',
+        )
+        break
+      case 'sslmode':
+        this.logger.log(
+          '🔐 Database connection: sslmode=require present in DATABASE_URL',
+        )
+        break
+      case 'missing-prod':
+        throw new Error(
+          'DATABASE_URL missing sslmode=require in production — refusing to start',
+        )
+      case 'missing-dev':
+        this.logger.warn(
+          '⚠️  Database connection: no sslmode in DATABASE_URL (local dev only)',
+        )
+        break
+    }
 
     try {
       const enableVectorIndexSetup =
