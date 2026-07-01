@@ -50,6 +50,9 @@ describe('PatientAccessService', () => {
         findUnique: jest.fn() as jest.Mock<any>,
         findMany: jest.fn() as jest.Mock<any>,
       },
+      practiceCoordinator: {
+        findUnique: jest.fn() as jest.Mock<any>,
+      },
     }
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -256,6 +259,37 @@ describe('PatientAccessService', () => {
     it('PROVIDER denied — assignment is admin-tier only', async () => {
       await expect(
         service.assertCanModifyPracticeAssignment(provActor, PRACTICE_A),
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    // phase/28 — COORDINATOR may assign care teams in their OWN practice.
+    const coordActor: ActorUser = {
+      id: 'coord-1',
+      roles: [UserRole.COORDINATOR],
+    }
+
+    it('COORDINATOR allowed for their own practice', async () => {
+      prisma.practiceCoordinator.findUnique.mockResolvedValue({
+        practiceId: PRACTICE_A,
+      })
+      await expect(
+        service.assertCanModifyPracticeAssignment(coordActor, PRACTICE_A),
+      ).resolves.toBeUndefined()
+    })
+
+    it('COORDINATOR denied for a different practice', async () => {
+      prisma.practiceCoordinator.findUnique.mockResolvedValue({
+        practiceId: PRACTICE_A,
+      })
+      await expect(
+        service.assertCanModifyPracticeAssignment(coordActor, PRACTICE_B),
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('COORDINATOR with no practice membership → denied', async () => {
+      prisma.practiceCoordinator.findUnique.mockResolvedValue(null)
+      await expect(
+        service.assertCanModifyPracticeAssignment(coordActor, PRACTICE_A),
       ).rejects.toThrow(ForbiddenException)
     })
   })

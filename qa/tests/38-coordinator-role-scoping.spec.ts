@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { signInAdmin, authedApi } from '../helpers/auth.js'
-import { ADMINS } from '../helpers/accounts.js'
+import { ADMINS, SEED_PRACTICE_ID } from '../helpers/accounts.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 import { byTestId, T } from '../helpers/selectors.js'
 
@@ -86,6 +86,78 @@ test.describe('Spec 38 — coordinator role scoping', () => {
         data: { name: 'QA should-403' },
       })
       expect(practice.status(), 'POST /admin/practices forbidden').toBe(403)
+    } finally {
+      await api.dispose()
+    }
+  })
+
+  // ── phase/28 — coordinator patient roster + care-team assignment ──────────
+
+  test('38.4 — coordinator CAN reach /patients (restricted, no-clinical view)', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000)
+    await signInAdmin(page, ADMINS.coordinator.email, ADMIN_BASE_URL, coordinatorLanding)
+    await page.goto(`${ADMIN_BASE_URL}/patients`)
+    // The coordinator-restricted roster renders (search box), NOT the clinical
+    // list (its search input) and NOT the 403 card.
+    await expect(
+      page.locator(byTestId('coordinator-patient-search')),
+    ).toBeVisible({ timeout: 25_000 })
+    await expect(
+      page.locator(byTestId(T.admin.patientListSearch)),
+    ).toHaveCount(0)
+    await expect(
+      page.locator(byTestId(T.admin.patientListAccessDenied)),
+    ).toHaveCount(0)
+  })
+
+  test('38.5 — coordinator patient/clinician lists + own-practice assignment scope', async ({}, testInfo) => {
+    testInfo.setTimeout(90_000)
+    const api = await authedApi(API_BASE_URL, ADMINS.coordinator.email, 'admin')
+    try {
+      // New coordinator read surfaces — allowed, scoped server-side.
+      const patients = await api.get('admin/coordinator/patients')
+      expect(patients.status(), 'GET /admin/coordinator/patients allowed').toBe(200)
+      const clinicians = await api.get('admin/coordinator/clinicians')
+      expect(clinicians.status(), 'GET /admin/coordinator/clinicians allowed').toBe(200)
+
+      // Assignment WRITE is now COORDINATOR-allowed: for their OWN practice the
+      // RolesGuard + scope guard pass, so the handler runs and 404s on a fake
+      // patient (proving the coordinator reaches it — not a role 403).
+      const reachable = await api.post(
+        'admin/patients/qa-nonexistent-patient/assignment',
+        {
+          data: {
+            practiceId: SEED_PRACTICE_ID,
+            primaryProviderId: 'qa-a',
+            backupProviderId: 'qa-b',
+            medicalDirectorId: 'qa-c',
+          },
+        },
+      )
+      expect(
+        reachable.status(),
+        'coordinator reaches the assignment handler for their own practice',
+      ).toBe(404)
+
+      // A DIFFERENT practice is rejected by the own-practice scope guard (403),
+      // never mutating anything.
+      const wrongPractice = await api.post(
+        'admin/patients/qa-nonexistent-patient/assignment',
+        {
+          data: {
+            practiceId: 'not-your-practice',
+            primaryProviderId: 'qa-a',
+            backupProviderId: 'qa-b',
+            medicalDirectorId: 'qa-c',
+          },
+        },
+      )
+      expect(
+        wrongPractice.status(),
+        'out-of-practice assignment forbidden',
+      ).toBe(403)
     } finally {
       await api.dispose()
     }
