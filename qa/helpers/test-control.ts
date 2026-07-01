@@ -603,6 +603,24 @@ export class TestControl {
     return this.post('test-control/magic-link/issue', args)
   }
 
+  // ─── Captured emails (spec 4Z — email-no-PHI) ─────────────────────────────
+  /**
+   * Read the backend's in-memory captured emails. CI SMTP is a dummy that
+   * never delivers, so EmailService captures the rendered mail in a non-prod
+   * buffer; this is the only way a spec can inspect what WOULD be sent.
+   */
+  async getCapturedEmails(
+    to?: string,
+  ): Promise<Array<{ to: string; subject: string; html: string; sentAt: string }>> {
+    const q = to ? `?to=${encodeURIComponent(to)}` : ''
+    return this.get(`test-control/emails${q}`)
+  }
+
+  /** Clear the captured-email buffer (call before triggering a send). */
+  async clearCapturedEmails(): Promise<{ ok: true }> {
+    return this.post('test-control/emails/clear')
+  }
+
   async dispose(): Promise<void> {
     await this.ctx.dispose()
   }

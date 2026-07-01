@@ -94,6 +94,72 @@ function buildAlertCreatedPayload(
   }
 }
 
+// ─── HIPAA — provider/MD/Ops emails carry NO patient PHI ────────────────────
+// The refactored escalationEmailBody sends clinical recipients a "notify-and-
+// link" body (Minimum Necessary §164.502(b)); only the PATIENT (data subject)
+// still sees their own reading. This is the authoritative no-PHI guard.
+describe('escalationEmailBody — HIPAA notify-and-link (PHI)', () => {
+  const CLINICAL_ROLES = [
+    'PRIMARY_PROVIDER',
+    'BACKUP_PROVIDER',
+    'MEDICAL_DIRECTOR',
+    'HEALPLACE_OPS',
+  ] as const
+
+  const render = (role: string) =>
+    escalationEmailBody({
+      alert: buildAlert({
+        user: {
+          id: 'patient-1',
+          name: 'Alan Smith',
+          email: 'alan@example.com',
+          dateOfBirth: new Date('1985-04-24T00:00:00Z'),
+          displayId: 'CPPATK8M2R4N7',
+          enrollmentStatus: 'ENROLLED',
+          providerAssignmentAsPatient: ASSIGNMENT_FULL,
+        },
+      }) as any,
+      step: 'T0',
+      role: role as any,
+      message: 'Tier 1 — ACE/ARB in pregnancy.',
+      adminBaseUrl: 'https://admin.test',
+      patientBaseUrl: 'https://app.test',
+      afterHours: false,
+      now: new Date('2026-04-22T10:05:00Z'),
+    })
+
+  it.each(CLINICAL_ROLES)('%s email contains no patient PHI', (role) => {
+    const { subject, html } = render(role)
+    const combined = `${subject}\n${html}`
+    expect(combined).not.toContain('Alan Smith') // name
+    expect(combined).not.toContain('alan@example.com') // email
+    expect(combined).not.toContain('1985-04-24') // DOB
+    expect(combined).not.toContain('165/102') // BP
+    expect(combined).not.toContain('DOB')
+    expect(combined).not.toContain('pulse')
+    expect(combined).not.toMatch(/age \d/)
+    // Subject carries no patient identifier (lockscreen test).
+    expect(subject.startsWith('[Cardioplace] ')).toBe(true)
+    expect(subject.endsWith(' - Cedar Hill Internal Medicine')).toBe(true)
+    expect(subject).not.toContain('Alan Smith')
+  })
+
+  it.each(CLINICAL_ROLES)('%s email keeps the non-PHI handle, link + footer', (role) => {
+    const { html } = render(role)
+    expect(html).toContain('CP-PAT-K8M2R4N-7') // formatted displayId reference
+    expect(html).toContain('https://admin.test/patients/patient-1?alert=alert-1')
+    expect(html).toContain('protected health information') // HIPAA footer
+  })
+
+  it('PATIENT email is unchanged (their own data) but gains the footer', () => {
+    const { subject, html } = render('PATIENT')
+    expect(html).toContain('Alan Smith') // data subject sees their own name
+    expect(html).toContain('165/102') // and their own reading
+    expect(html).toContain('protected health information') // footer now present
+    expect(subject).not.toContain('[Cardioplace]') // keeps the friendly patient subject
+  })
+})
+
 // ─── suite ──────────────────────────────────────────────────────────────────
 
 describe('EscalationService', () => {
@@ -1395,7 +1461,7 @@ describe('EscalationService', () => {
   // context on every notification.
   // ────────────────────────────────────────────────────────────────────────
   describe('email body content', () => {
-    it('Tier 1 T+0 to primary provider includes name, practice, BP reading, and dashboard link', async () => {
+    it('Tier 1 T+0 provider email is a no-PHI notify-and-link body', async () => {
       // Business-hours dispatch so the email fires immediately — no queueing.
       const now = new Date('2026-04-22T15:00:00Z') // 11:00 NY, in hours
       prisma.deviationAlert.findUnique.mockResolvedValue(
@@ -1417,38 +1483,50 @@ describe('EscalationService', () => {
         string,
       ]
       expect(to).toBe('primary@example.com')
-      // Subject — step + tier prefix + patient name + practice.
-      expect(subject).toContain('T+0')
-      expect(subject).toContain('TIER 1 CONTRAINDICATION')
-      expect(subject).toContain('Alan Smith')
-      expect(subject).toContain('Cedar Hill Internal Medicine')
-      // Body — patient identifiers, BP reading, dashboard link, ack footer.
-      expect(html).toContain('Alan Smith')
-      expect(html).toContain('alan@example.com')
-      expect(html).toContain('1985-04-24')
-      expect(html).toMatch(/age 4[01]/) // 40 or 41 depending on now/dob math
+      // Subject — NO patient identifier (HIPAA lockscreen test).
+      expect(subject).toBe(
+        '[Cardioplace] TIER 1 CONTRAINDICATION - Cedar Hill Internal Medicine',
+      )
+      expect(subject).not.toContain('Alan Smith')
+      expect(subject).not.toContain('T+0')
+      // Notify-and-link body — NONE of the patient PHI.
+      expect(html).not.toContain('Alan Smith')
+      expect(html).not.toContain('alan@example.com')
+      expect(html).not.toContain('1985-04-24')
+      expect(html).not.toMatch(/age \d/)
+      expect(html).not.toContain('165/102')
+      expect(html).not.toContain('pulse')
+      expect(html).not.toContain('Tier 1 — ACE/ARB in pregnancy.') // clinical msg
+      expect(html).not.toContain('Mode:')
+      expect(html).not.toContain('Rule:')
+      // Keeps — practice, ack window, dashboard link, role banner, the
+      // non-PHI IDs, and the HIPAA confidentiality footer.
       expect(html).toContain('Cedar Hill Internal Medicine')
-      expect(html).toContain('165/102 mmHg')
-      expect(html).toContain('pulse <strong>88</strong>')
-      expect(html).toContain('Tier 1 — ACE/ARB in pregnancy.')
+      expect(html).toContain('within 4 hours')
       expect(html).toContain(
         'https://admin.cardioplaceai.com/patients/patient-1?alert=alert-1',
       )
-      expect(html).toContain('within 4 hours')
-      // Detail richness — recipient role banner, alert metadata strip,
-      // pulse pressure, position, alert + patient IDs in footer.
-      expect(html).toContain('primary provider')
-      expect(html).toContain('pulse pressure <strong>63</strong>')
-      expect(html).toContain('(wide)') // pulsePressure 63 > 60
-      expect(html).toContain('position <strong>SITTING</strong>')
-      expect(html).toContain('Mode: <strong>STANDARD</strong>')
-      expect(html).toContain('Rule: <strong>RULE_PREGNANCY_ACE_ARB</strong>')
+      expect(html).toContain('primary provider') // role banner
       expect(html).toContain('Alert ID: alert-1')
       expect(html).toContain('Patient ID: patient-1')
+      expect(html).toContain('protected health information') // footer
     })
 
-    it('renders the suboptimal-measurement banner when the alert flagged it', () => {
+    it('renders the suboptimal-measurement banner on the PATIENT email (dropped from provider)', () => {
       const out = escalationEmailBody({
+        alert: buildAlert({ suboptimalMeasurement: true }) as any,
+        step: 'T0',
+        role: 'PATIENT',
+        message: 'Tier 1 — ACE/ARB in pregnancy.',
+        adminBaseUrl: 'https://admin.cardioplaceai.com',
+        patientBaseUrl: 'https://app.cardioplaceai.com',
+        afterHours: false,
+        now: new Date('2026-04-22T15:00:00Z'),
+      })
+      expect(out.html).toContain('Suboptimal measurement conditions')
+      expect(out.html).toMatch(/checklist item/i)
+      // Provider must NOT receive the suboptimal (clinical) banner.
+      const provider = escalationEmailBody({
         alert: buildAlert({ suboptimalMeasurement: true }) as any,
         step: 'T0',
         role: 'PRIMARY_PROVIDER',
@@ -1458,11 +1536,10 @@ describe('EscalationService', () => {
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
-      expect(out.html).toContain('Suboptimal measurement conditions')
-      expect(out.html).toMatch(/checklist item/i)
+      expect(provider.html).not.toContain('Suboptimal measurement conditions')
     })
 
-    it('renders the after-hours explanation block when afterHours=true', () => {
+    it('drops the after-hours clinical block from the provider email but still flags after-hours in the step pill', () => {
       const out = escalationEmailBody({
         alert: buildAlert() as any,
         step: 'T0',
@@ -1473,24 +1550,28 @@ describe('EscalationService', () => {
         afterHours: true,
         now: new Date('2026-04-22T10:00:00Z'),
       })
-      expect(out.html).toContain('After-hours dispatch')
-      expect(out.html).toContain('queued for the next business window')
-      expect(out.html).toContain('America/New_York')
+      // The after-hours clinical / business-hours block is dropped (HIPAA refactor).
+      expect(out.html).not.toContain('After-hours dispatch')
+      expect(out.html).not.toContain('queued for the next business window')
+      // But the recipient still sees the role banner + the "(after-hours
+      // queued)" step-pill marker in the header.
       expect(out.html).toContain('backup provider')
+      expect(out.html).toContain('after-hours queued')
     })
 
-    it('renders practice-local timestamps in addition to UTC', () => {
+    it('renders practice-local timestamps in addition to UTC on the patient email', () => {
       const out = escalationEmailBody({
         alert: buildAlert() as any,
         step: 'T0',
-        role: 'PRIMARY_PROVIDER',
+        role: 'PATIENT',
         message: 'Tier 1 — ACE/ARB in pregnancy.',
         adminBaseUrl: 'https://admin.cardioplaceai.com',
         patientBaseUrl: 'https://app.cardioplaceai.com',
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
-      // Both UTC and a practice-local rendering present.
+      // Both UTC and a practice-local rendering present (timestamp block is
+      // patient-only after the HIPAA refactor).
       expect(out.html).toContain('2026-04-22T10:00:00.000Z') // alert.createdAt UTC
       expect(out.html).toMatch(/Apr 22, 2026/) // practice-local readable form
     })
@@ -1523,7 +1604,7 @@ describe('EscalationService', () => {
       expect(subject).toContain('BP EMERGENCY')
       expect(html).toContain('within 2 hours')
       expect(html).toContain('Healplace ops will phone the practice')
-      expect(html).toContain('BP Level 2 — 190/120 mmHg.')
+      expect(html).not.toContain('190/120') // clinical BP dropped from provider
     })
 
     it('after-hours Tier 1 backup courtesy fire flags "(after-hours queued)" in the body', async () => {
@@ -1659,7 +1740,7 @@ describe('EscalationService', () => {
       const out = escalationEmailBody({
         alert: alert as any,
         step: 'T0',
-        role: 'PRIMARY_PROVIDER',
+        role: 'PATIENT', // DOB line is patient-only after the HIPAA refactor
         message: 'Tier 1 — ACE/ARB in pregnancy.',
         adminBaseUrl: 'https://admin.cardioplaceai.com',
         patientBaseUrl: 'https://app.cardioplaceai.com',
@@ -1763,17 +1844,15 @@ describe('EscalationService', () => {
       const emailCalls = email.sendEmail.mock.calls as Array<
         [string, string, string]
       >
-      const providerEmail = emailCalls.find(
-        ([, subject]) =>
-          subject.includes('BP LEVEL 1 HIGH') && subject.includes('Alan Smith'),
+      const providerEmail = emailCalls.find(([, subject]) =>
+        subject.includes('BP LEVEL 1 HIGH'),
       )
       expect(providerEmail).toBeTruthy()
       const [, subject, html] = providerEmail!
-      expect(subject).toContain('T+0')
       expect(subject).toContain('BP LEVEL 1 HIGH')
-      expect(subject).toContain('Alan Smith')
+      expect(subject).not.toContain('Alan Smith') // no patient identifier in subject
       expect(html).toContain('within 24 hours')
-      expect(html).toContain('148/94 mmHg')
+      expect(html).not.toContain('148/94') // clinical BP dropped from provider
     })
 
     it('BP_LEVEL_1_LOW uses the same provider ladder shape with HIGH→LOW label swap (no patient mirror)', async () => {
@@ -1870,7 +1949,7 @@ describe('EscalationService', () => {
     })
 
     it('humanStep renders T72H and T7D with the canonical T+ prefix', () => {
-      // Step display in the email subject pill — verifies the new helpers
+      // Step display in the email body step-pill — verifies the new helpers
       // didn't break either the existing or the new step IDs.
       const t72h = escalationEmailBody({
         alert: buildBpL1HighAlert() as any,
@@ -1882,7 +1961,7 @@ describe('EscalationService', () => {
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
-      expect(t72h.subject).toContain('T+72h')
+      expect(t72h.html).toContain('T+72h')
 
       const t7d = escalationEmailBody({
         alert: buildBpL1HighAlert() as any,
@@ -1894,7 +1973,7 @@ describe('EscalationService', () => {
         afterHours: false,
         now: new Date('2026-04-22T15:00:00Z'),
       })
-      expect(t7d.subject).toContain('T+7d')
+      expect(t7d.html).toContain('T+7d')
     })
 
     // ────────────────────────────────────────────────────────────────────
