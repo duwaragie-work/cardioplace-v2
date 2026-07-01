@@ -2,6 +2,14 @@ import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import nodemailer, { type Transporter } from 'nodemailer'
 
+/** A captured outbound email (test-only in-memory sink — see below). */
+export interface CapturedEmail {
+  to: string
+  subject: string
+  html: string
+  sentAt: string
+}
+
 /**
  * Two transports, picked at boot:
  *   • RESEND_API_KEY set → send over Resend's HTTPS API (port 443). Required on
@@ -19,7 +27,28 @@ export class EmailService implements OnModuleInit {
   private readonly resendApiKey: string | undefined
   private readonly from: string
 
+  // ── Test-only email capture ─────────────────────────────────────────────
+  // In non-production (dev / test / CI) the rendered email is pushed to an
+  // in-memory ring buffer so a Playwright / e2e spec can read what WOULD be
+  // sent — CI SMTP is a dummy that never delivers, so specs cannot read a real
+  // inbox. Never enabled in production. Exposed read-only via test-control.
+  private static readonly CAPTURE_MAX = 100
+  private static captured: CapturedEmail[] = []
+  private readonly captureEnabled: boolean
+
+  static getCapturedEmails(to?: string): CapturedEmail[] {
+    return to
+      ? EmailService.captured.filter((e) => e.to === to)
+      : [...EmailService.captured]
+  }
+  static clearCapturedEmails(): void {
+    EmailService.captured = []
+  }
+
   constructor(private readonly config: ConfigService) {
+    this.captureEnabled =
+      this.config.get<string>('EMAIL_CAPTURE') === '1' ||
+      this.config.get<string>('NODE_ENV') !== 'production'
     this.resendApiKey = this.config.get<string>('RESEND_API_KEY') || undefined
 
     // SMTP_FROM is the canonical sender; fall back to the legacy EMAIL_FROM for
@@ -73,6 +102,20 @@ export class EmailService implements OnModuleInit {
   // Fire-and-forget: callers (OTP, welcome, escalation, …) `void`-dispatch this
   // and rely on it never throwing. Failures are logged, not propagated.
   async sendEmail(to: string, subject: string, html: string): Promise<void> {
+    if (this.captureEnabled) {
+      EmailService.captured.push({
+        to,
+        subject,
+        html,
+        sentAt: new Date().toISOString(),
+      })
+      if (EmailService.captured.length > EmailService.CAPTURE_MAX) {
+        EmailService.captured.splice(
+          0,
+          EmailService.captured.length - EmailService.CAPTURE_MAX,
+        )
+      }
+    }
     try {
       if (this.resendApiKey) {
         await this.sendViaResend(to, subject, html)

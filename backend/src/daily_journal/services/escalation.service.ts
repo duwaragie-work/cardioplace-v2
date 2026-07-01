@@ -1682,15 +1682,12 @@ function escalationEmailBody(args: {
   const isPatient = role === 'PATIENT'
 
   // Subject — patient-role emails keep the friendly, non-alarming title.
-  // Staff subjects include the patient's permanent display ID so the
-  // clinician can cross-reference with their own systems at a glance.
-  // See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §5.
-  const displayIdSuffix = alert.user.displayId
-    ? ` · ${formatDisplayIdForView(alert.user.displayId)}`
-    : ''
+  // Staff subjects carry NO patient identifier (HIPAA Minimum Necessary
+  // §164.502(b) — passes the lockscreen test). The patient is referenced by
+  // the non-PHI displayId inside the body only.
   const subject = isPatient
     ? patientSubject(alert.tier)
-    : `[${humanStep(step)} ${tierLabel}] ${patientName}${displayIdSuffix} — ${practiceName}`
+    : `[Cardioplace] ${tierLabel} - ${practiceName}`
 
   const stepPill = `${humanStep(step)}${afterHours ? ' (after-hours queued)' : ''}`
   const ackFooter = ackFooterFor(alert.tier)
@@ -1755,9 +1752,15 @@ function escalationEmailBody(args: {
     : alert.userId
   const idFooter = `<div style="margin-top:18px;font-size:11px;color:#9ca3af;font-family:ui-monospace,SFMono-Regular,monospace">Alert ID: ${escapeHtml(alert.id)} &middot; Patient ID: ${escapeHtml(patientRefId)}</div>`
 
-  // Header / clinical / detail / action / footer blocks. Keep inline styles
-  // — most email clients strip <style> tags.
-  const html = `<html><body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:auto;padding:24px;color:#111827">
+  // Standardized HIPAA confidentiality footer — rendered on BOTH the patient
+  // and the provider/MD/Ops emails (one definition, one place to update).
+  const confidentialityFooter = `<hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb"/>
+  <p style="font-size:11px;color:#9ca3af">Sent by Cardioplace escalation service. Do not reply to this email. This email may contain protected health information. If you received it in error, please notify the sender and delete it without forwarding or printing.</p>`
+
+  // Patient recipients are the data subject — they see their own reading and
+  // clinical message (their own data, not a PHI disclosure). Keep this body
+  // exactly as before.
+  const patientHtml = `<html><body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:auto;padding:24px;color:#111827">
   <div style="border-left:4px solid ${tierColor};padding:16px 20px;background:#f9fafb;border-radius:6px">
     <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${tierColor}">${escapeHtml(tierLabel)} &middot; ${escapeHtml(stepPill)}</div>
     <div style="font-size:20px;font-weight:700;margin-top:6px;color:#111827">${escapeHtml(patientName)}</div>
@@ -1774,9 +1777,31 @@ function escalationEmailBody(args: {
   <div style="margin-top:22px"><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:11px 20px;background:${tierColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">${escapeHtml(ctaLabel)}</a></div>
   ${ackFooter ? `<div style="margin-top:18px;padding:12px 14px;background:#fef3c7;border-radius:6px;font-size:12.5px;color:#78350f"><strong>Acknowledgment expected.</strong> ${escapeHtml(ackFooter)}</div>` : ''}
   ${idFooter}
-  <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb"/>
-  <p style="font-size:11px;color:#9ca3af">Sent by Cardioplace escalation service. Do not reply to this email.</p>
+  ${confidentialityFooter}
 </body></html>`
+
+  // Provider / MD / Ops recipients get the HIPAA "notify-and-link" body:
+  // NO patient PHI (no name, email, DOB, age, BP/pulse/position, clinical
+  // narrative, or rule metadata) — only the alert tier, practice, ack window,
+  // the non-PHI displayId reference, and a dashboard deep-link. Minimum
+  // Necessary §164.502(b); see the HIPAA-sprint email-refactor appendix.
+  const providerHtml = `<html><body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:auto;padding:24px;color:#111827">
+  <div style="border-left:4px solid ${tierColor};padding:16px 20px;background:#f9fafb;border-radius:6px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${tierColor}">${escapeHtml(tierLabel)} &middot; ${escapeHtml(stepPill)}</div>
+    <div style="font-size:15px;margin-top:8px;color:#111827">You have a new <strong>${escapeHtml(tierLabel)}</strong> alert from a patient in your practice.</div>
+  </div>
+  ${recipientBanner}
+  <div style="margin-top:18px;font-size:13.5px;color:#374151;line-height:1.7">
+    <div>Practice: <strong>${escapeHtml(practiceName)}</strong></div>
+    ${ackFooter ? `<div>Acknowledgment expected: <strong>${escapeHtml(ackFooter)}</strong></div>` : ''}
+    <div>Patient reference ID: <strong>${escapeHtml(patientRefId)}</strong></div>
+  </div>
+  <div style="margin-top:22px"><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:11px 20px;background:${tierColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">${escapeHtml(ctaLabel)}</a></div>
+  ${idFooter}
+  ${confidentialityFooter}
+</body></html>`
+
+  const html = isPatient ? patientHtml : providerHtml
 
   return { subject, html }
 }

@@ -6,9 +6,13 @@ const HEADER = `
   </div>
 `
 
+// Standardized HIPAA confidentiality footer — applied to every wrap()-based
+// template (OTP, welcome, invite, MFA/biometric reset, caregiver update,
+// scheduled call, monthly report, contact form, …). HIPAA Minimum Necessary
+// §164.502(b) — outbound mail that may carry PHI must carry this notice.
 const FOOTER = `
   <div style="padding: 16px 24px; text-align: center; color: #9ca3af; font-size: 12px; font-family: sans-serif; border-top: 1px solid #e5e7eb;">
-    This is an automated alert from Cardioplace. Do not reply to this email.
+    This is an automated message from Cardioplace — please do not reply. It may contain protected health information; if you received it in error, please notify the sender and delete it without forwarding or printing.
   </div>
 `
 
