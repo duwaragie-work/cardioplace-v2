@@ -46,7 +46,12 @@ export class AssignmentController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.HEALPLACE_OPS)
+  @Roles(
+    UserRole.SUPER_ADMIN,
+    UserRole.MEDICAL_DIRECTOR,
+    UserRole.HEALPLACE_OPS,
+    UserRole.COORDINATOR,
+  )
   create(
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
@@ -74,7 +79,12 @@ export class AssignmentController {
   }
 
   @Patch()
-  @Roles(UserRole.SUPER_ADMIN, UserRole.MEDICAL_DIRECTOR, UserRole.HEALPLACE_OPS)
+  @Roles(
+    UserRole.SUPER_ADMIN,
+    UserRole.MEDICAL_DIRECTOR,
+    UserRole.HEALPLACE_OPS,
+    UserRole.COORDINATOR,
+  )
   update(
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,

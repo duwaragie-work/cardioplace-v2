@@ -101,13 +101,33 @@ export class PatientAccessService {
   ): Promise<void> {
     if (this.isUnscoped(actor)) return
 
+    const ids = Array.isArray(practiceIds) ? practiceIds : [practiceIds]
+
+    // COORDINATOR — front-desk role, may assign / reassign care teams for
+    // patients in THEIR OWN practice only (PracticeCoordinator is 1:1 by
+    // userId). Checked before the MED_DIR branch so a coordinator who also
+    // holds MED_DIR still gets the tighter own-practice scope.
+    if (actor.roles.includes(UserRole.COORDINATOR)) {
+      const own = await this.prisma.practiceCoordinator.findUnique({
+        where: { userId: actor.id },
+        select: { practiceId: true },
+      })
+      for (const practiceId of ids) {
+        if (!own || own.practiceId !== practiceId) {
+          throw new ForbiddenException(
+            `Practice ${practiceId} is outside your coordinator practice`,
+          )
+        }
+      }
+      return
+    }
+
     if (!actor.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
       throw new ForbiddenException(
-        'Care-team assignment requires MEDICAL_DIRECTOR, HEALPLACE_OPS, or SUPER_ADMIN',
+        'Care-team assignment requires COORDINATOR (own practice), MEDICAL_DIRECTOR, HEALPLACE_OPS, or SUPER_ADMIN',
       )
     }
 
-    const ids = Array.isArray(practiceIds) ? practiceIds : [practiceIds]
     for (const practiceId of ids) {
       const ok = await this.medHeadsPractice(actor.id, practiceId)
       if (!ok) {
@@ -154,6 +174,54 @@ export class PatientAccessService {
     // queries return empty rather than 500.
     return {
       providerAssignmentAsPatient: { is: { id: '__never__' } },
+    }
+  }
+
+  /**
+   * Where-clause fragment for the **dashboard alert queue** — the provider's
+   * personal work list. Identical to `patientScopeFilter()` for org-wide roles
+   * (SUPER_ADMIN / HEALPLACE_OPS) and MEDICAL_DIRECTOR (they see every patient
+   * in their practice), but tightens a plain PROVIDER to ASSIGNED patients
+   * only: the ones where they are the primary OR backup provider on the
+   * assignment row.
+   *
+   * Manisha 2026-06 sign-off (Humaira HIPAA N14 follow-up): practice-wide
+   * read + act on the patient list / detail, but the dashboard queue is a
+   * focused caseload, not a directory. See docs/ACCESS_SCOPE.md.
+   *
+   * Reuse: every path except the plain-PROVIDER case delegates to
+   * `patientScopeFilter()`, so the two methods can never drift for the
+   * org-wide / MED_DIR / defensive-deny branches.
+   */
+  async alertQueueScopeFilter(
+    actor: ActorUser,
+  ): Promise<{ providerAssignmentAsPatient: Record<string, unknown> } | undefined> {
+    // Only a plain PROVIDER gets the tighter assigned-only queue. A MED_DIR
+    // (even one who also holds PROVIDER) and the org-wide roles keep their
+    // normal patient scope — delegate so those branches live in one place.
+    const providerOnly =
+      actor.roles.includes(UserRole.PROVIDER) &&
+      !actor.roles.includes(UserRole.MEDICAL_DIRECTOR) &&
+      !this.isUnscoped(actor)
+    if (!providerOnly) return this.patientScopeFilter(actor)
+
+    const practiceIds = this.scopeToActive(
+      actor,
+      await this.practicesForProvider(actor.id),
+    )
+    return {
+      providerAssignmentAsPatient: {
+        is: {
+          OR: [
+            { primaryProviderId: actor.id },
+            { backupProviderId: actor.id },
+          ],
+          // Keep the active-practice scope so a multi-practice provider who
+          // switched practices doesn't see stale alerts from the other
+          // practice's assignment rows.
+          practiceId: { in: practiceIds },
+        },
+      },
     }
   }
 

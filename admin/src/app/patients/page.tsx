@@ -53,11 +53,13 @@ import {
   CheckCircle2,
   Loader2,
   Info,
+  UserCheck,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
-import { canCompleteEnrollment, canVerifyProfile, hasAdminRole } from '@/lib/roleGates';
+import { canCompleteEnrollment, canVerifyProfile, hasAdminRole, isCoordinatorOnly, isProviderOnly } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getPatients, getPatientSummary } from '@/lib/services/provider.service';
+import CoordinatorPatientsView from '@/components/coordinator/CoordinatorPatientsView';
 import {
   completePatientEnrollment,
   ENROLLMENT_REASON_LABELS,
@@ -109,6 +111,11 @@ interface Patient {
    *  tint + the "Threshold needed" filter chip. Matches the detail-page banner. */
   needsThreshold?: boolean;
   latestBaseline: { baselineSystolic: number; baselineDiastolic: number } | null;
+  /** True when the signed-in provider is the primary or backup provider on this
+   *  patient's assignment. Drives the "Yours" badge + mine-first sort + "My
+   *  patients" filter chip. Always false for MED_DIR / OPS / SUPER (the UI
+   *  suppresses the distinction for those roles). */
+  assignedToMe?: boolean;
   activeAlertsCount: number;
   alertsByTier: Record<string, number>;
   lastEntryDate: string | null;
@@ -897,6 +904,10 @@ export default function PatientsPage() {
   // Threshold-attention quick-toggle — "show only patients who need a threshold
   // set or re-reviewed". Mirrors the awaiting filter; the chip pulses when >0.
   const [thresholdNeededOnly, setThresholdNeededOnly] = useState(false);
+  // "My patients only" quick-toggle — narrows the practice-wide list to the
+  // provider's own caseload (assignedToMe). Client-side only; the list stays
+  // practice-wide by default (Layer 1). Only meaningful for a plain PROVIDER.
+  const [myPatientsOnly, setMyPatientsOnly] = useState(false);
 
   // Flow K3 — per-row enrollment state. Loading state for the in-flight CTA
   // and a per-patient cache of 409 reasons returned by the backend gate.
@@ -940,6 +951,11 @@ export default function PatientsPage() {
       .finally(() => setSummaryLoading(false));
   }, [selectedPatient]);
 
+  // Ownership distinction only applies to a plain PROVIDER — MED_DIR / OPS /
+  // SUPER are never in a provider slot, so the "Yours" badge, the mine-first
+  // sort, and the "My patients" chip are all suppressed for them.
+  const showOwnership = !!user && isProviderOnly(user);
+
   // Filter + search
   const filtered = patients.filter((p) => {
     if (riskFilter !== 'ALL' && p.riskTier !== riskFilter) return false;
@@ -952,6 +968,9 @@ export default function PatientsPage() {
     if (thresholdNeededOnly && !p.needsThreshold) {
       return false;
     }
+    if (showOwnership && myPatientsOnly && !p.assignedToMe) {
+      return false;
+    }
     if (search) {
       const q = search.toLowerCase();
       return (
@@ -962,11 +981,27 @@ export default function PatientsPage() {
     return true;
   });
 
+  // Mine-first ordering for providers — their own caseload rises to the top
+  // while everyone else's practice patients stay visible below. Stable sort
+  // (V8) preserves the existing within-group order. Suppressed for non-
+  // providers, whose list has no ownership concept.
+  if (showOwnership) {
+    filtered.sort(
+      (a, b) => Number(!!b.assignedToMe) - Number(!!a.assignedToMe),
+    );
+  }
+
   // ─── Auth guard ───────────────────────────────────────────────────────────
   if (isLoading) return null;
   // No user (logged out / mid-navigation) — render nothing so the
   // role-mismatch screen doesn't flash before window.location.href fires.
   if (!user) return null;
+
+  // COORDINATOR (front-desk) gets a restricted, no-clinical roster + care-team
+  // assignment view — not the clinical patient list below.
+  if (isCoordinatorOnly(user)) {
+    return <CoordinatorPatientsView />;
+  }
 
   if (!hasAdminRole(user)) {
     return (
@@ -1000,8 +1035,10 @@ export default function PatientsPage() {
     <div className="h-full" style={{ backgroundColor: '#FAFBFF' }}>
       <style>{thresholdPulseStyles}</style>
       <div className="max-w-6xl mx-auto px-4 md:px-8 py-6">
-        {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+        {/* Page Header — one fully-wrapping flex row: the title block, search,
+            and every filter chip are wrapping siblings, so at any width they
+            reflow onto as many lines as needed instead of cramming or clipping. */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div className="flex items-center gap-3">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center"
@@ -1019,15 +1056,10 @@ export default function PatientsPage() {
             </div>
           </div>
 
-          {/* Filter cluster — responsive:
-             • Mobile (<sm): search bar gets its own full-width row;
-               filter chips sit below in a horizontal-scroll strip so a
-               350px screen never has to fit 3 controls side-by-side.
-             • sm: search shrinks to fixed width and joins the filter
-               row inline.
-             • md+: everything sits on the same line as the title.
-          */}
-          <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:items-center">
+          {/* Filter cluster — a wrapping flex group. Search + chips flow onto
+             new lines as the viewport narrows; nothing is pinned to a single
+             row. */}
+          <div className="flex flex-wrap items-center gap-2">
             {/* Search */}
             <div
               className="flex items-center gap-2 px-3 h-9 rounded-full w-full sm:w-56"
@@ -1051,20 +1083,18 @@ export default function PatientsPage() {
               )}
             </div>
 
-            {/* Filter chip row — on phones the three controls share the row
-                width (fit-to-width) so there's no horizontal scroll; on sm+
-                they revert to natural widths inline. pt-1 leaves room for the
-                threshold chip's pulsing ring (a box-shadow that would clip if
-                an ancestor scrolled). */}
-            <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto pt-1 sm:pt-0">
+            {/* Filter chips — wrap freely; pt-1 leaves room for the threshold
+                chip's pulsing ring (a box-shadow that would clip if an ancestor
+                scrolled). */}
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pt-1 sm:pt-0">
               {/* Risk filter */}
-              <div className="relative flex-1 min-w-0 sm:flex-none">
+              <div className="relative shrink-0">
                 <select
                   value={riskFilter}
                   onChange={(e) => setRiskFilter(e.target.value)}
                   aria-label={t('provider.allTiers')}
                   data-testid="admin-patient-risk-filter"
-                  className="appearance-none w-full sm:w-auto h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
+                  className="appearance-none w-auto h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
                   style={{
                     backgroundColor: 'white',
                     border: '1.5px solid var(--brand-border)',
@@ -1099,7 +1129,7 @@ export default function PatientsPage() {
                     data-testid="admin-patient-awaiting-filter"
                     aria-pressed={active}
                     aria-label={active ? 'Showing only unverified patients' : 'Filter to unverified patients'}
-                    className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer flex-1 min-w-0 sm:flex-none whitespace-nowrap"
+                    className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
                     style={{
                       backgroundColor: active ? 'var(--brand-warning-amber)' : 'var(--brand-warning-amber-light)',
                       color: active ? 'white' : 'var(--brand-warning-amber)',
@@ -1148,7 +1178,7 @@ export default function PatientsPage() {
                     data-testid="admin-patient-threshold-filter"
                     aria-pressed={active}
                     aria-label={active ? 'Showing only patients needing a threshold' : 'Filter to patients needing a threshold'}
-                    className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer flex-1 min-w-0 sm:flex-none whitespace-nowrap"
+                    className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
                     style={{
                       backgroundColor: active
                         ? 'var(--brand-alert-red)'
@@ -1190,6 +1220,54 @@ export default function PatientsPage() {
                   </button>
                 );
               })()}
+
+              {/* "My patients" quick-toggle — provider-only. Narrows the
+                  practice-wide list to the provider's own caseload
+                  (assignedToMe). Suppressed for MED_DIR / OPS / SUPER, who
+                  have no ownership concept. */}
+              {showOwnership && (() => {
+                const count = patients.filter((p) => p.assignedToMe).length;
+                const active = myPatientsOnly;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setMyPatientsOnly((v) => !v)}
+                    data-testid="admin-patient-mine-filter"
+                    aria-pressed={active}
+                    aria-label={active ? 'Showing only your patients' : 'Filter to your patients'}
+                    className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
+                    style={{
+                      backgroundColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-background)',
+                      color: active ? 'white' : 'var(--brand-text-muted)',
+                      border: `1.5px solid ${active ? 'var(--brand-primary-purple)' : 'transparent'}`,
+                    }}
+                  >
+                    <UserCheck className="w-3 h-3 shrink-0" />
+                    <span className="hidden md:inline">My patients</span>
+                    <span className="md:hidden truncate">Mine</span>
+                    <span
+                      className="text-[10px] font-bold px-1.5 rounded-full shrink-0"
+                      style={{
+                        backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
+                        color: active ? 'white' : 'var(--brand-primary-purple)',
+                        minWidth: 18,
+                        textAlign: 'center',
+                      }}
+                    >
+                      {count}
+                    </span>
+                    {active && (
+                      <X
+                        className="w-3 h-3 shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMyPatientsOnly(false);
+                        }}
+                      />
+                    )}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -1201,7 +1279,7 @@ export default function PatientsPage() {
         >
           {/* Table header */}
           <div
-            className="hidden md:grid items-center px-5 py-3 text-[10px] font-bold uppercase tracking-wider gap-3"
+            className="hidden lg:grid items-center px-5 py-3 text-[10px] font-bold uppercase tracking-wider gap-3"
             style={{
               color: 'var(--brand-text-muted)',
               gridTemplateColumns: '1.8fr 0.9fr 0.9fr 1fr 1fr 1fr 1.2fr 32px',
@@ -1254,7 +1332,7 @@ export default function PatientsPage() {
                     // Whole-row subtle red tint when a threshold is missing/stale
                     // (no left stripe). The base class tints the entire row; the
                     // hover variant still wins on hover (no inline bg to clobber it).
-                    className={`w-full text-left px-5 py-3.5 flex items-center gap-4 md:grid md:gap-3 transition-colors hover:bg-[#F8F4FF] cursor-pointer group ${p.needsThreshold ? 'bg-[#FDE8E8]' : ''}`}
+                    className={`w-full text-left px-5 py-3.5 flex items-center gap-4 lg:grid lg:gap-3 transition-colors hover:bg-[#F8F4FF] cursor-pointer group ${p.needsThreshold ? 'bg-[#FDE8E8]' : ''}`}
                     style={{
                       gridTemplateColumns: '1.8fr 0.9fr 0.9fr 1fr 1fr 1fr 1.2fr 32px',
                       borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none',
@@ -1276,6 +1354,23 @@ export default function PatientsPage() {
                           <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
                             {p.name ?? 'Unknown'}
                           </p>
+                          {/* "Yours" pill — this patient is in the signed-in
+                              provider's caseload (primary or backup). Only
+                              rendered for a plain PROVIDER; the practice-wide
+                              list still shows everyone. */}
+                          {showOwnership && p.assignedToMe && (
+                            <span
+                              className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide"
+                              style={{
+                                backgroundColor: 'var(--brand-primary-purple-light)',
+                                color: 'var(--brand-primary-purple)',
+                              }}
+                              title="You are the primary or backup provider for this patient"
+                            >
+                              <UserCheck className="w-2.5 h-2.5" aria-hidden />
+                              Yours
+                            </span>
+                          )}
                           {/* Preeclampsia-history notation per CLINICAL_SPEC §3.
                               Only when patient is NOT currently pregnant — the
                               pregnancy banner already covers active pregnancies,
@@ -1303,7 +1398,7 @@ export default function PatientsPage() {
                     </div>
 
                     {/* BP */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
                         {p.latestBP ? `${p.latestBP.systolicBP}/${p.latestBP.diastolicBP}` : '--/--'}
                       </p>
@@ -1311,29 +1406,29 @@ export default function PatientsPage() {
                     </div>
 
                     {/* Risk */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <RiskBadge tier={p.riskTier} />
                     </div>
 
                     {/* Verification (K1) */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <VerificationBadge status={p.profileVerificationStatus} />
                     </div>
 
                     {/* Alerts (K2 — tier-color-coded) */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <AlertsCell alertsByTier={p.alertsByTier} count={p.activeAlertsCount} />
                     </div>
 
                     {/* Last check-in */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <p className="text-[12px]" style={{ color: 'var(--brand-text-secondary)' }}>
                         {p.lastEntryDate ? timeAgo(p.lastEntryDate) : 'Never'}
                       </p>
                     </div>
 
                     {/* Onboarding (K3) */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <OnboardingCell
                         patient={p}
                         completing={completingId === p.id}
@@ -1366,15 +1461,16 @@ export default function PatientsPage() {
                     </div>
 
                     {/* Arrow indicator */}
-                    <div className="hidden md:flex items-center justify-center">
+                    <div className="hidden lg:flex items-center justify-center">
                       <ChevronRight
                         className="w-4 h-4 transition-transform group-hover:translate-x-0.5"
                         style={{ color: 'var(--brand-text-muted)' }}
                       />
                     </div>
 
-                    {/* Mobile: compact info */}
-                    <div className="flex items-center gap-2 md:hidden ml-auto shrink-0">
+                    {/* Compact info — shown below lg (phones + tablets), where
+                        the row renders as a card instead of the full grid. */}
+                    <div className="flex items-center gap-2 lg:hidden ml-auto shrink-0">
                       <VerificationBadge status={p.profileVerificationStatus} compact />
                       <RiskBadge tier={p.riskTier} />
                       <AlertsCell alertsByTier={p.alertsByTier} count={p.activeAlertsCount} compact />
