@@ -25,6 +25,7 @@ export type AccountStatus =
   | 'BLOCKED'
   | 'SUSPENDED'
   | 'DEACTIVATED'
+  | 'CLOSED'
 
 /** Synthetic value the list endpoint uses for the open-invite bucket. */
 export const INVITE_PENDING = 'INVITE_PENDING' as const
@@ -35,6 +36,9 @@ export interface UserRow {
   id: string
   email: string | null
   name: string | null
+  /** Permanent public handle (CP-…). Needed for the permanent-close typed
+   *  confirmation gate. */
+  displayId: string | null
   roles: UserRole[]
   accountStatus: AccountStatus
   createdAt: string
@@ -239,12 +243,53 @@ export async function deactivateUser(
   return unwrap<UserRow>(json)
 }
 
-export async function reactivateUser(id: string): Promise<UserRow> {
+export async function reactivateUser(
+  id: string,
+  // Default true: admin deactivate is a reversible pause, so reactivate hands
+  // the pre-deactivation (staff) role back — otherwise the user returns as a
+  // roleless PATIENT. Pass false only for a deliberate fresh re-authorization.
+  restoreRoles = true,
+): Promise<UserRow> {
   const res = await fetchWithAuth(`${API}/api/admin/users/${id}/reactivate`, {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ restoreRoles }),
   })
   const json = await jsonOrThrow<unknown>(res, 'Could not reactivate user')
+  return unwrap<UserRow>(json)
+}
+
+// ─── Permanent close (tombstone) + role removal (phase/28) ──────────────────
+
+/**
+ * Irreversible. `confirmDisplayId` must match the target's DisplayID exactly
+ * (anti-typo gate enforced server-side too). Anonymises PII, retains PHI.
+ */
+export async function permanentCloseUser(
+  id: string,
+  confirmDisplayId: string,
+  reason?: string,
+): Promise<{ id: string; accountStatus: AccountStatus }> {
+  const res = await fetchWithAuth(
+    `${API}/api/admin/users/${id}/permanent-close`,
+    {
+      method: 'POST',
+      body: JSON.stringify(reason ? { confirmDisplayId, reason } : { confirmDisplayId }),
+    },
+  )
+  const json = await jsonOrThrow<unknown>(res, 'Could not close account')
+  return unwrap<{ id: string; accountStatus: AccountStatus }>(json)
+}
+
+/** Remove a single role from a staff account. */
+export async function removeUserRole(
+  id: string,
+  role: UserRole,
+): Promise<UserRow> {
+  const res = await fetchWithAuth(
+    `${API}/api/admin/users/${id}/roles/${role}`,
+    { method: 'DELETE' },
+  )
+  const json = await jsonOrThrow<unknown>(res, 'Could not remove role')
   return unwrap<UserRow>(json)
 }
 

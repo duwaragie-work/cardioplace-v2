@@ -47,6 +47,7 @@ const BACKEND_MSG_KEY_MAP: Record<string, TranslationKey> = {
   'This account is not authorized to access the admin app': 'register.adminAccessDenied',
   'Account is suspended': 'register.accountSuspended',
   'Account is blocked': 'register.accountBlocked',
+  'Account is deactivated': 'register.accountDeactivated',
 };
 
 function backendMsgToKey(msg: string | undefined): TranslationKey | null {

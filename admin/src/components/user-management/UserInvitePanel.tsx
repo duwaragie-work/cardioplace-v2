@@ -31,6 +31,7 @@ import {
   type AccountStatus,
   type CoordinatorPatientRow,
   deactivateUser,
+  permanentCloseUser,
   INVITE_PENDING,
   listUsers,
   reactivateUser,
@@ -47,6 +48,7 @@ import { canResetUserMfa } from '@/lib/roleGates';
 import BulkInviteInline from './BulkInviteInline';
 import CSVUploadCard from './CSVUploadCard';
 import DeactivateConfirmModal from './DeactivateConfirmModal';
+import PermanentCloseConfirmModal from './PermanentCloseConfirmModal';
 import InviteUserModal, { type PracticeOption } from './InviteUserModal';
 import ResetMfaModal from './ResetMfaModal';
 import UsersList from './UsersList';
@@ -183,6 +185,11 @@ export default function UserInvitePanel() {
     useState<PendingResetMfa | null>(null);
   const [pendingResetBiometric, setPendingResetBiometric] =
     useState<PendingResetBiometric | null>(null);
+  const [pendingClose, setPendingClose] = useState<{
+    id: string;
+    name: string;
+    displayId: string;
+  } | null>(null);
   const callerCanResetMfa = canResetUserMfa(user);
 
   async function handleResend(inviteId: string) {
@@ -294,6 +301,24 @@ export default function UserInvitePanel() {
         'error',
       );
       throw e; // re-throw so the modal stays open + shows the error
+    } finally {
+      setPendingRowId(null);
+    }
+  }
+
+  async function handleClose(confirmDisplayId: string, reason: string | undefined) {
+    if (!pendingClose) return;
+    setPendingRowId(pendingClose.id);
+    try {
+      await permanentCloseUser(pendingClose.id, confirmDisplayId, reason);
+      showToast(t('userManagement.action.closePermanently'));
+      await refresh();
+    } catch (e) {
+      showToast(
+        e instanceof Error ? e.message : 'Could not close account.',
+        'error',
+      );
+      throw e; // keep the modal open so the error shows
     } finally {
       setPendingRowId(null);
     }
@@ -665,6 +690,13 @@ export default function UserInvitePanel() {
             name: row.name ?? row.email ?? 'this user',
           })
         }
+        onCloseClick={(row: UserRow) =>
+          setPendingClose({
+            id: row.id,
+            name: row.name ?? row.email ?? 'this user',
+            displayId: row.displayId ?? '',
+          })
+        }
         onResetMfaClick={
           callerCanResetMfa
             ? (row) => setPendingResetMfa({ id: row.id, name: row.name })
@@ -703,6 +735,13 @@ export default function UserInvitePanel() {
         name={pendingDeactivate?.name ?? ''}
         onClose={() => setPendingDeactivate(null)}
         onConfirm={handleDeactivate}
+      />
+      <PermanentCloseConfirmModal
+        open={!!pendingClose}
+        name={pendingClose?.name ?? ''}
+        displayId={pendingClose?.displayId ?? ''}
+        onClose={() => setPendingClose(null)}
+        onConfirm={handleClose}
       />
       <ResetMfaModal
         open={!!pendingResetMfa}

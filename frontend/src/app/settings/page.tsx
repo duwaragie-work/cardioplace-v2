@@ -7,6 +7,7 @@
 // have a desktop one (a desktop passkey can't travel to a phone).
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Fingerprint,
   Loader2,
@@ -22,9 +23,15 @@ import {
   Check,
   X,
   Mail,
+  AlertTriangle,
+  Power,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
+import {
+  selfDeactivateAccount,
+  requestSelfClose,
+} from '@/lib/services/auth.service';
 import {
   isBiometricSupported,
   registerBiometric,
@@ -58,8 +65,51 @@ function looksLikePhone(name: string | null): boolean {
 }
 
 export default function SettingsPage() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, logout } = useAuth();
   const { t } = useLanguage();
+  const router = useRouter();
+
+  // ── Account lifecycle (phase/28) ──────────────────────────────────────────
+  const [dangerBusy, setDangerBusy] = useState<null | 'deactivate' | 'close'>(null);
+  const [dangerError, setDangerError] = useState<string | null>(null);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [closeRequested, setCloseRequested] = useState(false);
+
+  async function handleSelfDeactivate() {
+    if (dangerBusy) return;
+    setDangerBusy('deactivate');
+    setDangerError(null);
+    try {
+      await selfDeactivateAccount();
+      // Session is already dead server-side (tokenVersion bumped) — clear the
+      // local session and bounce to sign-in.
+      try {
+        await logout();
+      } catch {
+        // logout is best-effort; the redirect below is what matters.
+      }
+      router.replace('/sign-in');
+    } catch (e) {
+      setDangerError(e instanceof Error ? e.message : t('settings.danger.error'));
+      setConfirmDeactivate(false);
+    } finally {
+      setDangerBusy(null);
+    }
+  }
+
+  async function handleRequestClose() {
+    if (dangerBusy) return;
+    setDangerBusy('close');
+    setDangerError(null);
+    try {
+      await requestSelfClose();
+      setCloseRequested(true);
+    } catch (e) {
+      setDangerError(e instanceof Error ? e.message : t('settings.danger.error'));
+    } finally {
+      setDangerBusy(null);
+    }
+  }
 
   const [supported, setSupported] = useState(false);
   const [credentials, setCredentials] = useState<WebAuthnCredentialRow[]>([]);
@@ -673,6 +723,147 @@ export default function SettingsPage() {
             </div>
           </section>
         )}
+        {/* ── Danger zone (phase/28) — patient self-service lifecycle ────── */}
+        <p
+          className="mt-8 mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
+          style={{ color: 'var(--brand-alert-red)' }}
+        >
+          {t('settings.danger.title')}
+        </p>
+
+        <section
+          className="rounded-2xl bg-white overflow-hidden"
+          style={{ border: '1px solid var(--brand-alert-red-light, #FEE2E2)' }}
+        >
+          {/* Deactivate (reversible) */}
+          <div className="p-5">
+            <div className="flex items-start gap-4">
+              <span
+                className="shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center"
+                style={{
+                  backgroundColor: 'var(--brand-warning-amber-light, #FEF3C7)',
+                  color: 'var(--brand-warning-amber, #92400E)',
+                }}
+                aria-hidden
+              >
+                <Power className="w-6 h-6" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                  {t('settings.danger.deactivate.title')}
+                </h2>
+                <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
+                  {t('settings.danger.deactivate.desc')}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3">
+              {confirmDeactivate ? (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <span
+                    className="flex-1 text-[12.5px] font-medium"
+                    style={{ color: 'var(--brand-warning-amber, #92400E)' }}
+                  >
+                    {t('settings.danger.deactivate.confirm')}
+                  </span>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeactivate(false)}
+                      disabled={!!dangerBusy}
+                      className="h-10 px-4 rounded-full border font-semibold text-sm disabled:opacity-50 cursor-pointer"
+                      style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                    >
+                      {t('common.cancel')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSelfDeactivate}
+                      disabled={!!dangerBusy}
+                      data-testid="settings-deactivate-confirm"
+                      className="h-10 px-4 rounded-full text-white font-semibold text-sm inline-flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                      style={{ backgroundColor: 'var(--brand-warning-amber, #D97706)' }}
+                    >
+                      {dangerBusy === 'deactivate' && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {t('settings.danger.deactivate.button')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeactivate(true)}
+                  data-testid="settings-deactivate"
+                  className="h-10 px-4 rounded-full border font-semibold text-sm cursor-pointer"
+                  style={{ borderColor: 'var(--brand-warning-amber, #D97706)', color: 'var(--brand-warning-amber, #92400E)' }}
+                >
+                  {t('settings.danger.deactivate.button')}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--brand-border)' }} />
+
+          {/* Permanent close (irreversible, email-confirmed) */}
+          <div className="p-5">
+            <div className="flex items-start gap-4">
+              <span
+                className="shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center text-white"
+                style={{ backgroundColor: 'var(--brand-alert-red)' }}
+                aria-hidden
+              >
+                <AlertTriangle className="w-6 h-6" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                  {t('settings.danger.close.title')}
+                </h2>
+                <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
+                  {t('settings.danger.close.desc')}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3">
+              {closeRequested ? (
+                <p
+                  className="text-[13px] font-semibold px-3 py-2.5 rounded-lg inline-flex items-start gap-2"
+                  style={{
+                    color: 'var(--brand-success-green, #166534)',
+                    backgroundColor: 'var(--brand-success-green-light, #DCFCE7)',
+                  }}
+                >
+                  <Mail className="w-4 h-4 mt-0.5 shrink-0" />
+                  {t('settings.danger.close.requested')}
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleRequestClose}
+                  disabled={!!dangerBusy}
+                  data-testid="settings-close-request"
+                  className="h-10 px-4 rounded-full text-white font-semibold text-sm inline-flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                  style={{ backgroundColor: 'var(--brand-alert-red)' }}
+                >
+                  {dangerBusy === 'close' && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {t('settings.danger.close.button')}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {dangerError && (
+            <div className="px-5 pb-5">
+              <p
+                role="alert"
+                className="text-[13px] font-semibold px-3 py-2 rounded-lg"
+                style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
+              >
+                {dangerError}
+              </p>
+            </div>
+          )}
+        </section>
       </div>
 
       {/* Recovery-codes overlay (first setup / regenerate) */}

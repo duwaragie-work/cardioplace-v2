@@ -708,10 +708,15 @@ export class UsersService {
     if (!target) throw new NotFoundException('User not found')
     await this.assertCanDeactivate(caller, target)
 
+    // Default to restoring the pre-deactivation roles: admin deactivate is a
+    // reversible pause ("not a delete" — see the deactivate modal copy), so
+    // reactivate must hand the staff role back or the user returns powerless.
+    // An admin can still pass restoreRoles:false for a fresh re-authorization.
+    const restoreRoles = dto.restoreRoles ?? true
     const updated = await this.lifecycle.reactivate(target.id, {
       actorId: caller.id,
       actorRoles: caller.roles,
-      restoreRoles: dto.restoreRoles ?? false,
+      restoreRoles,
       ctx,
     })
 
@@ -724,7 +729,7 @@ export class UsersService {
       metadata: {
         targetUserId: updated.id,
         targetRoles: updated.roles,
-        restoreRoles: dto.restoreRoles ?? false,
+        restoreRoles,
       },
       success: true,
     })
@@ -986,6 +991,12 @@ export class UsersService {
     // are 1:1 with AccountStatus.
     if (query.status) {
       userWhere.accountStatus = query.status as AccountStatus
+    } else {
+      // Hide permanently-closed accounts by default — they're anonymized
+      // tombstones (no name/email/roles), so they'd render as blank, non-
+      // actionable rows. Their history lives in AccountClosureLog. An explicit
+      // ?status=CLOSED still fetches them if ever needed.
+      userWhere.accountStatus = { not: AccountStatus.CLOSED }
     }
 
     const [users, total] = await Promise.all([
@@ -998,6 +1009,7 @@ export class UsersService {
           id: true,
           email: true,
           name: true,
+          displayId: true,
           roles: true,
           accountStatus: true,
           createdAt: true,
@@ -1042,6 +1054,7 @@ export class UsersService {
       id: u.id,
       email: u.email,
       name: u.name,
+      displayId: u.displayId,
       roles: u.roles,
       accountStatus: u.accountStatus,
       createdAt: u.createdAt,
