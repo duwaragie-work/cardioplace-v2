@@ -245,8 +245,10 @@ export class SupportService {
         data: { status: 'IN_PROGRESS' },
       })
     }
-    // Email the user + in-app bell (if they have an account).
-    await this.email.sendEmail(
+    // Email the user + in-app bell (if they have an account). Fire-and-forget —
+    // EmailService blocks on its transport and never throws (see its docstring),
+    // so the reply must not await mail delivery.
+    void this.email.sendEmail(
       ticket.email,
       `Re: your Cardioplace support request ${ticket.ticketNumber}`,
       supportReplyEmailHtml(ticket.ticketNumber, dto.body),
@@ -408,7 +410,9 @@ export class SupportService {
     email: string
   }) {
     const summary = `New ${ticket.priority} ${ticket.category} ticket ${ticket.ticketNumber} from ${ticket.email}\n\nSubject: ${ticket.subject}\n\n${ticket.body}`
-    await this.email.sendEmail(
+    // Fire-and-forget — never make the intake request wait on mail delivery
+    // (EmailService blocks on its transport and never throws).
+    void this.email.sendEmail(
       OPS_INBOX,
       `[Support] ${ticket.ticketNumber} — ${ticket.category}`,
       contactFormEmailHtml(ticket.email, summary),
