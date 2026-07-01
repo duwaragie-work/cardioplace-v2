@@ -30,6 +30,27 @@ model User {
   // already-ENROLLED users so existing patients aren't treated as brand new.
   enrolledAt              DateTime?
   accountStatus           AccountStatus            @default(ACTIVE)
+
+  // ── Account lifecycle (phase/28) ──────────────────────────────────────────
+  // Session kill-switch: minted into the access token as a claim; jwt.strategy
+  // rejects any token whose version is behind this value. Bumped on deactivate,
+  // permanent-close, and role removal so every live session dies instantly
+  // without hunting down individual AuthSession / RefreshToken rows.
+  tokenVersion            Int                      @default(0)
+  // Set when the account is permanently CLOSED (tombstoned) — PII anonymised,
+  // all PHI rows retained per HIPAA §164.316. Presence distinguishes CLOSED
+  // (irreversible) from DEACTIVATED (reversible).
+  tombstonedAt            DateTime?
+  // Actor who closed the account (admin id, or the user's own id for a
+  // patient self-close). Plain scalar, not a relation, so a tombstone never
+  // dangles a FK.
+  tombstonedById          String?
+  closureReason           String?
+  // Roles / assignments captured at deactivate|close time so a later
+  // reactivate can restore prior roles ONLY when explicitly requested
+  // (restoreRoles flag). Null until the first off-transition.
+  terminationSnapshot     Json?
+
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
 
@@ -64,6 +85,7 @@ model User {
   profileVerificationLogs              ProfileVerificationLog[]
   caregivers                           PatientCaregiver[]          @relation("PatientCaregivers")
   rejectedReadingLogs                  RejectedReadingLog[]
+  accountClosureLogs                   AccountClosureLog[]
 
   // MFA — provider/admin TOTP second factor (Manisha 2026-06-12 §6). Both
   // null/empty for patients (their biometric arrives later in its own table).
@@ -104,4 +126,7 @@ enum AccountStatus {
   BLOCKED
   SUSPENDED
   DEACTIVATED
+  // Permanently closed / tombstoned (phase/28). Irreversible — PII anonymised,
+  // PHI retained. Never transitions back to ACTIVE.
+  CLOSED
 }
