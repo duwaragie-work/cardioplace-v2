@@ -6,6 +6,28 @@ import { newTestControl } from '../helpers/test-control.js'
 import { ADMINS, SEED_PRACTICE_ID } from '../helpers/accounts.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 import { byTestId, T } from '../helpers/selectors.js'
+import type { Page } from '@playwright/test'
+
+// phase/28 — per-row actions moved behind a 3-dots kebab. These helpers open
+// the menu and click / assert an item, retrying the whole open+act so a
+// list refetch (which re-renders the row and closes the menu) can't flake.
+async function menuClick(page: Page, email: string, key: string): Promise<void> {
+  await expect(async () => {
+    await page.locator(byTestId(T.adminUsers.actionsMenu(email))).click()
+    await page
+      .locator(byTestId(T.adminUsers.action(key, email)))
+      .click({ timeout: 2_000 })
+  }).toPass({ timeout: 20_000 })
+}
+
+async function menuHasItem(page: Page, email: string, key: string): Promise<void> {
+  await expect(async () => {
+    await page.locator(byTestId(T.adminUsers.actionsMenu(email))).click()
+    await expect(
+      page.locator(byTestId(T.adminUsers.action(key, email))),
+    ).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 20_000 })
+}
 
 /**
  * Spec 35 — admin user management (/users, phase/23).
@@ -186,8 +208,8 @@ test.describe('Spec 35 — admin user management', () => {
       timeout: 15_000,
     })
 
-    // Deactivate → confirm modal → reason → confirm.
-    await page.locator(byTestId(T.adminUsers.deactivate(email))).click()
+    // Deactivate → kebab item → confirm modal → reason → confirm.
+    await menuClick(page, email, 'deactivate')
     await expect(
       page.locator(byTestId(T.adminUsers.deactivateModal)),
     ).toBeVisible({ timeout: 15_000 })
@@ -195,16 +217,15 @@ test.describe('Spec 35 — admin user management', () => {
       .locator(byTestId(T.adminUsers.deactivateReason))
       .fill('QA automated deactivation')
     await page.locator(byTestId(T.adminUsers.deactivateConfirm)).click()
-
-    // Row flips to offering Reactivate.
+    // Modal closes only after the list has refetched → the row is now fresh.
     await expect(
-      page.locator(byTestId(T.adminUsers.reactivate(email))),
-    ).toBeVisible({ timeout: 15_000 })
+      page.locator(byTestId(T.adminUsers.deactivateModal)),
+    ).toHaveCount(0, { timeout: 15_000 })
 
-    // Reactivate → row flips back to offering Deactivate.
-    await page.locator(byTestId(T.adminUsers.reactivate(email))).click()
-    await expect(
-      page.locator(byTestId(T.adminUsers.deactivate(email))),
-    ).toBeVisible({ timeout: 15_000 })
+    // Kebab now offers Reactivate → click it.
+    await menuClick(page, email, 'reactivate')
+
+    // After reactivate, the kebab offers Deactivate again.
+    await menuHasItem(page, email, 'deactivate')
   })
 })
