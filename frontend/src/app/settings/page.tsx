@@ -74,6 +74,7 @@ export default function SettingsPage() {
   const [dangerBusy, setDangerBusy] = useState<null | 'deactivate' | 'close'>(null);
   const [dangerError, setDangerError] = useState<string | null>(null);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
   const [closeRequested, setCloseRequested] = useState(false);
 
   async function handleSelfDeactivate() {
@@ -104,6 +105,7 @@ export default function SettingsPage() {
     setDangerError(null);
     try {
       await requestSelfClose();
+      setConfirmClose(false);
       setCloseRequested(true);
     } catch (e) {
       setDangerError(e instanceof Error ? e.message : t('settings.danger.error'));
@@ -837,16 +839,46 @@ export default function SettingsPage() {
                   <Mail className="w-4 h-4 mt-0.5 shrink-0" />
                   {t('settings.danger.close.requested')}
                 </p>
+              ) : confirmClose ? (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <span
+                    className="flex-1 text-[12.5px] font-medium"
+                    style={{ color: 'var(--brand-alert-red)' }}
+                  >
+                    {t('settings.danger.close.confirm')}
+                  </span>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClose(false)}
+                      disabled={!!dangerBusy}
+                      className="h-10 px-4 rounded-full border font-semibold text-sm disabled:opacity-50 cursor-pointer"
+                      style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                    >
+                      {t('common.cancel')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRequestClose}
+                      disabled={!!dangerBusy}
+                      data-testid="settings-close-confirm"
+                      className="h-10 px-4 rounded-full text-white font-semibold text-sm inline-flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                      style={{ backgroundColor: 'var(--brand-alert-red)' }}
+                    >
+                      {dangerBusy === 'close' && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {t('settings.danger.close.button')}
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <button
                   type="button"
-                  onClick={handleRequestClose}
+                  onClick={() => setConfirmClose(true)}
                   disabled={!!dangerBusy}
                   data-testid="settings-close-request"
                   className="h-10 px-4 rounded-full text-white font-semibold text-sm inline-flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
                   style={{ backgroundColor: 'var(--brand-alert-red)' }}
                 >
-                  {dangerBusy === 'close' && <Loader2 className="w-4 h-4 animate-spin" />}
                   {t('settings.danger.close.button')}
                 </button>
               )}

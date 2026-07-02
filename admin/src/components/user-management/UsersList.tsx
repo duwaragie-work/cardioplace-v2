@@ -28,6 +28,7 @@ import {
 } from '@/lib/services/user-management.service';
 import {
   canDeactivateUser,
+  canPermanentCloseUsers,
   canResetUserMfa,
   type UserRole,
 } from '@/lib/roleGates';
@@ -38,6 +39,10 @@ import { RoleBadge, StatusBadge } from './badges';
 interface Props {
   /** Whether the caller is a COORDINATOR (collapsed columns + status text). */
   coordinatorView: boolean;
+  /** Whether the caller can perform write actions (invite/deactivate/close/
+   *  resend/revoke). False for read-only PROVIDER — the row action menu is
+   *  suppressed entirely. Defaults to true for backward compatibility. */
+  canManage?: boolean;
   /** Backend payload from `listUsers`. */
   response: UserListResponse | null;
   loading: boolean;
@@ -229,6 +234,7 @@ function ActionsMenu({
 
 export default function UsersList({
   coordinatorView,
+  canManage = true,
   response,
   loading,
   page,
@@ -428,17 +434,21 @@ export default function UsersList({
                 // coordinatorView gate — that was wrongly hiding the action for
                 // coordinators on the desktop table (mobile already allowed it).
                 const canAct =
-                  !isSelf && canDeactivateUser(caller, row.targetRoles);
+                  !isSelf && canManage && canDeactivateUser(caller, row.targetRoles);
                 const showDeactivate =
                   row.kind === 'user' && row.status === 'ACTIVE' && canAct;
                 const showReactivate =
                   row.kind === 'user' && row.status === 'DEACTIVATED' && canAct;
-                // Permanent close — available on ACTIVE or DEACTIVATED user rows
-                // the caller may act on, and only when we have a DisplayID for
-                // the typed-confirmation gate. Never on CLOSED / invites.
+                // Permanent close — irreversible tombstone, org-level authority
+                // (SUPER_ADMIN + HEALPLACE_OPS only per ACCESS_SCOPE §8;
+                // COORDINATOR walked back #114, MED_DIR never had it). Also
+                // requires a row the caller can act on, a DisplayID for the
+                // typed-confirmation gate, and an ACTIVE/DEACTIVATED status.
+                // Never on CLOSED / invites.
                 const showClose =
                   row.kind === 'user' &&
                   canAct &&
+                  canPermanentCloseUsers(caller) &&
                   (row.status === 'ACTIVE' || row.status === 'DEACTIVATED') &&
                   !!(row.raw as UserRow).displayId &&
                   !!onCloseClick;
@@ -510,7 +520,7 @@ export default function UsersList({
                     <td className="px-5 py-3.5 text-right">
                       {(() => {
                         const items: MenuItem[] = [];
-                        if (row.kind === 'invite') {
+                        if (canManage && row.kind === 'invite') {
                           items.push({
                             key: 'resend',
                             label: t('userManagement.action.resend'),
@@ -614,14 +624,16 @@ export default function UsersList({
             const isPending = pendingRowId === row.id;
             const isSelf = caller?.id === row.id;
             const canAct =
-              !isSelf && canDeactivateUser(caller, row.targetRoles);
+              !isSelf && canManage && canDeactivateUser(caller, row.targetRoles);
             const showDeactivate =
               row.kind === 'user' && row.status === 'ACTIVE' && canAct;
             const showReactivate =
               row.kind === 'user' && row.status === 'DEACTIVATED' && canAct;
+            // Permanent close — org-level only (SUPER + OPS); see desktop block.
             const showClose =
               row.kind === 'user' &&
               canAct &&
+              canPermanentCloseUsers(caller) &&
               (row.status === 'ACTIVE' || row.status === 'DEACTIVATED') &&
               !!(row.raw as UserRow).displayId &&
               !!onCloseClick;
@@ -649,7 +661,7 @@ export default function UsersList({
             // Build the card's action set once, so the kebab can live in the
             // top-right corner beside the status pill.
             const items: MenuItem[] = [];
-            if (row.kind === 'invite') {
+            if (canManage && row.kind === 'invite') {
               items.push({
                 key: 'resend',
                 label: t('userManagement.action.resend'),

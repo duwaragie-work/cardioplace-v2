@@ -94,6 +94,11 @@ export class PatientAccessService {
    * unscoped. On update flows the caller must pass *both* the existing
    * practiceId and the (optional) new practiceId so a MED_DIR can't move
    * a patient out of their practice into one they don't head.
+   *
+   * COORDINATOR is NOT permitted here (2026-07-01 walkback from #116 —
+   * care-team assignment is a clinical decision, not front-desk). The
+   * controller-level @Roles already blocks them; this is the defense-in-
+   * depth service check for the roles that do get through.
    */
   async assertCanModifyPracticeAssignment(
     actor: ActorUser,
@@ -103,28 +108,9 @@ export class PatientAccessService {
 
     const ids = Array.isArray(practiceIds) ? practiceIds : [practiceIds]
 
-    // COORDINATOR — front-desk role, may assign / reassign care teams for
-    // patients in THEIR OWN practice only (PracticeCoordinator is 1:1 by
-    // userId). Checked before the MED_DIR branch so a coordinator who also
-    // holds MED_DIR still gets the tighter own-practice scope.
-    if (actor.roles.includes(UserRole.COORDINATOR)) {
-      const own = await this.prisma.practiceCoordinator.findUnique({
-        where: { userId: actor.id },
-        select: { practiceId: true },
-      })
-      for (const practiceId of ids) {
-        if (!own || own.practiceId !== practiceId) {
-          throw new ForbiddenException(
-            `Practice ${practiceId} is outside your coordinator practice`,
-          )
-        }
-      }
-      return
-    }
-
     if (!actor.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
       throw new ForbiddenException(
-        'Care-team assignment requires COORDINATOR (own practice), MEDICAL_DIRECTOR, HEALPLACE_OPS, or SUPER_ADMIN',
+        'Care-team assignment requires MEDICAL_DIRECTOR, HEALPLACE_OPS, or SUPER_ADMIN',
       )
     }
 
@@ -223,6 +209,30 @@ export class PatientAccessService {
         },
       },
     }
+  }
+
+  /**
+   * Practice-management write guard (config edit + staff-membership CRUD) for
+   * `practice.controller.ts`. OPS / SUPER are unscoped; MEDICAL_DIRECTOR must
+   * head the target practice (PracticeMedicalDirector). Any other role → 403.
+   * The controller-level @Roles already limits the route to SUPER / OPS /
+   * MED_DIR — this enforces the per-practice cell for a MED_DIR so they can
+   * only manage practices they head, not any practice in the org. (2026-07-01)
+   */
+  async assertCanManagePractice(
+    actor: ActorUser,
+    practiceId: string,
+  ): Promise<void> {
+    if (this.isUnscoped(actor)) return
+    if (
+      actor.roles.includes(UserRole.MEDICAL_DIRECTOR) &&
+      (await this.medHeadsPractice(actor.id, practiceId))
+    ) {
+      return
+    }
+    throw new ForbiddenException(
+      `Practice ${practiceId} is outside your management scope`,
+    )
   }
 
   private isUnscoped(actor: ActorUser): boolean {

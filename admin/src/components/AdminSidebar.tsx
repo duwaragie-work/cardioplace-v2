@@ -23,7 +23,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import {
   canManageSupport,
-  canManageUsers,
+  canViewUsers,
   canViewReports,
   isCoordinatorOnly,
 } from '@/lib/roleGates';
@@ -75,14 +75,15 @@ const PRIMARY_NAV: NavItem[] = [
     show: () => true,
   },
   // phase/23 — user management. Visible to COORDINATOR, HEALPLACE_OPS,
-  // SUPER_ADMIN (controller-level @Roles on the backend). Anyone else
-  // (PROVIDER / MEDICAL_DIRECTOR) doesn't see the item.
+  // SUPER_ADMIN, MEDICAL_DIRECTOR, and PROVIDER (2026-07-01). PROVIDER is
+  // read-only (sees their active practice's roster, no invite / actions);
+  // everyone else manages. All scoped server-side to the active practice.
   {
     href: '/users',
     label: 'Users',
     icon: UserPlus,
     matchPrefix: true,
-    show: (roles) => canManageUsers(roles),
+    show: (roles) => canViewUsers(roles),
   },
   // phase/24 — monthly practice analytics. Oversight surface — visible
   // to MEDICAL_DIRECTOR (scoped to own practice), HEALPLACE_OPS, and

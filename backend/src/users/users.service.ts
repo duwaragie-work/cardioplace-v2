@@ -27,6 +27,10 @@ export interface Actor {
   id: string
   email: string | null
   roles: UserRole[]
+  /** The practice the session is acting as (JWT claim). When set, the user
+   *  roster + scoped views narrow to this practice only. Null/undefined for
+   *  org-wide roles (SUPER / OPS) and legacy sessions. */
+  activePracticeId?: string | null
 }
 
 export interface InviteContext {
@@ -149,6 +153,43 @@ export class UsersService {
       return
     }
 
+    if (caller.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
+      // MED_DIR (2026-07-01) — practice-scoped admin authority. Invites into
+      // practices they head only (PracticeMedicalDirector, many-to-many).
+      // Allowed targets: PROVIDER, COORDINATOR, MEDICAL_DIRECTOR (peer MDs —
+      // a practice can have more than one), and PATIENT (they're the clinical
+      // owner of the practice's roster). NOT HEALPLACE_OPS / SUPER_ADMIN —
+      // org-level roles stay with OPS + SUPER. Placed before the COORDINATOR
+      // branch so an MD who also holds COORDINATOR gets the broader MD scope.
+      const mdAllowed: UserRole[] = [
+        UserRole.PROVIDER,
+        UserRole.COORDINATOR,
+        UserRole.MEDICAL_DIRECTOR,
+        UserRole.PATIENT,
+      ]
+      if (!mdAllowed.includes(targetRole)) {
+        throw new ForbiddenException(
+          `MEDICAL_DIRECTOR cannot invite a ${targetRole}`,
+        )
+      }
+      if (!practiceId) {
+        throw new BadRequestException(
+          `practiceId is required for MEDICAL_DIRECTOR invites`,
+        )
+      }
+      const headed = await this.prisma.practiceMedicalDirector.findMany({
+        where: { userId: caller.id },
+        select: { practiceId: true },
+      })
+      const headedIds = headed.map((p) => p.practiceId)
+      if (!headedIds.includes(practiceId)) {
+        throw new ForbiddenException(
+          'MEDICAL_DIRECTOR can only invite into practices they head',
+        )
+      }
+      return
+    }
+
     if (caller.roles.includes(UserRole.COORDINATOR)) {
       // COORDINATOR can invite PATIENT, PROVIDER, and MEDICAL_DIRECTOR — but
       // ONLY into their own practice. PracticeCoordinator is the source of
@@ -220,6 +261,36 @@ export class UsersService {
       return
     }
 
+    if (caller.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
+      // MED_DIR (2026-07-01) — practice-scoped. May deactivate/reactivate any
+      // staff member OR patient whose practice is one they head. Cannot touch
+      // org-level roles (SUPER_ADMIN / HEALPLACE_OPS). Placed before the
+      // COORDINATOR branch so an MD who also holds COORDINATOR gets MD scope.
+      if (targetUser.roles.includes(UserRole.SUPER_ADMIN)) {
+        throw new ForbiddenException(
+          'MEDICAL_DIRECTOR cannot deactivate a SUPER_ADMIN',
+        )
+      }
+      if (targetUser.roles.includes(UserRole.HEALPLACE_OPS)) {
+        throw new ForbiddenException(
+          'MEDICAL_DIRECTOR cannot deactivate HEALPLACE_OPS',
+        )
+      }
+      const headed = await this.prisma.practiceMedicalDirector.findMany({
+        where: { userId: caller.id },
+        select: { practiceId: true },
+      })
+      const headedIds = headed.map((p) => p.practiceId)
+      const targetPractices = await this.resolveTargetPractices(targetUser.id)
+      const overlap = targetPractices.some((p) => headedIds.includes(p))
+      if (!overlap) {
+        throw new ForbiddenException(
+          'MEDICAL_DIRECTOR can only act on users in practices they head',
+        )
+      }
+      return
+    }
+
     if (caller.roles.includes(UserRole.COORDINATOR)) {
       // Patients in own practice only.
       const onlyPatient = targetUser.roles.every((r) => r === UserRole.PATIENT)
@@ -273,6 +344,40 @@ export class UsersService {
       select: { id: true },
     })
     if (!row) throw new NotFoundException(`Practice ${practiceId} not found`)
+  }
+
+  /**
+   * Union of every practice a user is tied to, across all four membership
+   * sources: staff paths (PracticeProvider / PracticeMedicalDirector /
+   * PracticeCoordinator) + the patient path (PatientProviderAssignment).
+   * Used by the MED_DIR branch of `assertCanDeactivate` to decide whether the
+   * target overlaps a practice the caller heads. De-duplicated.
+   */
+  private async resolveTargetPractices(userId: string): Promise<string[]> {
+    const [providers, mds, coordinator, assignment] = await Promise.all([
+      this.prisma.practiceProvider.findMany({
+        where: { userId },
+        select: { practiceId: true },
+      }),
+      this.prisma.practiceMedicalDirector.findMany({
+        where: { userId },
+        select: { practiceId: true },
+      }),
+      this.prisma.practiceCoordinator.findUnique({
+        where: { userId },
+        select: { practiceId: true },
+      }),
+      this.prisma.patientProviderAssignment.findUnique({
+        where: { userId },
+        select: { practiceId: true },
+      }),
+    ])
+    const ids = new Set<string>()
+    for (const p of providers) ids.add(p.practiceId)
+    for (const m of mds) ids.add(m.practiceId)
+    if (coordinator) ids.add(coordinator.practiceId)
+    if (assignment) ids.add(assignment.practiceId)
+    return Array.from(ids)
   }
 
   /**
@@ -866,33 +971,66 @@ export class UsersService {
     const limit = query.limit ?? 50
     const skip = (page - 1) * limit
 
-    // Practice scope — COORDINATOR is locked to their own practice
-    // server-side regardless of what they send. Also pulled here so the
-    // response carries the practice name (the COORDINATOR caller can't
-    // list practices to resolve it client-side — that endpoint is
-    // gated to OPS/SUPER).
-    let practiceIdFilter: string | null | undefined
+    // Practice scope. Priority (widest first): OPS/SUPER unscoped →
+    // MEDICAL_DIRECTOR headed practices → COORDINATOR own practice →
+    // explicit query filter for the org-wide roles. Scoped roles are
+    // locked server-side regardless of what they send, and can never be
+    // widened past their memberships. `scopePracticeIds === null` means
+    // no practice filter (org-wide). Also pulled here so the response can
+    // carry the practice name for COORDINATOR (they can't list practices
+    // to resolve it client-side — that endpoint is gated to OPS/SUPER).
+    let scopePracticeIds: string[] | null = null
     let coordinatorScope: { id: string; name: string } | null = null
-    if (caller.roles.includes(UserRole.COORDINATOR)) {
-      const own = await this.prisma.practiceCoordinator.findUnique({
-        where: { userId: caller.id },
-        select: { practice: { select: { id: true, name: true } } },
-      })
-      if (!own) {
-        return {
-          statusCode: 200,
-          message: 'Users retrieved',
-          data: [],
-          page,
-          limit,
-          total: 0,
-          invites: [],
+
+    const isOrgWide =
+      caller.roles.includes(UserRole.SUPER_ADMIN) ||
+      caller.roles.includes(UserRole.HEALPLACE_OPS)
+
+    if (isOrgWide) {
+      // OPS / SUPER — unscoped; honor an explicit practice filter if sent.
+      if (query.practiceId) scopePracticeIds = [query.practiceId]
+    } else {
+      // Scoped roles (MED_DIR / PROVIDER / COORDINATOR) — the roster is limited
+      // to the practices they belong to, then narrowed to the ACTIVE (selected)
+      // practice carried on the session. A single-practice user is effectively
+      // already narrowed; a multi-practice user must switch practice (header
+      // dropdown) to see another practice's roster. Zero memberships → empty
+      // array → zero rows (safe). PROVIDER is read-only (controller GET @Roles);
+      // they see the roster but every write is blocked at the guard.
+      const membership = new Set<string>()
+      if (caller.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
+        const headed = await this.prisma.practiceMedicalDirector.findMany({
+          where: { userId: caller.id },
+          select: { practiceId: true },
+        })
+        for (const r of headed) membership.add(r.practiceId)
+      }
+      if (caller.roles.includes(UserRole.PROVIDER)) {
+        const memberOf = await this.prisma.practiceProvider.findMany({
+          where: { userId: caller.id },
+          select: { practiceId: true },
+        })
+        for (const r of memberOf) membership.add(r.practiceId)
+      }
+      if (caller.roles.includes(UserRole.COORDINATOR)) {
+        const own = await this.prisma.practiceCoordinator.findUnique({
+          where: { userId: caller.id },
+          select: { practice: { select: { id: true, name: true } } },
+        })
+        if (own) {
+          membership.add(own.practice.id)
+          coordinatorScope = { id: own.practice.id, name: own.practice.name }
         }
       }
-      practiceIdFilter = own.practice.id
-      coordinatorScope = { id: own.practice.id, name: own.practice.name }
-    } else if (query.practiceId) {
-      practiceIdFilter = query.practiceId
+      let ids = Array.from(membership)
+      // Narrow to the active/selected practice when the session carries one and
+      // it is a real membership — never widen past it (stale/forged claim is
+      // ignored). Single-practice users are unaffected (their active id equals
+      // their only membership).
+      if (caller.activePracticeId && ids.includes(caller.activePracticeId)) {
+        ids = [caller.activePracticeId]
+      }
+      scopePracticeIds = ids
     }
 
     // Build the User where-clause. The filters compose as AND of three
@@ -922,41 +1060,42 @@ export class UsersService {
       }
     }
 
-    if (practiceIdFilter) {
+    if (scopePracticeIds) {
       // Practice-scoped roster — for an explicit OPS / SUPER practice filter
-      // AND for COORDINATOR (locked to their own practice above). Accept any
-      // of: a patient assigned to that practice, a patient invited into that
-      // practice (assignment-pending), or a staff member of that practice
-      // (provider, MD, coordinator memberships) — so a coordinator sees the
-      // patients PLUS the providers, medical directors, and themselves.
+      // AND for COORDINATOR (own practice) / MED_DIR (headed practices),
+      // locked above. Accept any of: a patient assigned to those practices,
+      // a patient invited into them (assignment-pending), or a staff member
+      // of them (provider, MD, coordinator memberships) — so the caller sees
+      // the patients PLUS the providers, medical directors, and coordinators.
       // The invite back-reference matters because a patient invited by the
       // coordinator has no PatientProviderAssignment until Provider Verify
       // runs — without it they'd be invisible to the coordinator who invited
       // them. An optional `query.role` further narrows the set (handled above).
+      // An empty array yields `{ in: [] }` → zero rows (safe deny).
       andGroups.push({
         OR: [
           {
             providerAssignmentAsPatient: {
-              is: { practiceId: practiceIdFilter },
+              is: { practiceId: { in: scopePracticeIds } },
             },
           },
           {
             userInviteCreated: {
-              is: { practiceId: practiceIdFilter },
+              is: { practiceId: { in: scopePracticeIds } },
             },
           },
           {
             practiceProviderMemberships: {
-              some: { practiceId: practiceIdFilter },
+              some: { practiceId: { in: scopePracticeIds } },
             },
           },
           {
             practiceMedicalDirectorMemberships: {
-              some: { practiceId: practiceIdFilter },
+              some: { practiceId: { in: scopePracticeIds } },
             },
           },
           {
-            practiceCoordinator: { is: { practiceId: practiceIdFilter } },
+            practiceCoordinator: { is: { practiceId: { in: scopePracticeIds } } },
           },
         ],
       })
@@ -973,7 +1112,7 @@ export class UsersService {
       // Return just the invite list — no users.
       const invites = await this.fetchPendingInvites({
         caller,
-        practiceIdFilter,
+        practiceIds: scopePracticeIds,
         role: query.role,
         search: query.search,
       })
@@ -1028,11 +1167,24 @@ export class UsersService {
           // honest for accepted patient invites.
           providerAssignmentAsPatient: { select: { practiceId: true } },
           practiceCoordinator: { select: { practiceId: true } },
+          // When the roster is scoped to a practice (or the active/selected
+          // one), filter the many-to-many memberships to that scope so the
+          // flattened practice column reflects the practice the row matched on
+          // — NOT an arbitrary other practice the user also belongs to. A
+          // multi-practice provider viewed under practice B must show "B", not
+          // whichever membership happens to be first. Unscoped (OPS / SUPER)
+          // keeps the take-1 arbitrary primary membership.
           practiceProviderMemberships: {
+            where: scopePracticeIds
+              ? { practiceId: { in: scopePracticeIds } }
+              : undefined,
             select: { practiceId: true },
             take: 1,
           },
           practiceMedicalDirectorMemberships: {
+            where: scopePracticeIds
+              ? { practiceId: { in: scopePracticeIds } }
+              : undefined,
             select: { practiceId: true },
             take: 1,
           },
@@ -1086,7 +1238,7 @@ export class UsersService {
         total,
         invites: await this.fetchPendingInvites({
           caller,
-          practiceIdFilter,
+          practiceIds: scopePracticeIds,
           role: query.role,
           search: query.search,
         }),
@@ -1103,7 +1255,7 @@ export class UsersService {
       total,
       invites: await this.fetchPendingInvites({
         caller,
-        practiceIdFilter,
+        practiceIds: scopePracticeIds,
         role: query.role,
         search: query.search,
       }),
@@ -1112,7 +1264,7 @@ export class UsersService {
 
   private async fetchPendingInvites(params: {
     caller: Actor
-    practiceIdFilter: string | null | undefined
+    practiceIds: string[] | null
     role?: UserRole
     search?: string
   }) {
@@ -1121,7 +1273,7 @@ export class UsersService {
       revokedAt: null,
       expiresAt: { gt: new Date() },
     }
-    if (params.practiceIdFilter) where.practiceId = params.practiceIdFilter
+    if (params.practiceIds) where.practiceId = { in: params.practiceIds }
     if (params.role) where.role = params.role
     if (params.search) {
       const term = params.search.trim()
@@ -1132,8 +1284,9 @@ export class UsersService {
         ]
       }
     }
-    // COORDINATOR is already scoped to their own practice via practiceIdFilter
-    // above; they now manage patients, providers, AND medical directors, so we
+    // COORDINATOR / MED_DIR are already scoped to their practice(s) via
+    // practiceIds above; they now manage patients, providers, AND medical
+    // directors, so we
     // no longer force PATIENT-only here (the optional `role` param still
     // narrows it when a role filter is applied).
 

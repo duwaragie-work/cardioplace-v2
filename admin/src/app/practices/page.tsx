@@ -25,14 +25,15 @@ import {
   type UpsertPracticePayload,
 } from '@/lib/services/practice.service';
 import { useAuth } from '@/lib/auth-context';
-import { canManagePractices } from '@/lib/roleGates';
+import { canCreateOrDeletePractices } from '@/lib/roleGates';
 
 export default function PracticesPage() {
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
-  // Create practice is a write — SUPER_ADMIN, MED_DIR, OPS only.
-  // PROVIDER sees the list but no "Add practice" CTA anywhere on the page.
-  const canManage = canManagePractices(user);
+  // Create practice is org-level lifecycle — SUPER_ADMIN + HEALPLACE_OPS only.
+  // MED_DIR can edit practices they head (detail page) but not create new ones,
+  // so the "Add practice" CTA stays hidden for them. PROVIDER never sees it.
+  const canManage = canCreateOrDeletePractices(user);
 
   const [practices, setPractices] = useState<Practice[]>([]);
   const [loading, setLoading] = useState(true);

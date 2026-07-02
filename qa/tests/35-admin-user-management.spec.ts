@@ -33,8 +33,10 @@ async function menuHasItem(page: Page, email: string, key: string): Promise<void
  * Spec 35 — admin user management (/users, phase/23).
  *
  * Surface map (from admin/src/components/user-management/*):
- *   • Gate: COORDINATOR / HEALPLACE_OPS / SUPER_ADMIN (canManageUsers).
- *     Everyone else gets the `admin-users-access-denied` 403 card.
+ *   • View gate (canViewUsers): COORDINATOR / HEALPLACE_OPS / SUPER_ADMIN /
+ *     MEDICAL_DIRECTOR / PROVIDER. Only PATIENT gets the 403 card.
+ *   • Manage gate (canManageUsers): the above minus PROVIDER — PROVIDER is
+ *     read-only (no invite CTA / row actions). See 2026-07-01 access-scope patch.
  *   • SUPER_ADMIN / OPS see the full list + role/status/practice filters.
  *   • COORDINATOR sees their own-practice variant: NO role filter (single
  *     practice), a practice badge, and an invite CTA. The list now includes
@@ -127,20 +129,36 @@ test.describe('Spec 35 — admin user management', () => {
     ).toBeVisible()
   })
 
-  test('35.5 — PROVIDER + MEDICAL_DIRECTOR are denied /users', async ({
+  test('35.5 — PROVIDER + MEDICAL_DIRECTOR can reach /users (2026-07-01)', async ({
     page,
   }) => {
     test.setTimeout(90_000)
+    // Access-scope patch: MED_DIR gained practice-scoped roster management and
+    // PROVIDER gained read-only roster access. Neither sees the 403 card now.
+    // MED_DIR is a manager (invite CTA present); PROVIDER is read-only (no CTA).
+    // Finer behavior is pinned in specs 70 + 71.
     for (const persona of [ADMINS.primaryProvider, ADMINS.medicalDirector]) {
       // Clear the prior persona's session, else /sign-in redirects straight to
       // /dashboard (already authed) and the email field never renders.
       await page.context().clearCookies()
       await signInAdmin(page, persona.email, ADMIN_BASE_URL)
       await page.goto(`${ADMIN_BASE_URL}/users`)
+      // Roster chrome renders; the 403 card does NOT.
+      await expect(
+        page.locator(byTestId(T.adminUsers.search)),
+        `${persona.email} should see the roster`,
+      ).toBeVisible({ timeout: 25_000 })
       await expect(
         page.locator(byTestId(T.adminUsers.accessDenied)),
-        `${persona.email} should see the 403 card`,
-      ).toBeVisible({ timeout: 25_000 })
+        `${persona.email} should NOT see the 403 card`,
+      ).toHaveCount(0)
+      // MED_DIR manages (invite CTA visible); PROVIDER is read-only (no CTA).
+      const inviteCta = page.locator(byTestId(T.adminUsers.inviteSingle))
+      if (persona.email === ADMINS.medicalDirector.email) {
+        await expect(inviteCta).toBeVisible()
+      } else {
+        await expect(inviteCta).toHaveCount(0)
+      }
     }
   })
 
