@@ -32,7 +32,11 @@ export const ALL_USER_ROLES = [
 export type UserRole = (typeof ALL_USER_ROLES)[number]
 
 type RoleInput = string[] | null | undefined
-type UserInput = { roles?: string[] | null } | null | undefined
+// `id` is optional so predicates that need per-user runtime scope
+// (canEditThisPractice) can read it without a cast. The auth-context user
+// object always carries an id; older call sites that pass only { roles } keep
+// working since it's optional.
+type UserInput = { roles?: string[] | null; id?: string | null } | null | undefined
 
 function rolesOf(input: RoleInput | UserInput): string[] {
   if (!input) return []
@@ -90,24 +94,59 @@ export function canVerifyMedications(input: RoleInput | UserInput): boolean {
 
 // ─── Practice CRUD ──────────────────────────────────────────────────────────
 /**
- * Practice CRUD is an operational/admin function (May 2026 access-scope
- * decision). MED_DIR removed — their clinical authority is per-patient
- * inside their practice, not over practice metadata.
- *   @Roles(SUPER_ADMIN, HEALPLACE_OPS)  // MED_DIR + PROVIDER excluded
- *   backend/src/practice/practice.controller.ts
+ * Practice config edit (update + staff membership). 2026-07-01: MED_DIR added
+ * for practice-scoped edits on practices they head — whether they can edit a
+ * *specific* practice is decided by canEditThisPractice (runtime). CREATE /
+ * DELETE remain SUPER + OPS only (see canCreateOrDeletePractices).
+ *   @Roles(SUPER_ADMIN, HEALPLACE_OPS, MEDICAL_DIRECTOR)
+ *   backend/src/practice/practice.controller.ts (update + staff membership)
  */
 export function canManagePractices(input: RoleInput | UserInput): boolean {
+  return has(input, ['SUPER_ADMIN', 'HEALPLACE_OPS', 'MEDICAL_DIRECTOR'])
+}
+
+/**
+ * Can this user edit *this specific* practice's config? Mirrors the backend
+ * runtime scope check (PatientAccessService.assertCanManagePractice): OPS /
+ * SUPER edit any practice; a MED_DIR edits only practices they head (their
+ * user id appears in the practice's medicalDirectorIds). Used by the practice
+ * detail page to render the editor vs. the read-only summary.
+ */
+export function canEditThisPractice(
+  user: UserInput,
+  practice: { id?: string; medicalDirectorIds?: string[] } | null,
+): boolean {
+  if (!practice) return false
+  if (has(user, ['SUPER_ADMIN', 'HEALPLACE_OPS'])) return true
+  if (has(user, ['MEDICAL_DIRECTOR'])) {
+    const userId = user?.id
+    return !!userId && (practice.medicalDirectorIds ?? []).includes(userId)
+  }
+  return false
+}
+
+/**
+ * Practice CREATE / DELETE — org-level lifecycle. MED_DIR excluded (they can
+ * edit a practice they head but not spin one up or tear it down).
+ *   @Roles(SUPER_ADMIN, HEALPLACE_OPS)
+ *   backend/src/practice/practice.controller.ts @Post + @Delete
+ */
+export function canCreateOrDeletePractices(
+  input: RoleInput | UserInput,
+): boolean {
   return has(input, ['SUPER_ADMIN', 'HEALPLACE_OPS'])
 }
 
 // ─── Care team assignment ───────────────────────────────────────────────────
 /**
- * @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS)   // PROVIDER excluded
+ * @Roles(SUPER_ADMIN, MEDICAL_DIRECTOR, HEALPLACE_OPS)
  * backend/src/practice/assignment.controller.ts
  *
- * MED_DIR is further runtime-scoped by PatientAccessService to practices
- * they head — the frontend can show the button but a MED_DIR trying to
- * edit assignments outside their practice gets a 403 from the backend.
+ * PROVIDER excluded (they don't reassign their own care team). COORDINATOR
+ * excluded (2026-07-01 walkback from #116 — care-team assignment is a
+ * clinical decision, not front-desk). MED_DIR is further runtime-scoped by
+ * PatientAccessService to practices they head — the frontend can show the
+ * button but a MED_DIR editing assignments outside their practice gets a 403.
  */
 export function canAssignCareTeam(input: RoleInput | UserInput): boolean {
   return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS'])
@@ -192,11 +231,29 @@ export function isHealplaceOpsOnly(input: RoleInput | UserInput): boolean {
 // ─── User management (phase/23) ─────────────────────────────────────────────
 /**
  * Can access the /users page at all. Controller-level @Roles on the backend:
- *   @Roles(COORDINATOR, HEALPLACE_OPS, SUPER_ADMIN)
+ *   @Roles(COORDINATOR, HEALPLACE_OPS, SUPER_ADMIN, MEDICAL_DIRECTOR)
  *   backend/src/users/users.controller.ts
+ * 2026-07-01: MEDICAL_DIRECTOR added — practice-scoped roster management
+ * (invite / deactivate / reactivate), scoped server-side by assertCanInvite /
+ * assertCanDeactivate to practices they head.
  */
 export function canManageUsers(input: RoleInput | UserInput): boolean {
-  return has(input, ['COORDINATOR', 'HEALPLACE_OPS', 'SUPER_ADMIN'])
+  return has(input, [
+    'COORDINATOR',
+    'HEALPLACE_OPS',
+    'SUPER_ADMIN',
+    'MEDICAL_DIRECTOR',
+  ])
+}
+
+/**
+ * Permanent-close (irreversible tombstone) authority. HIPAA-relevant — org
+ * level only. 2026-07-01: COORDINATOR walked back (#114); MED_DIR never had it.
+ *   @Roles(SUPER_ADMIN, HEALPLACE_OPS)
+ *   backend/src/users/users.controller.ts @Post(':id/permanent-close')
+ */
+export function canPermanentCloseUsers(input: RoleInput | UserInput): boolean {
+  return has(input, ['SUPER_ADMIN', 'HEALPLACE_OPS'])
 }
 
 // ─── MFA admin reset (phase/26) ─────────────────────────────────────────────
@@ -231,11 +288,14 @@ export function canViewReports(input: RoleInput | UserInput): boolean {
  * user with the given roles. Mirrors UsersService.assertCanDeactivate in
  * backend/src/users/users.service.ts.
  *
- *   SUPER_ADMIN    → any target (incl. SUPER_ADMIN, except self).
- *   HEALPLACE_OPS  → admin-role targets only (no PATIENT, no SUPER_ADMIN).
- *   COORDINATOR    → PATIENT targets only (backend further scopes to own
- *                    practice; UI just shows the button).
- *   MEDICAL_DIRECTOR / PROVIDER → cannot deactivate anyone via /users.
+ *   SUPER_ADMIN      → any target (incl. SUPER_ADMIN, except self).
+ *   HEALPLACE_OPS    → admin-role targets only (no PATIENT, no SUPER_ADMIN).
+ *   MEDICAL_DIRECTOR → any non-org target (not SUPER_ADMIN / HEALPLACE_OPS);
+ *                      backend further scopes to practices they head + 403s
+ *                      out-of-scope, so the UI just shows the button. (2026-07-01)
+ *   COORDINATOR      → PATIENT targets only (backend further scopes to own
+ *                      practice; UI just shows the button).
+ *   PROVIDER         → cannot deactivate anyone via /users.
  *
  * Self-deactivation is blocked separately at the call site.
  */
@@ -250,6 +310,12 @@ export function canDeactivateUser(
   if (callerRoles.includes('HEALPLACE_OPS')) {
     if (isPatientOnly) return false
     if (target.includes('SUPER_ADMIN')) return false
+    return true
+  }
+  if (callerRoles.includes('MEDICAL_DIRECTOR')) {
+    // Practice-scoped on the backend; org-level targets always off-limits.
+    if (target.includes('SUPER_ADMIN')) return false
+    if (target.includes('HEALPLACE_OPS')) return false
     return true
   }
   if (callerRoles.includes('COORDINATOR')) {
@@ -276,6 +342,12 @@ export function invitableRoles(input: RoleInput | UserInput): UserRole[] {
   }
   if (roles.includes('HEALPLACE_OPS')) {
     return ['PROVIDER', 'MEDICAL_DIRECTOR', 'HEALPLACE_OPS', 'COORDINATOR']
+  }
+  if (roles.includes('MEDICAL_DIRECTOR')) {
+    // MED_DIR staffs practices they head — patients + clinicians + coordinators,
+    // but not org-level roles (OPS / SUPER_ADMIN). Practice is required and must
+    // be one they head (enforced server-side by assertCanInvite). (2026-07-01)
+    return ['PATIENT', 'PROVIDER', 'MEDICAL_DIRECTOR', 'COORDINATOR']
   }
   if (roles.includes('COORDINATOR')) {
     // COORDINATOR staffs their own practice — they can invite patients plus
@@ -308,6 +380,13 @@ export function inviteRequiresPractice(
   }
   if (roles.includes('HEALPLACE_OPS')) {
     return ['COORDINATOR', 'PROVIDER'].includes(targetRole)
+  }
+  if (roles.includes('MEDICAL_DIRECTOR')) {
+    // MED_DIR may head more than one practice, so the target practice is never
+    // implicit — they must pick which headed practice to invite into. The
+    // practice picker is naturally scoped: /admin/practices returns only the
+    // practices a MED_DIR can see. (2026-07-01)
+    return true
   }
   if (roles.includes('COORDINATOR')) {
     // Practice always implicit (auto-filled server-side from

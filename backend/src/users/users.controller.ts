@@ -41,7 +41,16 @@ type AuthedReq = Request & {
  */
 @Controller('admin/users')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.COORDINATOR, UserRole.HEALPLACE_OPS, UserRole.SUPER_ADMIN)
+// 2026-07-01: MEDICAL_DIRECTOR added — practice-scoped admin authority over
+// their own practice's roster (invite / deactivate / reactivate). Runtime
+// scoping is enforced by assertCanInvite / assertCanDeactivate below. The
+// irreversible permanent-close is re-restricted at the method level.
+@Roles(
+  UserRole.COORDINATOR,
+  UserRole.HEALPLACE_OPS,
+  UserRole.SUPER_ADMIN,
+  UserRole.MEDICAL_DIRECTOR,
+)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
@@ -128,7 +137,14 @@ export class UsersController {
     )
   }
 
+  // Permanent-close is irreversible tombstoning (anonymize PII, retain PHI
+  // per HIPAA 6-year rule) — org-level authority only. 2026-07-01 walkbacks:
+  // COORDINATOR excluded (#114) and MED_DIR excluded (never had it). The
+  // explicit method-level @Roles overrides the controller-level list, which
+  // includes COORDINATOR + MEDICAL_DIRECTOR for the reversible actions.
+  // Reversible deactivate/reactivate stay available to those roles.
   @Post(':id/permanent-close')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.HEALPLACE_OPS)
   permanentClose(
     @Req() req: AuthedReq,
     @Param('id') id: string,
@@ -142,7 +158,12 @@ export class UsersController {
     )
   }
 
+  // Role removal is org-level authority (ACCESS_SCOPE §8) — SUPER + OPS only.
+  // Pinned explicitly so the controller-level @Roles (which now includes
+  // COORDINATOR + MEDICAL_DIRECTOR for the reversible roster actions) does not
+  // leak role-removal to those practice-scoped roles.
   @Delete(':id/roles/:role')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.HEALPLACE_OPS)
   removeRole(
     @Req() req: AuthedReq,
     @Param('id') id: string,

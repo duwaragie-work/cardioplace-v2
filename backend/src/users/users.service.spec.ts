@@ -17,6 +17,12 @@ describe('UsersService', () => {
     roles: ['SUPER_ADMIN'] as any,
   }
 
+  const medDir: Actor = {
+    id: 'md-1',
+    email: 'md@cardioplace.test',
+    roles: ['MEDICAL_DIRECTOR'] as any,
+  }
+
   beforeEach(async () => {
     prisma = {
       user: {
@@ -27,6 +33,11 @@ describe('UsersService', () => {
         count: jest.fn(),
       },
       authLog: { create: jest.fn() },
+      practiceMedicalDirector: { findMany: jest.fn() },
+      practiceProvider: { findMany: jest.fn() },
+      practiceCoordinator: { findUnique: jest.fn() },
+      patientProviderAssignment: { findUnique: jest.fn() },
+      practice: { findUnique: jest.fn() },
     }
     lifecycle = {
       deactivate: jest.fn(),
@@ -111,6 +122,121 @@ describe('UsersService', () => {
       await service.listUsers(superAdmin, { status: 'DEACTIVATED' as any })
       const where = prisma.user.findMany.mock.calls[0][0].where
       expect(where.accountStatus).toBe('DEACTIVATED')
+    })
+
+    it('MED_DIR list is scoped to headed practices (in: [...])', async () => {
+      prisma.practiceMedicalDirector.findMany.mockResolvedValue([
+        { practiceId: 'prac-a' },
+        { practiceId: 'prac-b' },
+      ])
+      await service.listUsers(medDir, {})
+      const where = prisma.user.findMany.mock.calls[0][0].where
+      // The practice scope group is one of the AND groups; find the OR that
+      // references providerAssignmentAsPatient with an `in` list.
+      const andGroups = where.AND ?? []
+      const scoped = JSON.stringify(andGroups)
+      expect(scoped).toContain('prac-a')
+      expect(scoped).toContain('prac-b')
+    })
+  })
+
+  // ─── assertCanInvite — MED_DIR practice-scoped branch (2026-07-01) ──────────
+  describe('assertCanInvite (MED_DIR)', () => {
+    beforeEach(() => {
+      prisma.practiceMedicalDirector.findMany.mockResolvedValue([
+        { practiceId: 'prac-a' },
+      ])
+    })
+
+    it('allows inviting a PROVIDER into a practice they head', async () => {
+      await expect(
+        service.assertCanInvite(medDir, 'PROVIDER' as any, 'prac-a'),
+      ).resolves.toBeUndefined()
+    })
+
+    it('rejects inviting into a practice they do NOT head', async () => {
+      await expect(
+        service.assertCanInvite(medDir, 'PROVIDER' as any, 'prac-z'),
+      ).rejects.toThrow()
+    })
+
+    it('rejects inviting a HEALPLACE_OPS (org-level role)', async () => {
+      await expect(
+        service.assertCanInvite(medDir, 'HEALPLACE_OPS' as any, 'prac-a'),
+      ).rejects.toThrow()
+    })
+
+    it('rejects inviting a SUPER_ADMIN', async () => {
+      await expect(
+        service.assertCanInvite(medDir, 'SUPER_ADMIN' as any, 'prac-a'),
+      ).rejects.toThrow()
+    })
+
+    it('requires a practiceId', async () => {
+      await expect(
+        service.assertCanInvite(medDir, 'PROVIDER' as any, null),
+      ).rejects.toThrow()
+    })
+  })
+
+  // ─── assertCanDeactivate — MED_DIR practice-scoped branch (2026-07-01) ──────
+  describe('assertCanDeactivate (MED_DIR)', () => {
+    beforeEach(() => {
+      // The caller (md-1) heads prac-a. The target's MD memberships (queried
+      // inside resolveTargetPractices) must be keyed separately, else the
+      // shared mock makes every target look like an MD of prac-a.
+      prisma.practiceMedicalDirector.findMany.mockImplementation(
+        ({ where }: any) =>
+          where.userId === medDir.id
+            ? Promise.resolve([{ practiceId: 'prac-a' }])
+            : Promise.resolve([]),
+      )
+      prisma.practiceProvider.findMany.mockResolvedValue([])
+      prisma.practiceCoordinator.findUnique.mockResolvedValue(null)
+      prisma.patientProviderAssignment.findUnique.mockResolvedValue(null)
+    })
+
+    it('allows deactivating a provider in a practice they head', async () => {
+      // Target prov-9 is a provider in prac-a (overlaps caller's headed set).
+      prisma.practiceProvider.findMany.mockResolvedValue([
+        { practiceId: 'prac-a' },
+      ])
+      await expect(
+        service.assertCanDeactivate(medDir, {
+          id: 'prov-9',
+          roles: ['PROVIDER'] as any,
+        }),
+      ).resolves.toBeUndefined()
+    })
+
+    it('rejects deactivating a user with no overlapping practice', async () => {
+      prisma.practiceProvider.findMany.mockResolvedValue([
+        { practiceId: 'prac-z' },
+      ])
+      await expect(
+        service.assertCanDeactivate(medDir, {
+          id: 'prov-9',
+          roles: ['PROVIDER'] as any,
+        }),
+      ).rejects.toThrow()
+    })
+
+    it('rejects deactivating a SUPER_ADMIN', async () => {
+      await expect(
+        service.assertCanDeactivate(medDir, {
+          id: 'su-1',
+          roles: ['SUPER_ADMIN'] as any,
+        }),
+      ).rejects.toThrow()
+    })
+
+    it('rejects deactivating a HEALPLACE_OPS', async () => {
+      await expect(
+        service.assertCanDeactivate(medDir, {
+          id: 'ops-1',
+          roles: ['HEALPLACE_OPS'] as any,
+        }),
+      ).rejects.toThrow()
     })
   })
 })

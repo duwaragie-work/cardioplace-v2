@@ -28,6 +28,7 @@ import {
 } from '@/lib/services/user-management.service';
 import {
   canDeactivateUser,
+  canPermanentCloseUsers,
   canResetUserMfa,
   type UserRole,
 } from '@/lib/roleGates';
@@ -433,12 +434,16 @@ export default function UsersList({
                   row.kind === 'user' && row.status === 'ACTIVE' && canAct;
                 const showReactivate =
                   row.kind === 'user' && row.status === 'DEACTIVATED' && canAct;
-                // Permanent close — available on ACTIVE or DEACTIVATED user rows
-                // the caller may act on, and only when we have a DisplayID for
-                // the typed-confirmation gate. Never on CLOSED / invites.
+                // Permanent close — irreversible tombstone, org-level authority
+                // (SUPER_ADMIN + HEALPLACE_OPS only per ACCESS_SCOPE §8;
+                // COORDINATOR walked back #114, MED_DIR never had it). Also
+                // requires a row the caller can act on, a DisplayID for the
+                // typed-confirmation gate, and an ACTIVE/DEACTIVATED status.
+                // Never on CLOSED / invites.
                 const showClose =
                   row.kind === 'user' &&
                   canAct &&
+                  canPermanentCloseUsers(caller) &&
                   (row.status === 'ACTIVE' || row.status === 'DEACTIVATED') &&
                   !!(row.raw as UserRow).displayId &&
                   !!onCloseClick;
@@ -619,9 +624,11 @@ export default function UsersList({
               row.kind === 'user' && row.status === 'ACTIVE' && canAct;
             const showReactivate =
               row.kind === 'user' && row.status === 'DEACTIVATED' && canAct;
+            // Permanent close — org-level only (SUPER + OPS); see desktop block.
             const showClose =
               row.kind === 'user' &&
               canAct &&
+              canPermanentCloseUsers(caller) &&
               (row.status === 'ACTIVE' || row.status === 'DEACTIVATED') &&
               !!(row.raw as UserRow).displayId &&
               !!onCloseClick;

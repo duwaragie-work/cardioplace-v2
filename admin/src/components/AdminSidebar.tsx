@@ -73,8 +73,9 @@ const PRIMARY_NAV: NavItem[] = [
     show: () => true,
   },
   // phase/23 — user management. Visible to COORDINATOR, HEALPLACE_OPS,
-  // SUPER_ADMIN (controller-level @Roles on the backend). Anyone else
-  // (PROVIDER / MEDICAL_DIRECTOR) doesn't see the item.
+  // SUPER_ADMIN, and MEDICAL_DIRECTOR (2026-07-01 — practice-scoped roster
+  // management, scoped server-side by assertCanInvite / assertCanDeactivate).
+  // PROVIDER doesn't see the item.
   {
     href: '/users',
     label: 'Users',

@@ -262,34 +262,71 @@ describe('PatientAccessService', () => {
       ).rejects.toThrow(ForbiddenException)
     })
 
-    // phase/28 — COORDINATOR may assign care teams in their OWN practice.
+    // 2026-07-01 walkback (#116) — COORDINATOR no longer assigns care teams.
+    // Care-team assignment is a clinical decision (MED_DIR / OPS / SUPER only).
+    // Denied for every practice, including their own.
     const coordActor: ActorUser = {
       id: 'coord-1',
       roles: [UserRole.COORDINATOR],
     }
 
-    it('COORDINATOR allowed for their own practice', async () => {
+    it('COORDINATOR denied even for their own practice (2026-07-01 walkback)', async () => {
       prisma.practiceCoordinator.findUnique.mockResolvedValue({
         practiceId: PRACTICE_A,
       })
       await expect(
         service.assertCanModifyPracticeAssignment(coordActor, PRACTICE_A),
-      ).resolves.toBeUndefined()
+      ).rejects.toThrow(ForbiddenException)
     })
 
     it('COORDINATOR denied for a different practice', async () => {
-      prisma.practiceCoordinator.findUnique.mockResolvedValue({
-        practiceId: PRACTICE_A,
-      })
       await expect(
         service.assertCanModifyPracticeAssignment(coordActor, PRACTICE_B),
       ).rejects.toThrow(ForbiddenException)
     })
+  })
 
-    it('COORDINATOR with no practice membership → denied', async () => {
-      prisma.practiceCoordinator.findUnique.mockResolvedValue(null)
+  // ────────────────────────────────────────────────────────────────────────
+  // assertCanManagePractice — practice config / staff-membership write gate
+  // (2026-07-01). OPS/SUPER unscoped; MED_DIR must head the practice.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('assertCanManagePractice', () => {
+    it('OPS bypasses without DB lookup', async () => {
       await expect(
-        service.assertCanModifyPracticeAssignment(coordActor, PRACTICE_A),
+        service.assertCanManagePractice(
+          { id: OPS_ID, roles: [UserRole.HEALPLACE_OPS] },
+          PRACTICE_A,
+        ),
+      ).resolves.toBeUndefined()
+      expect(prisma.practiceMedicalDirector.findUnique).not.toHaveBeenCalled()
+    })
+
+    it('MED_DIR allowed for a practice they head', async () => {
+      prisma.practiceMedicalDirector.findUnique.mockResolvedValue({ id: 'pmd-1' })
+      await expect(
+        service.assertCanManagePractice(
+          { id: MED_ID, roles: [UserRole.MEDICAL_DIRECTOR] },
+          PRACTICE_A,
+        ),
+      ).resolves.toBeUndefined()
+    })
+
+    it('MED_DIR denied for a practice they do not head', async () => {
+      prisma.practiceMedicalDirector.findUnique.mockResolvedValue(null)
+      await expect(
+        service.assertCanManagePractice(
+          { id: MED_ID, roles: [UserRole.MEDICAL_DIRECTOR] },
+          PRACTICE_B,
+        ),
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('PROVIDER denied — practice management is not a provider power', async () => {
+      await expect(
+        service.assertCanManagePractice(
+          { id: PROV_ID, roles: [UserRole.PROVIDER] },
+          PRACTICE_A,
+        ),
       ).rejects.toThrow(ForbiddenException)
     })
   })
