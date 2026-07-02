@@ -1,8 +1,17 @@
 import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
+import { ClsService } from 'nestjs-cls'
 import { ContentStatus } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { ContentSchedulerService } from './content-scheduler.service.js'
+
+// runAsCronActor wraps the cron body in cls.run — a pass-through stub is enough
+// for the unit tests, which exercise the flagging logic, not CLS itself.
+const clsStub = {
+  run: (fn: () => unknown) => fn(),
+  set: () => undefined,
+  get: () => null,
+} as unknown as ClsService
 
 describe('ContentSchedulerService', () => {
   let service: ContentSchedulerService
@@ -22,6 +31,7 @@ describe('ContentSchedulerService', () => {
       providers: [
         ContentSchedulerService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: ClsService, useValue: clsStub },
       ],
     }).compile()
 

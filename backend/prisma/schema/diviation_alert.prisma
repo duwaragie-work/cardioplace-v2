@@ -50,6 +50,13 @@ model DeviationAlert {
   // (cron-fired alerts have no actor) and for pre-policy rows.
   actorPracticeContext String?
   updatedAt            DateTime  @default(now()) @updatedAt
+  // Inline audit (2026-07-03) — generic edit-actor, auto-stamped from the CLS
+  // actor by the access-log extension. resolvedBy / acknowledgedByUserId stay
+  // action-specific; createdByActorId captures the manual/request creator
+  // (null for engine + cron-fired alerts, which are SYSTEM_ACTOR), and
+  // updatedByActorId catches any subsequent mutation.
+  createdByActorId     String?
+  updatedByActorId     String?
 
   escalationEvents      EscalationEvent[]
   notifications         Notification[]

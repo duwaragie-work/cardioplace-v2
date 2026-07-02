@@ -1,20 +1,35 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { ContentStatus } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 @Injectable()
 export class ContentSchedulerService {
   private readonly logger = new Logger(ContentSchedulerService.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cls: ClsService,
+  ) {}
 
   /**
    * Twice a month at 2AM — flag content that has not been reviewed in over 365 days.
    * Status stays PUBLISHED; only needsReview is set to true.
    * Stale content is excluded from chatbot KB queries via needsReview = false filter.
+   *
+   * Touches only Content + ContentAuditLog (non-PHI) → writes no AccessLog rows
+   * today. Wrapped in runAsCronActor anyway for uniformity, so if either model
+   * ever joins PHI_MODELS the attribution is already in place.
    */
   @Cron('0 2 1,15 * *') // 2AM on the 1st and 15th of every month (~bi-weekly)
   async flagStaleContent() {
+    return runAsCronActor(this.cls, 'cron-content-stale-flag', () =>
+      this.flagStaleContentImpl(),
+    )
+  }
+
+  private async flagStaleContentImpl() {
     const cutoffDate = new Date()
     cutoffDate.setFullYear(cutoffDate.getFullYear() - 1) // 365 days ago
 

@@ -4,7 +4,16 @@ import { EventEmitter2 } from '@nestjs/event-emitter'
 import { ProfileNotFoundException, type ResolvedContext } from '@cardioplace/shared'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
+import { ClsService } from 'nestjs-cls'
 import { AlertEngineService } from './alert-engine.service.js'
+
+// runAsCronActor wraps the @OnEvent handlers in cls.run — a pass-through stub
+// suffices for the unit tests, which drive evaluate() directly.
+const clsStub = {
+  run: (fn: () => unknown) => fn(),
+  set: () => undefined,
+  get: () => null,
+} as unknown as ClsService
 import { OutputGeneratorService } from './output-generator.service.js'
 import { ProfileResolverService } from './profile-resolver.service.js'
 import { SessionAveragerService } from './session-averager.service.js'
@@ -172,6 +181,7 @@ describe('AlertEngineService (orchestrator)', () => {
         { provide: ProfileResolverService, useValue: profileResolver },
         { provide: SessionAveragerService, useValue: sessionAverager },
         { provide: OutputGeneratorService, useValue: outputGenerator },
+        { provide: ClsService, useValue: clsStub },
       ],
     }).compile()
     service = module.get<AlertEngineService>(AlertEngineService)

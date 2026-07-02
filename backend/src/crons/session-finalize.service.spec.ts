@@ -1,9 +1,18 @@
 import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
+import { ClsService } from 'nestjs-cls'
 import { SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
 import { SessionFinalizeService } from './session-finalize.service.js'
+
+// runAsCronActor wraps scheduledRun in cls.run — a pass-through stub is enough
+// for the unit tests, which call runScan directly.
+const clsStub = {
+  run: (fn: () => unknown) => fn(),
+  set: () => undefined,
+  get: () => null,
+} as unknown as ClsService
 
 const mockPrisma = {
   journalEntry: { findMany: jest.fn() },
@@ -34,6 +43,7 @@ describe('SessionFinalizeService', () => {
         SessionFinalizeService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: DailyJournalService, useValue: mockDailyJournal },
+        { provide: ClsService, useValue: clsStub },
       ],
     }).compile()
     service = module.get<SessionFinalizeService>(SessionFinalizeService)

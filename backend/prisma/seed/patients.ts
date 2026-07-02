@@ -5,6 +5,7 @@
 // clinical data changed — §F appends the filler cohort separately so this
 // module's output stays byte-identical for the modularization commit.
 import { DisplayIdClass } from '../../src/generated/prisma/enums.js'
+import { resolveCanonicalDrugId } from '../../src/intake/medication-dedup.js'
 import { getOrGenerateDisplayIdForEmail } from './display-ids.js'
 import {
   prisma,
@@ -480,6 +481,11 @@ export async function seedPatients(
           userId: user.id,
           drugName: m.drugName,
           drugClass: m.drugClass,
+          // #85 — populate canonical identity like the real self-report path
+          // (intake.service). Without it the admin-add dedup query
+          // (WHERE canonicalDrugId=…) never matches a seeded row, so a provider
+          // could silently add a duplicate of a seeded med (e.g. Rita's Metoprolol).
+          canonicalDrugId: resolveCanonicalDrugId(m.drugName),
           frequency: m.frequency,
           source: 'PATIENT_SELF_REPORT',
           verificationStatus: m.verificationStatus,

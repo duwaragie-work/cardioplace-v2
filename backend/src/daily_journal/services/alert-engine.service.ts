@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter'
+import { ClsService } from 'nestjs-cls'
 import {
   ProfileNotFoundException,
   RULE_IDS,
@@ -8,6 +9,7 @@ import {
 } from '@cardioplace/shared'
 import { Prisma } from '../../generated/prisma/client.js'
 import { withDeadlockRetry } from '../../common/deadlock-retry.js'
+import { runAsCronActor } from '../../common/cls/cron-actor.util.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type { JournalEntryCreatedEvent, JournalEntryUpdatedEvent } from '../interfaces/events.interface.js'
@@ -274,13 +276,24 @@ export class AlertEngineService {
     private readonly profileResolver: ProfileResolverService,
     private readonly sessionAverager: SessionAveragerService,
     private readonly outputGenerator: OutputGeneratorService,
+    private readonly cls: ClsService,
   ) {}
 
+  // The @OnEvent handlers fire from inside the patient's journal-submit request,
+  // whose CLS actor is the PATIENT. Left as-is, the engine's DeviationAlert
+  // writes would be audited as the patient authoring their own alert. The
+  // engine's judgment is system-authored (Epic In Basket / Cerner norm: patient
+  // action → JournalEntry; engine verdict → DeviationAlert), so we open a fresh
+  // SYSTEM_ACTOR context labelled 'engine-alert-generator' for the handler body.
+  // Only the handlers are wrapped — direct callers of evaluate() (tests, ops
+  // tooling) keep whatever CLS context they set up.
   @OnEvent(JOURNAL_EVENTS.ENTRY_CREATED, { async: true })
   async handleEntryCreated(payload: JournalEntryCreatedEvent) {
-    await this.evaluate(payload.entryId).catch((err) =>
-      this.logEvaluationError(payload.entryId, err),
-    )
+    await runAsCronActor(this.cls, 'engine-alert-generator', async () => {
+      await this.evaluate(payload.entryId).catch((err) =>
+        this.logEvaluationError(payload.entryId, err),
+      )
+    })
   }
 
   // Signed CTO 2026-06-09 "no re-trigger" policy (Manisha 2026-06-12 Q2 "we
@@ -292,9 +305,11 @@ export class AlertEngineService {
   // into the next new entry's evaluation batch (e.g. session averaging).
   @OnEvent(JOURNAL_EVENTS.ENTRY_FINALIZED, { async: true })
   async handleEntryFinalized(payload: JournalEntryUpdatedEvent) {
-    await this.evaluate(payload.entryId).catch((err) =>
-      this.logEvaluationError(payload.entryId, err),
-    )
+    await runAsCronActor(this.cls, 'engine-alert-generator', async () => {
+      await this.evaluate(payload.entryId).catch((err) =>
+        this.logEvaluationError(payload.entryId, err),
+      )
+    })
   }
 
   /**
