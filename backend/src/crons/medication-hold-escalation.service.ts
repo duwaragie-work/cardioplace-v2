@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import {
   MedicationVerificationStatus,
   NotificationChannel,
@@ -69,12 +71,17 @@ const HOLD_RUNGS: HoldRung[] = [
 export class MedicationHoldEscalationService {
   private readonly logger = new Logger(MedicationHoldEscalationService.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cls: ClsService,
+  ) {}
 
   @Cron('0 15 * * *') // daily 15:00 UTC
   async scheduledRun() {
-    const count = await this.runScan()
-    this.logger.log(`Medication-hold escalation scan complete: ${count} rungs fired`)
+    return runAsCronActor(this.cls, 'cron-medication-hold-escalation', async () => {
+      const count = await this.runScan()
+      this.logger.log(`Medication-hold escalation scan complete: ${count} rungs fired`)
+    })
   }
 
   /**

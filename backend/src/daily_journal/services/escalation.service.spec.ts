@@ -2,6 +2,7 @@ import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
 import { ConfigService } from '@nestjs/config'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import { ClsService } from 'nestjs-cls'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
 import { SmsService } from '../../sms/sms.service.js'
@@ -198,6 +199,15 @@ describe('EscalationService', () => {
               if (key === 'PATIENT_BASE_URL') return 'https://app.cardioplaceai.com'
               return fallback ?? undefined
             },
+          },
+        },
+        {
+          // runAsCronActor wraps handleCron in cls.run — pass-through stub.
+          provide: ClsService,
+          useValue: {
+            run: (fn: () => unknown) => fn(),
+            set: () => undefined,
+            get: () => null,
           },
         },
       ],

@@ -2,6 +2,7 @@ import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
 import { ConfigService } from '@nestjs/config'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import { ClsService } from 'nestjs-cls'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
 import { SmsService } from '../../sms/sms.service.js'
@@ -122,6 +123,14 @@ describe('EscalationService — caregiver dispatch (Gap 5)', () => {
         {
           provide: ConfigService,
           useValue: { get: (_k: string, fb?: string) => fb ?? undefined },
+        },
+        {
+          provide: ClsService,
+          useValue: {
+            run: (fn: () => unknown) => fn(),
+            set: () => undefined,
+            get: () => null,
+          },
         },
       ],
     }).compile()

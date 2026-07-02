@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
+import { ClsService } from 'nestjs-cls'
 import { SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared'
+import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 
@@ -28,14 +30,17 @@ export class SessionFinalizeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly dailyJournal: DailyJournalService,
+    private readonly cls: ClsService,
   ) {}
 
   @Cron('*/2 * * * *') // every 2 min — ~2 min latency vs the frontend timer
   async scheduledRun() {
-    const count = await this.runScan()
-    if (count > 0) {
-      this.logger.log(`Session-finalize scan complete: ${count} finalized`)
-    }
+    return runAsCronActor(this.cls, 'cron-session-finalize', async () => {
+      const count = await this.runScan()
+      if (count > 0) {
+        this.logger.log(`Session-finalize scan complete: ${count} finalized`)
+      }
+    })
   }
 
   /**

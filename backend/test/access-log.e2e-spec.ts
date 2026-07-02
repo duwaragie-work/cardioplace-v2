@@ -9,6 +9,8 @@ import { PrismaService } from '../src/prisma/prisma.service.js'
 import { UsersService } from '../src/users/users.service.js'
 import { IntakeService } from '../src/intake/intake.service.js'
 import { CaregiverService } from '../src/caregiver/caregiver.service.js'
+import { MonthlyReaskService } from '../src/crons/monthly-reask.service.js'
+import { runAsCronActor } from '../src/common/cls/cron-actor.util.js'
 import { generateTestDisplayId } from './helpers/generate-test-display-id.js'
 
 /**
@@ -255,5 +257,54 @@ describe('AccessLog PHI audit (e2e)', () => {
       where: { modelName: 'PatientProfile', actorType: 'SYSTEM_ACTOR' },
     })
     expect(sysAfter).toBe(sysBefore)
+  })
+
+  // ── Cron actor attribution (Task 1.4c) ─────────────────────────────────────
+  // Friday's cron work: SYSTEM_ACTOR AccessLog rows now name WHICH cron wrote
+  // them. runAsCronActor is the exact wrapper every @Cron body uses.
+  it('a PHI write inside runAsCronActor → AccessLog row: SYSTEM_ACTOR, actorId null, systemActorLabel set', async () => {
+    const label = 'cron-session-finalize'
+    const notif = await runAsCronActor(cls, label, () =>
+      prisma.notification.create({
+        data: { userId, channel: 'PUSH', title: `${runTag}-cron`, body: 'cron write' },
+      }),
+    )
+    await waitForLogs(
+      { modelName: 'Notification', action: 'WRITE', recordId: notif.id },
+      1,
+    )
+    const row = await prisma.accessLog.findFirst({
+      where: { modelName: 'Notification', action: 'WRITE', recordId: notif.id },
+    })
+    expect(row).not.toBeNull()
+    expect(row).toMatchObject({
+      actorType: 'SYSTEM_ACTOR',
+      actorId: null,
+      systemActorLabel: label,
+    })
+    if (row) systemActorRowIds.push(row.id)
+    // Inline audit fields are NOT stamped for system-actor writes (honest null).
+    // (Notification isn't a stamp model anyway, but this confirms the SYSTEM_ACTOR
+    // short-circuit path produced a clean row.)
+  })
+
+  it('a real wired cron (MonthlyReaskService.scheduledRun) attributes its PHI reads to its label', async () => {
+    const label = 'cron-monthly-reask'
+    const before = await prisma.accessLog.count({ where: { systemActorLabel: label } })
+
+    // Invoke the cron method directly (bypass the scheduler). Its User.findMany
+    // is a PHI read → an AccessLog READ row carrying the cron's label. Seeded
+    // patients are freshly reported, so no re-ask notifications are written.
+    await app.get(MonthlyReaskService).scheduledRun()
+
+    const after = await waitForLogs({ systemActorLabel: label }, before + 1)
+    expect(after).toBeGreaterThan(before)
+
+    const rows = await prisma.accessLog.findMany({ where: { systemActorLabel: label } })
+    for (const r of rows) {
+      expect(r.actorType).toBe('SYSTEM_ACTOR')
+      expect(r.actorId).toBeNull()
+      systemActorRowIds.push(r.id) // targeted cleanup
+    }
   })
 })

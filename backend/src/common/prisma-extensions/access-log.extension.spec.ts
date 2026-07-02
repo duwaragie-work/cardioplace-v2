@@ -3,7 +3,9 @@ import type { ClsService } from 'nestjs-cls'
 import {
   computeAccessLogData,
   auditAndReturn,
+  stampInlineAudit,
   PHI_MODELS,
+  AUDIT_STAMP_MODELS,
 } from './access-log.extension.js'
 
 /**
@@ -27,6 +29,8 @@ const USER_CLS = clsWith({
   userAgent: 'jest-agent',
 })
 const EMPTY_CLS = clsWith({})
+// A cron that identified itself via runAsCronActor: no actorId, a label set.
+const CRON_CLS = clsWith({ systemActorLabel: 'cron-gap-alert' })
 
 describe('computeAccessLogData — operation → audit row', () => {
   it('findUnique on JournalEntry with where.id → READ, recordId = where.id', () => {
@@ -155,6 +159,27 @@ describe('computeAccessLogData — actor attribution', () => {
     const data = computeAccessLogData('JournalEntry', 'findMany', {}, [], EMPTY_CLS)
     expect(data).toMatchObject({ actorType: 'SYSTEM_ACTOR', actorId: null, ip: null, userAgent: null })
   })
+
+  it('unlabelled system write → systemActorLabel null', () => {
+    const data = computeAccessLogData('JournalEntry', 'findMany', {}, [], EMPTY_CLS)
+    expect(data).toMatchObject({ actorType: 'SYSTEM_ACTOR', systemActorLabel: null })
+  })
+
+  it('labelled cron write → SYSTEM_ACTOR + the systemActorLabel from CLS', () => {
+    const data = computeAccessLogData('Notification', 'create', { data: {} }, { id: 'n-1' }, CRON_CLS)
+    expect(data).toMatchObject({
+      actorType: 'SYSTEM_ACTOR',
+      actorId: null,
+      systemActorLabel: 'cron-gap-alert',
+    })
+  })
+
+  it('USER write is never a cron → systemActorLabel null even if one were set', () => {
+    // A real user is not a background process; the label is suppressed.
+    const userWithStrayLabel = clsWith({ actorId: 'prov-1', systemActorLabel: 'cron-x' })
+    const data = computeAccessLogData('JournalEntry', 'findMany', {}, [], userWithStrayLabel)
+    expect(data).toMatchObject({ actorType: 'USER', actorId: 'prov-1', systemActorLabel: null })
+  })
 })
 
 describe('auditAndReturn — fire-and-forget write', () => {
@@ -239,5 +264,147 @@ describe('auditAndReturn — fire-and-forget write', () => {
     await Promise.resolve()
     expect(errSpy).toHaveBeenCalledWith('[AccessLog] write failed', expect.any(Error))
     errSpy.mockRestore()
+  })
+
+  it('cron write → AccessLog payload carries the systemActorLabel (Task 1.4b)', async () => {
+    const create = jest.fn<(args: any) => Promise<any>>().mockResolvedValue({ id: 'al-1' })
+    const basePrisma = { accessLog: { create } } as any
+
+    await auditAndReturn(
+      {
+        model: 'Notification',
+        operation: 'create',
+        args: { data: { title: 'x' } },
+        query: jest.fn<(args: any) => Promise<any>>().mockResolvedValue({ id: 'n-1' }),
+      },
+      CRON_CLS,
+      basePrisma,
+    )
+
+    expect(create.mock.calls[0][0]).toEqual({
+      data: expect.objectContaining({
+        actorType: 'SYSTEM_ACTOR',
+        actorId: null,
+        systemActorLabel: 'cron-gap-alert',
+      }),
+    })
+  })
+
+  it('stamps inline audit fields on the query args before the write runs (Task 2.3)', async () => {
+    const create = jest.fn<(args: any) => Promise<any>>().mockResolvedValue({ id: 'al-1' })
+    const basePrisma = { accessLog: { create } } as any
+    // Capture the args the underlying query actually received.
+    const query = jest
+      .fn<(args: any) => Promise<any>>()
+      .mockImplementation(async (a) => ({ id: 't-1', ...(a.data ?? {}) }))
+
+    await auditAndReturn(
+      { model: 'PatientThreshold', operation: 'create', args: { data: { sbpUpperTarget: 140 } }, query },
+      USER_CLS,
+      basePrisma,
+    )
+
+    expect(query.mock.calls[0][0]).toEqual({
+      data: { sbpUpperTarget: 140, createdByActorId: 'prov-1', updatedByActorId: 'prov-1' },
+    })
+  })
+})
+
+describe('stampInlineAudit — inline audit-actor stamping (Task 2)', () => {
+  it('the stamp set is exactly the three chosen tables (PatientMedication excluded — see #92)', () => {
+    expect([...AUDIT_STAMP_MODELS].sort()).toEqual(
+      ['DeviationAlert', 'PatientProviderAssignment', 'PatientThreshold'].sort(),
+    )
+    expect(AUDIT_STAMP_MODELS.has('PatientMedication')).toBe(false)
+  })
+
+  it('create on PatientThreshold with USER actor → both created + updated stamped', () => {
+    const out = stampInlineAudit(
+      'PatientThreshold',
+      'create',
+      { data: { sbpUpperTarget: 140 } },
+      USER_CLS,
+    ) as any
+    expect(out.data).toEqual({
+      sbpUpperTarget: 140,
+      createdByActorId: 'prov-1',
+      updatedByActorId: 'prov-1',
+    })
+  })
+
+  it('update on PatientThreshold → only updatedByActorId stamped (createdByActorId untouched)', () => {
+    const out = stampInlineAudit(
+      'PatientThreshold',
+      'update',
+      { where: { id: 't-1' }, data: { notes: 'edited' } },
+      USER_CLS,
+    ) as any
+    expect(out.data).toEqual({ notes: 'edited', updatedByActorId: 'prov-1' })
+    expect(out.data).not.toHaveProperty('createdByActorId')
+    expect(out.where).toEqual({ id: 't-1' }) // where is left alone
+  })
+
+  it('createMany on DeviationAlert → every row stamped', () => {
+    const out = stampInlineAudit(
+      'DeviationAlert',
+      'createMany',
+      { data: [{ userId: 'u1' }, { userId: 'u2' }] },
+      USER_CLS,
+    ) as any
+    expect(out.data).toEqual([
+      { userId: 'u1', createdByActorId: 'prov-1', updatedByActorId: 'prov-1' },
+      { userId: 'u2', createdByActorId: 'prov-1', updatedByActorId: 'prov-1' },
+    ])
+  })
+
+  it('upsert on PatientProviderAssignment → create path both, update path only updated', () => {
+    const out = stampInlineAudit(
+      'PatientProviderAssignment',
+      'upsert',
+      { where: { userId: 'u1' }, create: { userId: 'u1' }, update: { primaryProviderId: 'p2' } },
+      USER_CLS,
+    ) as any
+    expect(out.create).toEqual({
+      userId: 'u1',
+      createdByActorId: 'prov-1',
+      updatedByActorId: 'prov-1',
+    })
+    expect(out.update).toEqual({ primaryProviderId: 'p2', updatedByActorId: 'prov-1' })
+  })
+
+  it('SYSTEM_ACTOR / cron write (no actorId) → args unchanged, fields stay null', () => {
+    const args = { data: { sbpUpperTarget: 140 } }
+    const out = stampInlineAudit('PatientThreshold', 'create', args, CRON_CLS)
+    expect(out).toBe(args) // same reference — no stamping attempted
+  })
+
+  it('CLS actor wins over a caller-supplied createdByActorId (impersonation guard)', () => {
+    const out = stampInlineAudit(
+      'PatientThreshold',
+      'create',
+      { data: { createdByActorId: 'attacker', sbpUpperTarget: 140 } },
+      USER_CLS,
+    ) as any
+    expect(out.data.createdByActorId).toBe('prov-1')
+  })
+
+  it('PatientMedication is NOT stamped — #92 addedBy/lastEditedBy already cover it', () => {
+    // Guards against a future accidental re-inclusion in AUDIT_STAMP_MODELS.
+    const createArgs = { data: { drugName: 'Losartan' } }
+    const updateArgs = { where: { id: 'm-1' }, data: { notes: 'x' } }
+    expect(stampInlineAudit('PatientMedication', 'create', createArgs, USER_CLS)).toBe(createArgs)
+    expect(stampInlineAudit('PatientMedication', 'update', updateArgs, USER_CLS)).toBe(updateArgs)
+  })
+
+  it('non-stamp PHI model (User) → args unchanged', () => {
+    const args = { data: { email: 'x@y.z' } }
+    expect(stampInlineAudit('User', 'create', args, USER_CLS)).toBe(args)
+  })
+
+  it('reads/deletes on a stamp model → args unchanged (no audit-actor payload)', () => {
+    const findArgs = { where: { id: 't-1' } }
+    const delArgs = { where: { id: 't-1' } }
+    expect(stampInlineAudit('PatientThreshold', 'findUnique', findArgs, USER_CLS)).toBe(findArgs)
+    expect(stampInlineAudit('PatientThreshold', 'delete', delArgs, USER_CLS)).toBe(delArgs)
   })
 })

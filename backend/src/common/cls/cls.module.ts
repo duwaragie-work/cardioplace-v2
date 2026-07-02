@@ -32,6 +32,10 @@ import { ClsModule } from 'nestjs-cls'
           const actor = req?.user as { id: string; roles?: string[] } | undefined
           cls.set('actorId', actor?.id ?? null)
           cls.set('actorType', actor ? 'USER' : 'SYSTEM_ACTOR')
+          // HTTP requests never carry a cron label — a real actor (or an
+          // unauthenticated request) is not a background process. Only
+          // runAsCronActor sets this. Left null here explicitly.
+          cls.set('systemActorLabel', null)
           cls.set('ip', req?.ip ?? null)
           cls.set('userAgent', req?.headers?.['user-agent'] ?? null)
         },

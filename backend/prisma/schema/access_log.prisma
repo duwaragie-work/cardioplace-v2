@@ -15,6 +15,10 @@ model AccessLog {
   recordId  String?
   ip        String?
   userAgent String?
+  // Which background process wrote this row (e.g. 'cron-gap-alert'), set by
+  // runAsCronActor when actorType='SYSTEM_ACTOR'. Null for USER writes and for
+  // pre-2026-07-03 / unlabelled system writes (honest — we didn't know then).
+  systemActorLabel String?
   createdAt DateTime @default(now())
 
   @@index([actorId, createdAt])
