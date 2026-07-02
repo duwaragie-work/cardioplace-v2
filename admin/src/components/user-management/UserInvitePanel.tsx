@@ -23,8 +23,11 @@ import { Building2, ChevronDown, RefreshCw, Search, Users, X } from 'lucide-reac
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
+  canManageUsers,
   invitableRoles,
   isCoordinatorOnly,
+  isMedicalDirectorOnly,
+  isOrgWideAdmin,
   type UserRole,
 } from '@/lib/roleGates';
 import {
@@ -74,9 +77,15 @@ type AffordanceMode = 'none' | 'bulk' | 'csv';
 
 export default function UserInvitePanel() {
   const { t } = useLanguage();
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, activePractice } = useAuth();
 
   const coordinatorView = isCoordinatorOnly(user);
+  // Write authority — invite CTAs + row actions. PROVIDER is read-only: they
+  // view the roster (scoped to their active practice) but cannot invite or act.
+  const canManage = canManageUsers(user);
+  // Org-wide admins (SUPER / OPS) get the cross-practice filter + free practice
+  // pick on invite. Scoped roles are locked to their active practice.
+  const orgWide = isOrgWideAdmin(user);
   const callerInvitable = useMemo(() => invitableRoles(user), [user]);
 
   // ─── Filters ─────────────────────────────────────────────────────────────
@@ -399,7 +408,14 @@ export default function UserInvitePanel() {
   // is false for coordinators so no picker is shown, and the backend
   // auto-fills their PracticeCoordinator.practiceId + scope-checks it.
   const lockedRole = undefined;
-  const lockedPracticeId = undefined;
+  // MED_DIR invites are locked to the active/selected practice (they head one
+  // at a time; to invite into another they switch practice via the header).
+  // COORDINATOR practice stays implicit (backend auto-fills from their
+  // PracticeCoordinator). OPS / SUPER pick freely. (2026-07-01)
+  const lockedPracticeId =
+    isMedicalDirectorOnly(user) && activePractice?.id
+      ? activePractice.id
+      : undefined;
 
   return (
     <div className="max-w-[1200px] mx-auto px-4 md:px-8 py-6 space-y-5">
@@ -452,35 +468,39 @@ export default function UserInvitePanel() {
           </div>
         </div>
 
-        {/* Primary CTAs — under the title on small, right of title on lg+. */}
-        <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap lg:shrink-0 lg:justify-end">
-          <button
-            type="button"
-            data-testid="admin-users-invite-single"
-            onClick={() => setInviteOpen(true)}
-            className="btn-admin-primary"
-          >
-            {t('userManagement.inviteSingleCta')}
-          </button>
-          <button
-            type="button"
-            data-testid="admin-users-bulk-toggle"
-            onClick={() => setMode((m) => (m === 'bulk' ? 'none' : 'bulk'))}
-            aria-pressed={mode === 'bulk'}
-            className="btn-admin-secondary"
-          >
-            {t('userManagement.addMultipleCta')}
-          </button>
-          <button
-            type="button"
-            data-testid="admin-users-csv-toggle"
-            onClick={() => setMode((m) => (m === 'csv' ? 'none' : 'csv'))}
-            aria-pressed={mode === 'csv'}
-            className="btn-admin-secondary"
-          >
-            {t('userManagement.uploadCsvCta')}
-          </button>
-        </div>
+        {/* Primary CTAs — under the title on small, right of title on lg+.
+            Hidden entirely for read-only viewers (PROVIDER): they can see the
+            roster but cannot invite. */}
+        {canManage && (
+          <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap lg:shrink-0 lg:justify-end">
+            <button
+              type="button"
+              data-testid="admin-users-invite-single"
+              onClick={() => setInviteOpen(true)}
+              className="btn-admin-primary"
+            >
+              {t('userManagement.inviteSingleCta')}
+            </button>
+            <button
+              type="button"
+              data-testid="admin-users-bulk-toggle"
+              onClick={() => setMode((m) => (m === 'bulk' ? 'none' : 'bulk'))}
+              aria-pressed={mode === 'bulk'}
+              className="btn-admin-secondary"
+            >
+              {t('userManagement.addMultipleCta')}
+            </button>
+            <button
+              type="button"
+              data-testid="admin-users-csv-toggle"
+              onClick={() => setMode((m) => (m === 'csv' ? 'none' : 'csv'))}
+              aria-pressed={mode === 'csv'}
+              className="btn-admin-secondary"
+            >
+              {t('userManagement.uploadCsvCta')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
@@ -496,11 +516,10 @@ export default function UserInvitePanel() {
           setPracticeFilter('ALL');
           setSearch('');
         };
-        // Practice filter is only meaningful for OPS / SUPER — coordinator
-        // is locked to their own practice server-side, so showing them a
-        // picker would be misleading.
-        const showPracticeFilter =
-          !coordinatorView && practices.length > 0;
+        // Practice filter is only meaningful for org-wide admins (OPS / SUPER).
+        // Scoped roles (COORDINATOR / MED_DIR / PROVIDER) are locked to their
+        // active practice server-side, so a picker would be misleading.
+        const showPracticeFilter = orgWide && practices.length > 0;
 
         return (
           <div
@@ -678,6 +697,7 @@ export default function UserInvitePanel() {
       {/* Users + invites table */}
       <UsersList
         coordinatorView={coordinatorView}
+        canManage={canManage}
         response={response}
         loading={loading}
         page={page}

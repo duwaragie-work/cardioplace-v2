@@ -112,20 +112,21 @@ test.describe('Spec 38 — coordinator role scoping', () => {
     ).toHaveCount(0)
   })
 
-  test('38.5 — coordinator patient/clinician lists + own-practice assignment scope', async ({}, testInfo) => {
+  test('38.5 — coordinator patient/clinician lists allowed; care-team + permanent-close walked back (2026-07-01)', async ({}, testInfo) => {
     testInfo.setTimeout(90_000)
     const api = await authedApi(API_BASE_URL, ADMINS.coordinator.email, 'admin')
     try {
-      // New coordinator read surfaces — allowed, scoped server-side.
+      // Coordinator read surfaces — still allowed, scoped server-side.
       const patients = await api.get('admin/coordinator/patients')
       expect(patients.status(), 'GET /admin/coordinator/patients allowed').toBe(200)
       const clinicians = await api.get('admin/coordinator/clinicians')
       expect(clinicians.status(), 'GET /admin/coordinator/clinicians allowed').toBe(200)
 
-      // Assignment WRITE is now COORDINATOR-allowed: for their OWN practice the
-      // RolesGuard + scope guard pass, so the handler runs and 404s on a fake
-      // patient (proving the coordinator reaches it — not a role 403).
-      const reachable = await api.post(
+      // Walkback #116 — care-team assignment is a clinical decision (MED_DIR /
+      // OPS / SUPER only). COORDINATOR is now removed from the @Roles, so the
+      // RolesGuard rejects BEFORE the handler runs → 403 for ANY practice,
+      // including their own. (Previously this returned 404 for own practice.)
+      const ownPractice = await api.post(
         'admin/patients/qa-nonexistent-patient/assignment',
         {
           data: {
@@ -137,27 +138,41 @@ test.describe('Spec 38 — coordinator role scoping', () => {
         },
       )
       expect(
-        reachable.status(),
-        'coordinator reaches the assignment handler for their own practice',
-      ).toBe(404)
+        ownPractice.status(),
+        'coordinator care-team create forbidden (walkback #116)',
+      ).toBe(403)
 
-      // A DIFFERENT practice is rejected by the own-practice scope guard (403),
-      // never mutating anything.
-      const wrongPractice = await api.post(
+      const patchAssignment = await api.patch(
         'admin/patients/qa-nonexistent-patient/assignment',
-        {
-          data: {
-            practiceId: 'not-your-practice',
-            primaryProviderId: 'qa-a',
-            backupProviderId: 'qa-b',
-            medicalDirectorId: 'qa-c',
-          },
-        },
+        { data: { primaryProviderId: 'qa-a' } },
       )
       expect(
-        wrongPractice.status(),
-        'out-of-practice assignment forbidden',
+        patchAssignment.status(),
+        'coordinator care-team update forbidden (walkback #116)',
       ).toBe(403)
+
+      // Walkback #114 — permanent-close is irreversible org-level tombstoning
+      // (SUPER + OPS only). COORDINATOR is now rejected at the method-level
+      // @Roles → 403 before the handler runs.
+      const close = await api.post(
+        'admin/users/qa-nonexistent-user/permanent-close',
+        { data: { confirmDisplayId: 'QA', reason: 'x' } },
+      )
+      expect(
+        close.status(),
+        'coordinator permanent-close forbidden (walkback #114)',
+      ).toBe(403)
+
+      // Sanity — reversible deactivate stays reachable for the coordinator
+      // (RolesGuard passes → handler runs → 404 on the fake id, not a role 403).
+      const deactivate = await api.post(
+        'admin/users/qa-nonexistent-user/deactivate',
+        { data: { reason: 'x' } },
+      )
+      expect(
+        deactivate.status(),
+        'coordinator reaches deactivate handler (retained power)',
+      ).toBe(404)
     } finally {
       await api.dispose()
     }

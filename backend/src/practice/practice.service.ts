@@ -97,7 +97,16 @@ export class PracticeService {
       include: { _count: { select: { assignments: true } } },
     })
     if (!practice) throw new NotFoundException('Practice not found')
-    const staffCounts = await this.staffCounts([id])
+    const [staffCounts, medicalDirectors] = await Promise.all([
+      this.staffCounts([id]),
+      // Heads of this practice — drives the admin-app runtime edit check
+      // (canEditThisPractice): a MED_DIR sees the editor only for practices
+      // whose id list contains their user id.
+      this.prisma.practiceMedicalDirector.findMany({
+        where: { practiceId: id },
+        select: { userId: true },
+      }),
+    ])
     return {
       statusCode: 200,
       message: 'Practice retrieved',
@@ -112,6 +121,7 @@ export class PracticeService {
         updatedAt: practice.updatedAt,
         patientCount: practice._count.assignments,
         staffCount: staffCounts.get(id) ?? 0,
+        medicalDirectorIds: medicalDirectors.map((m) => m.userId),
       },
     }
   }

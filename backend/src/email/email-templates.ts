@@ -412,6 +412,71 @@ export function monthlyReportEmailHtml(params: {
   `)
 }
 
+/**
+ * Patient self-service permanent-close — step 1: the anti-impulse confirmation
+ * link (phase/28). Emailed when the patient requests closure from Settings.
+ * The link is the ONLY way to reach permanent-close/confirm and expires in 1h.
+ * Brand chrome matches every other Cardioplace email (shared wrap()).
+ */
+export function selfCloseConfirmEmailHtml(name: string, link: string): string {
+  const greeting = name ? `Hi ${name},` : 'Hi,'
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #dc2626; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Confirm closure
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">Confirm you want to close your account</h2>
+    <p style="color: #374151; line-height: 1.6;">${greeting}</p>
+    <p style="color: #374151; line-height: 1.6;">
+      You asked to <strong>permanently close</strong> your Cardioplace account.
+      This cannot be undone. You will lose access to your dashboard and history.
+    </p>
+    <p style="color: #374151; line-height: 1.6;">If this was you, confirm within the next hour:</p>
+    <div style="text-align: center; margin: 24px 0;">
+      <a href="${link}"
+         style="display: inline-block; background: #B91C1C; color: #ffffff; font-size: 16px;
+                font-weight: 600; padding: 14px 32px; border-radius: 30px;
+                text-decoration: none;">
+        Permanently close my account
+      </a>
+    </div>
+    <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+      If you did not request this, ignore this email. Your account stays exactly as it is.
+      This link expires in 1 hour.
+    </p>
+  `)
+}
+
+/**
+ * Patient permanent-close — step 2: the final "your account is closed"
+ * confirmation, sent once the closure completes (phase/28). Sent to the address
+ * captured BEFORE the User row is anonymised, since close wipes the email.
+ */
+export function accountClosedEmailHtml(name: string): string {
+  const greeting = name ? `Hi ${name},` : 'Hi,'
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #6b7280; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Account closed
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">Your account has been closed</h2>
+    <p style="color: #374151; line-height: 1.6;">${greeting}</p>
+    <p style="color: #374151; line-height: 1.6;">
+      Your Cardioplace account has been <strong>permanently closed</strong>. You no longer
+      have access to your dashboard or history, and this cannot be undone.
+    </p>
+    <p style="color: #374151; line-height: 1.6;">
+      Your medical records are retained securely as the law requires, but your personal
+      profile has been removed.
+    </p>
+    <p style="color: #9ca3af; font-size: 12px; margin: 16px 0 0;">
+      If you did not expect this, contact support right away.
+    </p>
+  `)
+}
+
 export function contactFormEmailHtml(
   senderEmail: string,
   message: string,
