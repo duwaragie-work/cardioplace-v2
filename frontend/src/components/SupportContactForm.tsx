@@ -95,12 +95,19 @@ export default function SupportContactForm() {
       <fieldset className="flex items-center gap-4 text-[13px] text-slate-600">
         <span className="text-slate-400">Prefer to be reached by:</span>
         {(['EMAIL', 'PHONE'] as const).map((p) => (
-          <label key={p} className="flex items-center gap-1.5">
+          <label key={p} className="flex items-center gap-1.5 cursor-pointer">
             <input
               type="radio"
               name="contactPreference"
               checked={pref === p}
               onChange={() => setPref(p)}
+              // data-no-min-target opts out of the globals.css 44×44 WCAG
+              // touch-target floor, which balloons raw radios and breaks this
+              // row (the admin app has no such floor, so it looked fine there).
+              // The label is the touch target, so the radio stays a 16px square
+              // with the brand accent — mirrors the CaregiversCard fix (#79).
+              data-no-min-target
+              className="h-4 w-4 shrink-0 accent-[var(--brand-primary-purple)] cursor-pointer"
             />
             {p === 'EMAIL' ? 'Email' : 'Phone'}
           </label>
