@@ -47,6 +47,7 @@ import {
   type RegisterMode,
 } from '@/lib/services/webauthn.service';
 import RecoveryCodesPanel from '@/components/cardio/RecoveryCodesPanel';
+import SupportContactForm from '@/components/SupportContactForm';
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -895,6 +896,25 @@ export default function SettingsPage() {
               </p>
             </div>
           )}
+        </section>
+
+        {/* Contact support — in-app form for signed-in patients. */}
+        <p
+          className="mb-2 mt-6 px-1 text-[11px] font-bold uppercase tracking-wide"
+          style={{ color: 'var(--brand-text-muted)' }}
+        >
+          Contact support
+        </p>
+        <section
+          className="rounded-2xl bg-white overflow-hidden p-5"
+          style={{ border: '1px solid var(--brand-border)' }}
+          data-testid="settings-support"
+        >
+          <p className="text-[13px] mb-4" style={{ color: 'var(--brand-text-muted)' }}>
+            Need help with your account, sign-in, or something in the app? Send our team a
+            message and we’ll follow up by email.
+          </p>
+          <SupportContactForm />
         </section>
       </div>
 

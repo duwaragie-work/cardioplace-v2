@@ -6,9 +6,13 @@ const HEADER = `
   </div>
 `
 
+// Standardized HIPAA confidentiality footer — applied to every wrap()-based
+// template (OTP, welcome, invite, MFA/biometric reset, caregiver update,
+// scheduled call, monthly report, contact form, …). HIPAA Minimum Necessary
+// §164.502(b) — outbound mail that may carry PHI must carry this notice.
 const FOOTER = `
   <div style="padding: 16px 24px; text-align: center; color: #9ca3af; font-size: 12px; font-family: sans-serif; border-top: 1px solid #e5e7eb;">
-    This is an automated alert from Cardioplace. Do not reply to this email.
+    This is an automated message from Cardioplace — please do not reply. It may contain protected health information; if you received it in error, please notify the sender and delete it without forwarding or printing.
   </div>
 `
 
@@ -473,6 +477,29 @@ export function accountClosedEmailHtml(name: string): string {
     </p>
     <p style="color: #9ca3af; font-size: 12px; margin: 16px 0 0;">
       If you did not expect this, contact support right away.
+    </p>
+  `)
+}
+
+/** Support System — ops reply to a user's ticket. Wrapped → carries the
+ *  standardized HIPAA confidentiality footer like every other outbound email. */
+export function supportReplyEmailHtml(
+  ticketNumber: string,
+  replyBody: string,
+): string {
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #7B00E0; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Support reply
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">A reply to your support request</h2>
+    <p style="color: #6b7280; font-size: 13px; margin: 0 0 12px;">Ticket ${ticketNumber}</p>
+    <div style="background: #fafafa; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+      <p style="color: #1f2937; font-size: 14px; line-height: 1.7; margin: 0; white-space: pre-wrap;">${replyBody}</p>
+    </div>
+    <p style="color: #6b7280; font-size: 13px; line-height: 1.6;">
+      Reply to this email if you need anything else, and our team will follow up.
     </p>
   `)
 }

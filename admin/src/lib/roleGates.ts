@@ -282,6 +282,15 @@ export function canPermanentCloseUsers(input: RoleInput | UserInput): boolean {
   return has(input, ['SUPER_ADMIN', 'HEALPLACE_OPS'])
 }
 
+/**
+ * Can access the /support ops queue. Controller-level @Roles on the backend:
+ *   @Roles(HEALPLACE_OPS, SUPER_ADMIN)
+ *   backend/src/support/admin-support.controller.ts
+ */
+export function canManageSupport(input: RoleInput | UserInput): boolean {
+  return has(input, ['HEALPLACE_OPS', 'SUPER_ADMIN'])
+}
+
 // ─── MFA admin reset (phase/26) ─────────────────────────────────────────────
 /**
  * Whether the caller can reset another staff member's two-factor auth.

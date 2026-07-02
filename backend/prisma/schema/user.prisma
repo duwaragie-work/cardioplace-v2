@@ -100,6 +100,10 @@ model User {
   // (DisplayId.userId is @unique). Tombstoned rows (userId = NULL) are
   // not reachable from this side.
   displayIdLedger DisplayId?
+
+  // Support System Phase 1 — tickets this user raised (signed-in contact).
+  // Locked-out tickets have userId = NULL and are not reachable from here.
+  supportTickets SupportTicket[]
 }
 
 enum UserRole {

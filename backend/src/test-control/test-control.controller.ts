@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common'
 import { Public } from '../auth/decorators/public.decorator.js'
 import { TestControlService } from './test-control.service.js'
+import { EmailService } from '../email/email.service.js'
 
 /**
  * Dev-only test-control endpoints. Mounted ONLY when ENABLE_TEST_CONTROL=true
@@ -576,6 +577,27 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     return this.svc.findUser(email)
+  }
+
+  // ─── Captured emails (spec 4Z — email-no-PHI) ─────────────────────────────
+  // CI SMTP is a dummy that never delivers, so specs can't read a real inbox.
+  // EmailService captures the rendered mail in a non-prod in-memory buffer;
+  // these endpoints let a Playwright spec read (and reset) it.
+  @Get('emails')
+  getEmails(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('to') to?: string,
+  ) {
+    this.assertAuthorized(secret)
+    return EmailService.getCapturedEmails(to)
+  }
+
+  @Post('emails/clear')
+  @HttpCode(200)
+  clearEmails(@Headers('x-test-control-secret') secret: string) {
+    this.assertAuthorized(secret)
+    EmailService.clearCapturedEmails()
+    return { ok: true }
   }
 
   // ─── Invite + magic-link token minting (specs 36/37/40) ───────────────────
