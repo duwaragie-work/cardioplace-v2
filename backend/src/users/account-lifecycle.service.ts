@@ -8,6 +8,10 @@ import {
 import { JwtService } from '@nestjs/jwt'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EmailService } from '../email/email.service.js'
+import {
+  selfCloseConfirmEmailHtml,
+  accountClosedEmailHtml,
+} from '../email/email-templates.js'
 import { ConfigService } from '@nestjs/config'
 import { AccountStatus, UserRole } from '../generated/prisma/enums.js'
 
@@ -207,6 +211,16 @@ export class AccountLifecycleService {
       opts,
       snapshot: { roles: target.roles },
     })
+
+    // Final confirmation to the address captured BEFORE anonymisation (the
+    // update above wiped User.email). Fire-and-forget: sendEmail never throws.
+    if (target.email) {
+      await this.email.sendEmail(
+        target.email,
+        'Your Cardioplace account has been closed',
+        accountClosedEmailHtml(target.name ?? ''),
+      )
+    }
     return { id: target.id, accountStatus: AccountStatus.CLOSED }
   }
 
@@ -238,7 +252,7 @@ export class AccountLifecycleService {
     await this.email.sendEmail(
       user.email,
       'Confirm you want to permanently close your Cardioplace account',
-      selfCloseEmailHtml(user.name ?? '', link),
+      selfCloseConfirmEmailHtml(user.name ?? '', link),
     )
   }
 
@@ -263,6 +277,7 @@ export class AccountLifecycleService {
       select: {
         id: true,
         email: true,
+        name: true,
         displayId: true,
         roles: true,
         accountStatus: true,
@@ -333,27 +348,4 @@ export class AccountLifecycleService {
       },
     })
   }
-}
-
-function selfCloseEmailHtml(name: string, link: string): string {
-  const greeting = name ? `Hi ${name},` : 'Hi,'
-  return `
-    <div style="font-family: sans-serif; max-width: 520px; margin: 0 auto; color: #1f2937;">
-      <h2 style="color: #7B00E0;">Confirm account closure</h2>
-      <p>${greeting}</p>
-      <p>You asked to <strong>permanently close</strong> your Cardioplace account.
-         This cannot be undone — you will lose access to your dashboard and history.</p>
-      <p>If this was you, confirm within the next hour:</p>
-      <p>
-        <a href="${link}" style="display:inline-block;background:#B91C1C;color:#fff;
-           padding:12px 20px;border-radius:9999px;text-decoration:none;font-weight:600;">
-          Permanently close my account
-        </a>
-      </p>
-      <p style="color:#6B7280;font-size:13px;">
-        If you did not request this, ignore this email — your account stays exactly as it is.
-        This link expires in 1 hour.
-      </p>
-    </div>
-  `
 }

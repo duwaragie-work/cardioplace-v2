@@ -39,6 +39,10 @@ import { RoleBadge, StatusBadge } from './badges';
 interface Props {
   /** Whether the caller is a COORDINATOR (collapsed columns + status text). */
   coordinatorView: boolean;
+  /** Whether the caller can perform write actions (invite/deactivate/close/
+   *  resend/revoke). False for read-only PROVIDER — the row action menu is
+   *  suppressed entirely. Defaults to true for backward compatibility. */
+  canManage?: boolean;
   /** Backend payload from `listUsers`. */
   response: UserListResponse | null;
   loading: boolean;
@@ -230,6 +234,7 @@ function ActionsMenu({
 
 export default function UsersList({
   coordinatorView,
+  canManage = true,
   response,
   loading,
   page,
@@ -429,7 +434,7 @@ export default function UsersList({
                 // coordinatorView gate — that was wrongly hiding the action for
                 // coordinators on the desktop table (mobile already allowed it).
                 const canAct =
-                  !isSelf && canDeactivateUser(caller, row.targetRoles);
+                  !isSelf && canManage && canDeactivateUser(caller, row.targetRoles);
                 const showDeactivate =
                   row.kind === 'user' && row.status === 'ACTIVE' && canAct;
                 const showReactivate =
@@ -515,7 +520,7 @@ export default function UsersList({
                     <td className="px-5 py-3.5 text-right">
                       {(() => {
                         const items: MenuItem[] = [];
-                        if (row.kind === 'invite') {
+                        if (canManage && row.kind === 'invite') {
                           items.push({
                             key: 'resend',
                             label: t('userManagement.action.resend'),
@@ -619,7 +624,7 @@ export default function UsersList({
             const isPending = pendingRowId === row.id;
             const isSelf = caller?.id === row.id;
             const canAct =
-              !isSelf && canDeactivateUser(caller, row.targetRoles);
+              !isSelf && canManage && canDeactivateUser(caller, row.targetRoles);
             const showDeactivate =
               row.kind === 'user' && row.status === 'ACTIVE' && canAct;
             const showReactivate =
@@ -656,7 +661,7 @@ export default function UsersList({
             // Build the card's action set once, so the kebab can live in the
             // top-right corner beside the status pill.
             const items: MenuItem[] = [];
-            if (row.kind === 'invite') {
+            if (canManage && row.kind === 'invite') {
               items.push({
                 key: 'resend',
                 label: t('userManagement.action.resend'),

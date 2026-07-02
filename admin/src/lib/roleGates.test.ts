@@ -3,6 +3,8 @@ import {
   canEditThisPractice,
   canCreateOrDeletePractices,
   canManageUsers,
+  canViewUsers,
+  isOrgWideAdmin,
   canPermanentCloseUsers,
   canAssignCareTeam,
   canDeactivateUser,
@@ -85,6 +87,34 @@ describe('roleGates — 2026-07-01 access-scope patch', () => {
     });
     it('rejects PROVIDER', () => {
       expect(canManageUsers({ roles: ['PROVIDER'] })).toBe(false);
+    });
+  });
+
+  describe('canViewUsers (read roster — +PROVIDER)', () => {
+    it('allows PROVIDER to view (read-only)', () => {
+      expect(canViewUsers({ roles: ['PROVIDER'] })).toBe(true);
+    });
+    it('allows all management roles', () => {
+      for (const r of ['COORDINATOR', 'HEALPLACE_OPS', 'SUPER_ADMIN', 'MEDICAL_DIRECTOR']) {
+        expect(canViewUsers({ roles: [r] })).toBe(true);
+      }
+    });
+    it('PROVIDER can view but NOT manage', () => {
+      expect(canViewUsers({ roles: ['PROVIDER'] })).toBe(true);
+      expect(canManageUsers({ roles: ['PROVIDER'] })).toBe(false);
+    });
+    it('PATIENT cannot view', () => {
+      expect(canViewUsers({ roles: ['PATIENT'] })).toBe(false);
+    });
+  });
+
+  describe('isOrgWideAdmin (SUPER + OPS)', () => {
+    it('true for SUPER / OPS, false for scoped roles', () => {
+      expect(isOrgWideAdmin({ roles: ['SUPER_ADMIN'] })).toBe(true);
+      expect(isOrgWideAdmin({ roles: ['HEALPLACE_OPS'] })).toBe(true);
+      expect(isOrgWideAdmin({ roles: ['MEDICAL_DIRECTOR'] })).toBe(false);
+      expect(isOrgWideAdmin({ roles: ['PROVIDER'] })).toBe(false);
+      expect(isOrgWideAdmin({ roles: ['COORDINATOR'] })).toBe(false);
     });
   });
 

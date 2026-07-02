@@ -247,6 +247,32 @@ export function canManageUsers(input: RoleInput | UserInput): boolean {
 }
 
 /**
+ * Can VIEW the /users roster (read-only for PROVIDER). Superset of
+ * canManageUsers with PROVIDER added — they see their active practice's users
+ * but cannot invite or act on anyone (every write is guarded server-side).
+ *   GET @Roles(COORDINATOR, HEALPLACE_OPS, SUPER_ADMIN, MEDICAL_DIRECTOR, PROVIDER)
+ *   backend/src/users/users.controller.ts (list)
+ */
+export function canViewUsers(input: RoleInput | UserInput): boolean {
+  return has(input, [
+    'COORDINATOR',
+    'HEALPLACE_OPS',
+    'SUPER_ADMIN',
+    'MEDICAL_DIRECTOR',
+    'PROVIDER',
+  ])
+}
+
+/**
+ * True for org-wide admins (SUPER / OPS) — the only roles that see the whole
+ * org and therefore get the cross-practice practice filter + free practice
+ * pick on invite. Scoped roles are locked to their active practice.
+ */
+export function isOrgWideAdmin(input: RoleInput | UserInput): boolean {
+  return has(input, ['SUPER_ADMIN', 'HEALPLACE_OPS'])
+}
+
+/**
  * Permanent-close (irreversible tombstone) authority. HIPAA-relevant — org
  * level only. 2026-07-01: COORDINATOR walked back (#114); MED_DIR never had it.
  *   @Roles(SUPER_ADMIN, HEALPLACE_OPS)

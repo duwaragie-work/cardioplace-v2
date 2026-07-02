@@ -27,6 +27,10 @@ export interface Actor {
   id: string
   email: string | null
   roles: UserRole[]
+  /** The practice the session is acting as (JWT claim). When set, the user
+   *  roster + scoped views narrow to this practice only. Null/undefined for
+   *  org-wide roles (SUPER / OPS) and legacy sessions. */
+  activePracticeId?: string | null
 }
 
 export interface InviteContext {
@@ -983,38 +987,50 @@ export class UsersService {
       caller.roles.includes(UserRole.HEALPLACE_OPS)
 
     if (isOrgWide) {
+      // OPS / SUPER — unscoped; honor an explicit practice filter if sent.
       if (query.practiceId) scopePracticeIds = [query.practiceId]
-    } else if (caller.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
-      // MED_DIR (2026-07-01) — roster scoped to practices they head. Honor an
-      // in-scope query filter, but never widen past headed practices. Heading
-      // zero practices → empty array → zero rows (safe).
-      const headed = await this.prisma.practiceMedicalDirector.findMany({
-        where: { userId: caller.id },
-        select: { practiceId: true },
-      })
-      const headedIds = headed.map((p) => p.practiceId)
-      scopePracticeIds =
-        query.practiceId && headedIds.includes(query.practiceId)
-          ? [query.practiceId]
-          : headedIds
-    } else if (caller.roles.includes(UserRole.COORDINATOR)) {
-      const own = await this.prisma.practiceCoordinator.findUnique({
-        where: { userId: caller.id },
-        select: { practice: { select: { id: true, name: true } } },
-      })
-      if (!own) {
-        return {
-          statusCode: 200,
-          message: 'Users retrieved',
-          data: [],
-          page,
-          limit,
-          total: 0,
-          invites: [],
+    } else {
+      // Scoped roles (MED_DIR / PROVIDER / COORDINATOR) — the roster is limited
+      // to the practices they belong to, then narrowed to the ACTIVE (selected)
+      // practice carried on the session. A single-practice user is effectively
+      // already narrowed; a multi-practice user must switch practice (header
+      // dropdown) to see another practice's roster. Zero memberships → empty
+      // array → zero rows (safe). PROVIDER is read-only (controller GET @Roles);
+      // they see the roster but every write is blocked at the guard.
+      const membership = new Set<string>()
+      if (caller.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
+        const headed = await this.prisma.practiceMedicalDirector.findMany({
+          where: { userId: caller.id },
+          select: { practiceId: true },
+        })
+        for (const r of headed) membership.add(r.practiceId)
+      }
+      if (caller.roles.includes(UserRole.PROVIDER)) {
+        const memberOf = await this.prisma.practiceProvider.findMany({
+          where: { userId: caller.id },
+          select: { practiceId: true },
+        })
+        for (const r of memberOf) membership.add(r.practiceId)
+      }
+      if (caller.roles.includes(UserRole.COORDINATOR)) {
+        const own = await this.prisma.practiceCoordinator.findUnique({
+          where: { userId: caller.id },
+          select: { practice: { select: { id: true, name: true } } },
+        })
+        if (own) {
+          membership.add(own.practice.id)
+          coordinatorScope = { id: own.practice.id, name: own.practice.name }
         }
       }
-      scopePracticeIds = [own.practice.id]
-      coordinatorScope = { id: own.practice.id, name: own.practice.name }
+      let ids = Array.from(membership)
+      // Narrow to the active/selected practice when the session carries one and
+      // it is a real membership — never widen past it (stale/forged claim is
+      // ignored). Single-practice users are unaffected (their active id equals
+      // their only membership).
+      if (caller.activePracticeId && ids.includes(caller.activePracticeId)) {
+        ids = [caller.activePracticeId]
+      }
+      scopePracticeIds = ids
     }
 
     // Build the User where-clause. The filters compose as AND of three
@@ -1151,11 +1167,24 @@ export class UsersService {
           // honest for accepted patient invites.
           providerAssignmentAsPatient: { select: { practiceId: true } },
           practiceCoordinator: { select: { practiceId: true } },
+          // When the roster is scoped to a practice (or the active/selected
+          // one), filter the many-to-many memberships to that scope so the
+          // flattened practice column reflects the practice the row matched on
+          // — NOT an arbitrary other practice the user also belongs to. A
+          // multi-practice provider viewed under practice B must show "B", not
+          // whichever membership happens to be first. Unscoped (OPS / SUPER)
+          // keeps the take-1 arbitrary primary membership.
           practiceProviderMemberships: {
+            where: scopePracticeIds
+              ? { practiceId: { in: scopePracticeIds } }
+              : undefined,
             select: { practiceId: true },
             take: 1,
           },
           practiceMedicalDirectorMemberships: {
+            where: scopePracticeIds
+              ? { practiceId: { in: scopePracticeIds } }
+              : undefined,
             select: { practiceId: true },
             take: 1,
           },

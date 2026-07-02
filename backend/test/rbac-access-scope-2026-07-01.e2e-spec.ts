@@ -47,6 +47,7 @@ describe('RBAC access-scope 2026-07-01 (e2e)', () => {
   let coordAToken: string
   let opsToken: string
   let superToken: string
+  let provAToken: string
 
   const allEmails = [
     'medA', 'coordA', 'ops', 'super', 'provA', 'provA2', 'provB',
@@ -176,11 +177,12 @@ describe('RBAC access-scope 2026-07-01 (e2e)', () => {
       }),
     ])
 
-    ;[medAToken, coordAToken, opsToken, superToken] = await Promise.all([
+    ;[medAToken, coordAToken, opsToken, superToken, provAToken] = await Promise.all([
       sign(medAId, medA.email!, medA.roles),
       sign(coordAId, coordA.email!, coordA.roles),
       sign(opsId, ops.email!, ops.roles),
       sign(superId, superU.email!, superU.roles),
+      sign(provAId, provA.email!, provA.roles),
     ])
   }, 45000)
 
@@ -343,6 +345,34 @@ describe('RBAC access-scope 2026-07-01 (e2e)', () => {
         .set('Authorization', `Bearer ${coordAToken}`)
         .send({ reason: 'test' })
       expect([200, 201]).toContain(res.status)
+    })
+  })
+
+  // ─── PROVIDER read-only roster access (2026-07-01) ───────────────────────
+  describe('PROVIDER can view the roster read-only', () => {
+    it('can GET /admin/users (scoped to their practice)', async () => {
+      const res = await request(srv())
+        .get('/admin/users')
+        .set('Authorization', `Bearer ${provAToken}`)
+        .expect(200)
+      const emails: string[] = res.body.data.map((u: { email: string }) => u.email)
+      expect(emails).not.toContain(email('provB')) // BridgePoint excluded
+    })
+
+    it('cannot invite (403)', async () => {
+      await request(srv())
+        .post('/admin/users/invite')
+        .set('Authorization', `Bearer ${provAToken}`)
+        .send({ email: email('prov-invitee'), name: 'X', role: 'PATIENT', practiceId: practiceAId })
+        .expect(403)
+    })
+
+    it('cannot deactivate (403)', async () => {
+      await request(srv())
+        .post(`/admin/users/${patientAId}/deactivate`)
+        .set('Authorization', `Bearer ${provAToken}`)
+        .send({ reason: 'x' })
+        .expect(403)
     })
   })
 

@@ -181,7 +181,7 @@ describe('AccountLifecycleService', () => {
 
   describe('permanentClose', () => {
     it('anonymises PII, clears roles, sets CLOSED, bumps version, wipes creds', async () => {
-      const { svc, prisma } = makeService()
+      const { svc, prisma, email } = makeService()
       prisma.user.findUnique.mockResolvedValue(activePatient as any)
       await svc.permanentClose('u1', { actorId: 'a', reason: 'x' })
       expect(prisma.user.update).toHaveBeenCalledWith(
@@ -200,6 +200,12 @@ describe('AccountLifecycleService', () => {
       expect(prisma.webAuthnCredential.deleteMany).toHaveBeenCalled()
       expect(prisma.displayId.updateMany).toHaveBeenCalled()
       expect(prisma.accountClosureLog.create).toHaveBeenCalled()
+      // Final "account closed" confirmation goes to the pre-scrub email.
+      expect(email.sendEmail).toHaveBeenCalledWith(
+        'p@test',
+        expect.stringContaining('closed'),
+        expect.stringContaining('closed'),
+      )
     })
 
     it('blocks closing the last active Super Admin', async () => {

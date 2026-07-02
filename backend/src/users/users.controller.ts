@@ -25,7 +25,12 @@ import type { Actor } from './users.service.js'
 import { UsersService } from './users.service.js'
 
 type AuthedReq = Request & {
-  user: { id: string; email: string | null; roles: UserRole[] }
+  user: {
+    id: string
+    email: string | null
+    roles: UserRole[]
+    activePracticeId?: string | null
+  }
 }
 
 /**
@@ -59,6 +64,7 @@ export class UsersController {
       id: req.user.id,
       email: req.user.email,
       roles: req.user.roles,
+      activePracticeId: req.user.activePracticeId ?? null,
     }
   }
 
@@ -102,7 +108,18 @@ export class UsersController {
 
   // ─── List ─────────────────────────────────────────────────────────────────
 
+  // PROVIDER can READ the roster (their active practice's users) but not
+  // invite or act on anyone — method-level @Roles widens the read set beyond
+  // the controller-level list (which governs the write endpoints). The roster
+  // is scoped to the active practice server-side (listUsers). (2026-07-01)
   @Get()
+  @Roles(
+    UserRole.COORDINATOR,
+    UserRole.HEALPLACE_OPS,
+    UserRole.SUPER_ADMIN,
+    UserRole.MEDICAL_DIRECTOR,
+    UserRole.PROVIDER,
+  )
   list(@Req() req: AuthedReq, @Query() query: ListUsersQuery) {
     return this.usersService.listUsers(this.actorFrom(req), query)
   }
