@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Cron } from '@nestjs/schedule'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { EmailService } from '../email/email.service.js'
 import { monthlyReportEmailHtml } from '../email/email-templates.js'
 import type { Prisma } from '../generated/prisma/client.js'
@@ -32,12 +34,15 @@ export class MonthlyReportCron {
     private readonly reports: ReportsService,
     private readonly email: EmailService,
     private readonly config: ConfigService,
+    private readonly cls: ClsService,
   ) {}
 
   @Cron('0 6 1 * *') // 06:00 UTC, day 1 of each month
   async scheduledRun() {
-    const count = await this.run()
-    this.logger.log(`Monthly report cron complete: ${count} practices`)
+    return runAsCronActor(this.cls, 'cron-monthly-report', async () => {
+      const count = await this.run()
+      this.logger.log(`Monthly report cron complete: ${count} practices`)
+    })
   }
 
   /**

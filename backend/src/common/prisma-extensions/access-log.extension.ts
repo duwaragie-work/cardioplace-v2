@@ -36,6 +36,31 @@ export const PHI_MODELS: ReadonlySet<string> = new Set([
   'PatientThreshold',
 ])
 
+/**
+ * Models that get inline `createdByActorId` / `updatedByActorId` columns
+ * auto-stamped from the CLS actor on write (2026-07-03). Complements — does
+ * not replace — AccessLog: AccessLog stays the immutable append-only audit
+ * log; these inline fields are mutable current-state for the "changed by
+ * Dr. X at 10:32" display on the Timeline tab without a join.
+ *
+ * Deliberately NOT the full PHI set:
+ *   • User / PatientProfile / JournalEntry / Notification — not display-audit
+ *     targets for this pass (JournalEntry is patient-authored, immutable).
+ *   • PatientMedication — EXCLUDED: it already carries generic edit-actor
+ *     provenance (`addedByUserId` / `lastEditedByUserId`, PR #92). A second
+ *     inline audit source would diverge from the #92 fields the Timeline UI
+ *     already reads. See 2026-07-03 handoff decision.
+ *
+ * Stamping only fires for USER writes (a real CLS actorId). SYSTEM_ACTOR /
+ * cron writes stay null inline — AccessLog still captures them with the cron
+ * label (see runAsCronActor).
+ */
+export const AUDIT_STAMP_MODELS: ReadonlySet<string> = new Set([
+  'PatientProviderAssignment',
+  'PatientThreshold',
+  'DeviationAlert',
+])
+
 const READ_OPS: ReadonlySet<string> = new Set([
   'findUnique',
   'findFirst',
@@ -76,6 +101,10 @@ function classifyAction(operation: string): 'READ' | 'WRITE' | 'DELETE' | null {
 export interface AccessLogData {
   actorId: string | null
   actorType: 'USER' | 'SYSTEM_ACTOR'
+  // Which background process wrote this, when actorType='SYSTEM_ACTOR' and the
+  // cron identified itself via runAsCronActor. Null for USER writes and for
+  // pre-2026-07-03 / unlabelled system writes.
+  systemActorLabel: string | null
   action: 'READ' | 'WRITE' | 'DELETE'
   modelName: string
   recordId: string | null
@@ -104,9 +133,13 @@ export function computeAccessLogData(
 
   const actorId = cls.get<string | null>('actorId') ?? null
   // No CLS actor (startup seeding, cron, raw $connect paths) → attribute to the
-  // system actor rather than throwing. Friday's cron work adds real
-  // system-actor ids.
+  // system actor rather than throwing. Cron handlers wrapped in runAsCronActor
+  // carry a systemActorLabel so the SYSTEM_ACTOR row names its process.
   const actorType: 'USER' | 'SYSTEM_ACTOR' = actorId ? 'USER' : 'SYSTEM_ACTOR'
+  // Only meaningful for system-actor writes; a real user is never a cron.
+  const systemActorLabel = actorId
+    ? null
+    : (cls.get<string | null>('systemActorLabel') ?? null)
   const ip = cls.get<string | null>('ip') ?? null
   const userAgent = cls.get<string | null>('userAgent') ?? null
 
@@ -117,7 +150,105 @@ export function computeAccessLogData(
     recordId = (result as { id?: string } | null)?.id ?? null
   }
 
-  return { actorId, actorType, action, modelName: model, recordId, ip, userAgent }
+  return {
+    actorId,
+    actorType,
+    systemActorLabel,
+    action,
+    modelName: model,
+    recordId,
+    ip,
+    userAgent,
+  }
+}
+
+/**
+ * Inline audit stamp (2026-07-03). For the three AUDIT_STAMP_MODELS, mutate the
+ * write `args` so the row carries `createdByActorId` / `updatedByActorId` from
+ * the CLS actor — giving admin displays "who last touched this" without a join
+ * against AccessLog. Returns a NEW args object (does not mutate the caller's);
+ * for non-stamp models / non-writes / no-actor it returns `args` unchanged.
+ *
+ * Only USER writes are stamped (`actorId` present). SYSTEM_ACTOR / cron writes
+ * legitimately have no user actor → fields stay null, which is honest;
+ * AccessLog still records the cron write with its label. Seed scripts run
+ * without a CLS actor, so seeded rows also stay null (nullable columns → OK).
+ *
+ * Spread order puts the CLS actor LAST, so it wins over any caller-supplied
+ * `createdByActorId` in `data`. That is the intended default — a write path
+ * that must override (a deliberate backfill/impersonation) has to bypass the
+ * extension. No such path exists today.
+ */
+export function stampInlineAudit(
+  model: string | undefined,
+  operation: string,
+  args: unknown,
+  cls: ClsService,
+): unknown {
+  if (!model || !AUDIT_STAMP_MODELS.has(model)) return args
+
+  const actorId = cls.get<string | null>('actorId') ?? null
+  if (!actorId) return args // SYSTEM_ACTOR / seed / cron → leave inline fields null
+
+  const a = (args ?? {}) as Record<string, unknown>
+
+  switch (operation) {
+    case 'create':
+      return {
+        ...a,
+        data: {
+          ...((a.data as Record<string, unknown>) ?? {}),
+          createdByActorId: actorId,
+          updatedByActorId: actorId,
+        },
+      }
+    case 'createMany': {
+      const rows = a.data
+      if (Array.isArray(rows)) {
+        return {
+          ...a,
+          data: rows.map((r) => ({
+            ...(r as Record<string, unknown>),
+            createdByActorId: actorId,
+            updatedByActorId: actorId,
+          })),
+        }
+      }
+      // createMany also accepts a single object.
+      return {
+        ...a,
+        data: {
+          ...((rows as Record<string, unknown>) ?? {}),
+          createdByActorId: actorId,
+          updatedByActorId: actorId,
+        },
+      }
+    }
+    case 'update':
+    case 'updateMany':
+      return {
+        ...a,
+        data: {
+          ...((a.data as Record<string, unknown>) ?? {}),
+          updatedByActorId: actorId,
+        },
+      }
+    case 'upsert':
+      return {
+        ...a,
+        create: {
+          ...((a.create as Record<string, unknown>) ?? {}),
+          createdByActorId: actorId,
+          updatedByActorId: actorId,
+        },
+        update: {
+          ...((a.update as Record<string, unknown>) ?? {}),
+          updatedByActorId: actorId,
+        },
+      }
+    default:
+      return args // reads / deletes carry no audit-actor payload
+  }
 }
 
 /**
@@ -136,11 +267,18 @@ export async function auditAndReturn(
   cls: ClsService,
   basePrisma: Pick<PrismaClient, 'accessLog'>,
 ): Promise<unknown> {
+  // Inline audit stamp BEFORE the write runs, so createdByActorId /
+  // updatedByActorId are persisted with the row itself (not just in AccessLog).
+  // No-op for non-stamp models, reads/deletes, and system-actor writes.
+  const stampedArgs = stampInlineAudit(ctx.model, ctx.operation, ctx.args, cls)
+
   // Run the real query first — its result/latency must be unaffected by
   // auditing. A throwing read (e.g. findUniqueOrThrow miss) propagates here
   // before we log, so no row is written for a record never read.
-  const result = await ctx.query(ctx.args)
+  const result = await ctx.query(stampedArgs)
 
+  // recordId classification reads `where` (unchanged by stamping), so the
+  // original args are fine here.
   const data = computeAccessLogData(ctx.model, ctx.operation, ctx.args, result, cls)
   if (!data) return result
 

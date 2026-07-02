@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
+import { ClsService } from 'nestjs-cls'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { TestControlService } from './test-control.service.js'
 import { GapAlertService } from '../crons/gap-alert.service.js'
@@ -42,6 +43,15 @@ describe('TestControlService — medication-hold escalation cron driver (F33)', 
         TestControlService,
         MedicationHoldEscalationService,
         { provide: PrismaService, useValue: prisma },
+        // runAsCronActor wraps scheduledRun in cls.run — pass-through stub.
+        {
+          provide: ClsService,
+          useValue: {
+            run: (fn: () => unknown) => fn(),
+            set: () => undefined,
+            get: () => null,
+          },
+        },
         // The other cron drivers are unused by this path — stub them.
         { provide: GapAlertService, useValue: {} },
         { provide: MonthlyReaskService, useValue: {} },

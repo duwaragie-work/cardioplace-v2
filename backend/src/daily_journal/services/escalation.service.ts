@@ -7,6 +7,8 @@ import {
 } from '../../chat/emergency-events.js'
 import { RULE_IDS } from '@cardioplace/shared'
 import { Cron } from '@nestjs/schedule'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../../common/cls/cron-actor.util.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
 import { caregiverEmailHtml } from '../../email/email-templates.js'
@@ -87,6 +89,7 @@ export class EscalationService {
     private readonly emailService: EmailService,
     private readonly smsService: SmsService,
     config: ConfigService,
+    private readonly cls: ClsService,
   ) {
     // Used by escalation emails to deep-link recipients into the right app.
     // Provider/admin recipients → admin app (/patients/{userId}?alert={id});
@@ -263,6 +266,12 @@ export class EscalationService {
 
   @Cron('*/15 * * * *')
   async handleCron(): Promise<void> {
+    return runAsCronActor(this.cls, 'cron-escalation-ladder', () =>
+      this.handleCronImpl(),
+    )
+  }
+
+  private async handleCronImpl(): Promise<void> {
     // Managed Prisma Postgres occasionally hands the pool a stale connection
     // (server hung up while idle) — first query throws "Server has closed
     // the connection" / P1017. node-postgres evicts the bad socket on that

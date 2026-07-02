@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { NotificationChannel, EnrollmentStatus, AccountStatus } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 
@@ -11,12 +13,17 @@ const IDEMPOTENCY_DAYS = 28
 export class MonthlyReaskService {
   private readonly logger = new Logger(MonthlyReaskService.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cls: ClsService,
+  ) {}
 
   @Cron('0 14 * * *') // daily 14:00 UTC
   async scheduledRun() {
-    const count = await this.runScan()
-    this.logger.log(`Monthly re-ask scan complete: ${count} notifications sent`)
+    return runAsCronActor(this.cls, 'cron-monthly-reask', async () => {
+      const count = await this.runScan()
+      this.logger.log(`Monthly re-ask scan complete: ${count} notifications sent`)
+    })
   }
 
   /**

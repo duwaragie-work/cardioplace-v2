@@ -1,7 +1,16 @@
 import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
+import { ClsService } from 'nestjs-cls'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { MedicationHoldEscalationService } from './medication-hold-escalation.service.js'
+
+// runAsCronActor wraps scheduledRun in cls.run — a pass-through stub is enough
+// for the unit tests, which call runScan directly.
+const clsStub = {
+  run: (fn: () => unknown) => fn(),
+  set: () => undefined,
+  get: () => null,
+} as unknown as ClsService
 
 // Manisha 5/24 Med §4 — HOLD reconciliation escalation ladder. Each rung fires
 // once (holdEscalationLevel idempotency); recipients resolve off the care team.
@@ -49,6 +58,7 @@ describe('MedicationHoldEscalationService', () => {
       providers: [
         MedicationHoldEscalationService,
         { provide: PrismaService, useValue: prisma },
+        { provide: ClsService, useValue: clsStub },
       ],
     }).compile()
     service = module.get(MedicationHoldEscalationService)

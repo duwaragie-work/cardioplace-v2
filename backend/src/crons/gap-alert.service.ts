@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { EmailService } from '../email/email.service.js'
 import { NotificationChannel, EnrollmentStatus, AccountStatus } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
@@ -17,12 +19,15 @@ export class GapAlertService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
+    private readonly cls: ClsService,
   ) {}
 
   @Cron('0 13 * * *') // daily 13:00 UTC ≈ 9AM ET
   async scheduledRun() {
-    const count = await this.runScan()
-    this.logger.log(`Gap-alert scan complete: ${count} notifications sent`)
+    return runAsCronActor(this.cls, 'cron-gap-alert', async () => {
+      const count = await this.runScan()
+      this.logger.log(`Gap-alert scan complete: ${count} notifications sent`)
+    })
   }
 
   /**

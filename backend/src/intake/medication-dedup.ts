@@ -1,5 +1,6 @@
 import { matchToCatalog } from '@cardioplace/shared'
 import {
+  DrugClass,
   MedicationHoldReason,
   MedicationVerificationStatus,
 } from '../generated/prisma/client.js'
@@ -21,6 +22,25 @@ import {
 export function resolveCanonicalDrugId(drugName: string | null | undefined): string | null {
   if (!drugName) return null
   return matchToCatalog(drugName)?.catalogId ?? null
+}
+
+/**
+ * Catalog-authoritative drug class for a name that resolves to the catalog
+ * (e.g. "Metoprolol" / "Toprol XL" → BETA_BLOCKER). Returns null for
+ * off-catalog names, so callers fall back to the user-provided class. Every
+ * catalog `drugClass` (DrugClassInput) is a valid Prisma `DrugClass` member —
+ * same string values — so the cast is safe.
+ *
+ * Used by admin add/edit to prevent a provider mis-classifying a known drug
+ * (e.g. picking OTHER_UNVERIFIED for Metoprolol): when the name resolves, the
+ * catalog class wins.
+ */
+export function resolveCanonicalDrugClass(
+  drugName: string | null | undefined,
+): DrugClass | null {
+  if (!drugName) return null
+  const match = matchToCatalog(drugName)
+  return match ? (match.drugClass as DrugClass) : null
 }
 
 /**
