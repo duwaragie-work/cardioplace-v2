@@ -606,6 +606,7 @@ describe('IntakeService.adminAddMedication (#92)', () => {
   function buildPrisma(opts: {
     aceContraindicatedAt?: Date | null
     activeDup?: any
+    nameDup?: any
   }) {
     return {
       patientProfile: {
@@ -614,7 +615,18 @@ describe('IntakeService.adminAddMedication (#92)', () => {
         }),
       },
       patientMedication: {
-        findFirst: (jest.fn() as any).mockResolvedValue(opts.activeDup ?? null),
+        // Two distinct dedup queries: the canonical check keys on
+        // `canonicalDrugId`, the defensive fallback keys on `drugName`. Route by
+        // the where-clause shape so call order/count doesn't matter.
+        findFirst: (jest.fn() as any).mockImplementation((args: any) => {
+          if (args?.where?.canonicalDrugId !== undefined) {
+            return Promise.resolve(opts.activeDup ?? null)
+          }
+          if (args?.where?.drugName !== undefined) {
+            return Promise.resolve(opts.nameDup ?? null)
+          }
+          return Promise.resolve(null)
+        }),
         create: (jest.fn() as any).mockImplementation((args: any) =>
           Promise.resolve({
             id: 'med-new',
@@ -697,6 +709,59 @@ describe('IntakeService.adminAddMedication (#92)', () => {
       } as any),
     ).rejects.toMatchObject({
       response: { error: 'DUPLICATE_CANONICAL_DRUG', existing: { id: 'existing-cozaar' } },
+    })
+    expect(prisma.patientMedication.create).not.toHaveBeenCalled()
+  })
+
+  it('catalog wins on class: provider mis-picks OTHER_UNVERIFIED for Metoprolol → saved as BETA_BLOCKER', async () => {
+    const prisma = buildPrisma({})
+    const service = await makeService(prisma)
+    await service.adminAddMedication(actor, 'p1', {
+      drugName: 'Metoprolol', drugClass: 'OTHER_UNVERIFIED', frequency: 'ONCE_DAILY',
+    } as any)
+
+    const data = prisma.patientMedication.create.mock.calls[0][0].data
+    expect(data.drugClass).toBe('BETA_BLOCKER') // catalog overrides the bad pick
+    expect(data.canonicalDrugId).toBe('metoprolol')
+    // Audit log records the effective (corrected) class, not the raw pick.
+    expect(prisma.profileVerificationLog.create.mock.calls[0][0].data.newValue.drugClass).toBe(
+      'BETA_BLOCKER',
+    )
+  })
+
+  it('off-catalog drug keeps the provider-supplied class (no catalog match)', async () => {
+    const prisma = buildPrisma({})
+    const service = await makeService(prisma)
+    await service.adminAddMedication(actor, 'p1', {
+      drugName: 'SomeCustomHerbalThing', drugClass: 'OTHER_UNVERIFIED', frequency: 'ONCE_DAILY',
+    } as any)
+
+    const data = prisma.patientMedication.create.mock.calls[0][0].data
+    expect(data.drugClass).toBe('OTHER_UNVERIFIED')
+    expect(data.canonicalDrugId).toBeNull()
+  })
+
+  it('defensive fallback: existing active row with same drugName but NULL canonicalDrugId → 409', async () => {
+    // Simulates a pre-fix seed / import row: same name, canonicalDrugId never set.
+    // The canonical check misses it (canonicalDrugId query returns null); the
+    // drugName fallback catches it.
+    const prisma = buildPrisma({
+      activeDup: null,
+      nameDup: {
+        id: 'legacy-metoprolol',
+        drugName: 'Metoprolol',
+        canonicalDrugId: null,
+        verificationStatus: 'VERIFIED',
+        holdReason: null,
+      },
+    })
+    const service = await makeService(prisma)
+    await expect(
+      service.adminAddMedication(actor, 'p1', {
+        drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER', frequency: 'ONCE_DAILY',
+      } as any),
+    ).rejects.toMatchObject({
+      response: { error: 'DUPLICATE_CANONICAL_DRUG', existing: { id: 'legacy-metoprolol' } },
     })
     expect(prisma.patientMedication.create).not.toHaveBeenCalled()
   })
