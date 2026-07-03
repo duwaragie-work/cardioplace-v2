@@ -21,7 +21,7 @@ import type { PrismaClient } from '../../generated/prisma/client.js'
  *      in PHI_MODELS anyway, so even an extended write would be skipped.
  */
 
-// The seven PHI models. Everything else (AccessLog itself, AuthLog,
+// The ten PHI models. Everything else (AccessLog itself, AuthLog,
 // AuthSession, RefreshToken, Practice, PracticeProvider, DisplayId, …) is not
 // logged. `Notification` IS PHI — it carries clinical alert context — so both
 // its reads and writes are logged (the sprint-doc self-read carveout was
@@ -34,6 +34,12 @@ export const PHI_MODELS: ReadonlySet<string> = new Set([
   'Notification',
   'PatientMedication',
   'PatientThreshold',
+  // Support System — a ticket's body/email/category can carry patient PHI and
+  // the ops-action trail touches account state, so its reads/writes are audited
+  // too (Fix 1, HIPAA §164.312(b)).
+  'SupportTicket',
+  'SupportTicketReply',
+  'SupportTicketAction',
 ])
 
 /**
