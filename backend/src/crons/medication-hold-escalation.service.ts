@@ -5,6 +5,9 @@ import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import {
   MedicationVerificationStatus,
   NotificationChannel,
+  Prisma,
+  VerifierRole,
+  VerificationChangeType,
 } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 
@@ -148,9 +151,33 @@ export class MedicationHoldEscalationService {
       // Always bump the level so a hold with no resolvable care team doesn't
       // re-evaluate the same rung every day (it would never dispatch but would
       // keep churning). Bump happens whether or not anyone was notified.
-      await this.prisma.patientMedication.update({
-        where: { id: med.id },
-        data: { holdEscalationLevel: rung.level },
+      //
+      // Audit (2026-07-03, Humaira Activity 1 #3): the bump changes clinical
+      // state, so — like a manual edit — write a ProfileVerificationLog row in
+      // the SAME transaction attributed to the system principal. Guarded on a
+      // resolved actorId (cold registry → skip the audit, never crash the bump).
+      const actorId = this.cls.get<string | null>('actorId') ?? null
+      await this.prisma.$transaction(async (tx) => {
+        await tx.patientMedication.update({
+          where: { id: med.id },
+          data: { holdEscalationLevel: rung.level },
+        })
+        if (actorId) {
+          await tx.profileVerificationLog.create({
+            data: {
+              userId: med.userId,
+              fieldPath: `patientMedication:${med.id}:holdEscalationLevel`,
+              previousValue: { holdEscalationLevel: med.holdEscalationLevel } as Prisma.InputJsonValue,
+              newValue: { holdEscalationLevel: rung.level } as Prisma.InputJsonValue,
+              changedBy: actorId,
+              changedByRole: VerifierRole.SYSTEM_ACTOR,
+              changeType: VerificationChangeType.SYSTEM_CRON_MEDICATION_HOLD_ESCALATION,
+              discrepancyFlag: false,
+              rationale: `Auto-escalated hold level from ${med.holdEscalationLevel} to ${rung.level} after T+${ageDays}d`,
+              practiceContext: null,
+            },
+          })
+        }
       })
 
       if (recipientIds.size === 0) {

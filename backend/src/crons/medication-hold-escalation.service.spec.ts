@@ -53,6 +53,13 @@ describe('MedicationHoldEscalationService', () => {
       notification: {
         create: (jest.fn() as any).mockResolvedValue({}),
       },
+      profileVerificationLog: {
+        create: (jest.fn() as any).mockResolvedValue({}),
+      },
+      // Interactive transaction runs the callback against the same mock, so
+      // `tx.patientMedication.update` / `tx.profileVerificationLog.create`
+      // resolve to these same jest.fns.
+      $transaction: (jest.fn() as any).mockImplementation((cb: any) => cb(prisma)),
     }
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -115,6 +122,39 @@ describe('MedicationHoldEscalationService', () => {
       where: { id: 'med-1' },
       data: { holdEscalationLevel: 4 },
     })
+  })
+
+  it('writes a ProfileVerificationLog row attributed to the system principal on bump (audit)', async () => {
+    const auditCls = {
+      run: (fn: () => unknown) => fn(),
+      set: () => undefined,
+      get: (k: string) => (k === 'actorId' ? 'sys-med-hold' : null),
+    } as unknown as ClsService
+    const mod: TestingModule = await Test.createTestingModule({
+      providers: [
+        MedicationHoldEscalationService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: ClsService, useValue: auditCls },
+      ],
+    }).compile()
+    const svc = mod.get(MedicationHoldEscalationService)
+
+    prisma.patientMedication.findMany.mockResolvedValue([
+      heldMed({ holdSetAt: new Date(NOW.getTime() - 8 * DAY), holdEscalationLevel: 0 }),
+    ])
+    await svc.runScan(NOW)
+
+    expect(prisma.profileVerificationLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: 'user-1',
+          fieldPath: 'patientMedication:med-1:holdEscalationLevel',
+          changedBy: 'sys-med-hold',
+          changedByRole: 'SYSTEM_ACTOR',
+          changeType: 'SYSTEM_CRON_MEDICATION_HOLD_ESCALATION',
+        }),
+      }),
+    )
   })
 
   it('does not re-fire a rung already reached (idempotent)', async () => {
