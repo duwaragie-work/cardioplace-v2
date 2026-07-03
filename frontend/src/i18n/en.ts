@@ -7,6 +7,7 @@ const en = {
   'nav.provider': 'Provider',
   'nav.patients': 'Patients',
   'nav.calls': 'Calls',
+  'nav.support': 'My Support',
 
   // ─── Common ────────────────────────────────────────────────────────────────
   'common.save': 'Save',
@@ -961,6 +962,20 @@ const en = {
   'support.locked.successTail': 'is in. Our team will reach out to verify your identity before any changes are made.',
   'support.locked.error': 'Could not submit your request.',
   'support.locked.backToSignIn': 'Back to sign in',
+  // Support — patient "My support requests" history page (Fix 9).
+  'support.mytickets.back': 'Back to settings',
+  'support.mytickets.title': 'My support requests',
+  'support.mytickets.subtitle': 'Track the status of requests you’ve sent our team.',
+  'support.mytickets.loading': 'Loading…',
+  'support.mytickets.empty': 'You haven’t sent any requests yet.',
+  'support.mytickets.error': 'Could not load your requests.',
+  'support.mytickets.statusOpen': 'Open',
+  'support.mytickets.statusInProgress': 'In progress',
+  'support.mytickets.statusResolved': 'Resolved',
+  'support.mytickets.replies': 'replies',
+  'support.mytickets.support': 'Support',
+  'support.mytickets.you': 'You',
+  'support.mytickets.resolvedNote': 'This request was resolved.',
   // Handoff 4 A1 — medical disclaimer (Manisha Doc 1). MVP US-only: 911 stays
   // hardcoded per CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   'register.medicalDisclaimer': 'Cardioplace helps you track your health and stay connected to your care team. It is not a substitute for medical advice, diagnosis, or treatment. In an emergency, call 911.',

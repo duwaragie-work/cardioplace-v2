@@ -14,6 +14,7 @@ const am: Record<TranslationKey, string> = {
   'nav.provider': 'የእንክብካቤ ቡድን',
   'nav.patients': 'ታካሚዎች',
   'nav.calls': 'ጥሪዎች',
+  'nav.support': 'My Support',
 
   // ─── Common ────────────────────────────────────────────────────────────────
   'common.save': 'አስቀምጥ',
@@ -950,6 +951,20 @@ const am: Record<TranslationKey, string> = {
   'support.locked.successTail': 'is in. Our team will reach out to verify your identity before any changes are made.',
   'support.locked.error': 'Could not submit your request.',
   'support.locked.backToSignIn': 'Back to sign in',
+  // Support — "My support requests" page (Fix 9). English fallback pending am.
+  'support.mytickets.back': 'Back to settings',
+  'support.mytickets.title': 'My support requests',
+  'support.mytickets.subtitle': 'Track the status of requests you’ve sent our team.',
+  'support.mytickets.loading': 'Loading…',
+  'support.mytickets.empty': 'You haven’t sent any requests yet.',
+  'support.mytickets.error': 'Could not load your requests.',
+  'support.mytickets.statusOpen': 'Open',
+  'support.mytickets.statusInProgress': 'In progress',
+  'support.mytickets.statusResolved': 'Resolved',
+  'support.mytickets.replies': 'replies',
+  'support.mytickets.support': 'Support',
+  'support.mytickets.you': 'You',
+  'support.mytickets.resolvedNote': 'This request was resolved.',
   // Translated 2026-06-04 (user opted in vs Niva pass). 911 stays per US pilot.
   // Amharic translation flagged for native-speaker review by Niva.
   'register.medicalDisclaimer': 'Cardioplace ጤናዎን ለመከታተል እና ከእንክብካቤ ቡድንዎ ጋር ለመገናኘት ይረዳዎታል። ይህ የሕክምና ምክርን፣ ምርመራን ወይም ሕክምናን አይተካም። በአስቸኳይ ጊዜ 911 ይደውሉ።',

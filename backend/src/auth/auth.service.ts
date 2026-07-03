@@ -2773,9 +2773,12 @@ export class AuthService {
         success: false,
         errorCode: 'account_not_active',
       })
-      throw new ForbiddenException(
-        `Account is ${existingUser.accountStatus.toLowerCase()}`,
-      )
+      // Silent success — return the happy-path shape WITHOUT generating or
+      // sending an OTP, so we never disclose to an unauthenticated requester
+      // that this email exists-but-is-inactive (info-disclosure). The block is
+      // still audited above; a non-ACTIVE user who somehow holds a valid code
+      // is still stopped at verifyOtp.
+      return { message: 'OTP sent successfully' }
     }
 
     // Check for recent OTP request (rate limiting)
@@ -3250,9 +3253,10 @@ export class AuthService {
         success: false,
         errorCode: 'account_not_active',
       })
-      throw new ForbiddenException(
-        `Account is ${existingUser.accountStatus.toLowerCase()}`,
-      )
+      // Silent success — same as sendOtp: return the happy-path shape without
+      // creating or sending a magic link, so we never disclose that the account
+      // exists-but-is-inactive. The block is audited above.
+      return { message: 'Magic link sent successfully' }
     }
 
     // Rate limiting: 1 magic link per email per 60s

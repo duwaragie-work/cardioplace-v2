@@ -13,6 +13,7 @@ const de: Record<TranslationKey, string> = {
   'nav.provider': 'Pflegeteam',
   'nav.patients': 'Patienten',
   'nav.calls': 'Anrufe',
+  'nav.support': 'Mein Support',
 
   // ─── Common ────────────────────────────────────────────────────────────────
   'common.save': 'Speichern',
@@ -943,6 +944,20 @@ const de: Record<TranslationKey, string> = {
   'support.locked.successTail': 'ist eingegangen. Unser Team wird Sie kontaktieren, um Ihre Identität zu bestätigen, bevor Änderungen vorgenommen werden.',
   'support.locked.error': 'Ihre Anfrage konnte nicht gesendet werden.',
   'support.locked.backToSignIn': 'Zurück zur Anmeldung',
+  // Support — Seite "Meine Support-Anfragen" (Fix 9).
+  'support.mytickets.back': 'Zurück zu den Einstellungen',
+  'support.mytickets.title': 'Meine Support-Anfragen',
+  'support.mytickets.subtitle': 'Verfolgen Sie den Status der Anfragen, die Sie an unser Team gesendet haben.',
+  'support.mytickets.loading': 'Wird geladen…',
+  'support.mytickets.empty': 'Sie haben noch keine Anfragen gesendet.',
+  'support.mytickets.error': 'Ihre Anfragen konnten nicht geladen werden.',
+  'support.mytickets.statusOpen': 'Offen',
+  'support.mytickets.statusInProgress': 'In Bearbeitung',
+  'support.mytickets.statusResolved': 'Gelöst',
+  'support.mytickets.replies': 'Antworten',
+  'support.mytickets.support': 'Support',
+  'support.mytickets.you': 'Sie',
+  'support.mytickets.resolvedNote': 'Diese Anfrage wurde gelöst.',
   // Translated 2026-06-04 (user opted in vs Niva pass). 911 stays per US pilot.
   'register.medicalDisclaimer': 'Cardioplace hilft Ihnen, Ihre Gesundheit zu verfolgen und mit Ihrem Behandlungsteam in Kontakt zu bleiben. Es ersetzt keine medizinische Beratung, Diagnose oder Behandlung. Wählen Sie im Notfall 911.',
   'register.privacyAssurance': 'Ihre Informationen sind privat und sicher. Nur Ihr Behandlungsteam kann Ihre Gesundheitsdaten einsehen.',

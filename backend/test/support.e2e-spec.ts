@@ -57,9 +57,26 @@ describe('Support System Phase 1 (e2e)', () => {
       where: { title: { startsWith: 'New support ticket ' } },
     })
     if (ids.length) {
+      // Fix 1 — support writes are now PHI-audited; drop this run's AccessLog rows.
+      await prisma.accessLog.deleteMany({
+        where: { actorId: { in: ids }, modelName: { startsWith: 'SupportTicket' } },
+      })
       await prisma.notification.deleteMany({ where: { userId: { in: ids } } })
       await prisma.authLog.deleteMany({ where: { userId: { in: ids } } })
       await prisma.user.deleteMany({ where: { id: { in: ids } } })
+    }
+  }
+
+  // Poll the fire-and-forget audit trail (the AccessLog write is not awaited).
+  async function waitForAccessLog(
+    where: Record<string, unknown>,
+    timeoutMs = 4000,
+  ): Promise<number> {
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      const count = await prisma.accessLog.count({ where })
+      if (count > 0 || Date.now() > deadline) return count
+      await new Promise((r) => setTimeout(r, 50))
     }
   }
 
@@ -166,6 +183,18 @@ describe('Support System Phase 1 (e2e)', () => {
       expect(t?.status).toBe('RESOLVED')
       const actions = await prisma.supportTicketAction.findMany({ where: { ticketId } })
       expect(actions.some((a) => a.actionType === 'RESOLVED')).toBe(true)
+    })
+
+    it('Fix 1 — the ticket write is PHI-audited (AccessLog row)', async () => {
+      // SupportTicket is in PHI_MODELS, so the contact create above routes through
+      // the audited Prisma extension and must leave an AccessLog WRITE row
+      // attributed to the patient actor (HIPAA §164.312(b)).
+      const count = await waitForAccessLog({
+        modelName: 'SupportTicket',
+        action: 'WRITE',
+        actorId: patientId,
+      })
+      expect(count).toBeGreaterThan(0)
     })
   })
 
