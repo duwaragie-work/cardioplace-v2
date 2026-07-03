@@ -16,10 +16,12 @@ const clsStub = {
 
 const mockPrisma = {
   journalEntry: { findMany: jest.fn() },
+  profileVerificationLog: { create: jest.fn() },
 } as any
 const mockDailyJournal = {
   shouldFinalizeAsSingleReading: jest.fn(),
   finalizeSingleReadingSession: jest.fn(),
+  finalizeUnconfirmedEmergency: jest.fn(),
 } as any
 
 const NOW = new Date('2026-05-22T10:00:00Z')
@@ -97,6 +99,41 @@ describe('SessionFinalizeService', () => {
     expect(where.measuredAt.gte).toEqual(new Date(NOW.getTime() - 24 * 60 * 60 * 1000))
     // Weight-only entries excluded — must have a BP or pulse value.
     expect(where.OR).toEqual([{ systolicBP: { not: null } }, { pulse: { not: null } }])
+  })
+
+  it('writes a ProfileVerificationLog row attributed to the system principal on finalize (audit)', async () => {
+    const auditCls = {
+      run: (fn: () => unknown) => fn(),
+      set: () => undefined,
+      get: (k: string) => (k === 'actorId' ? 'sys-finalize' : null),
+    } as unknown as ClsService
+    const mod: TestingModule = await Test.createTestingModule({
+      providers: [
+        SessionFinalizeService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: DailyJournalService, useValue: mockDailyJournal },
+        { provide: ClsService, useValue: auditCls },
+      ],
+    }).compile()
+    const svc = mod.get<SessionFinalizeService>(SessionFinalizeService)
+
+    mockPrisma.journalEntry.findMany.mockResolvedValueOnce([candidate({ id: 'e1' })])
+    mockDailyJournal.shouldFinalizeAsSingleReading.mockResolvedValueOnce(true)
+    mockDailyJournal.finalizeSingleReadingSession.mockResolvedValueOnce({ statusCode: 202 })
+
+    await svc.runScan(NOW)
+
+    expect(mockPrisma.profileVerificationLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: 'u1',
+          fieldPath: 'journalEntry:e1:singleReadingFinalized',
+          changedBy: 'sys-finalize',
+          changedByRole: 'SYSTEM_ACTOR',
+          changeType: 'SYSTEM_CRON_FINALIZE',
+        }),
+      }),
+    )
   })
 
   it('continues past a finalize failure without aborting the batch', async () => {
