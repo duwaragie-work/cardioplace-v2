@@ -6,17 +6,20 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import type { Prisma } from '../generated/prisma/client.js'
 import {
   NotificationChannel,
   SupportActionType,
+  SupportContactPref,
   UserRole,
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EmailService } from '../email/email.service.js'
 import {
-  contactFormEmailHtml,
+  supportOpsNotifyHtml,
   supportReplyEmailHtml,
+  supportResolvedEmailHtml,
 } from '../email/email-templates.js'
 import { AuthService, type SessionContext } from '../auth/auth.service.js'
 import { TicketNumberService } from './ticket-number.service.js'
@@ -43,6 +46,8 @@ export interface SupportContext {
 const OPS_INBOX = 'ops@healplace.com'
 const LOCKED_OUT_WINDOW_MS = 60 * 60 * 1000 // 1 hour
 const LOCKED_OUT_MAX = 5 // per IP per hour
+const CONTACT_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
+const CONTACT_MAX = 3 // authenticated tickets per user per 5-minute window
 
 /**
  * Support System Phase 1. Two intake paths (signed-in contact + public
@@ -51,12 +56,21 @@ const LOCKED_OUT_MAX = 5 // per IP per hour
  */
 @Injectable()
 export class SupportService {
+  private readonly adminBaseUrl: string
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
     private readonly auth: AuthService,
     private readonly ticketNumbers: TicketNumberService,
-  ) {}
+    config: ConfigService,
+  ) {
+    // Deep-link ops into the admin ticket detail from notification emails
+    // (notify-and-link — the email itself carries no requester PHI).
+    this.adminBaseUrl = config
+      .get<string>('ADMIN_BASE_URL', 'http://localhost:3001')
+      .replace(/\/+$/, '')
+  }
 
   // ── Intake ─────────────────────────────────────────────────────────────
   async createContactTicket(
@@ -64,6 +78,28 @@ export class SupportService {
     dto: ContactDto,
     ctx: SupportContext,
   ): Promise<{ ticketNumber: string }> {
+    // Phone contact is not yet available (no call-center / HIPAA phone-ID
+    // verification infrastructure) — reject at the API even if the UI guard is
+    // bypassed (Fix 6, defense in depth).
+    if (dto.contactPreference === SupportContactPref.PHONE) {
+      throw new BadRequestException(
+        'Phone contact is not yet available. Please choose email.',
+      )
+    }
+    // Rate-limit — 3 tickets per user per 5 minutes (mirrors the locked-out IP
+    // guard) so a stuck/looping client can't flood the ops queue (Fix 4).
+    const recent = await this.prisma.supportTicket.count({
+      where: {
+        userId: actor.id,
+        createdAt: { gt: new Date(Date.now() - CONTACT_WINDOW_MS) },
+      },
+    })
+    if (recent >= CONTACT_MAX) {
+      throw new HttpException(
+        'You have submitted several requests recently. Please wait a few minutes before sending another.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      )
+    }
     const ticketNumber = await this.ticketNumbers.next()
     const ticket = await this.prisma.supportTicket.create({
       data: {
@@ -128,6 +164,31 @@ export class SupportService {
     })
     await this.notifyOpsNewTicket(ticket)
     return { ticketNumber: ticket.ticketNumber }
+  }
+
+  // ── Requester self-service ─────────────────────────────────────────────
+  /** The signed-in user's own tickets + reply threads, newest first (Fix 9).
+   *  Scoped to `userId` so a user only ever sees their own requests. */
+  async listMyTickets(actor: SupportActor) {
+    const data = await this.prisma.supportTicket.findMany({
+      where: { userId: actor.id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        ticketNumber: true,
+        category: true,
+        subject: true,
+        body: true,
+        status: true,
+        createdAt: true,
+        resolvedAt: true,
+        replies: {
+          orderBy: { sentAt: 'asc' },
+          select: { authorType: true, body: true, sentAt: true },
+        },
+      },
+    })
+    return { data }
   }
 
   // ── Ops queue + detail ─────────────────────────────────────────────────
@@ -201,10 +262,14 @@ export class SupportService {
     // data). Recovery-codes-remaining drives the "regenerate" affordance.
     let recoveryCodesRemaining = 0
     let mfaEnrolled = false
+    let webAuthnCount = 0
     if (ticket.user) {
       mfaEnrolled = ticket.user.totpCredential?.enrolledAt != null
       recoveryCodesRemaining = await this.prisma.mfaRecoveryCode.count({
         where: { userId: ticket.user.id, usedAt: null },
+      })
+      webAuthnCount = await this.prisma.webAuthnCredential.count({
+        where: { userId: ticket.user.id },
       })
     }
 
@@ -223,6 +288,7 @@ export class SupportService {
             roles: ticket.user.roles,
             mfaEnrolled,
             recoveryCodesRemaining,
+            webAuthnCount,
           }
         : null,
     }
@@ -277,8 +343,7 @@ export class SupportService {
       data: { identityVerified: true },
     })
     return this.recordAction(ticket.id, actor.id, SupportActionType.IDENTITY_VERIFIED, {
-      method: dto.method,
-      notes: dto.notes,
+      rationale: dto.rationale,
     })
   }
 
@@ -288,6 +353,24 @@ export class SupportService {
       where: { id: ticket.id },
       data: { status: 'RESOLVED', resolvedAt: new Date() },
     })
+    // Notify the requester the ticket closed — mirrors the reply-flow dispatch
+    // (email + in-app bell), fire-and-forget, so they aren't left wondering
+    // whether it was handled (Fix 5). Internal resolutionNotes are NOT sent.
+    void this.email.sendEmail(
+      ticket.email,
+      `Your Cardioplace support request ${ticket.ticketNumber} is resolved`,
+      supportResolvedEmailHtml(ticket.ticketNumber),
+    )
+    if (ticket.userId) {
+      await this.prisma.notification.create({
+        data: {
+          userId: ticket.userId,
+          channel: NotificationChannel.DASHBOARD,
+          title: 'Support request closed',
+          body: `Ticket ${ticket.ticketNumber} has been marked resolved.`,
+        },
+      })
+    }
     return this.recordAction(ticket.id, actor.id, SupportActionType.RESOLVED, {
       resolutionNotes: dto.resolutionNotes,
     })
@@ -402,20 +485,25 @@ export class SupportService {
   }
 
   private async notifyOpsNewTicket(ticket: {
+    id: string
     ticketNumber: string
     category: string
     priority: string
     subject: string
-    body: string
-    email: string
   }) {
-    const summary = `New ${ticket.priority} ${ticket.category} ticket ${ticket.ticketNumber} from ${ticket.email}\n\nSubject: ${ticket.subject}\n\n${ticket.body}`
-    // Fire-and-forget — never make the intake request wait on mail delivery
-    // (EmailService blocks on its transport and never throws).
+    // Notify-and-link — the ops email carries NO requester email or message
+    // body (mirrors the clinical-alert PHI refactor); ops opens the dashboard
+    // for full, audit-logged context (Fix 10). Fire-and-forget — never make the
+    // intake request wait on mail delivery (EmailService never throws).
     void this.email.sendEmail(
       OPS_INBOX,
-      `[Support] ${ticket.ticketNumber} — ${ticket.category}`,
-      contactFormEmailHtml(ticket.email, summary),
+      `[Support] ${ticket.ticketNumber} — ${ticket.priority} ${ticket.category}`,
+      supportOpsNotifyHtml(
+        ticket.ticketNumber,
+        ticket.priority,
+        ticket.category,
+        `${this.adminBaseUrl}/support/${ticket.id}`,
+      ),
     )
     const opsUsers = await this.prisma.user.findMany({
       where: { roles: { has: UserRole.HEALPLACE_OPS } },

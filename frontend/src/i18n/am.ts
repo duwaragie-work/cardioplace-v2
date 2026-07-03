@@ -936,6 +936,20 @@ const am: Record<TranslationKey, string> = {
   'register.magicLinkInfo': 'ደህንነቱ የተጠበቀ ሊንክ በኢሜል እንልካለን። ከኢሜልዎ ይጫኑት እና ይገባሉ፣ ኮድ መጻፍ አያስፈልግም።',
   'register.otpTitle': 'OTP ኮድ',
   'register.otpInfo': '6-አሃዝ ኮድ በኢሜል እንልካለን። ለመግባት እዚህ ይጻፉት።',
+  // Support — locked-out page (Fix 12). TODO: Amharic translations pending;
+  // English placeholders (runtime falls back am → en until translated).
+  'support.locked.title': 'Need help signing in?',
+  'support.locked.subtitle': 'Tell us what’s happening and our team will contact you to verify your identity before making any account changes.',
+  'support.locked.statusBanner': 'You can also check the status of an existing request by clicking the link in your confirmation email.',
+  'support.locked.email': 'Your account email',
+  'support.locked.description': 'What’s happening? (e.g. I lost my authenticator app and recovery codes)',
+  'support.locked.phone': 'Callback phone (optional)',
+  'support.locked.submit': 'Request help',
+  'support.locked.submitting': 'Submitting…',
+  'support.locked.successLead': 'Thanks — your request',
+  'support.locked.successTail': 'is in. Our team will reach out to verify your identity before any changes are made.',
+  'support.locked.error': 'Could not submit your request.',
+  'support.locked.backToSignIn': 'Back to sign in',
   // Translated 2026-06-04 (user opted in vs Niva pass). 911 stays per US pilot.
   // Amharic translation flagged for native-speaker review by Niva.
   'register.medicalDisclaimer': 'Cardioplace ጤናዎን ለመከታተል እና ከእንክብካቤ ቡድንዎ ጋር ለመገናኘት ይረዳዎታል። ይህ የሕክምና ምክርን፣ ምርመራን ወይም ሕክምናን አይተካም። በአስቸኳይ ጊዜ 911 ይደውሉ።',

@@ -63,7 +63,7 @@ test.describe('5Y — locked-out flow', () => {
       // Ops verifies identity out-of-band.
       const verify = await ops.post(
         `v2/admin/support/tickets/${id}/verify-identity`,
-        { data: { method: 'Phone callback', notes: 'Confirmed DOB + last 4' } },
+        { data: { rationale: 'Confirmed DOB + last 4 via reply email' } },
       )
       expect(verify.ok(), await verify.text()).toBeTruthy()
 

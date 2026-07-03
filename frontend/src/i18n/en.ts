@@ -948,6 +948,19 @@ const en = {
   'register.magicLinkInfo': 'We email you a secure link. Tap it from your email and you are signed in, no codes to type.',
   'register.otpTitle': 'OTP Code',
   'register.otpInfo': 'We email you a 6-digit code. Type it here to sign in.',
+  // Support — public "locked out / can’t sign in" page (Fix 12).
+  'support.locked.title': 'Need help signing in?',
+  'support.locked.subtitle': 'Tell us what’s happening and our team will contact you to verify your identity before making any account changes.',
+  'support.locked.statusBanner': 'You can also check the status of an existing request by clicking the link in your confirmation email.',
+  'support.locked.email': 'Your account email',
+  'support.locked.description': 'What’s happening? (e.g. I lost my authenticator app and recovery codes)',
+  'support.locked.phone': 'Callback phone (optional)',
+  'support.locked.submit': 'Request help',
+  'support.locked.submitting': 'Submitting…',
+  'support.locked.successLead': 'Thanks — your request',
+  'support.locked.successTail': 'is in. Our team will reach out to verify your identity before any changes are made.',
+  'support.locked.error': 'Could not submit your request.',
+  'support.locked.backToSignIn': 'Back to sign in',
   // Handoff 4 A1 — medical disclaimer (Manisha Doc 1). MVP US-only: 911 stays
   // hardcoded per CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   'register.medicalDisclaimer': 'Cardioplace helps you track your health and stay connected to your care team. It is not a substitute for medical advice, diagnosis, or treatment. In an emergency, call 911.',

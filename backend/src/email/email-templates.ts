@@ -504,6 +504,49 @@ export function supportReplyEmailHtml(
   `)
 }
 
+/** Support System — ticket-resolved confirmation to the requester. Wrapped →
+ *  carries the standardized HIPAA confidentiality footer. */
+export function supportResolvedEmailHtml(ticketNumber: string): string {
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #059669; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Resolved
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">Your support request is resolved</h2>
+    <p style="color: #6b7280; font-size: 13px; margin: 0 0 12px;">Ticket ${ticketNumber}</p>
+    <p style="color: #1f2937; font-size: 14px; line-height: 1.7;">
+      Our team has marked this request as resolved. If you still need help, just reply to
+      this email and we'll pick it back up.
+    </p>
+  `)
+}
+
+/** Support System — ops "new ticket" notification. Notify-and-link: NO requester
+ *  email or message body inlined (mirrors the clinical-alert PHI refactor — the
+ *  inbox stays PHI-free; ops opens the dashboard for full, audit-logged context). */
+export function supportOpsNotifyHtml(
+  ticketNumber: string,
+  priority: string,
+  category: string,
+  dashboardUrl: string,
+): string {
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #7B00E0; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      New support ticket
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">A new ${priority} support ticket is waiting</h2>
+    <table style="width: 100%; font-size: 14px; color: #374151; margin: 0 0 20px;">
+      <tr><td style="padding: 4px 0; font-weight: 600; width: 90px;">Ticket</td><td style="padding: 4px 0;">${ticketNumber}</td></tr>
+      <tr><td style="padding: 4px 0; font-weight: 600;">Priority</td><td style="padding: 4px 0;">${priority}</td></tr>
+      <tr><td style="padding: 4px 0; font-weight: 600;">Category</td><td style="padding: 4px 0;">${category}</td></tr>
+    </table>
+    <a href="${dashboardUrl}" style="display: inline-block; padding: 11px 20px; background: #7B00E0; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;">View in dashboard →</a>
+  `)
+}
+
 export function contactFormEmailHtml(
   senderEmail: string,
   message: string,

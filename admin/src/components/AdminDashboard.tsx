@@ -103,6 +103,8 @@ interface RawAlert {
   patient: {
     id: string;
     name: string | null;
+    // Permanent public handle (CP-PAT-…) — makes the queue searchable by ID.
+    displayId?: string | null;
     communicationPreference?: string | null;
     riskTier?: string;
   } | null;
@@ -371,9 +373,15 @@ export default function AdminDashboard() {
     if (tierFilter !== 'ALL') list = list.filter((a) => tierBucket(a) === tierFilter);
     if (alertSearch.trim()) {
       const q = alertSearch.trim().toLowerCase();
+      // displayId search — normalise both sides (strip hyphens/space, uppercase)
+      // so a pasted CP-PAT-… matches the canonical/hyphenated/lowercased forms,
+      // mirroring the patient-list search (Fix 11).
+      const norm = (s: string) => s.replace(/[\s-]/g, '').toUpperCase();
+      const qId = norm(alertSearch);
       list = list.filter(
         (a) =>
           (a.patient?.name ?? '').toLowerCase().includes(q) ||
+          (a.patient?.displayId ? norm(a.patient.displayId).includes(qId) : false) ||
           readingOf(a).toLowerCase().includes(q) ||
           (a.type ?? '').toLowerCase().includes(q),
       );
@@ -687,8 +695,8 @@ export default function AdminDashboard() {
                     type="text"
                     value={alertSearch}
                     onChange={(e) => setAlertSearch(e.target.value)}
-                    placeholder="Search patient or BP"
-                    aria-label="Search patient or BP"
+                    placeholder="Search patient, ID, or BP"
+                    aria-label="Search patient, ID, or BP"
                     data-testid="admin-dashboard-search"
                     className="flex-1 text-[11px] outline-none bg-transparent min-w-0"
                     style={{ color: 'var(--brand-text-primary)' }}

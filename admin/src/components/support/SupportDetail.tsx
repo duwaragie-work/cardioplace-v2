@@ -113,6 +113,10 @@ export default function SupportDetail({ ticketId }: { ticketId: string }) {
             label="Recovery codes left"
             value={String(ticket.user?.recoveryCodesRemaining ?? 0)}
           />
+          <Info
+            label="Passkeys (WebAuthn)"
+            value={String(ticket.user?.webAuthnCount ?? 0)}
+          />
         </dl>
       </div>
 
@@ -145,14 +149,16 @@ export default function SupportDetail({ ticketId }: { ticketId: string }) {
 
       <IdentityVerifyToggle
         verified={ticket.identityVerified}
-        onVerify={(m, n) =>
-          withReload(() => verifyIdentity(ticket.id, m, n), 'Identity verified.')
+        onVerify={(rationale) =>
+          withReload(() => verifyIdentity(ticket.id, rationale), 'Identity verified.')
         }
       />
       <ActionButtons
         locked={!ticket.identityVerified}
         isPatient={isPatient}
         resolved={ticket.status === 'RESOLVED'}
+        mfaEnrolled={ticket.user?.mfaEnrolled ?? false}
+        webAuthnCount={ticket.user?.webAuthnCount ?? 0}
         onAction={(a: SupportAction) =>
           withReload(() => runTicketAction(ticket.id, a), 'Action completed.')
         }

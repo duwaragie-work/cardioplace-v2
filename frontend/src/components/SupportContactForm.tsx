@@ -20,7 +20,9 @@ export default function SupportContactForm() {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [category, setCategory] = useState<SupportCategory>('ACCOUNT');
-  const [pref, setPref] = useState<'EMAIL' | 'PHONE' | ''>('');
+  // Phone contact isn't available yet (no call-center / phone-ID verification),
+  // so Email is the default and the only selectable option (Fix 6).
+  const [pref, setPref] = useState<'EMAIL' | 'PHONE'>('EMAIL');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -35,7 +37,7 @@ export default function SupportContactForm() {
         subject: subject.trim(),
         body: body.trim(),
         category,
-        contactPreference: pref || undefined,
+        contactPreference: pref,
       });
       setDone(r.ticketNumber);
       setSubject('');
@@ -94,24 +96,36 @@ export default function SupportContactForm() {
       />
       <fieldset className="flex items-center gap-4 text-[13px] text-slate-600">
         <span className="text-slate-400">Prefer to be reached by:</span>
-        {(['EMAIL', 'PHONE'] as const).map((p) => (
-          <label key={p} className="flex items-center gap-1.5 cursor-pointer">
-            <input
-              type="radio"
-              name="contactPreference"
-              checked={pref === p}
-              onChange={() => setPref(p)}
-              // data-no-min-target opts out of the globals.css 44×44 WCAG
-              // touch-target floor, which balloons raw radios and breaks this
-              // row (the admin app has no such floor, so it looked fine there).
-              // The label is the touch target, so the radio stays a 16px square
-              // with the brand accent — mirrors the CaregiversCard fix (#79).
-              data-no-min-target
-              className="h-4 w-4 shrink-0 accent-[var(--brand-primary-purple)] cursor-pointer"
-            />
-            {p === 'EMAIL' ? 'Email' : 'Phone'}
-          </label>
-        ))}
+        {(['EMAIL', 'PHONE'] as const).map((p) => {
+          const disabled = p === 'PHONE'; // phone support not yet available (Fix 6)
+          return (
+            <label
+              key={p}
+              className={`flex items-center gap-1.5 ${
+                disabled ? 'cursor-not-allowed text-slate-300' : 'cursor-pointer'
+              }`}
+            >
+              <input
+                type="radio"
+                name="contactPreference"
+                checked={pref === p}
+                disabled={disabled}
+                onChange={() => setPref(p)}
+                // data-no-min-target opts out of the globals.css 44×44 WCAG
+                // touch-target floor, which balloons raw radios and breaks this
+                // row (the admin app has no such floor, so it looked fine there).
+                // The label is the touch target, so the radio stays a 16px square
+                // with the brand accent — mirrors the CaregiversCard fix (#79).
+                data-no-min-target
+                className="h-4 w-4 shrink-0 accent-[var(--brand-primary-purple)] cursor-pointer disabled:cursor-not-allowed"
+              />
+              {p === 'EMAIL' ? 'Email' : 'Phone'}
+              {disabled && (
+                <span className="text-[11px] text-slate-400">(coming soon)</span>
+              )}
+            </label>
+          );
+        })}
       </fieldset>
       {err && <p className="text-[13px] text-red-600">{err}</p>}
       <button

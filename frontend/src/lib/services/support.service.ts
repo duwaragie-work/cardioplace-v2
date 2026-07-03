@@ -25,6 +25,35 @@ export async function submitContact(input: {
   return (await res.json()) as { ticketNumber: string };
 }
 
+export type SupportTicketStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED';
+
+export interface MyTicketReply {
+  authorType: 'USER' | 'OPS';
+  body: string;
+  sentAt: string;
+}
+export interface MyTicket {
+  id: string;
+  ticketNumber: string;
+  category: SupportCategory;
+  subject: string;
+  body: string;
+  status: SupportTicketStatus;
+  createdAt: string;
+  resolvedAt: string | null;
+  replies: MyTicketReply[];
+}
+
+/** The signed-in user's own support tickets + reply threads (Fix 9). */
+export async function listMyTickets(): Promise<{ data: MyTicket[] }> {
+  const res = await fetchWithAuth(`${API}/api/v2/support/tickets/mine`);
+  if (!res.ok) {
+    const e = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(e?.message || 'Could not load your requests.');
+  }
+  return (await res.json()) as { data: MyTicket[] };
+}
+
 /** Public "I can't sign in" form. No auth — rate-limited server-side by IP. */
 export async function submitLockedOut(input: {
   email: string;

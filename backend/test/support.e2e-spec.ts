@@ -200,7 +200,7 @@ describe('Support System Phase 1 (e2e)', () => {
       await request(server())
         .post(`/v2/admin/support/tickets/${ticketId}/verify-identity`)
         .set('Authorization', `Bearer ${opsToken}`)
-        .send({ method: 'Phone callback', notes: 'Confirmed DOB + last 4' })
+        .send({ rationale: 'Confirmed DOB + last 4 via reply email' })
         .expect(201)
       const t = await prisma.supportTicket.findUnique({ where: { id: ticketId } })
       expect(t?.identityVerified).toBe(true)

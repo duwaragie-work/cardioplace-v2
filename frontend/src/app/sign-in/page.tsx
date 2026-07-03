@@ -51,6 +51,13 @@ function backendMsgToKey(msg: string | undefined): TranslationKey | null {
   return null;
 }
 
+// A deactivated/suspended/blocked account can't sign in via any method — the
+// backend returns "Account is <status>". Surface a link into the locked-out
+// support flow so the user isn't left stuck at a dead-end error (Fix 3).
+function isAccountLockedMsg(msg: string | undefined): boolean {
+  return !!msg && /account is (deactivated|suspended|blocked)/i.test(msg);
+}
+
 // Mirrors admin/src/proxy.ts ADMIN_ROLES — any of these means the user
 // belongs on the admin app, not the patient app.
 const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER', 'HEALPLACE_OPS']);
@@ -71,6 +78,9 @@ export default function RegisterPage() {
   // the rendered text re-translates live when the language is switched.
   const [statusKey, setStatusKey] = useState<TranslationKey | null>(null);
   const [errorKey, setErrorKey] = useState<TranslationKey | null>(null);
+  // Shows the "Contact support to reactivate" CTA when a sign-in attempt is
+  // rejected because the account is deactivated/suspended/blocked (Fix 3).
+  const [showReactivate, setShowReactivate] = useState(false);
   const statusMessage = statusKey ? t(statusKey) : "";
   const errorMessage = errorKey ? t(errorKey) : "";
   const [isRequestingOtp, setIsRequestingOtp] = useState(false);
@@ -174,6 +184,7 @@ export default function RegisterPage() {
   async function handleSendOtp() {
     if (!emailIsValid || isRequestingOtp) return;
     setErrorKey(null);
+    setShowReactivate(false);
     setStatusKey(null);
     setIsRequestingOtp(true);
     try {
@@ -183,7 +194,9 @@ export default function RegisterPage() {
       setStatusKey('register.otpSentSuccess');
       startResendCooldown();
     } catch (err) {
-      setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.failedOtp');
+      const msg = err instanceof Error ? err.message : '';
+      setErrorKey(backendMsgToKey(msg) ?? 'register.failedOtp');
+      if (isAccountLockedMsg(msg)) setShowReactivate(true);
     } finally {
       setIsRequestingOtp(false);
     }
@@ -192,6 +205,7 @@ export default function RegisterPage() {
   async function handleResendOtp() {
     if (!otpSent || resendCooldown > 0 || isResendingOtp) return;
     setErrorKey(null);
+    setShowReactivate(false);
     setStatusKey(null);
     setIsResendingOtp(true);
     try {
@@ -199,7 +213,9 @@ export default function RegisterPage() {
       setStatusKey('register.otpResent');
       startResendCooldown();
     } catch (err) {
-      setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.failedResend');
+      const msg = err instanceof Error ? err.message : '';
+      setErrorKey(backendMsgToKey(msg) ?? 'register.failedResend');
+      if (isAccountLockedMsg(msg)) setShowReactivate(true);
     } finally {
       setIsResendingOtp(false);
     }
@@ -226,6 +242,7 @@ export default function RegisterPage() {
   async function handleSendMagicLink() {
     if (!emailIsValid || isSendingMagicLink) return;
     setErrorKey(null);
+    setShowReactivate(false);
     setStatusKey(null);
     setIsSendingMagicLink(true);
     try {
@@ -234,7 +251,9 @@ export default function RegisterPage() {
       setStatusKey('register.magicLinkSent');
       startResendCooldown();
     } catch (err) {
-      setErrorKey(backendMsgToKey(err instanceof Error ? err.message : '') ?? 'register.failedMagicLink');
+      const msg = err instanceof Error ? err.message : '';
+      setErrorKey(backendMsgToKey(msg) ?? 'register.failedMagicLink');
+      if (isAccountLockedMsg(msg)) setShowReactivate(true);
     } finally {
       setIsSendingMagicLink(false);
     }
@@ -372,6 +391,7 @@ export default function RegisterPage() {
                     if (otpSent) { setOtpSent(false); setOtp(""); }
                     if (statusKey) setStatusKey(null);
                     if (errorKey) setErrorKey(null);
+                    if (showReactivate) setShowReactivate(false);
                   }}
                   onKeyDown={(e) => {
                     // WCAG 2.1.1 (Keyboard): Enter on the email field submits
@@ -506,6 +526,17 @@ export default function RegisterPage() {
                   >
                     {errorMessage || statusMessage}
                   </output>
+                )}
+                {/* Deactivated/suspended accounts can't sign in — route them to
+                    the locked-out support flow with their email pre-filled (Fix 3). */}
+                {showReactivate && (
+                  <a
+                    href={`/support/locked-out?email=${encodeURIComponent(email.trim())}`}
+                    data-testid="signin-deactivated-support-link"
+                    className="block mt-2 text-xs lg:text-sm font-semibold text-[#7B00E0] hover:underline"
+                  >
+                    Account deactivated? Contact support to reactivate →
+                  </a>
                 )}
                 {authMode === "otp" && otpSent && otp.length === 0 && !statusMessage && !errorMessage && (
                   <p className="mt-2 text-[#737373] text-xs lg:text-sm">
