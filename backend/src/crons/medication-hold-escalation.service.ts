@@ -170,6 +170,7 @@ export class MedicationHoldEscalationService {
               channel,
               title: rung.title,
               body,
+              dispatchTrigger: 'SYSTEM_CRON',
             },
           })
         }

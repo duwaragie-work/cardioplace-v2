@@ -31,6 +31,8 @@ const BRAND = 'CP'
 const CLASS_PREFIX = {
   [DisplayIdClass.PATIENT]: 'PAT',
   [DisplayIdClass.STAFF]: 'STF',
+  // System-principal registry (audit, 2026-07-03). CP-SYS-XXXXXXX-C.
+  [DisplayIdClass.SYSTEM]: 'SYS',
 } as const
 const BODY_LEN = 7
 const MAX_ALLOCATION_ATTEMPTS = 3

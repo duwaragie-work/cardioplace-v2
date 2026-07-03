@@ -133,4 +133,9 @@ enum AccountStatus {
   // Permanently closed / tombstoned (phase/28). Irreversible — PII anonymised,
   // PHI retained. Never transitions back to ACTIVE.
   CLOSED
+  // Reserved system-principal accounts (audit registry, 2026-07-03). One row
+  // per cron / engine process so automated PHI writes attribute to a real,
+  // joinable User id instead of null (HIPAA §164.312(b), Humaira Activity 1).
+  // Can NEVER sign in — every auth path hard-refuses this status. roles is [].
+  SYSTEM
 }

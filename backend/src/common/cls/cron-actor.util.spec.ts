@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from './cron-actor.util.js'
+import { setSystemPrincipalRegistry } from './system-principals.js'
 
 /**
  * Cron actor attribution (Humaira N8 / 164.312-T7). runAsCronActor opens a
@@ -28,7 +29,8 @@ describe('runAsCronActor', () => {
     expect(cls.isActive()).toBe(false)
   })
 
-  it('stamps SYSTEM_ACTOR identity + label, nulls the user/request fields', async () => {
+  it('cold registry → actorId null (safe fallback), SYSTEM_ACTOR + label set', async () => {
+    setSystemPrincipalRegistry(null)
     const cls = realCls()
 
     const seen = await runAsCronActor(cls, 'cron-gap-alert', async () => ({
@@ -46,6 +48,24 @@ describe('runAsCronActor', () => {
       ip: null,
       userAgent: null,
     })
+  })
+
+  it('warmed registry → resolves the system principal actorId, keeps SYSTEM_ACTOR + original label', async () => {
+    setSystemPrincipalRegistry(new Map([['gap-alert', 'sys-gap-id']]))
+    const cls = realCls()
+
+    const seen = await runAsCronActor(cls, 'cron-gap-alert', async () => ({
+      actorId: cls.get('actorId'),
+      actorType: cls.get('actorType'),
+      systemActorLabel: cls.get('systemActorLabel'),
+    }))
+
+    expect(seen).toEqual({
+      actorId: 'sys-gap-id',
+      actorType: 'SYSTEM_ACTOR',
+      systemActorLabel: 'cron-gap-alert',
+    })
+    setSystemPrincipalRegistry(null) // reset for other tests
   })
 
   it('preserves the inner function return value', async () => {

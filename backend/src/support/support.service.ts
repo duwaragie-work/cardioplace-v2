@@ -260,6 +260,7 @@ export class SupportService {
           channel: NotificationChannel.DASHBOARD,
           title: 'Support replied to your request',
           body: `Ticket ${ticket.ticketNumber}`,
+          dispatchTrigger: 'SUPPORT_REPLY',
         },
       })
     }
@@ -428,6 +429,7 @@ export class SupportService {
           channel: NotificationChannel.DASHBOARD,
           title: `New support ticket ${ticket.ticketNumber}`,
           body: `${ticket.category} · ${ticket.subject}`,
+          dispatchTrigger: 'SUPPORT_TICKET_CREATED',
         })),
       })
     }

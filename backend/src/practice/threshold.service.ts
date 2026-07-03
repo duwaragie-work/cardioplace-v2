@@ -234,6 +234,7 @@ export class ThresholdService {
           channel: NotificationChannel.PUSH,
           title: 'Monitoring targets updated',
           body: systemMsgThresholdUpdated(),
+          dispatchTrigger: 'THRESHOLD_UPDATED',
         },
       })
     } catch (err) {
