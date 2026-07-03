@@ -87,6 +87,7 @@ describe('MedicationHoldEscalationService', () => {
           userId: 'prov-1',
           patientUserId: 'user-1',
           channel: 'DASHBOARD',
+          dispatchTrigger: 'SYSTEM_CRON', // cron action → visible in the bell
         }),
       }),
     )

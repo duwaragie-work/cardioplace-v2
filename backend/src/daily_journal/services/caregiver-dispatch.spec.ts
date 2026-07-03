@@ -231,7 +231,12 @@ describe('EscalationService — caregiver dispatch (Gap 5)', () => {
     expect(prisma.notification.create).toHaveBeenCalledTimes(1)
     const data = prisma.notification.create.mock.calls[0][0].data
     expect(data).toEqual(
-      expect.objectContaining({ userId: 'cg-user-9', channel: 'DASHBOARD' }),
+      expect.objectContaining({
+        userId: 'cg-user-9',
+        channel: 'DASHBOARD',
+        // Caregiver alert notice → visible in the caregiver bell (not ALERT_*).
+        dispatchTrigger: 'CAREGIVER_UPDATE',
+      }),
     )
     expect(email.sendEmail).not.toHaveBeenCalled()
   })

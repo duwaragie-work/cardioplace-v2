@@ -554,6 +554,8 @@ describe('AlertResolutionService', () => {
           alertId,
           channel: 'PUSH',
           title: 'Care team update',
+          // Patient action notice → visible in the bell (NOT an ALERT_* trigger).
+          dispatchTrigger: 'CARE_TEAM_UPDATE',
         }),
       })
     })
@@ -573,6 +575,7 @@ describe('AlertResolutionService', () => {
           userId: baseAlert.userId,
           channel: 'PUSH',
           title: 'Care team update',
+          dispatchTrigger: 'CARE_TEAM_UPDATE',
         }),
       })
     })

@@ -432,6 +432,9 @@ describe('EscalationService', () => {
           arg?.data?.alertId === 'alert-1',
       )
       expect(patientPush).toBeDefined()
+      // Tab-split: the T+0 ladder row is alert-class, so it carries the
+      // ALERT_CREATED trigger the bell filter hides (project_notification_tab_split).
+      expect(patientPush?.[0]?.data?.dispatchTrigger).toBe('ALERT_CREATED')
     })
 
     it('throws NotFoundException when the alert does not exist', async () => {
@@ -439,6 +442,48 @@ describe('EscalationService', () => {
       await expect(service.dispatchT0ForAlert('missing')).rejects.toThrow(
         /not found/i,
       )
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Chat/voice emergency pages — tagged EMERGENCY_FLAGGED, NOT ALERT_*, because
+  // they have no DeviationAlert backing (EmergencyEvent only) and so never
+  // appear in the Alerts stream; they MUST stay visible in the care-team bell.
+  // project_notification_tab_split_2026_06_04.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('onEmergencyFlagged — care-team pages set EMERGENCY_FLAGGED', () => {
+    it('caregiver + provider DASHBOARD rows all carry EMERGENCY_FLAGGED (never ALERT_*)', async () => {
+      prisma.patientCaregiver = {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([
+          {
+            id: 'cg-1',
+            name: 'Cara Giver',
+            email: null,
+            phone: null,
+            caregiverUserId: 'cg-user-1',
+            notifyChannel: 'DASHBOARD',
+          },
+        ]),
+      }
+      prisma.patientProviderAssignment = {
+        findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue({
+          primaryProviderId: 'primary-1',
+          backupProviderId: 'backup-1',
+        }),
+      }
+
+      await service.onEmergencyFlagged({
+        userId: 'patient-1',
+        situation: 'Chest pain and dizziness',
+        source: 'voice-tool',
+      } as any)
+
+      const triggers = (prisma.notification.create as jest.Mock<any>).mock.calls.map(
+        ([arg]: [any]) => arg?.data?.dispatchTrigger,
+      )
+      // caregiver + primary + backup = 3 DASHBOARD rows, all EMERGENCY_FLAGGED.
+      expect(triggers).toHaveLength(3)
+      expect(triggers.every((t: string) => t === 'EMERGENCY_FLAGGED')).toBe(true)
     })
   })
 
