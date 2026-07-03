@@ -45,6 +45,7 @@ import {
   type BusinessHoursConfig,
 } from '../utils/business-hours.js'
 import { wasEverEnrolled } from '../../practice/enrollment-helpers.js'
+import type { NotificationTrigger } from '../../generated/prisma/enums.js'
 
 /**
  * Cluster 7 A.6 — rules whose primary delivery channel is the caregiver
@@ -213,7 +214,11 @@ export class EscalationService {
                   channel: 'DASHBOARD',
                   title: subject,
                   body,
-                  dispatchTrigger: 'ALERT_ESCALATION',
+                  // EMERGENCY_FLAGGED, not ALERT_*: this chat/voice emergency
+                  // page has no DeviationAlert backing (EmergencyEvent only), so
+                  // it never appears in the Alerts stream — it MUST stay visible
+                  // in the care team's bell. See project_notification_tab_split.
+                  dispatchTrigger: 'EMERGENCY_FLAGGED',
                 },
               })
             }
@@ -250,7 +255,9 @@ export class EscalationService {
             channel: 'DASHBOARD',
             title: subject,
             body,
-            dispatchTrigger: 'ALERT_ESCALATION',
+            // EMERGENCY_FLAGGED, not ALERT_*: no DeviationAlert backing, so this
+            // must stay visible in the provider's bell (not hidden as alert-class).
+            dispatchTrigger: 'EMERGENCY_FLAGGED',
           },
         })
       } catch (err) {
@@ -1094,6 +1101,17 @@ export class EscalationService {
   }): Promise<void> {
     const { alert, step, recipientIds, recipientRoles, eventId } = args
 
+    // Trigger keys the bell-vs-alerts tab split. These ladder rows carry
+    // `alertId` and render in the Alerts stream, so they are the alert-class
+    // triggers the bell hides: T+0 is the alert's first dispatch (ALERT_CREATED),
+    // later steps are ALERT_ESCALATION, and a resolution dispatch is
+    // ALERT_RESOLVED. See project_notification_tab_split_2026_06_04.
+    const dispatchTrigger: NotificationTrigger = args.triggeredByResolution
+      ? 'ALERT_RESOLVED'
+      : step.step === 'T0'
+        ? 'ALERT_CREATED'
+        : 'ALERT_ESCALATION'
+
     // Role ↔ recipientId pairing is 1:1 by position. getRecipientUserIds
     // preserves order.
     for (let i = 0; i < recipientIds.length; i++) {
@@ -1135,6 +1153,7 @@ export class EscalationService {
               title,
               body,
               tips: [],
+              dispatchTrigger,
             },
           })
           .catch((err: unknown) => {
