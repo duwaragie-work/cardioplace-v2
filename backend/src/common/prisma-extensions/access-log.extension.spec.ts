@@ -4,6 +4,7 @@ import {
   computeAccessLogData,
   auditAndReturn,
   stampInlineAudit,
+  stampNotificationActor,
   PHI_MODELS,
   AUDIT_STAMP_MODELS,
 } from './access-log.extension.js'
@@ -406,5 +407,100 @@ describe('stampInlineAudit — inline audit-actor stamping (Task 2)', () => {
     const delArgs = { where: { id: 't-1' } }
     expect(stampInlineAudit('PatientThreshold', 'findUnique', findArgs, USER_CLS)).toBe(findArgs)
     expect(stampInlineAudit('PatientThreshold', 'delete', delArgs, USER_CLS)).toBe(delArgs)
+  })
+})
+
+// A cron that carries a real system-principal actorId (post-2026-07-03,
+// runAsCronActor + registry): actorId set, actorType explicitly SYSTEM_ACTOR.
+const CRON_WITH_ID_CLS = clsWith({
+  actorId: 'sys-escalation',
+  actorType: 'SYSTEM_ACTOR',
+  systemActorLabel: 'cron-escalation-ladder',
+})
+
+describe('computeAccessLogData — cron carrying a principal actorId', () => {
+  it('keeps SYSTEM_ACTOR + label even though actorId is set (reads actorType from CLS, not actorId presence)', () => {
+    const data = computeAccessLogData(
+      'DeviationAlert',
+      'create',
+      { data: {} },
+      { id: 'a-1' },
+      CRON_WITH_ID_CLS,
+    )
+    expect(data).toMatchObject({
+      actorType: 'SYSTEM_ACTOR',
+      actorId: 'sys-escalation',
+      systemActorLabel: 'cron-escalation-ladder',
+    })
+  })
+})
+
+describe('stampInlineAudit — cron with principal actorId stays null inline', () => {
+  it('does NOT stamp createdBy/updatedBy for a SYSTEM_ACTOR write (human edits only)', () => {
+    const args = { data: { sbpUpperTarget: 140 } }
+    // actorId is present, but actorType is SYSTEM_ACTOR → no inline stamp.
+    expect(stampInlineAudit('PatientThreshold', 'create', args, CRON_WITH_ID_CLS)).toBe(args)
+  })
+})
+
+describe('stampNotificationActor — inline who-sent-it on Notification', () => {
+  it('stamps a USER dispatch with the user id + USER type', () => {
+    const out = stampNotificationActor(
+      'Notification',
+      'create',
+      { data: { userId: 'p-1', title: 't', dispatchTrigger: 'ALERT_RESOLVED' } },
+      USER_CLS,
+    ) as any
+    expect(out.data).toMatchObject({
+      sentByActorId: 'prov-1',
+      sentByActorType: 'USER',
+      dispatchTrigger: 'ALERT_RESOLVED', // caller value preserved
+    })
+  })
+
+  it('stamps a cron dispatch with the system principal id + SYSTEM_ACTOR type', () => {
+    const out = stampNotificationActor(
+      'Notification',
+      'create',
+      { data: { userId: 'p-1', title: 't', dispatchTrigger: 'SYSTEM_CRON' } },
+      CRON_WITH_ID_CLS,
+    ) as any
+    expect(out.data).toMatchObject({
+      sentByActorId: 'sys-escalation',
+      sentByActorType: 'SYSTEM_ACTOR',
+    })
+  })
+
+  it('a caller-supplied sentByActorId wins over the CLS stamp', () => {
+    const out = stampNotificationActor(
+      'Notification',
+      'create',
+      { data: { userId: 'p-1', sentByActorId: 'explicit', sentByActorType: 'USER' } },
+      CRON_WITH_ID_CLS,
+    ) as any
+    expect(out.data.sentByActorId).toBe('explicit')
+  })
+
+  it('stamps each row of a createMany', () => {
+    const out = stampNotificationActor(
+      'Notification',
+      'createMany',
+      { data: [{ userId: 'p-1' }, { userId: 'p-2' }] },
+      USER_CLS,
+    ) as any
+    expect(out.data).toEqual([
+      { userId: 'p-1', sentByActorId: 'prov-1', sentByActorType: 'USER' },
+      { userId: 'p-2', sentByActorId: 'prov-1', sentByActorType: 'USER' },
+    ])
+  })
+
+  it('non-Notification model → args unchanged', () => {
+    const args = { data: { email: 'x@y.z' } }
+    expect(stampNotificationActor('User', 'create', args, USER_CLS)).toBe(args)
+  })
+
+  it('reads on Notification → args unchanged', () => {
+    const args = { where: { id: 'n-1' } }
+    expect(stampNotificationActor('Notification', 'findUnique', args, USER_CLS)).toBe(args)
   })
 })

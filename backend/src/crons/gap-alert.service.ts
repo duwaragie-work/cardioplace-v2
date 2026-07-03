@@ -96,6 +96,7 @@ export class GapAlertService {
           channel: NotificationChannel.PUSH,
           title: GAP_ALERT_TITLE,
           body,
+          dispatchTrigger: 'SYSTEM_CRON',
         },
       })
 
@@ -106,6 +107,7 @@ export class GapAlertService {
             channel: NotificationChannel.EMAIL,
             title: GAP_ALERT_TITLE,
             body,
+            dispatchTrigger: 'SYSTEM_CRON',
           },
         })
         await this.emailService.sendEmail(

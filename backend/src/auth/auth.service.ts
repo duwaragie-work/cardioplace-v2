@@ -2762,6 +2762,23 @@ export class AuthService {
       where: { email: normalizedEmail },
       select: { accountStatus: true },
     })
+    // System-principal accounts (audit registry) can NEVER sign in. Return the
+    // generic success shape WITHOUT creating/sending an OTP — info-disclosure-
+    // safe (don't reveal the account exists or that it's a reserved system row).
+    // No OTP is ever minted, so the verify path can never succeed either.
+    if (existingUser && existingUser.accountStatus === AccountStatus.SYSTEM) {
+      await this.logAuthEvent({
+        event: 'otp_blocked',
+        identifier: normalizedEmail,
+        method: 'otp',
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'account_system_principal',
+      })
+      return { message: 'OTP sent successfully' }
+    }
     if (existingUser && existingUser.accountStatus !== AccountStatus.ACTIVE) {
       await this.logAuthEvent({
         event: 'otp_blocked',
@@ -3239,6 +3256,21 @@ export class AuthService {
       where: { email: normalizedEmail },
       select: { accountStatus: true },
     })
+    // System-principal accounts can never sign in. Generic success, no link
+    // minted — info-disclosure-safe (see sendOtp for the rationale).
+    if (existingUser && existingUser.accountStatus === AccountStatus.SYSTEM) {
+      await this.logAuthEvent({
+        event: 'magic_link_blocked',
+        identifier: normalizedEmail,
+        method: 'otp',
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'account_system_principal',
+      })
+      return { message: 'Magic link sent successfully' }
+    }
     if (existingUser && existingUser.accountStatus !== AccountStatus.ACTIVE) {
       await this.logAuthEvent({
         event: 'magic_link_blocked',

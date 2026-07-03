@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { ClsModule } from 'nestjs-cls'
+import { SystemPrincipalsService } from './system-principals.service.js'
 
 /**
  * Request-scoped continuation-local storage for PHI access attribution
@@ -42,6 +43,7 @@ import { ClsModule } from 'nestjs-cls'
       },
     }),
   ],
-  exports: [ClsModule],
+  providers: [SystemPrincipalsService],
+  exports: [ClsModule, SystemPrincipalsService],
 })
 export class CardioplaceClsModule {}

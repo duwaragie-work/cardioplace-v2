@@ -1597,6 +1597,7 @@ export class ProviderService {
         title: notifTitle,
         body: notifBody,
         tips: [],
+        dispatchTrigger: 'CALL_SCHEDULED',
       },
     })
 
@@ -1609,6 +1610,7 @@ export class ProviderService {
           title: notifTitle,
           body: notifBody,
           tips: [],
+          dispatchTrigger: 'CALL_SCHEDULED',
         },
       })
 

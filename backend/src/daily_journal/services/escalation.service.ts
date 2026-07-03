@@ -213,6 +213,7 @@ export class EscalationService {
                   channel: 'DASHBOARD',
                   title: subject,
                   body,
+                  dispatchTrigger: 'ALERT_ESCALATION',
                 },
               })
             }
@@ -249,6 +250,7 @@ export class EscalationService {
             channel: 'DASHBOARD',
             title: subject,
             body,
+            dispatchTrigger: 'ALERT_ESCALATION',
           },
         })
       } catch (err) {
@@ -1346,6 +1348,7 @@ export class EscalationService {
                 channel: 'DASHBOARD',
                 title: 'Caregiver update',
                 body: message,
+                dispatchTrigger: 'CAREGIVER_UPDATE',
               },
             })
             delivered = true
