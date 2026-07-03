@@ -37,6 +37,10 @@ describe('TestControlService — medication-hold escalation cron driver (F33)', 
       notification: {
         create: (jest.fn() as any).mockResolvedValue({}),
       },
+      // Interactive $transaction runs its callback against the same mock client
+      // (no real rollback) — mirrors daily_journal.service.spec.ts. The med-hold
+      // cron wraps its update + notification writes in $transaction.
+      $transaction: jest.fn(async (fn: any) => fn(prisma)),
     }
     const module: TestingModule = await Test.createTestingModule({
       providers: [
