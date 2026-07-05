@@ -24,11 +24,16 @@ model Notification {
   sentByActorId   String? // User.id (USER) or system-principal id (SYSTEM_ACTOR); null when unknown
   sentByActorType String? // 'USER' | 'SYSTEM_ACTOR' — mirrors AccessLog.actorType
   // Why this notification was sent. Set explicitly by the dispatching service
-  // (semantic — can't be inferred from context). Free string for now; may
-  // become an enum. E.g. 'ALERT_CREATED' | 'ALERT_ESCALATION' | 'ALERT_RESOLVED'
-  // | 'THRESHOLD_UPDATED' | 'SUPPORT_REPLY' | 'SUPPORT_RESOLVE' | 'MFA_RESET'
-  // | 'SYSTEM_CRON' | 'SYSTEM_ONBOARDING'.
-  dispatchTrigger String?
+  // (semantic — can't be inferred from context). This is the SOURCE OF TRUTH
+  // for the bell-vs-alerts tab split: the shared BELL_VISIBLE_NOTIFICATION_FILTER
+  // hides the ALERT_* triggers (they belong in the Alerts stream) and shows
+  // every action/system trigger. Keying off this instead of the nullable
+  // `alertId` fixes the leak where an alert row whose journal entry was deleted
+  // (DeviationAlert cascade -> Notification.alert onDelete:SetNull nulls alertId)
+  // was indistinguishable from a legit null-alertId action row.
+  // See project_notification_tab_split_2026_06_04.
+  // NOT NULL (enforced by migration): every dispatch path must declare a trigger.
+  dispatchTrigger NotificationTrigger
   alert             DeviationAlert?     @relation(fields: [alertId], references: [id], onDelete: SetNull)
   escalationEvent   EscalationEvent?    @relation(fields: [escalationEventId], references: [id], onDelete: SetNull)
   user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -38,4 +43,34 @@ model Notification {
   @@unique([alertId, escalationEventId, userId, channel])
   @@index([userId, sentAt(sort: Desc)])
   @@index([userId, readAt])
+}
+
+// Why a Notification was dispatched. The bell-vs-alerts tab split keys off this
+// (not the nullable `alertId`): ALERT_* triggers are hidden from the in-app bell
+// because they already render in the Alerts stream; everything else is a
+// care-team action or system event and stays visible in the bell.
+enum NotificationTrigger {
+  // ── Alert-class — HIDDEN from the bell (surfaced via the Alerts stream). ──
+  ALERT_CREATED // first ladder dispatch (T+0) for an alert
+  ALERT_ESCALATION // subsequent ladder steps (T+4h … T+48h)
+  ALERT_RESOLVED // de-escalation / resolution dispatch
+
+  // ── Care-team action-class — VISIBLE in the bell. ──
+  EMERGENCY_FLAGGED // chat/voice emergency page to caregivers/providers (no DeviationAlert backing → must stay in the bell)
+  CAREGIVER_UPDATE // caregiver-routed alert notice to a consented caregiver inbox
+  CARE_TEAM_UPDATE // patient-facing care-team notice (enrollment/condition review)
+  THRESHOLD_UPDATED // monitoring targets changed
+  MEDICATION_CONTRAINDICATION // intake contraindication flag
+  PROFILE_REJECTED // profile correction / rejection
+  CALL_SCHEDULED // scheduled-call notice
+  SUPPORT_REPLY // support ticket reply
+  SUPPORT_TICKET_CREATED // support ticket created
+  SUPPORT_RESOLVE // support ticket resolved
+  MFA_RESET // MFA reset notice
+
+  // ── System-class — VISIBLE in the bell. ──
+  SYSTEM_CRON // cron-emitted notice (gap alert, monthly re-ask, med-hold)
+  SYSTEM_ONBOARDING // onboarding system notice
+  SYSTEM_SEED // seeded demo notification
+  SYSTEM_OTHER // catch-all for un-classified legacy rows (backfill default)
 }

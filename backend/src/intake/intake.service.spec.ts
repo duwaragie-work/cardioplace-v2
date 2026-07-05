@@ -240,6 +240,7 @@ describe('IntakeService.rejectProfileField idempotency (IVR-16)', () => {
     expect(arg.userId).toBe('p1') // the patient, not the admin actor
     expect(arg.channel).toBe('PUSH') // lands in the patient Notifications tab
     expect(arg.body).toMatch(/bradycardia history/i) // names the rejected field
+    expect(arg.dispatchTrigger).toBe('PROFILE_REJECTED') // action → visible in the bell
   })
 
   it('does not notify the patient on an idempotent no-op reject', async () => {

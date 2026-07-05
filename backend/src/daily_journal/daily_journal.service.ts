@@ -24,6 +24,7 @@ import {
   VerifierRole,
   VerificationChangeType,
 } from '../generated/prisma/enums.js'
+import type { NotificationTrigger } from '../generated/prisma/enums.js'
 import type { ActorUser } from '../common/patient-access.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from './constants/events.js'
@@ -85,26 +86,41 @@ const AUDIT_SYMPTOM_FLAGS = [
 ] as const
 
 /**
- * Channel-aware predicate for the in-app bell LIST + unread COUNT. Both
- * exclusions are READ-SIDE ONLY — the escalation write path
- * (`Notification.create`) and the SMTP email send are untouched.
+ * Predicate for the in-app bell LIST + unread COUNT. Both exclusions are
+ * READ-SIDE ONLY — the escalation write path (`Notification.create`) and the
+ * SMTP email send are untouched.
  *  • EMAIL rows — outbound deliveries, not in-app bell state. A patient with
  *    both a PUSH and an EMAIL row for one event was seeing it twice while the
  *    badge counted it once (H3 #80).
- *  • alert-linked PUSH rows — escalation T+0 dispatch writes a PUSH
- *    Notification row to the PATIENT for emergency-class alerts (BP_LEVEL_2,
- *    symptom-override, angioedema). The alert is already shown in the Alerts
- *    tab, so this must not ALSO render in the Notifications tab (H5 G.4). The
- *    row STAYS in the DB as the hook for a future real-push service — there is
- *    no out-of-app push delivery today. System-action PUSH rows (alertId null
- *    — med-hold, threshold, profile-reject, gap-alert) remain visible.
+ *  • ALERT_* trigger rows — the escalation ladder's clinical alerts already
+ *    render in the Alerts stream (getAlerts), so they must not ALSO render in
+ *    the bell (H5 G.4). This now keys off `dispatchTrigger`, not the old
+ *    `alertId != null AND PUSH` heuristic, which leaked once a DeviationAlert
+ *    cascade nulled `alertId` (journal-entry delete → onDelete:SetNull). The
+ *    rows STAY in the DB. EMERGENCY_FLAGGED (chat/voice pages with no
+ *    DeviationAlert backing) is NOT alert-class here — it stays visible.
  * Memory: project_notification_tab_split_2026_06_04,
  *         project_no_push_service_pilot_gap_2026_06_04.
  */
+// Alert-class triggers — hidden from the in-app bell because they already
+// render in the Alerts stream (getAlerts). Keyed off dispatchTrigger, NOT the
+// nullable `alertId`: a null alertId is a legitimate, common state for action
+// rows, AND the system actively produces null-alertId ALERT rows
+// (DeviationAlert.journalEntry onDelete:Cascade → Notification.alert
+// onDelete:SetNull nulls alertId on delete), so alertId cannot distinguish an
+// alert from an action. dispatchTrigger can. EMERGENCY_FLAGGED is deliberately
+// NOT here — chat/voice emergency pages have no DeviationAlert backing and must
+// stay visible. See project_notification_tab_split_2026_06_04.
+const ALERT_TRIGGERS: NotificationTrigger[] = [
+  'ALERT_CREATED',
+  'ALERT_ESCALATION',
+  'ALERT_RESOLVED',
+]
+
 const BELL_VISIBLE_NOTIFICATION_FILTER: Prisma.NotificationWhereInput = {
   AND: [
     { channel: { not: 'EMAIL' } },
-    { NOT: { AND: [{ alertId: { not: null } }, { channel: 'PUSH' }] } },
+    { dispatchTrigger: { notIn: ALERT_TRIGGERS } },
   ],
 }
 

@@ -227,6 +227,10 @@ export class AlertResolutionService {
             title: 'Care team update',
             body,
             tips: [],
+            // Action notice ("your care team acted"), not the alert itself —
+            // it belongs in the bell, so it is CARE_TEAM_UPDATE (visible), NOT
+            // an ALERT_* trigger. The old alertId-based filter wrongly hid it.
+            dispatchTrigger: 'CARE_TEAM_UPDATE',
           },
         })
         .catch((err: unknown) => {
@@ -401,6 +405,9 @@ export class AlertResolutionService {
           title: 'Care team update',
           body: `Angioedema alert reviewed: ${actionLabel}`,
           tips: [],
+          // Action notice, not the alert — visible in the bell. See sibling
+          // resolution notification above.
+          dispatchTrigger: 'CARE_TEAM_UPDATE',
         },
       })
       .catch((err: unknown) => {
