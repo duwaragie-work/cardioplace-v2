@@ -327,11 +327,17 @@ export class ProviderService {
     const usersWithEntries = await this.prisma.user.findMany({
       where: {
         enrollmentStatus: 'ENROLLED',
-        journalEntries: { some: {} },
+        // Soft-delete (L5): only count patients with at least one LIVE reading,
+        // so a patient whose readings are all soft-deleted doesn't drag the
+        // BP-control denominator.
+        journalEntries: { some: { deletedAt: null } },
         ...userWhereScope,
       },
       include: {
         journalEntries: {
+          // Soft-delete (L5): nested include the extension can't reach — a
+          // soft-deleted latest reading must not skew the BP-control rate.
+          where: { deletedAt: null },
           orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: { systolicBP: true },
@@ -405,6 +411,9 @@ export class ProviderService {
           select: { primaryProviderId: true, backupProviderId: true },
         },
         journalEntries: {
+          // Soft-delete (L5): nested include the extension can't reach — a
+          // soft-deleted reading must not surface as the patient's latest BP.
+          where: { deletedAt: null },
           orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: {
@@ -710,6 +719,9 @@ export class ProviderService {
       include: {
         patientProfile: { select: this.profileSelect },
         journalEntries: {
+          // Soft-delete (L5): nested include the extension can't reach — a
+          // soft-deleted reading must not surface as the patient's latest BP.
+          where: { deletedAt: null },
           orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: {
