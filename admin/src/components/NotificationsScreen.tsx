@@ -54,7 +54,6 @@ type ProviderAlert = PatientAlert & {
     // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
     displayId: string | null;
   } | null;
-  followUpScheduledAt: string | null;
 };
 
 type TierFilter = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
@@ -551,7 +550,6 @@ export default function NotificationsScreen() {
                         ackInFlight={acking.has(a.id)}
                         patientName={a.patient?.name ?? 'Unknown'}
                         patientDisplayId={a.patient?.displayId ?? null}
-                        followUpScheduledAt={a.followUpScheduledAt}
                       />
                     </div>
                   );

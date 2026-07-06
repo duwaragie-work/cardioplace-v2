@@ -25,7 +25,6 @@ export interface Alert {
   level: 'L1' | 'L2';
   color: 'red' | 'amber';
   patientId: string;
-  followUpScheduledAt: string | null;
 }
 
 export interface AlertDetail {
@@ -80,7 +79,6 @@ interface AlertPanelProps {
   detailLoading: boolean;
   onClose: () => void;
   onReview: (id: string) => void;
-  onSchedule: (alert: Alert) => void;
 }
 
 const SPRING = { type: 'spring' as const, stiffness: 320, damping: 30 };
@@ -104,7 +102,6 @@ export default function AlertPanel({
   detailLoading,
   onClose,
   onReview,
-  onSchedule,
 }: AlertPanelProps) {
   const { t } = useLanguage();
 
@@ -452,36 +449,6 @@ export default function AlertPanel({
               <CheckCircle2 className="w-4 h-4" />
               {t('provider.markReviewed')}
             </motion.button>
-            {alert.followUpScheduledAt ? (
-              <div
-                className="w-full h-11 rounded-full font-bold text-sm border-2 flex items-center justify-center gap-2"
-                style={{
-                  borderColor: '#0D9488',
-                  backgroundColor: '#CCFBF1',
-                  color: '#0D9488',
-                  cursor: 'default',
-                }}
-              >
-                {t('provider.followUpScheduled')} &mdash;{' '}
-                {new Date(alert.followUpScheduledAt).toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                })}
-              </div>
-            ) : (
-              <motion.button
-                onClick={() => onSchedule(alert)}
-                className="w-full h-11 rounded-full font-bold text-sm border-2 bg-white flex items-center justify-center gap-2"
-                style={{
-                  borderColor: 'var(--brand-primary-purple)',
-                  color: 'var(--brand-primary-purple)',
-                }}
-                whileHover={{ scale: 1.02, backgroundColor: '#f5f0ff' }}
-                whileTap={{ scale: 0.97 }}
-              >
-                {t('provider.scheduleFollowUp')}
-              </motion.button>
-            )}
           </div>
         </>
       )}

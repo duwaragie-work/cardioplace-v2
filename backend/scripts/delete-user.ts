@@ -41,7 +41,6 @@ async function run() {
   const alerts = await prisma.deviationAlert.count({ where: { userId: user.id } })
   const escalations = await prisma.escalationEvent.count({ where: { userId: user.id } })
   const notifications = await prisma.notification.count({ where: { userId: user.id } })
-  const calls = await prisma.scheduledCall.count({ where: { userId: user.id } })
 
   // Cascade delete
   await prisma.user.delete({ where: { id: user.id } })
@@ -51,7 +50,6 @@ async function run() {
   console.log(`  Deviation alerts: ${alerts}`)
   console.log(`  Escalations:      ${escalations}`)
   console.log(`  Notifications:    ${notifications}`)
-  console.log(`  Scheduled calls:  ${calls}`)
   console.log(`  User:             ${user.email}`)
   console.log('\nDone!')
 

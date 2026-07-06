@@ -21,7 +21,6 @@ function makeService(scopeFragment: unknown) {
   const findMany = (jest.fn() as jest.Mock<any>).mockResolvedValue([])
   const prisma = {
     deviationAlert: { findMany },
-    scheduledCall: { findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]) },
     user: { findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]) },
   }
   const access = { alertQueueScopeFilter, patientScopeFilter }
