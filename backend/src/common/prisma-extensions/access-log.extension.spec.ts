@@ -148,25 +148,39 @@ describe('computeAccessLogData — PHI gate', () => {
     expect(computeAccessLogData('User', 'someExoticOp', {}, null, USER_CLS)).toBeNull()
   })
 
-  it('PHI_MODELS matches the current audited set (updated when N4 extends it)', () => {
-    // The canonical inventory lives in docs/EPHI_INVENTORY.md and is enforced
-    // by phi-inventory.ts + the conformance suite (N3). This snapshot mirrors
-    // the runtime set on this branch: 7 original + 3 Support (already on dev).
-    // N4 extends both this test and PHI_MODELS to the full 20-model set.
+  it('PHI_MODELS matches the 20-model canonical inventory (docs/EPHI_INVENTORY.md Table 1)', () => {
+    // Snapshot of the audited set as of N4 (2026-07-08). The canonical list is
+    // in docs/EPHI_INVENTORY.md; the N3 conformance suite (phi-inventory.ts,
+    // Wed 9 Jul) will assert equality against a shared constant so drift here
+    // fails the build automatically.
     expect([...PHI_MODELS].sort()).toEqual(
       [
-        'DeviationAlert',
+        // Original 7
+        'User',
+        'PatientProfile',
         'JournalEntry',
+        'DeviationAlert',
         'Notification',
         'PatientMedication',
-        'PatientProfile',
         'PatientThreshold',
+        // Support triad (already on dev)
         'SupportTicket',
-        'SupportTicketAction',
         'SupportTicketReply',
-        'User',
+        'SupportTicketAction',
+        // N4 additions
+        'EscalationEvent',
+        'ProfileVerificationLog',
+        'RejectedReadingLog',
+        'PatientCaregiver',
+        'CaregiverDispatchLog',
+        'EmergencyEvent',
+        'Conversation',
+        'Session',
+        'MonthlyReportSnapshot',
+        'PatientProviderAssignment',
       ].sort(),
     )
+    expect(PHI_MODELS.size).toBe(20)
   })
 })
 

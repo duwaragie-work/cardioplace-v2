@@ -22,12 +22,24 @@ import { writeAuditWithRetry } from '../audit/write-with-retry.js'
  *      in PHI_MODELS anyway, so even an extended write would be skipped.
  */
 
-// The ten PHI models. Everything else (AccessLog itself, AuthLog,
-// AuthSession, RefreshToken, Practice, PracticeProvider, DisplayId, …) is not
-// logged. `Notification` IS PHI — it carries clinical alert context — so both
-// its reads and writes are logged (the sprint-doc self-read carveout was
-// over-scoped; log everything on the model).
+// The 20 PHI models — source of truth is docs/EPHI_INVENTORY.md Table 1.
+// Everything else (AccessLog itself, AuthLog, AuthSession, RefreshToken,
+// Practice, PracticeProvider, DisplayId, Content*, Device, …) is deliberately
+// NOT logged; see EPHI_INVENTORY Table 3 for the full non-PHI catalog with
+// rationale.
+//
+// Change-control rule: any PR that adds a new Prisma model MUST update
+// EPHI_INVENTORY.md first, then this set. The N3 conformance suite
+// (backend/src/common/prisma-extensions/phi-inventory.ts, coming Wed 9 Jul)
+// asserts these two lists agree and fails the build if they drift.
+//
+// N4 (2026-07-08) — extended from 10 → 20 per docs/EPHI_INVENTORY.md.
+// The 10 additions cover: escalation history, clinical audit trails, raw
+// reading rejections, caregiver identity + dispatch, chat/voice content, org
+// report snapshots, and the care-team assignment relationship (§164.514
+// identifier).
 export const PHI_MODELS: ReadonlySet<string> = new Set([
+  // Original 7 (2026-06-30) — core clinical + identity.
   'User',
   'PatientProfile',
   'JournalEntry',
@@ -35,12 +47,22 @@ export const PHI_MODELS: ReadonlySet<string> = new Set([
   'Notification',
   'PatientMedication',
   'PatientThreshold',
-  // Support System — a ticket's body/email/category can carry patient PHI and
-  // the ops-action trail touches account state, so its reads/writes are audited
-  // too (Fix 1, HIPAA §164.312(b)).
+  // Support System (2026-07-03) — a ticket's body/email/category can carry
+  // patient PHI and the ops-action trail touches account state.
   'SupportTicket',
   'SupportTicketReply',
   'SupportTicketAction',
+  // N4 (2026-07-08) — additions per EPHI_INVENTORY.md Table 1 rows 8–20.
+  'EscalationEvent', // alert dispatch history + ack/resolve trail
+  'ProfileVerificationLog', // previousValue/newValue snapshots of clinical edits
+  'RejectedReadingLog', // raw BP/pulse (the rejected ones); same content as JournalEntry
+  'PatientCaregiver', // caregiver identity + PHI-sharing consent
+  'CaregiverDispatchLog', // §164.528 disclosure trail — who was told what
+  'EmergencyEvent', // patient emergency prompt/narrative
+  'Conversation', // chat history — patient-typed clinical Q&A
+  'Session', // chat session container — same conversational stream
+  'MonthlyReportSnapshot', // frozen per-practice payload, per-patient adherence
+  'PatientProviderAssignment', // care-team relationship (§164.514 identifier)
 ])
 
 /**
