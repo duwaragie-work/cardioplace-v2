@@ -5,6 +5,7 @@ import { PrismaClient } from '../generated/prisma/client.js'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
 import { accessLogExtension } from '../common/prisma-extensions/access-log.extension.js'
+import { softDeleteJournalEntryExtension } from '../common/prisma-extensions/soft-delete.extension.js'
 
 /**
  * Prisma error codes that indicate a stale or closed connection — usually
@@ -108,7 +109,14 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     //
     // The extension is handed the base `this` as its write client, so its
     // AccessLog inserts never re-enter the extension (no recursion).
-    const extended = this.$extends(accessLogExtension(cls, this))
+    //
+    // Chained (2026-07-06, HIPAA L5): the soft-delete filter injects
+    // `deletedAt: null` into every top-level JournalEntry read so soft-deleted
+    // readings drop out of lists / averages / reports. It composes with the
+    // audit extension — both wrap each JournalEntry operation.
+    const extended = this.$extends(accessLogExtension(cls, this)).$extends(
+      softDeleteJournalEntryExtension(),
+    )
 
     // Members that must resolve to THIS class instance, never the extended
     // client: our prototype methods (onModuleInit, withConnectionRetry) and

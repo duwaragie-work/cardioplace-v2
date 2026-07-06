@@ -528,6 +528,12 @@ export async function seedPatients(
     // on journalEntry, so any §G alert bound to these entries is cascaded
     // here and recreated by seedState (which runs after seedPatients in
     // run.ts) — net state stays idempotent.
+    // Delete this patient's notifications BEFORE the journal wipe. journalEntry
+    // delete cascades to its DeviationAlerts, whose Notification.alert is
+    // onDelete:SetNull — that would leave orphaned null-alertId alert rows that
+    // used to leak into the bell. Removing them outright kills the leak source
+    // every reseed. See project_notification_tab_split_2026_06_04.
+    await prisma.notification.deleteMany({ where: { userId: user.id } })
     await prisma.journalEntry.deleteMany({ where: { userId: user.id } })
     for (const r of p.readings) {
       await prisma.journalEntry.create({

@@ -10,6 +10,7 @@ import {
   canDeactivateUser,
   invitableRoles,
   inviteRequiresPractice,
+  canManageAudit,
 } from './roleGates';
 
 // 2026-07-01 access-scope patch — MED_DIR practice-scoped admin authority +
@@ -172,5 +173,27 @@ describe('roleGates — 2026-07-01 access-scope patch', () => {
     it('MED_DIR invites require a practice pick', () => {
       expect(inviteRequiresPractice({ roles: ['MEDICAL_DIRECTOR'] }, 'PROVIDER')).toBe(true);
     });
+  });
+});
+
+// HIPAA L1/L2 — the audit-review console is OPS oversight; role alone is
+// SUPER_ADMIN / HEALPLACE_OPS only (the training-ack gate is enforced
+// separately in <AuditAccessGate/>). Mirrors backend @Roles on the L2 read
+// controllers.
+describe('canManageAudit (audit console — org-wide only)', () => {
+  it('allows SUPER_ADMIN and HEALPLACE_OPS', () => {
+    expect(canManageAudit({ roles: ['SUPER_ADMIN'] })).toBe(true);
+    expect(canManageAudit({ roles: ['HEALPLACE_OPS'] })).toBe(true);
+  });
+  it('rejects PROVIDER, MEDICAL_DIRECTOR, COORDINATOR, PATIENT', () => {
+    expect(canManageAudit({ roles: ['PROVIDER'] })).toBe(false);
+    expect(canManageAudit({ roles: ['MEDICAL_DIRECTOR'] })).toBe(false);
+    expect(canManageAudit({ roles: ['COORDINATOR'] })).toBe(false);
+    expect(canManageAudit({ roles: ['PATIENT'] })).toBe(false);
+  });
+  it('rejects empty / null / undefined role input', () => {
+    expect(canManageAudit({ roles: [] })).toBe(false);
+    expect(canManageAudit(null)).toBe(false);
+    expect(canManageAudit(undefined)).toBe(false);
   });
 });

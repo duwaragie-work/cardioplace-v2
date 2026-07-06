@@ -74,6 +74,9 @@ describe('SupportService', () => {
       // Ops notified — email to the inbox + one dashboard row per ops user.
       expect(email.sendEmail.mock.calls[0][0]).toBe('ops@healplace.com')
       expect(prisma.notification.createMany).toHaveBeenCalled()
+      // Every dashboard row declares its trigger (action → visible in the bell).
+      const notifRows = prisma.notification.createMany.mock.calls[0][0].data
+      expect(notifRows[0].dispatchTrigger).toBe('SUPPORT_TICKET_CREATED')
     })
 
     it('locked-out lands unverified + HIGH priority', async () => {

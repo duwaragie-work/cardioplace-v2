@@ -2,13 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, Phone, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/patients', label: 'Patients', icon: Users },
-  { href: '/scheduled-calls', label: 'Calls', icon: Phone },
 ];
 
 const HIDE_ON_PATHS = new Set<string>(['/', '/home', '/about', '/sign-in']);

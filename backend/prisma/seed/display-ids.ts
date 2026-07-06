@@ -14,6 +14,8 @@ const BRAND = 'CP'
 const CLASS_PREFIX = {
   [DisplayIdClass.PATIENT]: 'PAT',
   [DisplayIdClass.STAFF]: 'STF',
+  // System-principal registry (audit, 2026-07-03). CP-SYS-XXXXXXX-C.
+  [DisplayIdClass.SYSTEM]: 'SYS',
 } as const
 const BODY_LEN = 7
 
@@ -34,7 +36,7 @@ function computeCheckDigit(payload: string): string {
   return ALPHABET[(RADIX - (sum % RADIX)) % RADIX]!
 }
 
-function generateCanonical(cls: DisplayIdClass): string {
+export function generateCanonical(cls: DisplayIdClass): string {
   let body = ''
   for (let i = 0; i < BODY_LEN; i++) {
     body += ALPHABET[randomInt(0, RADIX)]
@@ -42,7 +44,7 @@ function generateCanonical(cls: DisplayIdClass): string {
   return `${BRAND}${CLASS_PREFIX[cls]}${body}${computeCheckDigit(body)}`
 }
 
-function formatForDisplay(canonical: string): string {
+export function formatForDisplay(canonical: string): string {
   return `${canonical.slice(0, 2)}-${canonical.slice(2, 5)}-${canonical.slice(5, 12)}-${canonical.slice(12)}`
 }
 
@@ -92,8 +94,13 @@ export async function seedDisplayIds(prisma: PrismaClient): Promise<void> {
     const cls = user.roles.includes('PATIENT')
       ? DisplayIdClass.PATIENT
       : DisplayIdClass.STAFF
-    await prisma.displayId.create({
-      data: {
+    // Idempotent: a prior seed run may already hold this value in the ledger.
+    // upsert (no-op on the existing row) makes re-seeding a non-fresh DB safe
+    // instead of throwing a P2002 unique violation on `value`.
+    await prisma.displayId.upsert({
+      where: { value: user.displayId! },
+      update: {},
+      create: {
         value: user.displayId!,
         display: formatForDisplay(user.displayId!),
         class: cls,

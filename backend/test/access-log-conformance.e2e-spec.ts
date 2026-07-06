@@ -238,7 +238,7 @@ describe('AccessLog conformance — every PHI-model write produces an audit row 
       stamp: false,
       write: () =>
         prisma.notification.create({
-          data: { userId: patientId, channel: 'PUSH', title: 'Conformance', body: 'x' },
+          data: { userId: patientId, channel: 'PUSH', title: 'Conformance', body: 'x', dispatchTrigger: 'SYSTEM_OTHER' },
         }),
     },
     {

@@ -138,14 +138,20 @@ export function computeAccessLogData(
   if (!action) return null // unknown op — don't log
 
   const actorId = cls.get<string | null>('actorId') ?? null
-  // No CLS actor (startup seeding, cron, raw $connect paths) → attribute to the
-  // system actor rather than throwing. Cron handlers wrapped in runAsCronActor
-  // carry a systemActorLabel so the SYSTEM_ACTOR row names its process.
-  const actorType: 'USER' | 'SYSTEM_ACTOR' = actorId ? 'USER' : 'SYSTEM_ACTOR'
-  // Only meaningful for system-actor writes; a real user is never a cron.
-  const systemActorLabel = actorId
-    ? null
-    : (cls.get<string | null>('systemActorLabel') ?? null)
+  // actorType comes from CLS, NOT from "is actorId set". Since 2026-07-03 a cron
+  // carries a real system-principal actorId (runAsCronActor) yet must still log
+  // as SYSTEM_ACTOR — inferring the type from actorId presence would wrongly
+  // flip it to USER. Fallback preserves pre-fix behaviour for paths that never
+  // set actorType (raw startup seeding / $connect): actor present ⇒ USER.
+  const actorType: 'USER' | 'SYSTEM_ACTOR' =
+    (cls.get<'USER' | 'SYSTEM_ACTOR' | null>('actorType') ?? null) ??
+    (actorId ? 'USER' : 'SYSTEM_ACTOR')
+  // The cron label names the process for any SYSTEM_ACTOR write (now including
+  // ones that also carry a principal actorId). Null for USER writes.
+  const systemActorLabel =
+    actorType === 'SYSTEM_ACTOR'
+      ? (cls.get<string | null>('systemActorLabel') ?? null)
+      : null
   const ip = cls.get<string | null>('ip') ?? null
   const userAgent = cls.get<string | null>('userAgent') ?? null
 
@@ -194,7 +200,14 @@ export function stampInlineAudit(
   if (!model || !AUDIT_STAMP_MODELS.has(model)) return args
 
   const actorId = cls.get<string | null>('actorId') ?? null
-  if (!actorId) return args // SYSTEM_ACTOR / seed / cron → leave inline fields null
+  // Inline "changed by Dr. X" fields are for HUMAN edits only. A cron now
+  // carries a principal actorId, so gate on actorType (not actorId presence) to
+  // keep system/cron/seed writes null inline — AccessLog still records them with
+  // the cron label + principal id.
+  const actorType =
+    (cls.get<'USER' | 'SYSTEM_ACTOR' | null>('actorType') ?? null) ??
+    (actorId ? 'USER' : 'SYSTEM_ACTOR')
+  if (actorType !== 'USER' || !actorId) return args
 
   const a = (args ?? {}) as Record<string, unknown>
 
@@ -258,6 +271,59 @@ export function stampInlineAudit(
 }
 
 /**
+ * Inline actor stamp for Notification (audit, 2026-07-03; HIPAA §164.312(b),
+ * Humaira Activity 1 item 1). On create / createMany, injects `sentByActorId` +
+ * `sentByActorType` from the CLS actor so the Notification row itself answers
+ * "who sent this" without a join to AccessLog.
+ *
+ * Unlike the AUDIT_STAMP_MODELS inline stamp, this fires for BOTH USER and
+ * SYSTEM_ACTOR writes — a cron legitimately sends notifications, and the whole
+ * point is that its principal id lands on the row. `dispatchTrigger` is NOT set
+ * here (it's semantic — the dispatching service passes it); a caller-supplied
+ * value (including sentByActor*) wins via spread order.
+ *
+ * Returns a NEW args object; non-Notification models / reads / deletes pass
+ * through unchanged.
+ */
+export function stampNotificationActor(
+  model: string | undefined,
+  operation: string,
+  args: unknown,
+  cls: ClsService,
+): unknown {
+  if (model !== 'Notification') return args
+  if (operation !== 'create' && operation !== 'createMany') return args
+
+  const actorId = cls.get<string | null>('actorId') ?? null
+  const actorType =
+    (cls.get<'USER' | 'SYSTEM_ACTOR' | null>('actorType') ?? null) ??
+    (actorId ? 'USER' : 'SYSTEM_ACTOR')
+  const stamp = { sentByActorId: actorId, sentByActorType: actorType }
+
+  const a = (args ?? {}) as Record<string, unknown>
+
+  if (operation === 'create') {
+    return {
+      ...a,
+      // stamp first so a caller-provided value (rare) wins.
+      data: { ...stamp, ...((a.data as Record<string, unknown>) ?? {}) },
+    }
+  }
+  // createMany — data is an array (or, less commonly, a single object).
+  const rows = a.data
+  if (Array.isArray(rows)) {
+    return {
+      ...a,
+      data: rows.map((r) => ({ ...stamp, ...(r as Record<string, unknown>) })),
+    }
+  }
+  return {
+    ...a,
+    data: { ...stamp, ...((rows as Record<string, unknown>) ?? {}) },
+  }
+}
+
+/**
  * The `$allOperations` body, extracted so it's directly unit-testable with a
  * stub `query` (no need to reach into Prisma's `defineExtension` internals):
  * run the real query, decide whether to audit, fire-and-forget the write, and
@@ -273,10 +339,13 @@ export async function auditAndReturn(
   cls: ClsService,
   basePrisma: Pick<PrismaClient, 'accessLog'>,
 ): Promise<unknown> {
-  // Inline audit stamp BEFORE the write runs, so createdByActorId /
-  // updatedByActorId are persisted with the row itself (not just in AccessLog).
-  // No-op for non-stamp models, reads/deletes, and system-actor writes.
-  const stampedArgs = stampInlineAudit(ctx.model, ctx.operation, ctx.args, cls)
+  // Inline audit stamps BEFORE the write runs, so the actor columns are
+  // persisted with the row itself (not just in AccessLog). Both are no-ops for
+  // the models / operations they don't target:
+  //   • stampInlineAudit — createdByActorId/updatedByActorId, HUMAN writes only.
+  //   • stampNotificationActor — sentByActorId/sentByActorType, USER + SYSTEM.
+  const inlineStamped = stampInlineAudit(ctx.model, ctx.operation, ctx.args, cls)
+  const stampedArgs = stampNotificationActor(ctx.model, ctx.operation, inlineStamped, cls)
 
   // Run the real query first — its result/latency must be unaffected by
   // auditing. A throwing read (e.g. findUniqueOrThrow miss) propagates here

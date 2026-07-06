@@ -24,6 +24,7 @@ import {
   VerifierRole,
   VerificationChangeType,
 } from '../generated/prisma/enums.js'
+import type { NotificationTrigger } from '../generated/prisma/enums.js'
 import type { ActorUser } from '../common/patient-access.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from './constants/events.js'
@@ -85,26 +86,41 @@ const AUDIT_SYMPTOM_FLAGS = [
 ] as const
 
 /**
- * Channel-aware predicate for the in-app bell LIST + unread COUNT. Both
- * exclusions are READ-SIDE ONLY — the escalation write path
- * (`Notification.create`) and the SMTP email send are untouched.
+ * Predicate for the in-app bell LIST + unread COUNT. Both exclusions are
+ * READ-SIDE ONLY — the escalation write path (`Notification.create`) and the
+ * SMTP email send are untouched.
  *  • EMAIL rows — outbound deliveries, not in-app bell state. A patient with
  *    both a PUSH and an EMAIL row for one event was seeing it twice while the
  *    badge counted it once (H3 #80).
- *  • alert-linked PUSH rows — escalation T+0 dispatch writes a PUSH
- *    Notification row to the PATIENT for emergency-class alerts (BP_LEVEL_2,
- *    symptom-override, angioedema). The alert is already shown in the Alerts
- *    tab, so this must not ALSO render in the Notifications tab (H5 G.4). The
- *    row STAYS in the DB as the hook for a future real-push service — there is
- *    no out-of-app push delivery today. System-action PUSH rows (alertId null
- *    — med-hold, threshold, profile-reject, gap-alert) remain visible.
+ *  • ALERT_* trigger rows — the escalation ladder's clinical alerts already
+ *    render in the Alerts stream (getAlerts), so they must not ALSO render in
+ *    the bell (H5 G.4). This now keys off `dispatchTrigger`, not the old
+ *    `alertId != null AND PUSH` heuristic, which leaked once a DeviationAlert
+ *    cascade nulled `alertId` (journal-entry delete → onDelete:SetNull). The
+ *    rows STAY in the DB. EMERGENCY_FLAGGED (chat/voice pages with no
+ *    DeviationAlert backing) is NOT alert-class here — it stays visible.
  * Memory: project_notification_tab_split_2026_06_04,
  *         project_no_push_service_pilot_gap_2026_06_04.
  */
+// Alert-class triggers — hidden from the in-app bell because they already
+// render in the Alerts stream (getAlerts). Keyed off dispatchTrigger, NOT the
+// nullable `alertId`: a null alertId is a legitimate, common state for action
+// rows, AND the system actively produces null-alertId ALERT rows
+// (DeviationAlert.journalEntry onDelete:Cascade → Notification.alert
+// onDelete:SetNull nulls alertId on delete), so alertId cannot distinguish an
+// alert from an action. dispatchTrigger can. EMERGENCY_FLAGGED is deliberately
+// NOT here — chat/voice emergency pages have no DeviationAlert backing and must
+// stay visible. See project_notification_tab_split_2026_06_04.
+const ALERT_TRIGGERS: NotificationTrigger[] = [
+  'ALERT_CREATED',
+  'ALERT_ESCALATION',
+  'ALERT_RESOLVED',
+]
+
 const BELL_VISIBLE_NOTIFICATION_FILTER: Prisma.NotificationWhereInput = {
   AND: [
     { channel: { not: 'EMAIL' } },
-    { NOT: { AND: [{ alertId: { not: null } }, { channel: 'PUSH' }] } },
+    { dispatchTrigger: { notIn: ALERT_TRIGGERS } },
   ],
 }
 
@@ -1425,10 +1441,15 @@ export class DailyJournalService {
   }
 
   /**
-   * Hard delete (soft-delete is paused with Chunk E). `actor` set = care-team
-   * delete via the admin readings endpoints — ADMIN_READING_DELETED audit row
-   * and NO session re-evaluation emit. Full row fetched (not a narrow select)
-   * because the audit snapshot must capture the state being destroyed.
+   * Soft delete (HIPAA L5, Duwaragie sign-off 2026-07-06). Stamps `deletedAt`
+   * instead of removing the row, so the reading's fired DeviationAlert +
+   * escalations + notifications survive (the onDelete: Cascade never fires) —
+   * the clinically-conservative "amend, don't destroy" approach. The reading
+   * drops out of all normal reads via the soft-delete Prisma client extension.
+   * `actor` set = care-team delete via the admin readings endpoints —
+   * ADMIN_READING_DELETED audit row and NO session re-evaluation emit. Full row
+   * fetched (not a narrow select) because the audit snapshot must capture the
+   * state at delete time.
    */
   async delete(
     userId: string,
@@ -1448,13 +1469,15 @@ export class DailyJournalService {
     }
 
     // Resolve the session anchor that will trigger a re-evaluation BEFORE the
-    // delete cascades. SessionAveragerService groups by sessionId OR a 5-min
+    // soft-delete. SessionAveragerService groups by sessionId OR a 5-min
     // measuredAt window (CLINICAL_SPEC §5.2); we mirror that here so the rule
     // engine recomputes the averaged vitals for what's left of the session.
+    // The soft-deleted reading drops out of that recompute automatically — the
+    // averager's findMany sibling load is filtered by the soft-delete extension.
     //
-    // DeviationAlert / EscalationEvent rows owned by `entry` cascade-delete
-    // via the FK (phase/2 schema). The re-evaluation below re-runs the rule
-    // engine against the surviving session-anchor entry. Bug #6/#7 fix
+    // With soft-delete the DeviationAlert / EscalationEvent rows owned by
+    // `entry` SURVIVE (the FK onDelete: Cascade never fires — the row is
+    // updated, not deleted); that is the whole point of L5. Bug #6/#7 fix
     // (alert-engine.service.ts) removed the silent auto-resolve sweep, so
     // sibling-owned alerts retain their state until an admin resolves them
     // explicitly via /admin/alerts/:id/resolve. Re-evaluation may surface
@@ -1462,9 +1485,9 @@ export class DailyJournalService {
     // existing ones.
     const survivingAnchor = actor ? null : await this.findSessionReevalAnchor(entry)
 
-    // Audit row is written BEFORE the row is removed, in the same transaction
-    // — the snapshot survives the hard delete, and a failed audit write rolls
-    // the delete back (a reading can't vanish without its audit row).
+    // Audit row is written BEFORE the reading is soft-deleted, in the same
+    // transaction — a failed audit write rolls the soft-delete back (a reading
+    // can't be marked deleted without its audit row).
     await this.prisma.$transaction(async (tx) => {
       await this.writeJournalAudit(tx, {
         userId,
@@ -1477,7 +1500,13 @@ export class DailyJournalService {
         newValue: null,
         practiceContext: ctx?.practiceId ?? null,
       })
-      await tx.journalEntry.delete({ where: { id } })
+      // Soft delete: stamp deletedAt instead of removing the row, so the fired
+      // alert + escalations + notifications survive (the cascade never fires).
+      // The row drops out of all normal reads via the soft-delete extension.
+      await tx.journalEntry.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      })
     })
 
     // Patient deletes keep the surviving-sibling re-evaluation (session-

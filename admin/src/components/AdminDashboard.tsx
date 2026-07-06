@@ -99,7 +99,6 @@ interface RawAlert {
   status: string;
   createdAt: string;
   acknowledgedAt: string | null;
-  followUpScheduledAt: string | null;
   patient: {
     id: string;
     name: string | null;
@@ -254,7 +253,6 @@ function toAlertPanelShape(a: RawAlert): Alert {
     level: isHigh ? 'L2' : 'L1',
     color: isHigh ? 'red' : 'amber',
     patientId: a.patient?.id ?? '',
-    followUpScheduledAt: a.followUpScheduledAt,
   };
 }
 
@@ -862,14 +860,6 @@ export default function AdminDashboard() {
                                 {chrome.icon}
                                 {chrome.label}
                               </span>
-                              {a.followUpScheduledAt && (
-                                <span
-                                  className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full"
-                                  style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
-                                >
-                                  Call scheduled
-                                </span>
-                              )}
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-[11.5px] font-bold" style={{ color: chrome.accentText }}>

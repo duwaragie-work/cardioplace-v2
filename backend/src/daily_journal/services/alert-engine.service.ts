@@ -1258,6 +1258,7 @@ export class AlertEngineService {
         title: 'CAD patient alert threshold updated',
         body: 'CAD patient alert threshold updated from SBP ≥160 to SBP ≥140 per AHA/ACC guideline alignment (treatment target 130/80). Customise the threshold in patient settings.',
         tips: [],
+        dispatchTrigger: 'THRESHOLD_UPDATED',
       },
     })
   }

@@ -139,6 +139,16 @@ model JournalEntry {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Soft-delete (HIPAA L5, Duwaragie sign-off 2026-07-06). A deleted reading is
+  // stamped here, never hard-deleted, so its fired DeviationAlert + escalations
+  // + notifications survive (the onDelete: Cascade below never fires) —
+  // "amend, don't destroy". A global Prisma client extension
+  // (common/prisma-extensions/soft-delete.extension.ts) injects
+  // `deletedAt: null` into every top-level JournalEntry read, so deleted rows
+  // drop out of every list / session average / report automatically. A genuine
+  // hard purge (account closure / GDPR erasure) stays a separate explicit path.
+  deletedAt DateTime?
+
   deviationAlerts DeviationAlert[]
   // Both User relations are named — Prisma requires disambiguation once a
   // second relation to the same model exists. Names are client-level only;
@@ -149,6 +159,7 @@ model JournalEntry {
   @@unique([userId, measuredAt])
   @@index([userId, measuredAt(sort: Desc)])
   @@index([addedByUserId])
+  @@index([deletedAt])
 }
 
 enum Position {

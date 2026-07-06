@@ -878,6 +878,7 @@ export class TestControlService {
           title: `Test notification ${i}`,
           body: `Seeded test notification ${i}.`,
           tips: [],
+          dispatchTrigger: 'SYSTEM_SEED',
         },
       })
     }

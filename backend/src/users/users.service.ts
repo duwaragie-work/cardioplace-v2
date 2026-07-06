@@ -1129,13 +1129,18 @@ export class UsersService {
     // INVITE_PENDING already handled + returned above; remaining values
     // are 1:1 with AccountStatus.
     if (query.status) {
+      // UserListStatus has no SYSTEM value, so a specific status filter can
+      // never surface a system-principal row.
       userWhere.accountStatus = query.status as AccountStatus
     } else {
       // Hide permanently-closed accounts by default — they're anonymized
       // tombstones (no name/email/roles), so they'd render as blank, non-
       // actionable rows. Their history lives in AccountClosureLog. An explicit
       // ?status=CLOSED still fetches them if ever needed.
-      userWhere.accountStatus = { not: AccountStatus.CLOSED }
+      //
+      // Also hide SYSTEM principals (audit registry, 2026-07-03): reserved
+      // non-login rows that must never appear in the human user roster.
+      userWhere.accountStatus = { notIn: [AccountStatus.CLOSED, AccountStatus.SYSTEM] }
     }
 
     const [users, total] = await Promise.all([

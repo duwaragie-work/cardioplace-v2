@@ -199,10 +199,6 @@ interface Props {
    *  AlertsTab the surrounding shell already exposes the ID. See
    *  docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md. */
   patientDisplayId?: string | null;
-  /** Optional follow-up call indicator — surfaces a "Call scheduled" pill
-   *  when the alert has a linked ScheduledCall. Sourced from the provider-
-   *  wide endpoint's followUpScheduledAt. */
-  followUpScheduledAt?: string | null;
   /** PatientProfile.heightCm — used by the 15-field audit footer in
    *  EscalationAuditTrail to compute BMI from the alert's reading weight. */
   heightCm?: number | null;
@@ -245,7 +241,6 @@ export default function AlertCard({
   ackInFlight,
   patientName,
   patientDisplayId,
-  followUpScheduledAt,
   heightCm,
   rowClickable = true,
   patientPreEnrollment = false,
@@ -451,14 +446,6 @@ export default function AlertCard({
                 style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
               >
                 Escalated
-              </span>
-            )}
-            {followUpScheduledAt && (
-              <span
-                className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
-              >
-                Call scheduled
               </span>
             )}
           </div>

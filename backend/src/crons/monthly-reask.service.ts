@@ -87,6 +87,7 @@ export class MonthlyReaskService {
           channel: NotificationChannel.PUSH,
           title: REASK_TITLE,
           body: 'Are you still taking the same medicines? Tap to review and confirm your list.',
+          dispatchTrigger: 'SYSTEM_CRON',
         },
       })
       sent++

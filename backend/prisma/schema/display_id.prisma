@@ -42,6 +42,9 @@ model DisplayId {
 enum DisplayIdClass {
   PATIENT
   STAFF
+  // System-principal registry rows (audit, 2026-07-03). Format CP-SYS-XXXXXXX-C.
+  // Never a real person — issued only by the system-principal seed.
+  SYSTEM
 }
 
 // Append-only collision log. If this table grows fast in production, the

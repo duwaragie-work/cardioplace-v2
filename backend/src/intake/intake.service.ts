@@ -449,6 +449,7 @@ export class IntakeService {
               title: 'Contraindicated medication re-added',
               body: `Patient re-added a medication flagged as contraindicated (prior angioedema): ${drugList}. It is held for your review before it can be trusted.`,
               tips: [],
+              dispatchTrigger: 'MEDICATION_CONTRAINDICATION',
             },
           })
         } else {
@@ -977,6 +978,7 @@ export class IntakeService {
           channel: NotificationChannel.PUSH,
           title: 'Please re-check a profile detail',
           body: systemMsgProfileFieldRejected(label),
+          dispatchTrigger: 'PROFILE_REJECTED',
         },
       })
     } catch (err) {
@@ -1241,6 +1243,7 @@ export class IntakeService {
               channel: NotificationChannel.PUSH,
               title,
               body,
+              dispatchTrigger: 'CARE_TEAM_UPDATE',
             },
           })
         }
@@ -1759,6 +1762,7 @@ export class IntakeService {
         channel: NotificationChannel.PUSH,
         title,
         body,
+        dispatchTrigger: 'CARE_TEAM_UPDATE',
       })),
     })
   }

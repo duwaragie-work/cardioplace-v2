@@ -19,10 +19,12 @@ import {
   ClipboardList,
   Settings,
   LifeBuoy,
+  FileSearch,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import {
   canManageSupport,
+  canManageAudit,
   canViewUsers,
   canViewReports,
   isCoordinatorOnly,
@@ -113,6 +115,15 @@ const SECONDARY_NAV: NavItem[] = [
     icon: LifeBuoy,
     matchPrefix: true,
     show: (roles) => canManageSupport(roles),
+  },
+  // HIPAA audit-review console (§164.312(b) L2) — HEALPLACE_OPS + SUPER_ADMIN
+  // only. Opening it also requires a Rules-of-Behavior ack (L1 AuditAccessGate).
+  {
+    href: '/audit',
+    label: 'Audit',
+    icon: FileSearch,
+    matchPrefix: true,
+    show: (roles) => canManageAudit(roles),
   },
   // Account-level settings (security / 2FA today). Available to every
   // signed-in staff role, including COORDINATOR.

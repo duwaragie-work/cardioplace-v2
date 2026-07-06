@@ -189,15 +189,6 @@ export function canManageReadings(input: RoleInput | UserInput): boolean {
   return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER'])
 }
 
-// ─── Legacy v1 / scheduled calls ────────────────────────────────────────────
-/**
- * @Roles(SUPER_ADMIN) — legacy v1 provider endpoints and scheduled-calls
- * UI live behind this gate.
- */
-export function canAccessLegacyV1(input: RoleInput | UserInput): boolean {
-  return has(input, ['SUPER_ADMIN'])
-}
-
 // ─── PROVIDER scope helper ──────────────────────────────────────────────────
 /**
  * True when the caller's ONLY admin-tier role is PROVIDER (i.e. not also
@@ -289,6 +280,22 @@ export function canPermanentCloseUsers(input: RoleInput | UserInput): boolean {
  */
 export function canManageSupport(input: RoleInput | UserInput): boolean {
   return has(input, ['HEALPLACE_OPS', 'SUPER_ADMIN'])
+}
+
+// ─── Audit-review console (HIPAA L1/L2, §164.312(b) — the "examine" half) ────
+/**
+ * Who can open the HIPAA audit-review console (L2). OPS oversight — org-wide
+ * roles only.
+ *   @Roles(SUPER_ADMIN, HEALPLACE_OPS)
+ *   backend/src/access-log admin read controllers (L2)
+ *
+ * NOTE: role alone is NOT sufficient. The console also requires a recorded
+ * Rules-of-Behavior acknowledgment (L1). The page wraps its content in
+ * <AuditAccessGate/>, which checks this predicate AND the training-ack status
+ * (GET /v2/auth/training-ack) before revealing any audit records.
+ */
+export function canManageAudit(input: RoleInput | UserInput): boolean {
+  return has(input, ['SUPER_ADMIN', 'HEALPLACE_OPS'])
 }
 
 // ─── MFA admin reset (phase/26) ─────────────────────────────────────────────

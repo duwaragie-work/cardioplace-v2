@@ -5,6 +5,11 @@ import { SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared'
 import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import {
+  Prisma,
+  VerifierRole,
+  VerificationChangeType,
+} from '../generated/prisma/client.js'
 
 // Don't re-walk ancient history: only consider readings from the last day. A
 // reading older than this whose timer never fired is effectively abandoned and
@@ -82,6 +87,7 @@ export class SessionFinalizeService {
         try {
           await this.dailyJournal.finalizeUnconfirmedEmergency(entry.userId, entry.id)
           finalized++
+          await this.auditFinalize(entry)
         } catch (err) {
           this.logger.error(
             `Failed to finalize unconfirmed emergency for entry ${entry.id}`,
@@ -99,6 +105,7 @@ export class SessionFinalizeService {
       try {
         await this.dailyJournal.finalizeSingleReadingSession(entry.userId, entry.id)
         finalized++
+        await this.auditFinalize(entry)
       } catch (err) {
         this.logger.error(
           `Failed to finalize single-reading session for entry ${entry.id}`,
@@ -108,5 +115,41 @@ export class SessionFinalizeService {
     }
 
     return finalized
+  }
+
+  /**
+   * Audit (2026-07-03, Humaira Activity 1 #3): the finalize flipped a
+   * JournalEntry's `singleReadingFinalized` — a clinical-state change that,
+   * like a manual edit, must leave a ProfileVerificationLog row. Attributed to
+   * the system principal (cls actorId). Best-effort: the flip lives inside
+   * DailyJournalService (shared with the frontend-timer / provider / voice
+   * paths), so we log right after it succeeds rather than refactoring that hot
+   * path into a shared transaction. Guarded on a resolved actorId (cold
+   * registry → skip) and never throws (audit must not break the cron).
+   */
+  private async auditFinalize(entry: { id: string; userId: string }): Promise<void> {
+    const actorId = this.cls.get<string | null>('actorId') ?? null
+    if (!actorId) return
+    try {
+      await this.prisma.profileVerificationLog.create({
+        data: {
+          userId: entry.userId,
+          fieldPath: `journalEntry:${entry.id}:singleReadingFinalized`,
+          previousValue: { singleReadingFinalized: false } as Prisma.InputJsonValue,
+          newValue: { singleReadingFinalized: true } as Prisma.InputJsonValue,
+          changedBy: actorId,
+          changedByRole: VerifierRole.SYSTEM_ACTOR,
+          changeType: VerificationChangeType.SYSTEM_CRON_FINALIZE,
+          discrepancyFlag: false,
+          rationale: 'Cron flipped singleReadingFinalized after buffer window elapsed',
+          practiceContext: null,
+        },
+      })
+    } catch (err) {
+      this.logger.error(
+        `Audit write failed for finalized entry ${entry.id}`,
+        err instanceof Error ? err.stack : undefined,
+      )
+    }
   }
 }

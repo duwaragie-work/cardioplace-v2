@@ -8,6 +8,7 @@ import { seedAdmins } from './admins.js'
 import { seedPatients } from './patients.js'
 import { seedState } from './state.js'
 import { seedDisplayIds } from './display-ids.js'
+import { seedSystemPrincipals } from './system-principals.js'
 import { prisma } from './helpers.js'
 
 export async function runSeed() {
@@ -21,6 +22,12 @@ export async function runSeed() {
   if (process.env.NODE_ENV !== 'production') {
     await seedState(practices, admins)
   }
+
+  // System-principal registry (audit) — runs in EVERY environment, not just
+  // dev/test: crons resolve their actor id from these rows at runtime, so prod
+  // needs them too. Idempotent. Before seedDisplayIds so its self-written
+  // SYSTEM-class ledger rows are in place (seedDisplayIds then skips them).
+  await seedSystemPrincipals()
 
   // Final pass: every seeded user gets a permanent DisplayId. Mirrors the
   // runtime issuance at the 4 user-create sites in auth.service.ts (which

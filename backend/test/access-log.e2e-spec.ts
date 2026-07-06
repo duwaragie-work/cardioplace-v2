@@ -267,7 +267,7 @@ describe('AccessLog PHI audit (e2e)', () => {
     const label = 'cron-session-finalize'
     const notif = await runAsCronActor(cls, label, () =>
       prisma.notification.create({
-        data: { userId, channel: 'PUSH', title: `${runTag}-cron`, body: 'cron write' },
+        data: { userId, channel: 'PUSH', title: `${runTag}-cron`, body: 'cron write', dispatchTrigger: 'SYSTEM_CRON' },
       }),
     )
     await waitForLogs(

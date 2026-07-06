@@ -60,7 +60,6 @@ model DeviationAlert {
 
   escalationEvents      EscalationEvent[]
   notifications         Notification[]
-  scheduledCalls        ScheduledCall[]
   caregiverDispatchLogs CaregiverDispatchLog[]
 
   // Phase/7 — dropped @@unique([journalEntryId, type]). v2 allows multiple
