@@ -847,6 +847,31 @@ export class AuthController {
     })
   }
 
+  // ─── Training / Rules-of-Behavior Acknowledgment (HIPAA L1, §164.312(b)) ──────
+  //
+  // GET  /v2/auth/training-ack — the signed-in reviewer's ROB acknowledgment
+  //   status; drives the audit-console gate (L2). POST records a fresh
+  //   acknowledgment of the current ROB version. Both JWT-guarded; the audit
+  //   console itself additionally role-gates SUPER_ADMIN / HEALPLACE_OPS.
+
+  @UseGuards(JwtAuthGuard)
+  @Get('training-ack')
+  getTrainingAck(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    return this.authService.getTrainingAckStatus(id)
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('training-ack')
+  recordTrainingAck(@Req() req: Request) {
+    const { id } = req.user as { id: string }
+    const ctx = this.buildAuthContext(req)
+    return this.authService.recordTrainingAck(id, {
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    })
+  }
+
   // ─── Cookie Helpers ───────────────────────────────────────────────────────────
 
   private cookieDefaults() {
