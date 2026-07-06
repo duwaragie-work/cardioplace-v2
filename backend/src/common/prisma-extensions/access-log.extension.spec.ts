@@ -8,6 +8,7 @@ import {
   PHI_MODELS,
   AUDIT_STAMP_MODELS,
 } from './access-log.extension.js'
+import { CANONICAL_PHI_MODELS } from './phi-inventory.js'
 
 /**
  * Humaira N8 / 164.312-T7 — PHI access audit trail. The extension writes one
@@ -148,39 +149,44 @@ describe('computeAccessLogData — PHI gate', () => {
     expect(computeAccessLogData('User', 'someExoticOp', {}, null, USER_CLS)).toBeNull()
   })
 
-  it('PHI_MODELS matches the 20-model canonical inventory (docs/EPHI_INVENTORY.md Table 1)', () => {
-    // Snapshot of the audited set as of N4 (2026-07-08). The canonical list is
-    // in docs/EPHI_INVENTORY.md; the N3 conformance suite (phi-inventory.ts,
-    // Wed 9 Jul) will assert equality against a shared constant so drift here
-    // fails the build automatically.
-    expect([...PHI_MODELS].sort()).toEqual(
-      [
-        // Original 7
-        'User',
-        'PatientProfile',
-        'JournalEntry',
-        'DeviationAlert',
-        'Notification',
-        'PatientMedication',
-        'PatientThreshold',
-        // Support triad (already on dev)
-        'SupportTicket',
-        'SupportTicketReply',
-        'SupportTicketAction',
-        // N4 additions
-        'EscalationEvent',
-        'ProfileVerificationLog',
-        'RejectedReadingLog',
-        'PatientCaregiver',
-        'CaregiverDispatchLog',
-        'EmergencyEvent',
-        'Conversation',
-        'Session',
-        'MonthlyReportSnapshot',
-        'PatientProviderAssignment',
-      ].sort(),
-    )
+  it('PHI_MODELS matches CANONICAL_PHI_MODELS from phi-inventory.ts — N3 conformance guard', () => {
+    // Any drift between the runtime PHI_MODELS set and the canonical inventory
+    // fails the build. If a new Prisma model is added to the schema and the
+    // author forgets to add it to PHI_MODELS, the model won't get audited and
+    // this suite won't catch it — but if the author DID remember to update
+    // EPHI_INVENTORY.md (and therefore phi-inventory.ts) but forgot the runtime
+    // set, this assertion trips.
+    //
+    // The pair phi-inventory.ts ↔ docs/EPHI_INVENTORY.md is a human-review
+    // guard (PR reviewers check them together); this test is the machine-review
+    // guard on the runtime side.
+    expect([...PHI_MODELS].sort()).toEqual([...CANONICAL_PHI_MODELS].sort())
+    expect(PHI_MODELS.size).toBe(CANONICAL_PHI_MODELS.size)
+    // Anchor the count too so a same-size swap (one model dropped, one added
+    // without inventory update) triggers a review discussion rather than a
+    // silent pass.
     expect(PHI_MODELS.size).toBe(20)
+  })
+
+  it('CANONICAL_PHI_MODELS never contains AccessLog / AuthLog / AuthSession — the audit-sink invariant', () => {
+    // These are the audit stream + auth stream. Auditing them would recurse
+    // (AccessLog writes trigger AccessLog writes) or double-log an event that
+    // AuthLog already captures — either way a wrong-headed addition.
+    expect(CANONICAL_PHI_MODELS.has('AccessLog')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('AuthLog')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('AuthSession')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('RefreshToken')).toBe(false)
+  })
+
+  it('CANONICAL_PHI_MODELS never contains org-config or non-clinical tables', () => {
+    // Regression guard — Practice + membership joins carry no clinical fields
+    // (see EPHI_INVENTORY.md Table 3). Adding them would flood AccessLog with
+    // every schema mutation on the practice sidebar.
+    expect(CANONICAL_PHI_MODELS.has('Practice')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('PracticeProvider')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('PracticeCoordinator')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('PracticeMedicalDirector')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('DisplayId')).toBe(false)
   })
 })
 
