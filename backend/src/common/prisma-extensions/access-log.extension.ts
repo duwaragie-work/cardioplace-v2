@@ -1,6 +1,7 @@
 import type { ClsService } from 'nestjs-cls'
 import { Prisma } from '../../generated/prisma/client.js'
 import type { PrismaClient } from '../../generated/prisma/client.js'
+import { writeAuditWithRetry } from '../audit/write-with-retry.js'
 
 /**
  * PHI access audit trail (Humaira N8 / 164.312-T7, HIPAA §164.312(b)) — writes
@@ -366,11 +367,20 @@ export async function auditAndReturn(
   const data = computeAccessLogData(ctx.model, ctx.operation, ctx.args, result, cls)
   if (!data) return result
 
-  // Fire-and-forget on the un-extended client. Never awaited; failures are
-  // logged, never thrown — audit must not break the request.
-  void basePrisma.accessLog.create({ data }).catch((err: unknown) => {
-    // eslint-disable-next-line no-console
-    console.error('[AccessLog] write failed', err)
+  // Fire-and-forget on the un-extended client. Never awaited; the wrapper
+  // owns retry + failure reporting so an audit outage becomes an OTEL span +
+  // structured console.error (audit-pipeline observability) instead of a
+  // silent dropped row. Audit must not break the request path — the wrapper
+  // guarantees no throw even if the tracer itself misfires.
+  //
+  // N1 (2026-07-08 wiring) — supersedes the previous inline `void ... .catch`
+  // pattern documented in the file-top comment (choice 2). The choice stays
+  // "fire-and-forget from the request path", but the failure is now LOUD.
+  void writeAuditWithRetry(() => basePrisma.accessLog.create({ data }), {
+    kind: 'access-log',
+    modelName: data.modelName,
+    action: data.action,
+    recordId: data.recordId,
   })
 
   return result

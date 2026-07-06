@@ -23,6 +23,7 @@ import {
   UserRole,
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { writeAuditWithRetry } from '../common/audit/write-with-retry.js'
 import { DisplayIdService } from '../users/display-id.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
@@ -2258,28 +2259,38 @@ export class AuthService {
      *  events. */
     practiceContext?: string | null
   }): Promise<void> {
-    try {
-      await this.prisma.authLog.create({
-        data: {
-          event: params.event,
-          identifier: params.identifier ?? null,
-          userId: params.userId ?? null,
-          method: params.method ?? null,
-          deviceId: params.deviceId ?? null,
-          ipAddress: params.ipAddress ?? null,
-          userAgent: params.userAgent ?? null,
-          metadata: params.metadata
-            ? JSON.parse(JSON.stringify(params.metadata))
-            : null,
-          success: params.success,
-          errorCode: params.errorCode ?? null,
-          practiceContext: params.practiceContext ?? null,
-        },
-      })
-    } catch (error) {
-      // Never let logging failures break the auth flow
-      console.error('Failed to log auth event:', error)
-    }
+    // N1 (2026-07-08) — bounded retry + OTEL failure span. Was a swallowed
+    // try/catch; now writeAuditWithRetry gives us 3 attempts + a loud signal
+    // on exhaust (audit.write.failed span + structured JSON error) so an
+    // AuthLog write-outage becomes observable. Still fire-and-forget from the
+    // auth flow's perspective — the wrapper never rethrows, so a failed
+    // write never breaks sign-in.
+    await writeAuditWithRetry(
+      () =>
+        this.prisma.authLog.create({
+          data: {
+            event: params.event,
+            identifier: params.identifier ?? null,
+            userId: params.userId ?? null,
+            method: params.method ?? null,
+            deviceId: params.deviceId ?? null,
+            ipAddress: params.ipAddress ?? null,
+            userAgent: params.userAgent ?? null,
+            metadata: params.metadata
+              ? JSON.parse(JSON.stringify(params.metadata))
+              : null,
+            success: params.success,
+            errorCode: params.errorCode ?? null,
+            practiceContext: params.practiceContext ?? null,
+          },
+        }),
+      {
+        kind: 'auth-log',
+        event: params.event,
+        userId: params.userId ?? null,
+        identifier: params.identifier ?? null,
+      },
+    )
   }
 
   // ─── Policy / Consent Acknowledgment ─────────────────────────────────────────

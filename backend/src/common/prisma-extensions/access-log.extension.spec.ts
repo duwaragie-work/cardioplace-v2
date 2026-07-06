@@ -310,6 +310,8 @@ describe('auditAndReturn — fire-and-forget write', () => {
 
   it('failed audit write is swallowed — query result still returned, no throw', async () => {
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    // Every attempt fails so writeAuditWithRetry (3 attempts) exhausts and
+    // reports the failure. auditAndReturn must still resolve the query result.
     const create = jest.fn<(args: any) => Promise<any>>().mockRejectedValue(new Error('db down'))
     const basePrisma = { accessLog: { create } } as any
 
@@ -325,10 +327,20 @@ describe('auditAndReturn — fire-and-forget write', () => {
     )
 
     expect(result).toEqual([{ id: 'a' }])
-    // Let the rejected create's .catch() microtask run.
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(errSpy).toHaveBeenCalledWith('[AccessLog] write failed', expect.any(Error))
+    // Wait for the fire-and-forget retry loop (3 attempts with 100ms + 500ms
+    // backoff = ~600ms). writeAuditWithRetry never rejects — we assert the
+    // final structured error was emitted.
+    await new Promise((resolve) => setTimeout(resolve, 800))
+    expect(errSpy).toHaveBeenCalledTimes(1)
+    const emitted = JSON.parse(errSpy.mock.calls[0]?.[0] as string) as Record<string, unknown>
+    expect(emitted).toMatchObject({
+      audit_write_failed: true,
+      kind: 'access-log',
+      error_message: 'db down',
+      'audit.model': 'JournalEntry',
+      'audit.action': 'READ',
+    })
+    expect(create).toHaveBeenCalledTimes(3)
     errSpy.mockRestore()
   })
 
