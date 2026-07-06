@@ -210,36 +210,4 @@ export class ProviderController {
     return this.providerService.acknowledgeAlert(alertId, req.user.id)
   }
 
-  @Get('scheduled-calls')
-  getScheduledCalls(@Query('status') status?: string) {
-    return this.providerService.getScheduledCalls({ status })
-  }
-
-  @Post('schedule-call')
-  scheduleCall(
-    @Body()
-    body: {
-      patientUserId: string
-      alertId?: string
-      callDate: string
-      callTime: string
-      callType: string
-      notes?: string
-    },
-  ) {
-    return this.providerService.scheduleCall(body)
-  }
-
-  @Patch('scheduled-calls/:id/status')
-  updateCallStatus(
-    @Param('id') id: string,
-    @Body('status') status: string,
-  ) {
-    return this.providerService.updateCallStatus(id, status)
-  }
-
-  @Delete('scheduled-calls/:id')
-  deleteScheduledCall(@Param('id') id: string) {
-    return this.providerService.deleteScheduledCall(id)
-  }
 }

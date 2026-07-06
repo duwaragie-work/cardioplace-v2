@@ -15,7 +15,6 @@ import ProfileMenu from './profile/ProfileMenu';
 const ROUTE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/patients': 'Patients',
-  '/scheduled-calls': 'Scheduled calls',
   '/notifications': 'Alerts & Notifications',
   '/profile': 'My account',
   '/settings': 'Settings',

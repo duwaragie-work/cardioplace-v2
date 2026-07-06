@@ -119,39 +119,6 @@ export function caregiverEmailHtml(
   `)
 }
 
-export function scheduleCallEmailHtml(
-  patientName: string,
-  callType: string,
-  callDate: string,
-  callTime: string,
-): string {
-  const typeLabel = callType === 'video' ? 'Video Call' : 'Phone Call'
-
-  return wrap(`
-    <h2 style="margin: 0 0 12px; color: #1a1a2e;">Your care team has scheduled a follow-up call</h2>
-    <p style="color: #374151; line-height: 1.6;">Hi ${patientName},</p>
-    <div style="margin: 20px 0; padding: 16px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
-      <table style="width: 100%; font-size: 15px; color: #374151;">
-        <tr>
-          <td style="padding: 6px 0; font-weight: 600; width: 80px;">Type</td>
-          <td style="padding: 6px 0;">${typeLabel}</td>
-        </tr>
-        <tr>
-          <td style="padding: 6px 0; font-weight: 600;">Date</td>
-          <td style="padding: 6px 0;">${callDate}</td>
-        </tr>
-        <tr>
-          <td style="padding: 6px 0; font-weight: 600;">Time</td>
-          <td style="padding: 6px 0;">${callTime} (EST)</td>
-        </tr>
-      </table>
-    </div>
-    <p style="color: #374151; line-height: 1.6;">
-      Your care team will contact you at the number on file.
-    </p>
-  `)
-}
-
 export function otpEmailHtml(otp: string): string {
   return wrap(`
     <div style="text-align: center;">

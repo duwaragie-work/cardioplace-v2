@@ -189,15 +189,6 @@ export function canManageReadings(input: RoleInput | UserInput): boolean {
   return has(input, ['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER'])
 }
 
-// ─── Legacy v1 / scheduled calls ────────────────────────────────────────────
-/**
- * @Roles(SUPER_ADMIN) — legacy v1 provider endpoints and scheduled-calls
- * UI live behind this gate.
- */
-export function canAccessLegacyV1(input: RoleInput | UserInput): boolean {
-  return has(input, ['SUPER_ADMIN'])
-}
-
 // ─── PROVIDER scope helper ──────────────────────────────────────────────────
 /**
  * True when the caller's ONLY admin-tier role is PROVIDER (i.e. not also

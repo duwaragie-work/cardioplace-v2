@@ -60,6 +60,10 @@ export class GapAlertService {
         email: true,
         name: true,
         journalEntries: {
+          // Soft-delete (L5): a soft-deleted "last reading" must not suppress
+          // the gap nudge. This is a NESTED include, which the global
+          // soft-delete extension cannot reach — filter explicitly here.
+          where: { deletedAt: null },
           orderBy: { measuredAt: 'desc' },
           take: 1,
           select: { measuredAt: true },

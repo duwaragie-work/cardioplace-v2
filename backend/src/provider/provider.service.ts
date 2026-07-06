@@ -7,7 +7,6 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js'
 import { wasEverEnrolled } from '../practice/enrollment-helpers.js'
 import { EmailService } from '../email/email.service.js'
-import { scheduleCallEmailHtml } from '../email/email-templates.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import {
   pickDisplayName,
@@ -328,11 +327,17 @@ export class ProviderService {
     const usersWithEntries = await this.prisma.user.findMany({
       where: {
         enrollmentStatus: 'ENROLLED',
-        journalEntries: { some: {} },
+        // Soft-delete (L5): only count patients with at least one LIVE reading,
+        // so a patient whose readings are all soft-deleted doesn't drag the
+        // BP-control denominator.
+        journalEntries: { some: { deletedAt: null } },
         ...userWhereScope,
       },
       include: {
         journalEntries: {
+          // Soft-delete (L5): nested include the extension can't reach — a
+          // soft-deleted latest reading must not skew the BP-control rate.
+          where: { deletedAt: null },
           orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: { systolicBP: true },
@@ -406,6 +411,9 @@ export class ProviderService {
           select: { primaryProviderId: true, backupProviderId: true },
         },
         journalEntries: {
+          // Soft-delete (L5): nested include the extension can't reach — a
+          // soft-deleted reading must not surface as the patient's latest BP.
+          where: { deletedAt: null },
           orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: {
@@ -711,6 +719,9 @@ export class ProviderService {
       include: {
         patientProfile: { select: this.profileSelect },
         journalEntries: {
+          // Soft-delete (L5): nested include the extension can't reach — a
+          // soft-deleted reading must not surface as the patient's latest BP.
+          where: { deletedAt: null },
           orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: {
@@ -1225,29 +1236,6 @@ export class ProviderService {
         (SEVERITY_ORDER[b.severity ?? ''] ?? 3),
     )
 
-    const alertIds = alerts.map((a) => a.id)
-    const scheduledCalls = alertIds.length
-      ? await this.prisma.scheduledCall.findMany({
-          where: { alertId: { in: alertIds } },
-          orderBy: { createdAt: 'desc' },
-          select: {
-            alertId: true,
-            callDate: true,
-            callTime: true,
-            callType: true,
-            status: true,
-            createdAt: true,
-          },
-        })
-      : []
-
-    const followUpMap = new Map<string, (typeof scheduledCalls)[0]>()
-    for (const sc of scheduledCalls) {
-      if (sc.alertId && !followUpMap.has(sc.alertId)) {
-        followUpMap.set(sc.alertId, sc)
-      }
-    }
-
     // Resolve every "by" UUID into a display name in one batched lookup so
     // the audit footer + escalation timeline can render "Acknowledged by …"
     // / "Resolved by Dr. Singal" instead of a truncated UUID. Mirrors
@@ -1266,7 +1254,6 @@ export class ProviderService {
     return {
       statusCode: 200,
       data: alerts.map((a) => {
-        const followUp = followUpMap.get(a.id)
         const profile = (a.user?.patientProfile ?? null) as PatientProfileShape | null
         return {
           id: a.id,
@@ -1306,11 +1293,6 @@ export class ProviderService {
           createdAt: a.createdAt,
           acknowledgedAt: a.acknowledgedAt,
           resolvedAt: a.resolvedAt,
-          followUpScheduledAt: followUp?.createdAt ?? null,
-          followUpCallDate: followUp?.callDate ?? null,
-          followUpCallTime: followUp?.callTime ?? null,
-          followUpCallType: followUp?.callType ?? null,
-          followUpStatus: followUp?.status ?? null,
           patient: a.user
             ? {
                 id: a.user.id,
@@ -1322,9 +1304,9 @@ export class ProviderService {
           journalEntry: a.journalEntry
             ? {
                 // entryDate is the legacy field name — kept so the
-                // dashboard AlertPanel + scheduled-calls page keep working.
-                // measuredAt mirrors the per-patient endpoint shape so
-                // AlertCard + EscalationAuditTrail consume the same field.
+                // dashboard AlertPanel keeps working. measuredAt mirrors the
+                // per-patient endpoint shape so AlertCard + EscalationAuditTrail
+                // consume the same field.
                 entryDate: a.journalEntry.measuredAt,
                 measuredAt: a.journalEntry.measuredAt,
                 systolicBP: a.journalEntry.systolicBP,
@@ -1558,85 +1540,6 @@ export class ProviderService {
     }
   }
 
-  // ─── POST /provider/schedule-call ───────────────────────────────────────────────
-
-  async scheduleCall(body: {
-    patientUserId: string
-    alertId?: string
-    callDate: string
-    callTime: string
-    callType: string
-    notes?: string
-  }) {
-    const patient = await this.prisma.user.findUnique({
-      where: { id: body.patientUserId },
-      select: { id: true, email: true, name: true },
-    })
-    if (!patient) throw new NotFoundException('Patient not found')
-
-    const scheduledCall = await this.prisma.scheduledCall.create({
-      data: {
-        userId: body.patientUserId,
-        alertId: body.alertId ?? null,
-        callDate: body.callDate,
-        callTime: body.callTime,
-        callType: body.callType,
-        notes: body.notes ?? null,
-        status: 'UPCOMING',
-      },
-    })
-
-    const notifTitle = 'Follow-up Call Scheduled'
-    const notifBody = `Your care team has scheduled a ${body.callType} call on ${body.callDate} at ${body.callTime}.${body.notes ? ` Note: ${body.notes}` : ''}`
-
-    await this.prisma.notification.create({
-      data: {
-        userId: body.patientUserId,
-        alertId: body.alertId ?? null,
-        channel: 'PUSH',
-        title: notifTitle,
-        body: notifBody,
-        tips: [],
-        dispatchTrigger: 'CALL_SCHEDULED',
-      },
-    })
-
-    if (patient.email) {
-      await this.prisma.notification.create({
-        data: {
-          userId: body.patientUserId,
-          alertId: body.alertId ?? null,
-          channel: 'EMAIL',
-          title: notifTitle,
-          body: notifBody,
-          tips: [],
-          dispatchTrigger: 'CALL_SCHEDULED',
-        },
-      })
-
-      await this.emailService.sendEmail(
-        patient.email,
-        'Follow-up Call Scheduled — Cardioplace',
-        scheduleCallEmailHtml(
-          patient.name ?? 'Patient',
-          body.callType,
-          body.callDate,
-          body.callTime,
-        ),
-      )
-    } else {
-      this.logger.warn(
-        `No email for patient ${body.patientUserId} — skipping email notification`,
-      )
-    }
-
-    return {
-      statusCode: 201,
-      message: 'Call scheduled. Patient notified.',
-      data: { scheduledCallId: scheduledCall.id },
-    }
-  }
-
   // ─── PATCH /provider/alerts/:alertId/acknowledge ──────────────────────────────
 
   async acknowledgeAlert(alertId: string, adminId: string) {
@@ -1687,114 +1590,6 @@ export class ProviderService {
         acknowledgedAt: updated.acknowledgedAt,
       },
     }
-  }
-
-  // ─── GET /provider/scheduled-calls ──────────────────────────────────────────
-
-  async getScheduledCalls(filters: { status?: string }) {
-    const where: Record<string, unknown> = {}
-    if (filters.status) {
-      where.status = filters.status.toUpperCase()
-    }
-
-    const calls = await this.prisma.scheduledCall.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            dateOfBirth: true,
-            patientProfile: { select: this.profileSelect },
-          },
-        },
-        deviationAlert: {
-          select: {
-            id: true,
-            type: true,
-            severity: true,
-            status: true,
-            createdAt: true,
-            journalEntry: {
-              select: { systolicBP: true, diastolicBP: true, measuredAt: true },
-            },
-          },
-        },
-      },
-    })
-
-    return {
-      statusCode: 200,
-      data: calls.map((c) => {
-        const profile = (c.user?.patientProfile ?? null) as PatientProfileShape | null
-        return {
-          id: c.id,
-          callDate: c.callDate,
-          callTime: c.callTime,
-          callType: c.callType,
-          notes: c.notes,
-          status: c.status.toLowerCase(),
-          createdAt: c.createdAt,
-          updatedAt: c.updatedAt,
-          patient: c.user
-            ? {
-                id: c.user.id,
-                name: c.user.name,
-                email: c.user.email,
-                riskTier: this.deriveRiskTier(profile, c.user.dateOfBirth),
-              }
-            : null,
-          alert: c.deviationAlert
-            ? {
-                id: c.deviationAlert.id,
-                type: c.deviationAlert.type,
-                severity: c.deviationAlert.severity,
-                alertStatus: c.deviationAlert.status,
-                createdAt: c.deviationAlert.createdAt,
-                journalEntry: c.deviationAlert.journalEntry
-                  ? {
-                      systolicBP: c.deviationAlert.journalEntry.systolicBP,
-                      diastolicBP: c.deviationAlert.journalEntry.diastolicBP,
-                      entryDate: c.deviationAlert.journalEntry.measuredAt,
-                    }
-                  : null,
-              }
-            : null,
-        }
-      }),
-    }
-  }
-
-  // ─── PATCH /provider/scheduled-calls/:id/status ─────────────────────────────
-
-  async updateCallStatus(id: string, status: string) {
-    const validStatuses = ['UPCOMING', 'COMPLETED', 'MISSED', 'CANCELLED']
-    const upper = status.toUpperCase()
-    if (!validStatuses.includes(upper)) {
-      throw new NotFoundException(`Invalid status: ${status}`)
-    }
-
-    const call = await this.prisma.scheduledCall.findUnique({ where: { id } })
-    if (!call) throw new NotFoundException('Scheduled call not found')
-
-    const updated = await this.prisma.scheduledCall.update({
-      where: { id },
-      data: { status: upper as 'UPCOMING' | 'COMPLETED' | 'MISSED' | 'CANCELLED' },
-    })
-
-    return { statusCode: 200, data: { id: updated.id, status: updated.status } }
-  }
-
-  // ─── DELETE /provider/scheduled-calls/:id ───────────────────────────────────
-
-  async deleteScheduledCall(id: string) {
-    const call = await this.prisma.scheduledCall.findUnique({ where: { id } })
-    if (!call) throw new NotFoundException('Scheduled call not found')
-
-    await this.prisma.scheduledCall.delete({ where: { id } })
-    return { statusCode: 200, message: 'Scheduled call deleted' }
   }
 
   // ─── Private: trailing 7-day BP mean (v2 replacement for BaselineSnapshot) ─

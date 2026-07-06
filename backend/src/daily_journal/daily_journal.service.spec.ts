@@ -1341,12 +1341,12 @@ describe('DailyJournalService', () => {
       expect(mockPrisma.profileVerificationLog.create).not.toHaveBeenCalled()
     })
 
-    it('DELETE (patient) → audit row written BEFORE the row is removed', async () => {
+    it('DELETE (patient) → SOFT-delete (deletedAt stamped, never hard-deleted) + audit written BEFORE it', async () => {
       mockPrisma.journalEntry.findFirst
         .mockResolvedValueOnce(fullRow()) // ownership + snapshot fetch
         .mockResolvedValueOnce(null) // findSessionReevalAnchor — no sibling
       mockPrisma.profileVerificationLog.create.mockResolvedValueOnce({})
-      mockPrisma.journalEntry.delete.mockResolvedValueOnce({})
+      mockPrisma.journalEntry.update.mockResolvedValueOnce({})
 
       await service.delete('u1', 'e1')
 
@@ -1356,12 +1356,19 @@ describe('DailyJournalService', () => {
         fieldPath: 'journal_entry.deleted',
         newValue: Prisma.JsonNull,
       })
-      // Snapshot captured the state being destroyed.
+      // Snapshot captured the state at delete time.
       expect(audit.data.previousValue).toMatchObject({ entryId: 'e1', systolicBP: 140 })
-      // The audit write strictly precedes the destructive delete.
+      // L5: the reading is SOFT-deleted (deletedAt stamped), NEVER hard-deleted
+      // — so its fired DeviationAlert + escalations survive (no FK cascade).
+      expect(mockPrisma.journalEntry.update).toHaveBeenCalledWith({
+        where: { id: 'e1' },
+        data: { deletedAt: expect.any(Date) },
+      })
+      expect(mockPrisma.journalEntry.delete).not.toHaveBeenCalled()
+      // The audit write strictly precedes the soft-delete.
       const auditOrder = mockPrisma.profileVerificationLog.create.mock.invocationCallOrder[0]
-      const deleteOrder = mockPrisma.journalEntry.delete.mock.invocationCallOrder[0]
-      expect(auditOrder).toBeLessThan(deleteOrder)
+      const updateOrder = mockPrisma.journalEntry.update.mock.invocationCallOrder[0]
+      expect(auditOrder).toBeLessThan(updateOrder)
     })
 
     it('DELETE (patient) with surviving session sibling → emits ENTRY_UPDATED (context refresh only; engine does not re-eval per CTO 2026-06-09)', async () => {
@@ -1378,7 +1385,7 @@ describe('DailyJournalService', () => {
           weight: null,
         })
       mockPrisma.profileVerificationLog.create.mockResolvedValueOnce({})
-      mockPrisma.journalEntry.delete.mockResolvedValueOnce({})
+      mockPrisma.journalEntry.update.mockResolvedValueOnce({})
 
       await service.delete('u1', 'e1')
 
@@ -1389,7 +1396,7 @@ describe('DailyJournalService', () => {
     it('DELETE (admin) → ADMIN_READING_DELETED; NO re-eval emit, anchor lookup skipped', async () => {
       mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(fullRow())
       mockPrisma.profileVerificationLog.create.mockResolvedValueOnce({})
-      mockPrisma.journalEntry.delete.mockResolvedValueOnce({})
+      mockPrisma.journalEntry.update.mockResolvedValueOnce({})
 
       await service.delete('u1', 'e1', ADMIN)
 
@@ -1410,6 +1417,7 @@ describe('DailyJournalService', () => {
       await expect(service.delete('u1', 'someone-elses-entry', ADMIN)).rejects.toThrow(
         'Journal entry not found',
       )
+      expect(mockPrisma.journalEntry.update).not.toHaveBeenCalled()
       expect(mockPrisma.journalEntry.delete).not.toHaveBeenCalled()
       expect(mockPrisma.profileVerificationLog.create).not.toHaveBeenCalled()
     })
