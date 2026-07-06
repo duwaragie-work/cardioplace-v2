@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Module } from '@nestjs/common'
 import { ClsModule } from 'nestjs-cls'
 import { SystemPrincipalsService } from './system-principals.service.js'
@@ -37,6 +38,12 @@ import { SystemPrincipalsService } from './system-principals.service.js'
           // unauthenticated request) is not a background process. Only
           // runAsCronActor sets this. Left null here explicitly.
           cls.set('systemActorLabel', null)
+          // N2 (2026-07-07) — per-request correlation id. AccessLog rows written
+          // during this request share the same runId; distinct HTTP requests get
+          // distinct ids. Symmetric with the cron path in runAsCronActor so the
+          // exception-report cron (N7) can group audit rows by runId regardless
+          // of whether the actor was a user or a system principal.
+          cls.set('runId', randomUUID())
           cls.set('ip', req?.ip ?? null)
           cls.set('userAgent', req?.headers?.['user-agent'] ?? null)
         },

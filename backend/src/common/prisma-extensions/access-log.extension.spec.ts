@@ -148,9 +148,24 @@ describe('computeAccessLogData — PHI gate', () => {
     expect(computeAccessLogData('User', 'someExoticOp', {}, null, USER_CLS)).toBeNull()
   })
 
-  it('the seven PHI models are exactly the audited set', () => {
+  it('PHI_MODELS matches the current audited set (updated when N4 extends it)', () => {
+    // The canonical inventory lives in docs/EPHI_INVENTORY.md and is enforced
+    // by phi-inventory.ts + the conformance suite (N3). This snapshot mirrors
+    // the runtime set on this branch: 7 original + 3 Support (already on dev).
+    // N4 extends both this test and PHI_MODELS to the full 20-model set.
     expect([...PHI_MODELS].sort()).toEqual(
-      ['DeviationAlert', 'JournalEntry', 'Notification', 'PatientMedication', 'PatientProfile', 'PatientThreshold', 'User'].sort(),
+      [
+        'DeviationAlert',
+        'JournalEntry',
+        'Notification',
+        'PatientMedication',
+        'PatientProfile',
+        'PatientThreshold',
+        'SupportTicket',
+        'SupportTicketAction',
+        'SupportTicketReply',
+        'User',
+      ].sort(),
     )
   })
 })
@@ -180,6 +195,56 @@ describe('computeAccessLogData — actor attribution', () => {
     const userWithStrayLabel = clsWith({ actorId: 'prov-1', systemActorLabel: 'cron-x' })
     const data = computeAccessLogData('JournalEntry', 'findMany', {}, [], userWithStrayLabel)
     expect(data).toMatchObject({ actorType: 'USER', actorId: 'prov-1', systemActorLabel: null })
+  })
+})
+
+describe('computeAccessLogData — N2 runId correlation', () => {
+  // N2: runId is set by runAsCronActor (cron path) or the CLS interceptor
+  // (HTTP path) — one per invocation. Distinct runs write distinct AccessLog
+  // rows, so N7's exception-report cron can count per-run rather than per-day.
+
+  it('HTTP request with runId in CLS → runId flows through to the audit row', () => {
+    const cls = clsWith({
+      actorId: 'prov-1',
+      runId: 'req-a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+    })
+    const data = computeAccessLogData('JournalEntry', 'findMany', {}, [], cls)
+    expect(data).toMatchObject({
+      actorType: 'USER',
+      runId: 'req-a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+    })
+  })
+
+  it('cron run with runId in CLS → runId flows through, systemActorLabel unaffected', () => {
+    const cls = clsWith({
+      systemActorLabel: 'cron-gap-alert',
+      runId: 'cron-run-abc-def-123',
+    })
+    const data = computeAccessLogData('Notification', 'create', { data: {} }, { id: 'n-1' }, cls)
+    expect(data).toMatchObject({
+      actorType: 'SYSTEM_ACTOR',
+      systemActorLabel: 'cron-gap-alert',
+      runId: 'cron-run-abc-def-123',
+    })
+  })
+
+  it('no runId in CLS → runId null (pre-N2 fallback)', () => {
+    // EMPTY_CLS has no runId key — matches the pre-2026-07-07 code path.
+    const data = computeAccessLogData('JournalEntry', 'findMany', {}, [], EMPTY_CLS)
+    expect(data).toMatchObject({ runId: null })
+  })
+
+  it('two distinct runIds → two distinct audit rows (correlation isolation)', () => {
+    // Simulates two independent runs (or two HTTP requests) writing to the same
+    // PHI model. The audit rows carry different runIds so N7's per-run
+    // aggregation can distinguish them even under identical actor + model.
+    const clsA = clsWith({ actorId: 'prov-1', runId: 'run-A' })
+    const clsB = clsWith({ actorId: 'prov-1', runId: 'run-B' })
+    const dataA = computeAccessLogData('JournalEntry', 'findMany', {}, [], clsA)
+    const dataB = computeAccessLogData('JournalEntry', 'findMany', {}, [], clsB)
+    expect(dataA?.runId).toBe('run-A')
+    expect(dataB?.runId).toBe('run-B')
+    expect(dataA?.runId).not.toBe(dataB?.runId)
   })
 })
 

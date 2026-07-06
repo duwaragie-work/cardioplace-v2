@@ -111,6 +111,13 @@ export interface AccessLogData {
   // cron identified itself via runAsCronActor. Null for USER writes and for
   // pre-2026-07-03 / unlabelled system writes.
   systemActorLabel: string | null
+  // N2 (2026-07-07) — per-invocation correlation id set by runAsCronActor
+  // (cron path) or the HTTP interceptor (request path). Groups every AccessLog
+  // row emitted during the same cron run or HTTP request; the N7 exception
+  // report cron uses this to compute per-run counts and detect anomalies at
+  // run granularity rather than day granularity. Nullable because pre-N2 rows
+  // have none.
+  runId: string | null
   action: 'READ' | 'WRITE' | 'DELETE'
   modelName: string
   recordId: string | null
@@ -154,6 +161,7 @@ export function computeAccessLogData(
       : null
   const ip = cls.get<string | null>('ip') ?? null
   const userAgent = cls.get<string | null>('userAgent') ?? null
+  const runId = cls.get<string | null>('runId') ?? null
 
   let recordId: string | null = null
   if (WHERE_ID_OPS.has(operation)) {
@@ -166,6 +174,7 @@ export function computeAccessLogData(
     actorId,
     actorType,
     systemActorLabel,
+    runId,
     action,
     modelName: model,
     recordId,
