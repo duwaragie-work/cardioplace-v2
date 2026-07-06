@@ -9,7 +9,7 @@ import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 import { createHash, randomBytes, randomInt } from 'crypto'
 import type { Profile } from 'passport-google-oauth20'
-import { POLICY_VERSION } from '@cardioplace/shared'
+import { POLICY_VERSION, TRAINING_ACK_VERSION } from '@cardioplace/shared'
 import { EmailService } from '../email/email.service.js'
 import {
   magicLinkEmailHtml,
@@ -2330,6 +2330,56 @@ export class AuthService {
       via: 'onboarding',
     })
     return { recorded: true }
+  }
+
+  // ─── Training / Rules-of-Behavior Acknowledgment (HIPAA L1, §164.312(b)) ──────
+  // Before the audit-review console (L2) lets a care-team reviewer in, they must
+  // acknowledge the Rules of Behavior. Recorded as a `training_acknowledged`
+  // event on the existing AuthLog audit trail — mirrors consent exactly, no new
+  // table / migration. Who (userId), when (createdAt), which ROB version
+  // (metadata.version), and IP / userAgent are all captured.
+
+  async recordTrainingAck(
+    userId: string,
+    context?: { ipAddress?: string; userAgent?: string },
+  ): Promise<{ recorded: boolean; version: string }> {
+    await this.logAuthEvent({
+      event: 'training_acknowledged',
+      userId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: {
+        policyType: 'RULES_OF_BEHAVIOR',
+        version: TRAINING_ACK_VERSION,
+        via: 'audit-console',
+      },
+      success: true,
+    })
+    return { recorded: true, version: TRAINING_ACK_VERSION }
+  }
+
+  // Whether the reviewer has acknowledged the CURRENT ROB version. Reads the
+  // latest `training_acknowledged` AuthLog event and compares its recorded
+  // version — a stale acknowledgment (older version) reports as un-acknowledged,
+  // so a ROB text change re-gates every reviewer.
+  async getTrainingAckStatus(
+    userId: string,
+  ): Promise<{ acknowledged: boolean; version: string; ackedAt: Date | null }> {
+    const latest = await this.prisma.authLog.findFirst({
+      where: { event: 'training_acknowledged', userId, success: true },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true, metadata: true },
+    })
+    const ackedVersion =
+      latest && typeof latest.metadata === 'object' && latest.metadata !== null
+        ? (latest.metadata as { version?: unknown }).version
+        : undefined
+    const acknowledged = ackedVersion === TRAINING_ACK_VERSION
+    return {
+      acknowledged,
+      version: TRAINING_ACK_VERSION,
+      ackedAt: acknowledged && latest ? latest.createdAt : null,
+    }
   }
 
   // ─── Timezone Auto-Update ───────────────────────────────────────────────────

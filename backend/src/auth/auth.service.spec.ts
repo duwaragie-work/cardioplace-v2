@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 import { Test, TestingModule } from '@nestjs/testing'
 import { validate } from 'class-validator'
+import { TRAINING_ACK_VERSION } from '@cardioplace/shared'
 import {
   AccountStatus,
   CommunicationPreference,
@@ -80,6 +81,7 @@ describe('AuthService', () => {
     const prismaMock: Record<string, unknown> = {
       authLog: {
         create: jest.fn(),
+        findFirst: jest.fn(),
       },
       otpCode: {
         create: jest.fn(),
@@ -515,6 +517,68 @@ describe('AuthService', () => {
           userId: mockUser.id,
         }),
       })
+    })
+  })
+
+  describe('training-ack (HIPAA L1 — Rules-of-Behavior acknowledgment)', () => {
+    it('recordTrainingAck writes a training_acknowledged AuthLog event with the current ROB version', async () => {
+      ;(prisma.authLog.create as jest.Mock).mockResolvedValue({})
+
+      const res = await service.recordTrainingAck('user-1', {
+        ipAddress: '1.1.1.1',
+        userAgent: 'UA',
+      })
+
+      expect(res).toEqual({ recorded: true, version: TRAINING_ACK_VERSION })
+      expect(prisma.authLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          event: 'training_acknowledged',
+          userId: 'user-1',
+          success: true,
+          metadata: expect.objectContaining({
+            policyType: 'RULES_OF_BEHAVIOR',
+            version: TRAINING_ACK_VERSION,
+            via: 'audit-console',
+          }),
+        }),
+      })
+    })
+
+    it('getTrainingAckStatus → acknowledged when the latest event matches the current version', async () => {
+      const ackedAt = new Date('2026-07-06T00:00:00.000Z')
+      ;(prisma.authLog.findFirst as jest.Mock).mockResolvedValue({
+        createdAt: ackedAt,
+        metadata: { version: TRAINING_ACK_VERSION },
+      })
+
+      const status = await service.getTrainingAckStatus('user-1')
+
+      expect(status).toEqual({
+        acknowledged: true,
+        version: TRAINING_ACK_VERSION,
+        ackedAt,
+      })
+    })
+
+    it('getTrainingAckStatus → NOT acknowledged for a stale (older) ROB version', async () => {
+      ;(prisma.authLog.findFirst as jest.Mock).mockResolvedValue({
+        createdAt: new Date(),
+        metadata: { version: 'an-older-version' },
+      })
+
+      const status = await service.getTrainingAckStatus('user-1')
+
+      expect(status.acknowledged).toBe(false)
+      expect(status.ackedAt).toBeNull()
+    })
+
+    it('getTrainingAckStatus → NOT acknowledged when no acknowledgment exists', async () => {
+      ;(prisma.authLog.findFirst as jest.Mock).mockResolvedValue(null)
+
+      const status = await service.getTrainingAckStatus('user-1')
+
+      expect(status.acknowledged).toBe(false)
+      expect(status.ackedAt).toBeNull()
     })
   })
 
