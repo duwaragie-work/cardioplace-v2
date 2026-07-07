@@ -1,15 +1,35 @@
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator'
+import {
+  ArrayNotEmpty,
+  IsArray,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator'
+import { UserRole } from '../../generated/prisma/enums.js'
 
 /**
- * Body for `POST /admin/users/:id/reactivate`. `restoreRoles` defaults to
- * true — admin deactivate is a reversible pause, so reactivate hands the
- * pre-deactivation (staff) roles back. Pass restoreRoles:false to force a
- * fresh re-authorization that strips staff roles to PATIENT-only (HIPAA N12).
+ * Body for `POST /admin/users/:id/reactivate`.
+ *
+ * HIPAA §164.308(a)(4) — reactivation is a DELIBERATE, authorized re-grant, not
+ * an automatic restore. The admin must explicitly send the role(s) to grant;
+ * there is no server-side default. The chosen roles are checked against the SAME
+ * grant-authority matrix as invite (`assertCanGrantRole`), so reactivation can
+ * never become a privilege-escalation path. The UI prefills `roles` with the
+ * prior role from `terminationSnapshot`, but the admin can change it.
  */
 export class ReactivateDto {
+  // The role(s) to grant on reactivation — the deliberate re-auth decision.
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsEnum(UserRole, { each: true })
+  roles!: UserRole[]
+
+  // Required when ANY chosen role is practice-bound (PROVIDER / MEDICAL_DIRECTOR
+  // / COORDINATOR). Ignored for PATIENT-only reactivation.
   @IsOptional()
-  @IsBoolean()
-  restoreRoles?: boolean
+  @IsString()
+  practiceId?: string
 
   @IsOptional()
   @IsString()

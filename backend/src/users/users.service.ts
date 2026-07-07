@@ -84,6 +84,17 @@ const ROLES_REQUIRING_PRACTICE_FOR_SUPER: UserRole[] = [
   UserRole.PROVIDER,
 ]
 
+// Roles that own a practice-membership join row (PracticeProvider /
+// PracticeMedicalDirector / PracticeCoordinator). Reactivating INTO any of these
+// requires a `practiceId` so the membership can be created — regardless of the
+// caller's role (stricter than the invite matrix, which lets SUPER omit the
+// practice for MD). See account-lifecycle syncPracticeMembership.
+const PRACTICE_BOUND_ROLES: UserRole[] = [
+  UserRole.PROVIDER,
+  UserRole.MEDICAL_DIRECTOR,
+  UserRole.COORDINATOR,
+]
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name)
@@ -108,6 +119,25 @@ export class UsersService {
    * authorization matrix.
    */
   async assertCanInvite(
+    caller: Actor,
+    targetRole: UserRole,
+    practiceId: string | null,
+  ): Promise<void> {
+    // Invite and reactivation share ONE grant-authority matrix. `assertCanInvite`
+    // is kept as the invite-site name; both delegate to `assertCanGrantRole` so
+    // the matrix is defined exactly once (a second copy that drifted would be the
+    // privilege-escalation bug this design exists to prevent — HIPAA
+    // §164.308(a)(4)).
+    return this.assertCanGrantRole(caller, targetRole, practiceId)
+  }
+
+  /**
+   * The single source of truth for "may `caller` grant `targetRole` into
+   * `practiceId`?" — used by invite (`assertCanInvite`) AND reactivation
+   * (once per requested role). Throws ForbiddenException / BadRequestException
+   * on deny; returns silently on grant.
+   */
+  async assertCanGrantRole(
     caller: Actor,
     targetRole: UserRole,
     practiceId: string | null,
@@ -811,17 +841,35 @@ export class UsersService {
       select: { id: true, email: true, roles: true, accountStatus: true },
     })
     if (!target) throw new NotFoundException('User not found')
+
+    // 1. Target scope — may the caller act on THIS user at all (practice
+    //    overlap for MED_DIR / COORDINATOR)? Same guard as deactivate.
     await this.assertCanDeactivate(caller, target)
 
-    // Default to restoring the pre-deactivation roles: admin deactivate is a
-    // reversible pause ("not a delete" — see the deactivate modal copy), so
-    // reactivate must hand the staff role back or the user returns powerless.
-    // An admin can still pass restoreRoles:false for a fresh re-authorization.
-    const restoreRoles = dto.restoreRoles ?? true
+    // 2. HIPAA §164.308(a)(4) — reactivation is a deliberate, scoped re-grant.
+    //    Every requested role must pass the SAME grant-authority matrix as
+    //    invite; any failure aborts the whole reactivation (no partial grant).
+    //    This is what stops a COORDINATOR reviving someone as SUPER_ADMIN, or a
+    //    MED_DIR granting into a practice they don't head.
+    const needsPractice = dto.roles.some((r) =>
+      PRACTICE_BOUND_ROLES.includes(r),
+    )
+    if (needsPractice && !dto.practiceId) {
+      const bound = dto.roles.filter((r) => PRACTICE_BOUND_ROLES.includes(r))
+      throw new BadRequestException(
+        `practiceId is required to grant ${bound.join(', ')}`,
+      )
+    }
+    for (const role of dto.roles) {
+      await this.assertCanGrantRole(caller, role, dto.practiceId ?? null)
+    }
+
     const updated = await this.lifecycle.reactivate(target.id, {
       actorId: caller.id,
       actorRoles: caller.roles,
-      restoreRoles,
+      roles: dto.roles,
+      practiceId: dto.practiceId,
+      reason: dto.reason,
       ctx,
     })
 
@@ -833,8 +881,8 @@ export class UsersService {
       userAgent: ctx?.userAgent,
       metadata: {
         targetUserId: updated.id,
-        targetRoles: updated.roles,
-        restoreRoles,
+        grantedRoles: updated.roles,
+        practiceId: dto.practiceId ?? null,
       },
       success: true,
     })
