@@ -20,6 +20,7 @@ import {
   LEGACY_MARKER_COOKIES,
 } from '@/lib/cookie-names';
 import { useIdleTimeout } from '@/lib/hooks/useIdleTimeout';
+import { unsubscribePush } from '@/lib/services/push.service';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -401,6 +402,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const logout = async () => {
+    // Drop this browser's push subscription FIRST, while the session is still
+    // valid (the unsubscribe call is authenticated). Best-effort — never blocks
+    // logout. Matters for shared devices: a signed-out patient must not keep
+    // receiving pushes on this browser.
+    await unsubscribePush().catch(() => {});
     // Tell the backend so it can clear both HttpOnly cookies + revoke the
     // refresh-token row. AWAIT the response so the server's Set-Cookie
     // (max-age=0 on access_token + refresh_token) is fully processed by
