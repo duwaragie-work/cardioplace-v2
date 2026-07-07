@@ -833,7 +833,7 @@ test.describe('AlertsTab — Acknowledged status filter (bug #3)', () => {
 test.describe('Phase 2 — Finding 3: journal-delete cascade (current behavior, CTO-deferred)', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  test('DELETE /daily-journal/:id cascades to linked DeviationAlert + EscalationEvent (flagged for CTO review)', async () => {
+  test('DELETE /daily-journal/:id soft-deletes the reading; its DeviationAlert + EscalationEvent SURVIVE', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     let u: Awaited<ReturnType<typeof tc.findUser>>
     try {
@@ -871,25 +871,22 @@ test.describe('Phase 2 — Finding 3: journal-delete cascade (current behavior, 
     ).toBeTruthy()
     await new Promise((r) => setTimeout(r, 500))
 
-    // CURRENT BEHAVIOR (documented, not endorsed): the linked DeviationAlert
-    // is cascade-deleted...
+    // SOFT-DELETE (HIPAA L5, Duwaragie sign-off 2026-07-06 — b6972f16): deleting
+    // a reading stamps `deletedAt` instead of removing the row, so the FK
+    // `onDelete: Cascade` never fires and the fired DeviationAlert SURVIVES.
+    // This is the "soft-supersede" move the prior TODO anticipated.
     const alertsAfter = await tc.listAlerts(u.id)
     expect(
       alertsAfter.some((a) => a.id === alertId),
-      'CURRENT cascade behavior: DeviationAlert is removed when its JournalEntry is deleted',
-    ).toBe(false)
+      'soft-delete: the fired DeviationAlert survives its reading being deleted',
+    ).toBe(true)
 
-    // ...and so are its EscalationEvent rows (the audit trail).
+    // ...and so does its EscalationEvent audit trail (nothing erased).
     const eventsAfter = await tc.listEscalationEvents(alertId)
     expect(
       eventsAfter.length,
-      `CURRENT cascade behavior: EscalationEvent rows removed (had ${eventsBefore.length})`,
-    ).toBe(0)
-
-    // TODO(CTO + Manisha + counsel — Phase 1 §G.3): if the architecture moves
-    // to soft-supersede (reading correction keeps prior alert as historical
-    // evidence), update this test to assert the alert/escalation rows PERSIST
-    // (marked superseded) instead of being erased.
+      `soft-delete: EscalationEvent audit rows survive (had ${eventsBefore.length})`,
+    ).toBe(eventsBefore.length)
 
     await patientApi.dispose()
     await tc.dispose()
