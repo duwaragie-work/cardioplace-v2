@@ -110,7 +110,9 @@ export class AccountLifecycleService {
         accountStatus: AccountStatus.DEACTIVATED,
         // Kill-switch: invalidate every token minted before this instant.
         tokenVersion: { increment: 1 },
-        // Capture roles so a later reactivate(restoreRoles) can hand them back.
+        // Capture the roles at deactivation for the audit trail (reactivation no
+        // longer auto-restores — it's an explicit re-grant — but the prior roles
+        // are recorded as `priorRoles` in the reactivation audit snapshot).
         terminationSnapshot: { roles: target.roles, capturedAt: new Date().toISOString() },
       },
       select: { id: true, email: true, roles: true, accountStatus: true },

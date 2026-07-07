@@ -11,6 +11,8 @@ import {
   invitableRoles,
   inviteRequiresPractice,
   canManageAudit,
+  assignableRoles,
+  assignablePractices,
 } from './roleGates';
 
 // 2026-07-01 access-scope patch — MED_DIR practice-scoped admin authority +
@@ -195,5 +197,75 @@ describe('canManageAudit (audit console — org-wide only)', () => {
     expect(canManageAudit({ roles: [] })).toBe(false);
     expect(canManageAudit(null)).toBe(false);
     expect(canManageAudit(undefined)).toBe(false);
+  });
+});
+
+// Reactivation re-uses the invite grant matrix (backend assertCanGrantRole).
+// These lock the frontend mirror to the same cells the backend enforces so the
+// modal never offers a role/practice that would 403 (Part B — HIPAA
+// §164.308(a)(4)).
+describe('roleGates — reactivation grant scoping (Part B)', () => {
+  describe('assignableRoles (== invite matrix)', () => {
+    it('SUPER_ADMIN can grant every role', () => {
+      const roles = assignableRoles({ roles: ['SUPER_ADMIN'] });
+      expect(roles).toEqual(
+        expect.arrayContaining([
+          'PATIENT',
+          'PROVIDER',
+          'MEDICAL_DIRECTOR',
+          'COORDINATOR',
+          'HEALPLACE_OPS',
+          'SUPER_ADMIN',
+        ]),
+      );
+    });
+    it('COORDINATOR cannot grant SUPER_ADMIN / HEALPLACE_OPS / COORDINATOR', () => {
+      const roles = assignableRoles({ roles: ['COORDINATOR'] });
+      expect(roles).not.toContain('SUPER_ADMIN');
+      expect(roles).not.toContain('HEALPLACE_OPS');
+      expect(roles).not.toContain('COORDINATOR');
+      expect(roles).toEqual(
+        expect.arrayContaining(['PATIENT', 'PROVIDER', 'MEDICAL_DIRECTOR']),
+      );
+    });
+    it('MEDICAL_DIRECTOR cannot grant org-level roles', () => {
+      const roles = assignableRoles({ roles: ['MEDICAL_DIRECTOR'] });
+      expect(roles).not.toContain('HEALPLACE_OPS');
+      expect(roles).not.toContain('SUPER_ADMIN');
+    });
+    it('matches assignableRoles === invitableRoles (single source)', () => {
+      expect(assignableRoles).toBe(invitableRoles);
+    });
+  });
+
+  describe('assignablePractices', () => {
+    const practices = [
+      { id: 'p1', name: 'Cedar Hill', medicalDirectorIds: ['md1'], coordinatorId: 'co1' },
+      { id: 'p2', name: 'BridgePoint', medicalDirectorIds: ['md2'], coordinatorId: 'co2' },
+    ];
+    it('SUPER_ADMIN / HEALPLACE_OPS see every practice', () => {
+      expect(assignablePractices({ roles: ['SUPER_ADMIN'] }, practices)).toHaveLength(2);
+      expect(assignablePractices({ roles: ['HEALPLACE_OPS'] }, practices)).toHaveLength(2);
+    });
+    it('MEDICAL_DIRECTOR sees only practices they head', () => {
+      const out = assignablePractices(
+        { id: 'md1', roles: ['MEDICAL_DIRECTOR'] },
+        practices,
+      );
+      expect(out.map((p) => p.id)).toEqual(['p1']);
+    });
+    it('COORDINATOR sees only their own practice', () => {
+      const out = assignablePractices(
+        { id: 'co2', roles: ['COORDINATOR'] },
+        practices,
+      );
+      expect(out.map((p) => p.id)).toEqual(['p2']);
+    });
+    it('returns every practice when membership hints are absent (already server-scoped)', () => {
+      const bare = [{ id: 'p1', name: 'Cedar Hill' }];
+      expect(
+        assignablePractices({ id: 'md1', roles: ['MEDICAL_DIRECTOR'] }, bare),
+      ).toHaveLength(1);
+    });
   });
 });

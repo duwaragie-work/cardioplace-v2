@@ -95,6 +95,8 @@ The matrix reflects the code **after** the 2026-07-01 patches ship (MED_DIR admi
 
 ***(pending)* cells are the 2026-07-01 change list** — track in the implementation status section below.
 
+**Reactivate ≠ auto-restore (2026-07-03, HIPAA §164.308(a)(4)).** The "Deactivate / reactivate staff" cell above still reflects *who may act*, but reactivation is now a **deliberate, scoped re-authorization**, not a silent role hand-back. The acting admin explicitly chooses the role(s) to grant (prefilled with the prior role, changeable), and each is checked against the **same** grant matrix as invite (`assertCanGrantRole`) — a caller can never grant on reactivation what they couldn't grant on invite. Practice-bound roles require a practice the admin is authorized for; the action bumps `tokenVersion` and reconciles practice membership, and is captured in an `AccountClosureLog` REACTIVATE audit row. See the User-lifecycle row in §8.
+
 ### §2.2 — Implementation status (as of 2026-07-01)
 
 | Change | Where | Owner | Status |
@@ -188,7 +190,7 @@ Principle: **OPS reads everything for operational support, but clinical disposit
 `COORDINATOR` is a non-clinical role for clinic front-desk / practice-manager staff. Scoped to exactly one practice (1:1 via `PracticeCoordinator @unique`).
 
 **Can:**
-- Manage their practice's user roster (invite, deactivate/reactivate — `/admin/users` endpoint scoped to `PracticeCoordinator.practiceId`)
+- Manage their practice's user roster (invite, deactivate, reactivate — `/admin/users` endpoint scoped to `PracticeCoordinator.practiceId`). Reactivation is an explicit re-grant (2026-07-03): a COORDINATOR may only grant roles they could invite (`assertCanGrantRole` — PATIENT / PROVIDER / MED_DIR into their own practice), so reactivation can never mint a COORDINATOR / OPS / SUPER_ADMIN.
 - See patient enrollment / verification status for their practice (a non-clinical dashboard surface)
 
 **Cannot (2026-07-01 walkbacks):**
@@ -324,7 +326,8 @@ Bootstrapping a practice with staff before the first patient is assigned: MED_DI
 |---|---|
 | READ user roster — 2026-07-01 | COORDINATOR, HEALPLACE_OPS, SUPER_ADMIN, **MEDICAL_DIRECTOR** (added). Scoped: COORDINATOR + MED_DIR practice-only; OPS + SUPER all. |
 | Invite staff — 2026-07-01 | Same. MED_DIR + COORDINATOR practice-scoped via `assertCanInvite`. |
-| Deactivate / reactivate — 2026-07-01 | Same. MED_DIR + COORDINATOR practice-scoped via `assertCanDeactivate`. |
+| Deactivate — 2026-07-01 | Same. MED_DIR + COORDINATOR practice-scoped via `assertCanDeactivate`. |
+| **Reactivate — 2026-07-03 (explicit re-grant)** | Target-scope via `assertCanDeactivate` (same as deactivate), THEN a deliberate, audited **re-authorization** (HIPAA §164.308(a)(4)): the admin sends the role(s) to grant (`{ roles, practiceId, reason }` — no silent restore), each checked against the **same** grant-authority matrix as invite via `assertCanGrantRole`. Practice-bound roles (PROVIDER / MED_DIR / COORDINATOR) require a `practiceId`; missing → 400; an out-of-scope grant → 403. On success: `accountStatus=ACTIVE`, `roles` set to the granted set, `tokenVersion` bumped (clean slate), practice join rows reconciled, and an `AccountClosureLog` REACTIVATE row records `grantedRoles` / `practiceId` / `priorRoles` / `reason`. |
 | Permanent-close — 2026-07-01 | SUPER_ADMIN, HEALPLACE_OPS only. **COORDINATOR excluded** (walkback from #114 — irreversible tombstoning is org-level). |
 | Remove role | Method-level `@Roles`: SUPER, OPS. Any actor except SUPER cannot remove SUPER_ADMIN role. |
 

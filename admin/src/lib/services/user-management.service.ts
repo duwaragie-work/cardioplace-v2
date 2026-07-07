@@ -243,16 +243,25 @@ export async function deactivateUser(
   return unwrap<UserRow>(json)
 }
 
+/** The deliberate, scoped re-authorization payload (HIPAA §164.308(a)(4)).
+ *  `roles` is required — there is no silent restore. `practiceId` is required
+ *  by the backend whenever any chosen role is practice-bound. */
+export interface ReactivatePayload {
+  roles: UserRole[]
+  practiceId?: string
+  reason?: string
+}
+
 export async function reactivateUser(
   id: string,
-  // Default true: admin deactivate is a reversible pause, so reactivate hands
-  // the pre-deactivation (staff) role back — otherwise the user returns as a
-  // roleless PATIENT. Pass false only for a deliberate fresh re-authorization.
-  restoreRoles = true,
+  payload: ReactivatePayload,
 ): Promise<UserRow> {
+  const body: Record<string, unknown> = { roles: payload.roles }
+  if (payload.practiceId) body.practiceId = payload.practiceId
+  if (payload.reason) body.reason = payload.reason
   const res = await fetchWithAuth(`${API}/api/admin/users/${id}/reactivate`, {
     method: 'POST',
-    body: JSON.stringify({ restoreRoles }),
+    body: JSON.stringify(body),
   })
   const json = await jsonOrThrow<unknown>(res, 'Could not reactivate user')
   return unwrap<UserRow>(json)

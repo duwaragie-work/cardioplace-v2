@@ -313,9 +313,10 @@ export default function UsersList({
     await onRevokeInvite(inviteId);
     setLiveMsg(t('userManagement.toast.revoked'));
   }
-  async function handleReactivate(id: string) {
-    await onReactivate(id);
-    setLiveMsg(t('userManagement.toast.reactivated'));
+  function handleReactivate(id: string) {
+    // Opens the reactivation modal in the parent (the deliberate re-grant flow);
+    // the parent announces success after the modal submits.
+    onReactivate(id);
   }
 
   const total = response?.total ?? 0;
