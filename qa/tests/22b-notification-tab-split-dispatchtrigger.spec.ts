@@ -29,7 +29,7 @@ test.describe('Notification tab-split — dispatchTrigger discriminator', () => 
 
   const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000'
 
-  test('A — delete-reading orphans the alert notification; it stays HIDDEN from the patient bell', async ({ page }) => {
+  test('A — delete-reading soft-deletes; the alert notification survives and stays HIDDEN from the patient bell', async ({ page }) => {
     const tc = await newTestControl(apiBase, process.env.TEST_CONTROL_SECRET)
     const aisha = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(aisha.id)
@@ -69,8 +69,9 @@ test.describe('Notification tab-split — dispatchTrigger discriminator', () => 
     expect(alertNotif, 'escalation T+0 wrote the alert-linked patient PUSH row').toBeDefined()
 
     // Resolve the reading id (resetUser wiped history, so this is the only
-    // entry) and DELETE it — hard delete → cascade deletes the alert →
-    // onDelete:SetNull nulls alertId on the notification (the orphan).
+    // entry) and DELETE it. SOFT-DELETE (b6972f16, 2026-07-06): this stamps
+    // `deletedAt` instead of removing the row, so the FK cascade never fires —
+    // the alert and its notification SURVIVE and `alertId` is NOT nulled.
     const readingsRes = await api.get('daily-journal')
     const readings = ((await readingsRes.json()) as { data: Array<{ id: string; systolicBP: number }> }).data
     const reading = readings.find((r) => r.systolicBP === 185) ?? readings[0]
@@ -78,21 +79,20 @@ test.describe('Notification tab-split — dispatchTrigger discriminator', () => 
     const del = await api.delete(`daily-journal/${reading.id}`)
     expect(del.status(), `DELETE failed: ${await del.text()}`).toBe(200)
 
-    // The notification row survives but is now orphaned (alertId null).
-    let orphaned = false
-    for (let i = 0; i < 20; i++) {
-      const notifs = await tc.listNotifications(aisha.id)
-      const row = notifs.find((n) => n.id === alertNotif!.id)
-      if (row && row.alertId === null) {
-        orphaned = true
-        break
-      }
-      await page.waitForTimeout(1000)
-    }
-    expect(orphaned, 'the alert cascade nulled alertId on the surviving notification').toBe(true)
+    // The notification survives with its alert link INTACT (soft-delete keeps
+    // the alert). It stays hidden from the bell via its ALERT_CREATED
+    // dispatchTrigger — NOT via a nulled alertId.
+    const survivor = await tc.listNotifications(aisha.id).then((ns) =>
+      ns.find((n) => n.id === alertNotif!.id),
+    )
+    expect(survivor, 'the alert notification survives the soft-delete').toBeDefined()
+    expect(
+      survivor!.alertId,
+      'soft-delete keeps the alert link intact (no orphan)',
+    ).toBe(emergency.id)
 
-    // API: the orphan is excluded from the bell (would have LEAKED under the old
-    // alertId != null AND PUSH heuristic, which no longer holds once alertId is null).
+    // API: the alert notification is excluded from the bell via its ALERT_*
+    // dispatchTrigger (the tab-split discriminator), independent of alertId.
     const notifRes = await api.get('daily-journal/notifications')
     expect(notifRes.status()).toBe(200)
     const body = (await notifRes.json()) as { data: Array<{ id: string }> }

@@ -439,6 +439,59 @@ export function inviteRequiresPractice(
 }
 
 /**
+ * Roles the caller may grant on invite OR reactivation. Reactivation reuses the
+ * invite authority matrix exactly (backend `assertCanGrantRole`, which
+ * `assertCanInvite` now delegates to), so this IS `invitableRoles` — exported
+ * under the neutral name so reactivation call sites read clearly and a future
+ * matrix change updates one predicate. See backend users.service.ts.
+ */
+export const assignableRoles = invitableRoles
+
+/** A practice the modal can offer, optionally carrying the membership hints the
+ *  MED_DIR / COORDINATOR scoping needs. When the hints are absent the list is
+ *  assumed already server-scoped for the caller and every entry is returned. */
+export interface AssignablePractice {
+  id: string
+  name: string
+  /** User ids of the practice's medical directors (for the MED_DIR filter). */
+  medicalDirectorIds?: string[]
+  /** The practice's coordinator user id (for the COORDINATOR filter). */
+  coordinatorId?: string | null
+}
+
+/**
+ * Practices the caller may assign a role INTO (invite or reactivation),
+ * mirroring the practice-scope half of the backend grant matrix:
+ *   SUPER_ADMIN / HEALPLACE_OPS → all practices (org-wide)
+ *   MEDICAL_DIRECTOR            → only practices they head
+ *   COORDINATOR                 → only their own practice
+ * For MED_DIR / COORDINATOR the filter uses the membership hints on each
+ * practice when present; if a practice omits them (the list was already
+ * server-scoped for this caller) it is kept. The backend re-checks every grant,
+ * so this is UI narrowing, never the authority.
+ */
+export function assignablePractices<T extends AssignablePractice>(
+  caller: UserInput,
+  allPractices: T[],
+): T[] {
+  if (isOrgWideAdmin(caller)) return allPractices
+  const callerId = caller?.id ?? null
+  if (has(caller, ['MEDICAL_DIRECTOR'])) {
+    return allPractices.filter(
+      (p) =>
+        !p.medicalDirectorIds ||
+        (callerId != null && p.medicalDirectorIds.includes(callerId)),
+    )
+  }
+  if (has(caller, ['COORDINATOR'])) {
+    return allPractices.filter(
+      (p) => p.coordinatorId === undefined || p.coordinatorId === callerId,
+    )
+  }
+  return allPractices
+}
+
+/**
  * Whether the caller is the COORDINATOR-only scope (i.e. their UI variant
  * collapses to "patient list of own practice" with no role filter / no
  * cross-practice picker).

@@ -13,6 +13,7 @@ import {
   accountClosedEmailHtml,
 } from '../email/email-templates.js'
 import { ConfigService } from '@nestjs/config'
+import type { Prisma } from '../generated/prisma/client.js'
 import { AccountStatus, UserRole } from '../generated/prisma/enums.js'
 
 /**
@@ -50,10 +51,15 @@ interface OffOpts {
 interface ReactivateOpts {
   actorId: string
   actorRoles?: UserRole[]
-  /** Only restore the pre-deactivation roles when explicitly asked (HIPAA
-   *  N12 — reactivation is a fresh re-authorization, not an automatic
-   *  privilege hand-back). */
-  restoreRoles?: boolean
+  /** The role(s) to grant on reactivation — the deliberate, already-authorized
+   *  re-grant decision (HIPAA §164.308(a)(4)). The caller (UsersService) has
+   *  already checked each role against the grant-authority matrix; this service
+   *  performs the mechanics only. There is no silent role restore anymore. */
+  roles: UserRole[]
+  /** Practice for the membership join rows — required by the caller whenever
+   *  any granted role is practice-bound. */
+  practiceId?: string
+  reason?: string
   ctx?: LifecycleContext
 }
 
@@ -104,7 +110,9 @@ export class AccountLifecycleService {
         accountStatus: AccountStatus.DEACTIVATED,
         // Kill-switch: invalidate every token minted before this instant.
         tokenVersion: { increment: 1 },
-        // Capture roles so a later reactivate(restoreRoles) can hand them back.
+        // Capture the roles at deactivation for the audit trail (reactivation no
+        // longer auto-restores — it's an explicit re-grant — but the prior roles
+        // are recorded as `priorRoles` in the reactivation audit snapshot).
         terminationSnapshot: { roles: target.roles, capturedAt: new Date().toISOString() },
       },
       select: { id: true, email: true, roles: true, accountStatus: true },
@@ -133,29 +141,101 @@ export class AccountLifecycleService {
       throw new BadRequestException('User is already active')
     }
 
-    // restoreRoles → hand back the captured roles verbatim. Otherwise strip
-    // privileged (staff) roles and keep only the base PATIENT role, so a
-    // reactivated staff account comes back with NO powers until an admin
-    // explicitly re-grants them (fresh re-authorization).
-    const snapshotRoles = this.snapshotRoles(target.terminationSnapshot) ?? target.roles
-    const roles = opts.restoreRoles
-      ? snapshotRoles
-      : snapshotRoles.filter((r) => r === UserRole.PATIENT)
+    // Explicit re-grant: the account comes back with EXACTLY the roles the admin
+    // chose (already authorized by UsersService against the grant matrix) — no
+    // silent restore. `priorRoles` is captured only for the audit trail.
+    const priorRoles = this.snapshotRoles(target.terminationSnapshot) ?? target.roles
+    const roles = opts.roles
 
-    const updated = await this.prisma.user.update({
-      where: { id: target.id },
-      data: { accountStatus: AccountStatus.ACTIVE, roles },
-      select: { id: true, email: true, roles: true, accountStatus: true },
+    // Atomic: flip status + roles + bump tokenVersion (clean slate — every token
+    // minted under the old role set is invalidated), then reconcile the practice
+    // join rows to match the new roles. All-or-nothing.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.user.update({
+        where: { id: target.id },
+        data: {
+          accountStatus: AccountStatus.ACTIVE,
+          roles,
+          tokenVersion: { increment: 1 },
+        },
+        select: { id: true, email: true, roles: true, accountStatus: true },
+      })
+      await this.syncPracticeMembership(tx, target.id, roles, opts.practiceId)
+      return u
     })
 
+    // Audit the deliberate re-grant — the evidence an auditor reads: who granted
+    // which roles, into which practice, what the prior roles were, and why.
     await this.writeClosureLog({
       userId: target.id,
       displayId: target.displayId,
       action: 'REACTIVATE',
-      opts: { actorId: opts.actorId, actorRoles: opts.actorRoles, ctx: opts.ctx },
-      snapshot: { restoredRoles: roles, restoreRoles: !!opts.restoreRoles },
+      opts: {
+        actorId: opts.actorId,
+        actorRoles: opts.actorRoles,
+        reason: opts.reason,
+        ctx: opts.ctx,
+      },
+      snapshot: {
+        grantedRoles: roles,
+        practiceId: opts.practiceId ?? null,
+        priorRoles,
+        reason: opts.reason ?? null,
+      },
     })
     return updated
+  }
+
+  /**
+   * Reconcile a user's practice-membership join rows to match a role set — used
+   * on reactivation so bringing someone back as a DIFFERENT role fixes the join
+   * tables, not just the `roles` array. For each practice-bound role: upsert the
+   * join row for `practiceId`; for each practice-bound role NOT held: drop its
+   * join rows. `practiceId` is guaranteed present for held practice-bound roles
+   * by the caller's up-front 400 check.
+   *
+   * v1: one practice per reactivation. A user who headed MULTIPLE practices as an
+   * MD keeps all existing rows and simply gains `practiceId` — we don't strip the
+   * others (that multi-practice case is surfaced by the caller, not guessed here).
+   * The invite-accept path (auth.service) still has its own inline single-role
+   * membership create; unifying the two is a safe follow-up (tracked in the PR).
+   */
+  private async syncPracticeMembership(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    roles: UserRole[],
+    practiceId?: string,
+  ): Promise<void> {
+    if (roles.includes(UserRole.PROVIDER)) {
+      await tx.practiceProvider.upsert({
+        where: { practiceId_userId: { practiceId: practiceId!, userId } },
+        create: { practiceId: practiceId!, userId },
+        update: {},
+      })
+    } else {
+      await tx.practiceProvider.deleteMany({ where: { userId } })
+    }
+
+    if (roles.includes(UserRole.MEDICAL_DIRECTOR)) {
+      await tx.practiceMedicalDirector.upsert({
+        where: { practiceId_userId: { practiceId: practiceId!, userId } },
+        create: { practiceId: practiceId!, userId },
+        update: {},
+      })
+    } else {
+      await tx.practiceMedicalDirector.deleteMany({ where: { userId } })
+    }
+
+    if (roles.includes(UserRole.COORDINATOR)) {
+      // One practice per coordinator (@unique on userId).
+      await tx.practiceCoordinator.upsert({
+        where: { userId },
+        create: { practiceId: practiceId!, userId },
+        update: { practiceId: practiceId! },
+      })
+    } else {
+      await tx.practiceCoordinator.deleteMany({ where: { userId } })
+    }
   }
 
   // ─── Permanent close (irreversible tombstone) ─────────────────────────────
