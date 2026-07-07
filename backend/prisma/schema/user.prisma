@@ -64,6 +64,7 @@ model User {
   journalEntries      JournalEntry[]    @relation("PatientJournalEntries")
   journalEntriesAdded JournalEntry[]    @relation("JournalEntryAddedBy")
   notifications       Notification[]
+  pushSubscriptions   PushSubscription[]
   refreshTokens       RefreshToken[]
   authSessions        AuthSession[]
   sessions            Session[]

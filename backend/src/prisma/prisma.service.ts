@@ -1,10 +1,12 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 import { ClsService } from 'nestjs-cls'
 import { PrismaClient } from '../generated/prisma/client.js'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
 import { accessLogExtension } from '../common/prisma-extensions/access-log.extension.js'
+import { pushDispatchExtension } from '../common/prisma-extensions/push-dispatch.extension.js'
 import { softDeleteJournalEntryExtension } from '../common/prisma-extensions/soft-delete.extension.js'
 
 /**
@@ -62,7 +64,11 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
   private readonly logger = new Logger(PrismaService.name)
   private readonly configService: ConfigService
 
-  constructor(configService: ConfigService, cls: ClsService) {
+  constructor(
+    configService: ConfigService,
+    cls: ClsService,
+    eventEmitter: EventEmitter2,
+  ) {
     const dbUrl = configService.get<string>('DATABASE_URL')!
     const isAccelerate = dbUrl.startsWith('prisma://')
 
@@ -114,9 +120,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     // `deletedAt: null` into every top-level JournalEntry read so soft-deleted
     // readings drop out of lists / averages / reports. It composes with the
     // audit extension — both wrap each JournalEntry operation.
-    const extended = this.$extends(accessLogExtension(cls, this)).$extends(
-      softDeleteJournalEntryExtension(),
-    )
+    // push-dispatch (Task 1): wraps `notification.create` to emit a fire-and-
+    // forget event for PUSH-channel rows → WebPushService sends the browser
+    // push. Chained last; its emit runs AFTER the audit write and never throws.
+    const extended = this.$extends(accessLogExtension(cls, this))
+      .$extends(softDeleteJournalEntryExtension())
+      .$extends(pushDispatchExtension(eventEmitter))
 
     // Members that must resolve to THIS class instance, never the extended
     // client: our prototype methods (onModuleInit, withConnectionRetry) and

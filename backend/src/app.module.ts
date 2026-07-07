@@ -27,6 +27,7 @@ import { AccessLogModule } from './access-log/access-log.module.js'
 import { OcrModule } from './ocr/ocr.module.js'
 import { DrugEnrichmentModule } from './drug-enrichment/drug-enrichment.module.js'
 import { CaregiverModule } from './caregiver/caregiver.module.js'
+import { PushModule } from './push/push.module.js'
 import { SmsModule } from './sms/sms.module.js'
 import { SupportModule } from './support/support.module.js'
 import { TestControlModule } from './test-control/test-control.module.js'
@@ -88,6 +89,7 @@ const TEST_CONTROL_MODULES = [TestControlModule]
     CaregiverModule,
     SmsModule,
     SupportModule,
+    PushModule,
     ...TEST_CONTROL_MODULES,
   ],
   controllers: [AppController],
