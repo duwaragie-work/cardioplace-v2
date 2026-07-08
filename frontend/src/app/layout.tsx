@@ -8,6 +8,7 @@ import ScrollToTop from "@/components/ScrollToTop";
 import PoweredByFooter from "@/components/PoweredByFooter";
 import SkipLink from "@/components/SkipLink";
 import IdleWarningToast from "@/components/auth/IdleWarningToast";
+import PushRegistrar from "@/components/auth/PushRegistrar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -43,6 +44,7 @@ export default function RootLayout({
             <SkipLink />
             <ScrollToTop />
             <IdleWarningToast />
+            <PushRegistrar />
             <NavbarWrapper>{children}</NavbarWrapper>
             <PoweredByFooter />
           </LanguageProvider>

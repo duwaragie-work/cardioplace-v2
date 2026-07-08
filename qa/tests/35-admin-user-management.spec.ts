@@ -240,8 +240,17 @@ test.describe('Spec 35 — admin user management', () => {
       page.locator(byTestId(T.adminUsers.deactivateModal)),
     ).toHaveCount(0, { timeout: 15_000 })
 
-    // Kebab now offers Reactivate → click it.
+    // Kebab now offers Reactivate → opens the scoped re-grant modal (no longer
+    // a one-click action; HIPAA §164.308(a)(4)). The prior role (PATIENT) is
+    // prefilled as "same role" — accept it and submit.
     await menuClick(page, email, 'reactivate')
+    await expect(
+      page.locator('[data-testid="admin-reactivate-modal"]'),
+    ).toBeVisible({ timeout: 15_000 })
+    await page.locator('[data-testid="admin-reactivate-submit"]').click()
+    await expect(
+      page.locator('[data-testid="admin-reactivate-modal"]'),
+    ).toHaveCount(0, { timeout: 15_000 })
 
     // After reactivate, the kebab offers Deactivate again.
     await menuHasItem(page, email, 'deactivate')

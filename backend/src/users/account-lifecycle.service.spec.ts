@@ -31,6 +31,20 @@ function makeService() {
     mfaRecoveryCode: { deleteMany: jest.fn().mockResolvedValue({ count: 0 } as any) },
     webAuthnCredential: { deleteMany: jest.fn().mockResolvedValue({ count: 0 } as any) },
     displayId: { updateMany: jest.fn().mockResolvedValue({ count: 1 } as any) },
+    // Practice-membership join tables — reconciled by syncPracticeMembership
+    // inside reactivate's transaction (tx === prisma via the $transaction mock).
+    practiceProvider: {
+      upsert: jest.fn().mockResolvedValue({} as any),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 } as any),
+    },
+    practiceMedicalDirector: {
+      upsert: jest.fn().mockResolvedValue({} as any),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 } as any),
+    },
+    practiceCoordinator: {
+      upsert: jest.fn().mockResolvedValue({} as any),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 } as any),
+    },
     $transaction: jest.fn((arg: any) =>
       typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
     ),
@@ -119,8 +133,8 @@ describe('AccountLifecycleService', () => {
     })
   })
 
-  describe('reactivate', () => {
-    it('without restoreRoles strips staff roles (keeps only PATIENT)', async () => {
+  describe('reactivate (explicit re-grant — HIPAA §164.308(a)(4))', () => {
+    it('grants EXACTLY the roles requested, sets ACTIVE, bumps tokenVersion', async () => {
       const { svc, prisma } = makeService()
       prisma.user.findUnique.mockResolvedValue({
         ...activePatient,
@@ -128,15 +142,28 @@ describe('AccountLifecycleService', () => {
         roles: ['PROVIDER'],
         terminationSnapshot: { roles: ['PROVIDER'] },
       } as any)
-      await svc.reactivate('u1', { actorId: 'a', restoreRoles: false })
+      await svc.reactivate('u1', {
+        actorId: 'a',
+        roles: ['PROVIDER'] as any,
+        practiceId: 'prac-a',
+      })
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ accountStatus: 'ACTIVE', roles: [] }),
+          data: expect.objectContaining({
+            accountStatus: 'ACTIVE',
+            roles: ['PROVIDER'],
+            tokenVersion: { increment: 1 },
+          }),
+        }),
+      )
+      expect(prisma.practiceProvider.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { practiceId_userId: { practiceId: 'prac-a', userId: 'u1' } },
         }),
       )
     })
 
-    it('with restoreRoles restores the snapshot roles', async () => {
+    it('swaps membership when reactivated as a DIFFERENT role (PROVIDER→COORDINATOR)', async () => {
       const { svc, prisma } = makeService()
       prisma.user.findUnique.mockResolvedValue({
         ...activePatient,
@@ -144,25 +171,68 @@ describe('AccountLifecycleService', () => {
         roles: ['PROVIDER'],
         terminationSnapshot: { roles: ['PROVIDER'] },
       } as any)
-      await svc.reactivate('u1', { actorId: 'a', restoreRoles: true })
-      expect(prisma.user.update).toHaveBeenCalledWith(
+      await svc.reactivate('u1', {
+        actorId: 'a',
+        roles: ['COORDINATOR'] as any,
+        practiceId: 'prac-a',
+      })
+      // Old provider join row dropped, new coordinator row created.
+      expect(prisma.practiceProvider.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u1' },
+      })
+      expect(prisma.practiceCoordinator.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ roles: ['PROVIDER'] }),
+          where: { userId: 'u1' },
+          update: { practiceId: 'prac-a' },
         }),
       )
     })
 
-    it('keeps PATIENT for a reactivated patient even without restoreRoles', async () => {
+    it('PATIENT-only reactivation drops ALL staff join rows and needs no practice', async () => {
       const { svc, prisma } = makeService()
       prisma.user.findUnique.mockResolvedValue({
         ...activePatient,
         accountStatus: 'DEACTIVATED',
-        terminationSnapshot: { roles: ['PATIENT'] },
+        roles: ['PROVIDER'],
+        terminationSnapshot: { roles: ['PROVIDER'] },
       } as any)
-      await svc.reactivate('u1', { actorId: 'a', restoreRoles: false })
+      await svc.reactivate('u1', { actorId: 'a', roles: ['PATIENT'] as any })
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ roles: ['PATIENT'] }),
+        }),
+      )
+      expect(prisma.practiceProvider.deleteMany).toHaveBeenCalled()
+      expect(prisma.practiceMedicalDirector.deleteMany).toHaveBeenCalled()
+      expect(prisma.practiceCoordinator.deleteMany).toHaveBeenCalled()
+      expect(prisma.practiceProvider.upsert).not.toHaveBeenCalled()
+    })
+
+    it('audits the re-grant with grantedRoles + priorRoles', async () => {
+      const { svc, prisma } = makeService()
+      prisma.user.findUnique.mockResolvedValue({
+        ...activePatient,
+        accountStatus: 'DEACTIVATED',
+        roles: ['PROVIDER'],
+        terminationSnapshot: { roles: ['PROVIDER'] },
+      } as any)
+      await svc.reactivate('u1', {
+        actorId: 'a',
+        roles: ['COORDINATOR'] as any,
+        practiceId: 'prac-a',
+        reason: 'returning staff',
+      })
+      expect(prisma.accountClosureLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'REACTIVATE',
+            reason: 'returning staff',
+            snapshot: expect.objectContaining({
+              grantedRoles: ['COORDINATOR'],
+              priorRoles: ['PROVIDER'],
+              practiceId: 'prac-a',
+            }),
+          }),
         }),
       )
     })
@@ -173,9 +243,17 @@ describe('AccountLifecycleService', () => {
         ...activePatient,
         accountStatus: 'CLOSED',
       } as any)
-      await expect(svc.reactivate('u1', { actorId: 'a' })).rejects.toThrow(
-        BadRequestException,
-      )
+      await expect(
+        svc.reactivate('u1', { actorId: 'a', roles: ['PATIENT'] as any }),
+      ).rejects.toThrow(BadRequestException)
+    })
+
+    it('refuses to reactivate an already-ACTIVE account', async () => {
+      const { svc, prisma } = makeService()
+      prisma.user.findUnique.mockResolvedValue(activePatient as any)
+      await expect(
+        svc.reactivate('u1', { actorId: 'a', roles: ['PATIENT'] as any }),
+      ).rejects.toThrow(BadRequestException)
     })
   })
 

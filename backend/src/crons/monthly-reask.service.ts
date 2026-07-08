@@ -2,10 +2,14 @@ import { Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
 import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from '../common/cls/cron-actor.util.js'
+import { medicationReaskEmailHtml } from '../email/email-templates.js'
+import { EmailService } from '../email/email.service.js'
 import { NotificationChannel, EnrollmentStatus, AccountStatus } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 
 const REASK_TITLE = 'Confirm your medications'
+const REASK_BODY =
+  'Are you still taking the same medicines? Tap to review and confirm your list.'
 const REASK_DAYS = 30
 const IDEMPOTENCY_DAYS = 28
 
@@ -15,6 +19,7 @@ export class MonthlyReaskService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
     private readonly cls: ClsService,
   ) {}
 
@@ -86,10 +91,31 @@ export class MonthlyReaskService {
           userId: p.id,
           channel: NotificationChannel.PUSH,
           title: REASK_TITLE,
-          body: 'Are you still taking the same medicines? Tap to review and confirm your list.',
+          body: REASK_BODY,
           dispatchTrigger: 'SYSTEM_CRON',
         },
       })
+
+      // EMAIL is the actual out-of-app reach: a patient who never opens the app
+      // still gets the re-ask. Mirrors gap-alert's PUSH + EMAIL dispatch. Guard
+      // on a present email — invited-but-not-activated rows can lack one.
+      if (p.email) {
+        await this.prisma.notification.create({
+          data: {
+            userId: p.id,
+            channel: NotificationChannel.EMAIL,
+            title: REASK_TITLE,
+            body: REASK_BODY,
+            dispatchTrigger: 'SYSTEM_CRON',
+          },
+        })
+        await this.emailService.sendEmail(
+          p.email,
+          `Cardioplace: ${REASK_TITLE}`,
+          medicationReaskEmailHtml(p.name ?? 'Patient', REASK_BODY),
+        )
+      }
+
       sent++
     }
 

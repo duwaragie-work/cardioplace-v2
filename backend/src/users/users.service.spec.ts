@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals'
+import { BadRequestException, ForbiddenException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Test, TestingModule } from '@nestjs/testing'
 import { EmailService } from '../email/email.service.js'
@@ -23,6 +24,12 @@ describe('UsersService', () => {
     roles: ['MEDICAL_DIRECTOR'] as any,
   }
 
+  const coordinator: Actor = {
+    id: 'co-1',
+    email: 'co@cardioplace.test',
+    roles: ['COORDINATOR'] as any,
+  }
+
   beforeEach(async () => {
     prisma = {
       user: {
@@ -37,6 +44,7 @@ describe('UsersService', () => {
       practiceProvider: { findMany: jest.fn() },
       practiceCoordinator: { findUnique: jest.fn() },
       patientProviderAssignment: { findUnique: jest.fn() },
+      userInvite: { findUnique: jest.fn().mockResolvedValue(null) },
       practice: { findUnique: jest.fn() },
     }
     lifecycle = {
@@ -63,7 +71,7 @@ describe('UsersService', () => {
     expect(service).toBeDefined()
   })
 
-  // ─── reactivate — admin default restores the pre-deactivation role ─────────
+  // ─── reactivate — explicit scoped re-grant (HIPAA §164.308(a)(4)) ───────────
   describe('reactivate', () => {
     beforeEach(() => {
       prisma.user.findUnique.mockResolvedValue({
@@ -72,6 +80,7 @@ describe('UsersService', () => {
         roles: ['PROVIDER'],
         accountStatus: 'DEACTIVATED',
       })
+      prisma.practice.findUnique.mockResolvedValue({ id: 'prac-a' })
       lifecycle.reactivate.mockResolvedValue({
         id: 'u1',
         email: 'provider@cardioplace.test',
@@ -80,20 +89,80 @@ describe('UsersService', () => {
       })
     })
 
-    it('defaults restoreRoles to true when the dto omits it (staff role handed back)', async () => {
-      await service.reactivate(superAdmin, 'u1', {})
+    it('passes the explicitly chosen roles + practice to the lifecycle', async () => {
+      await service.reactivate(superAdmin, 'u1', {
+        roles: ['PROVIDER'] as any,
+        practiceId: 'prac-a',
+      })
       expect(lifecycle.reactivate).toHaveBeenCalledWith(
         'u1',
-        expect.objectContaining({ restoreRoles: true }),
+        expect.objectContaining({ roles: ['PROVIDER'], practiceId: 'prac-a' }),
       )
     })
 
-    it('honours an explicit restoreRoles:false (fresh re-authorization)', async () => {
-      await service.reactivate(superAdmin, 'u1', { restoreRoles: false })
+    it('rejects a practice-bound role with no practiceId (400) and never calls the lifecycle', async () => {
+      await expect(
+        service.reactivate(superAdmin, 'u1', { roles: ['PROVIDER'] as any }),
+      ).rejects.toThrow(BadRequestException)
+      expect(lifecycle.reactivate).not.toHaveBeenCalled()
+    })
+
+    it('allows an org-level role (HEALPLACE_OPS) with no practiceId', async () => {
+      await service.reactivate(superAdmin, 'u1', {
+        roles: ['HEALPLACE_OPS'] as any,
+      })
       expect(lifecycle.reactivate).toHaveBeenCalledWith(
         'u1',
-        expect.objectContaining({ restoreRoles: false }),
+        expect.objectContaining({ roles: ['HEALPLACE_OPS'] }),
       )
+    })
+
+    it('blocks a COORDINATOR reviving someone as SUPER_ADMIN (no privilege escalation)', async () => {
+      // Target is patient-only in the coordinator's own practice, so the
+      // target-scope check passes — the grant-authority matrix is what stops it.
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        email: 'p@cardioplace.test',
+        roles: ['PATIENT'],
+        accountStatus: 'DEACTIVATED',
+      })
+      prisma.practiceCoordinator.findUnique.mockResolvedValue({ practiceId: 'prac-a' })
+      prisma.patientProviderAssignment.findUnique.mockResolvedValue({ practiceId: 'prac-a' })
+      await expect(
+        service.reactivate(coordinator, 'u1', {
+          roles: ['SUPER_ADMIN'] as any,
+          practiceId: 'prac-a',
+        }),
+      ).rejects.toThrow(ForbiddenException)
+      expect(lifecycle.reactivate).not.toHaveBeenCalled()
+    })
+  })
+
+  // ─── assertCanGrantRole — the single grant-authority matrix (shared with
+  //     invite). Privilege-escalation guards the reactivation path relies on. ──
+  describe('assertCanGrantRole (privilege-escalation guards)', () => {
+    it('COORDINATOR cannot grant SUPER_ADMIN', async () => {
+      await expect(
+        service.assertCanGrantRole(coordinator, 'SUPER_ADMIN' as any, 'prac-a'),
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('COORDINATOR cannot grant HEALPLACE_OPS', async () => {
+      await expect(
+        service.assertCanGrantRole(coordinator, 'HEALPLACE_OPS' as any, 'prac-a'),
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('MEDICAL_DIRECTOR cannot grant HEALPLACE_OPS', async () => {
+      await expect(
+        service.assertCanGrantRole(medDir, 'HEALPLACE_OPS' as any, 'prac-a'),
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('MEDICAL_DIRECTOR cannot grant SUPER_ADMIN', async () => {
+      await expect(
+        service.assertCanGrantRole(medDir, 'SUPER_ADMIN' as any, 'prac-a'),
+      ).rejects.toThrow(ForbiddenException)
     })
   })
 
@@ -107,12 +176,14 @@ describe('UsersService', () => {
       jest.spyOn(service as any, 'fetchPendingInvites').mockResolvedValue([])
     })
 
-    it('excludes CLOSED accounts from the default (unfiltered) list', async () => {
+    it('excludes CLOSED (and SYSTEM) accounts from the default (unfiltered) list', async () => {
       await service.listUsers(superAdmin, {})
       expect(prisma.user.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            accountStatus: { not: 'CLOSED' },
+            // Tombstoned (CLOSED) + internal SYSTEM principals both hidden from
+            // the default roster.
+            accountStatus: { notIn: ['CLOSED', 'SYSTEM'] },
           }),
         }),
       )

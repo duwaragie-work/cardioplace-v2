@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { authedApi } from '../helpers/auth.js'
-import { ADMINS, PATIENTS } from '../helpers/accounts.js'
+import { ADMINS, PATIENTS, SEED_PRACTICE_ID } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
@@ -32,7 +32,9 @@ test.describe('phase/28 — account lifecycle', () => {
     // Defensive: make sure she starts ACTIVE (ignore "already active").
     const pre = await authedApi(API_BASE_URL, ADMINS.support.email, 'admin')
     await pre
-      .post(`admin/users/${aisha.id}/reactivate`, { data: { restoreRoles: true } })
+      .post(`admin/users/${aisha.id}/reactivate`, {
+        data: { roles: ['PATIENT'], practiceId: SEED_PRACTICE_ID },
+      })
       .catch(() => {})
     await pre.dispose()
 
@@ -48,10 +50,11 @@ test.describe('phase/28 — account lifecycle', () => {
       expect(afterProfile.status(), 'session should be revoked').toBe(401)
       await patientApi.dispose()
 
-      // 3. Admin reactivates (restoreRoles keeps her PATIENT role).
+      // 3. Admin reactivates with an explicit PATIENT re-grant (the new scoped
+      //    re-authorization contract — practiceId required for a PATIENT grant).
       const adminApi = await authedApi(API_BASE_URL, ADMINS.support.email, 'admin')
       const react = await adminApi.post(`admin/users/${aisha.id}/reactivate`, {
-        data: { restoreRoles: true },
+        data: { roles: ['PATIENT'], practiceId: SEED_PRACTICE_ID },
       })
       expect(react.ok(), `reactivate: ${react.status()}`).toBeTruthy()
       await adminApi.dispose()
@@ -65,7 +68,9 @@ test.describe('phase/28 — account lifecycle', () => {
       // Belt + braces — leave Aisha ACTIVE for the rest of the suite.
       const restore = await authedApi(API_BASE_URL, ADMINS.support.email, 'admin')
       await restore
-        .post(`admin/users/${aisha.id}/reactivate`, { data: { restoreRoles: true } })
+        .post(`admin/users/${aisha.id}/reactivate`, {
+        data: { roles: ['PATIENT'], practiceId: SEED_PRACTICE_ID },
+      })
         .catch(() => {})
       await restore.dispose()
       await tc.dispose()

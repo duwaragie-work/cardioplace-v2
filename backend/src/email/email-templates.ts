@@ -119,6 +119,25 @@ export function caregiverEmailHtml(
   `)
 }
 
+// Monthly medication re-ask (crons/monthly-reask). Wrapped → carries the shared
+// Cardioplace header + HIPAA footer like every other patient-facing email.
+export function medicationReaskEmailHtml(name: string, body: string): string {
+  const greeting = name ? `Hi ${name},` : 'Hi,'
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #7B00E0; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Reminder
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">Confirm your medications</h2>
+    <p style="color: #374151; line-height: 1.6;">${greeting}</p>
+    <p style="color: #374151; line-height: 1.6;">${body}</p>
+    <p style="color: #6b7280; line-height: 1.6; font-size: 13px; margin-top: 16px;">
+      Log in to Cardioplace to review and confirm your medication list.
+    </p>
+  `)
+}
+
 export function otpEmailHtml(otp: string): string {
   return wrap(`
     <div style="text-align: center;">

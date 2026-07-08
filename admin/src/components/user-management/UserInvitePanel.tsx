@@ -37,7 +37,6 @@ import {
   permanentCloseUser,
   INVITE_PENDING,
   listUsers,
-  reactivateUser,
   resendInvite,
   revokeInvite,
   type UserListResponse,
@@ -53,6 +52,7 @@ import CSVUploadCard from './CSVUploadCard';
 import DeactivateConfirmModal from './DeactivateConfirmModal';
 import PermanentCloseConfirmModal from './PermanentCloseConfirmModal';
 import InviteUserModal, { type PracticeOption } from './InviteUserModal';
+import ReactivateModal from './ReactivateModal';
 import ResetMfaModal from './ResetMfaModal';
 import UsersList from './UsersList';
 
@@ -199,6 +199,7 @@ export default function UserInvitePanel() {
     name: string;
     displayId: string;
   } | null>(null);
+  const [reactivateTarget, setReactivateTarget] = useState<UserRow | null>(null);
   const callerCanResetMfa = canResetUserMfa(user);
 
   async function handleResend(inviteId: string) {
@@ -241,20 +242,31 @@ export default function UserInvitePanel() {
     }
   }
 
-  async function handleReactivate(id: string) {
-    setPendingRowId(id);
-    try {
-      await reactivateUser(id);
-      showToast(t('userManagement.toast.reactivated'));
-      await refresh();
-    } catch (e) {
-      showToast(
-        e instanceof Error ? e.message : 'Could not reactivate user.',
-        'error',
-      );
-    } finally {
-      setPendingRowId(null);
-    }
+  // Reactivation is now a deliberate, scoped re-grant (HIPAA §164.308(a)(4)):
+  // clicking Reactivate opens a modal to choose the role(s) rather than firing
+  // the API immediately. Resolve the full row so the modal can prefill the
+  // prior role · practice. Coordinator patient rows carry no roles — build a
+  // minimal target and let the modal collect the role (practice is their own).
+  function handleReactivate(id: string) {
+    const data = (response?.data ?? []) as Array<
+      UserRow | CoordinatorPatientRow
+    >;
+    const found = data.find((r) => r.id === id);
+    if (!found) return;
+    const target: UserRow =
+      'roles' in found
+        ? (found as UserRow)
+        : {
+            id: found.id,
+            name: found.name,
+            email: found.email ?? null,
+            displayId: null,
+            roles: [],
+            accountStatus: 'DEACTIVATED',
+            createdAt: '',
+            practiceId: response?.scopePractice?.id ?? null,
+          };
+    setReactivateTarget(target);
   }
 
   async function handleResetMfa(reason: string) {
@@ -748,6 +760,17 @@ export default function UserInvitePanel() {
         }}
         practices={practices}
         lockedRole={lockedRole}
+        lockedPracticeId={lockedPracticeId}
+      />
+      <ReactivateModal
+        open={!!reactivateTarget}
+        target={reactivateTarget}
+        onClose={() => setReactivateTarget(null)}
+        onReactivated={() => {
+          showToast(t('userManagement.toast.reactivated'));
+          refresh();
+        }}
+        practices={practices}
         lockedPracticeId={lockedPracticeId}
       />
       <DeactivateConfirmModal
