@@ -1,0 +1,40 @@
+// §164.528 accounting-of-disclosures for outbound email (Humaira Audit
+// Controls Technical n3, Necessary). One row per email that actually delivered
+// through EmailService.sendEmail — Resend or nodemailer resolved. Failed
+// deliveries do NOT write a row: auditing an email that never left the
+// building would be a lie in the disclosure trail.
+//
+// Deliberately NOT in PHI_MODELS (docs/EPHI_INVENTORY.md Table 3, non-PHI). It
+// IS the disclosure stream — auditing it would recurse, same rationale as
+// AccessLog / AuthLog / ContentAuditLog.
+//
+// senderType semantics mirror AccessLog:
+//   USER          senderPrincipal = req.user.id
+//   SYSTEM_ACTOR  senderPrincipal = system-principal User.id from
+//                 CRON_LABEL_TO_PRINCIPAL (system-principals.ts), e.g. the
+//                 escalation-ladder / gap-alert / monthly-* crons.
+//
+// patientUserId is nullable to accommodate two legitimate cases:
+//   1. Confirmed non-PHI sends (contact form → info@healplace.com), where the
+//      caller passes disclosure=null and no row is written.
+//   2. PHI-adjacent sends whose subject is a practice-wide aggregate rather
+//      than a single patient (monthly report to a provider).
+// FK ON DELETE SetNull mirrors PatientCaregiver — a hard-deleted patient
+// keeps their disclosure history for the required retention window.
+model EmailDisclosureLog {
+  id                String    @id @default(ulid())
+  senderPrincipal   String
+  senderType        String // 'USER' | 'SYSTEM_ACTOR'
+  recipientEmail    String
+  patientUserId     String?
+  patient           User?     @relation(fields: [patientUserId], references: [id], onDelete: SetNull)
+  template          String // 'welcome' | 'escalation_tier_1_staff' | 'gap_alert' | ...
+  templateVersion   String // stamped from EMAIL_TEMPLATE_VERSION at send time
+  subject           String
+  sentAt            DateTime  @default(now())
+  metadata          Json?
+
+  @@index([patientUserId, sentAt])
+  @@index([recipientEmail, sentAt])
+  @@index([template, sentAt])
+}

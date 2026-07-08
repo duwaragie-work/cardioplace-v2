@@ -4,7 +4,7 @@ import { Cron } from '@nestjs/schedule'
 import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { EmailService } from '../email/email.service.js'
-import { monthlyReportEmailHtml } from '../email/email-templates.js'
+import { EMAIL_TEMPLATE_VERSION, monthlyReportEmailHtml } from '../email/email-templates.js'
 import type { Prisma } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import {
@@ -135,6 +135,14 @@ export class MonthlyReportCron {
             meanResolveSeconds: report.overall.meanResolveSeconds,
             reportUrl,
           }),
+          {
+            // N6 — practice-wide aggregate report to a provider. Subject is the
+            // practice, not a single patient; patientUserId stays null.
+            template: 'monthly_report',
+            templateVersion: EMAIL_TEMPLATE_VERSION,
+            patientUserId: null,
+            metadata: { practiceId: practice.id, monthYear },
+          },
         )
       } catch (err) {
         this.logger.error(

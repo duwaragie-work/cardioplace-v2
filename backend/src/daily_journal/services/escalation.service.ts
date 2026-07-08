@@ -11,7 +11,7 @@ import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from '../../common/cls/cron-actor.util.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
-import { caregiverEmailHtml } from '../../email/email-templates.js'
+import { EMAIL_TEMPLATE_VERSION, caregiverEmailHtml } from '../../email/email-templates.js'
 import { SmsService } from '../../sms/sms.service.js'
 import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
@@ -197,7 +197,12 @@ export class EscalationService {
         switch (caregiver.notifyChannel) {
           case 'EMAIL':
             if (caregiver.email) {
-              await this.emailService.sendEmail(caregiver.email, subject, body)
+              await this.emailService.sendEmail(caregiver.email, subject, body, {
+                template: 'emergency_dispatch_caregiver',
+                templateVersion: EMAIL_TEMPLATE_VERSION,
+                patientUserId: payload.userId,
+                metadata: { caregiverId: caregiver.id },
+              })
             }
             break
           case 'SMS':
@@ -1180,7 +1185,16 @@ export class EscalationService {
                 afterHours: args.afterHours,
                 now: args.now,
               })
-              await this.emailService.sendEmail(email, rendered.subject, rendered.html)
+              await this.emailService.sendEmail(email, rendered.subject, rendered.html, {
+                template: `escalation_tier_${alert.tier ?? 'unknown'}_${role.toLowerCase()}`,
+                templateVersion: EMAIL_TEMPLATE_VERSION,
+                patientUserId: alert.userId,
+                metadata: {
+                  alertId: alert.id,
+                  escalationEventId: eventId,
+                  ladderStep: step.step,
+                },
+              })
             }
           }
         }
@@ -1353,6 +1367,12 @@ export class EscalationService {
               caregiver.email,
               `Cardioplace — a health update about ${patientDisplayName}`,
               caregiverEmailHtml(caregiver.name, message),
+              {
+                template: 'caregiver_alert',
+                templateVersion: EMAIL_TEMPLATE_VERSION,
+                patientUserId: alert.userId,
+                metadata: { alertId: alert.id, caregiverId: caregiver.id },
+              },
             )
             delivered = true
             break

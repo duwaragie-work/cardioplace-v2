@@ -135,6 +135,35 @@ describe('writeAuditWithRetry', () => {
     )
   })
 
+  it('email-disclosure-log context is preserved through the failure report', async () => {
+    // N6 (2026-07-10) — third variant of AuditWriteContext. Verifies the
+    // failure-span attributes include template + version + patient + recipient
+    // so an operator can locate the affected §164.528 disclosure surface
+    // without reading source.
+    const op = jest.fn<() => Promise<void>>().mockRejectedValue(new Error('disclosure write blew up'))
+
+    await writeAuditWithRetryMocked(op, {
+      kind: 'email-disclosure-log',
+      template: 'escalation_tier_1_staff',
+      templateVersion: '2026-07-10',
+      patientUserId: 'patient-77',
+      recipientEmail: 'provider@clinic.test',
+    })
+
+    expect(startSpan).toHaveBeenCalledWith(
+      'audit.write.failed',
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          'audit.kind': 'email-disclosure-log',
+          'audit.template': 'escalation_tier_1_staff',
+          'audit.templateVersion': '2026-07-10',
+          'audit.patientUserId': 'patient-77',
+          'audit.recipientEmail': 'provider@clinic.test',
+        }),
+      }),
+    )
+  })
+
   it('never rethrows even when the tracer itself errors', async () => {
     // Belt-and-suspenders: if the OTEL wiring is misconfigured and the tracer
     // throws, we must still not break the request path. Impl wraps reportFailure

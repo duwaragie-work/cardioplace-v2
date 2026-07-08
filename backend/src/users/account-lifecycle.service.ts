@@ -9,6 +9,7 @@ import { JwtService } from '@nestjs/jwt'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EmailService } from '../email/email.service.js'
 import {
+  EMAIL_TEMPLATE_VERSION,
   selfCloseConfirmEmailHtml,
   accountClosedEmailHtml,
 } from '../email/email-templates.js'
@@ -299,6 +300,11 @@ export class AccountLifecycleService {
         target.email,
         'Your Cardioplace account has been closed',
         accountClosedEmailHtml(target.name ?? ''),
+        {
+          template: 'account_closed',
+          templateVersion: EMAIL_TEMPLATE_VERSION,
+          patientUserId: target.id,
+        },
       )
     }
     return { id: target.id, accountStatus: AccountStatus.CLOSED }
@@ -333,6 +339,11 @@ export class AccountLifecycleService {
       user.email,
       'Confirm you want to permanently close your Cardioplace account',
       selfCloseConfirmEmailHtml(user.name ?? '', link),
+      {
+        template: 'self_close_confirm',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: user.id,
+      },
     )
   }
 

@@ -17,6 +17,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EmailService } from '../email/email.service.js'
 import {
+  EMAIL_TEMPLATE_VERSION,
   supportOpsNotifyHtml,
   supportReplyEmailHtml,
   supportResolvedEmailHtml,
@@ -318,6 +319,12 @@ export class SupportService {
       ticket.email,
       `Re: your Cardioplace support request ${ticket.ticketNumber}`,
       supportReplyEmailHtml(ticket.ticketNumber, dto.body),
+      {
+        template: 'support_reply',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: ticket.userId ?? null,
+        metadata: { ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+      },
     )
     if (ticket.userId) {
       await this.prisma.notification.create({
@@ -361,6 +368,12 @@ export class SupportService {
       ticket.email,
       `Your Cardioplace support request ${ticket.ticketNumber} is resolved`,
       supportResolvedEmailHtml(ticket.ticketNumber),
+      {
+        template: 'support_resolved',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: ticket.userId ?? null,
+        metadata: { ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+      },
     )
     if (ticket.userId) {
       await this.prisma.notification.create({
@@ -496,6 +509,11 @@ export class SupportService {
     // body (mirrors the clinical-alert PHI refactor); ops opens the dashboard
     // for full, audit-logged context (Fix 10). Fire-and-forget — never make the
     // intake request wait on mail delivery (EmailService never throws).
+    // N6 — ops-team internal notification. Ticket may reference PHI, but the
+    // notify-and-link body itself carries NO requester email or message content
+    // (Fix 10 refactor). Classifying as PHI-adjacent anyway because the ticket
+    // subject is a specific patient in most cases; ticketUserId lets audit
+    // reconstruct which patient the disclosure was ABOUT.
     void this.email.sendEmail(
       OPS_INBOX,
       `[Support] ${ticket.ticketNumber} — ${ticket.priority} ${ticket.category}`,
@@ -505,6 +523,12 @@ export class SupportService {
         ticket.category,
         `${this.adminBaseUrl}/support/${ticket.id}`,
       ),
+      {
+        template: 'support_ops_notify',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: null,
+        metadata: { ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+      },
     )
     const opsUsers = await this.prisma.user.findMany({
       where: { roles: { has: UserRole.HEALPLACE_OPS } },

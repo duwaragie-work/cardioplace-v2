@@ -1,3 +1,27 @@
+/**
+ * N6 (2026-07-10) — Coarse-grained version tag stamped into every
+ * EmailDisclosureLog row so the §164.528 accounting-of-disclosures trail
+ * records exactly which template variant went out.
+ *
+ * Bump procedure — whenever ANY template in this file (or its sibling render
+ * helpers: gap-alert, escalation body, monthly report, contact form) changes:
+ *   1. Edit the template function(s).
+ *   2. Bump this constant to today's date (or today-a, today-b if a second
+ *      bump happens on the same day).
+ *   3. Add a one-liner to EMAIL_TEMPLATE_CHANGELOG below.
+ *
+ * Per-template versioning (WELCOME_EMAIL_TEMPLATE_VERSION, etc.) is a
+ * potential future refinement. MVP is one file-level constant; if audit
+ * granularity ever demands per-template, factor at that point.
+ */
+export const EMAIL_TEMPLATE_VERSION = '2026-07-10'
+
+/**
+ * EMAIL_TEMPLATE_CHANGELOG — one line per bump.
+ *   2026-07-10 — Initial version (N6 baseline). Templates unchanged; this is
+ *                the anchor point for all future disclosure-log queries.
+ */
+
 const HEADER = `
   <div style="background: #7B00E0; padding: 24px; text-align: center;">
     <h1 style="color: #ffffff; margin: 0; font-family: sans-serif; font-size: 22px; letter-spacing: 1px;">

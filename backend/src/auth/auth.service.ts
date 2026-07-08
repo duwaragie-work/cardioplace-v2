@@ -12,6 +12,7 @@ import type { Profile } from 'passport-google-oauth20'
 import { POLICY_VERSION, TRAINING_ACK_VERSION } from '@cardioplace/shared'
 import { EmailService } from '../email/email.service.js'
 import {
+  EMAIL_TEMPLATE_VERSION,
   magicLinkEmailHtml,
   otpEmailHtml,
   welcomeEmailHtml,
@@ -299,6 +300,7 @@ export class AuthService {
    * See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §5.
    */
   private dispatchWelcomeEmail(user: {
+    id: string
     email: string | null
     name: string | null
     displayId: string | null
@@ -311,6 +313,11 @@ export class AuthService {
       user.email,
       'Welcome to Cardioplace — your account ID',
       welcomeEmailHtml(user.name ?? '', formatted, isPatient),
+      {
+        template: 'welcome',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: user.id,
+      },
     )
   }
 
@@ -1611,6 +1618,12 @@ export class AuthService {
         target.email,
         'Your Cardioplace two-factor authentication was reset',
         mfaResetEmailHtml(target.name ?? null),
+        {
+          template: 'mfa_reset',
+          templateVersion: EMAIL_TEMPLATE_VERSION,
+          patientUserId: targetUserId,
+          metadata: { resetBy: actorId, reason },
+        },
       )
     }
     return {
@@ -1984,6 +1997,12 @@ export class AuthService {
         target.email,
         'Your Cardioplace biometric sign-in was reset',
         biometricResetEmailHtml(target.name ?? null),
+        {
+          template: 'biometric_reset',
+          templateVersion: EMAIL_TEMPLATE_VERSION,
+          patientUserId: targetUserId,
+          metadata: { resetBy: actorId, reason },
+        },
       )
     }
     return {
@@ -3833,18 +3852,34 @@ export class AuthService {
   // ─── Email Helpers ──────────────────────────────────────────────────────────
 
   private async sendOtpEmail(email: string, otp: string): Promise<void> {
+    // N6 — OTP is pre-auth: the identifier may not resolve to a User row yet
+    // (new sign-up flow). patientUserId stays null; identifier goes in metadata
+    // so the §164.528 trail still records which email was targeted.
     await this.emailService.sendEmail(
       email,
       'Your Cardioplace verification code',
       otpEmailHtml(otp),
+      {
+        template: 'otp',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: null,
+        metadata: { identifier: email },
+      },
     )
   }
 
   private async sendMagicLinkEmail(email: string, url: string): Promise<void> {
+    // N6 — same reasoning as sendOtpEmail (pre-auth, identifier may not resolve).
     await this.emailService.sendEmail(
       email,
       'Sign in to Cardioplace',
       magicLinkEmailHtml(url),
+      {
+        template: 'magic_link',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: null,
+        metadata: { identifier: email },
+      },
     )
   }
 }

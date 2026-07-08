@@ -86,6 +86,7 @@ model User {
   caregivers                           PatientCaregiver[]          @relation("PatientCaregivers")
   rejectedReadingLogs                  RejectedReadingLog[]
   accountClosureLogs                   AccountClosureLog[]
+  emailDisclosuresAsPatient            EmailDisclosureLog[]
 
   // MFA — provider/admin TOTP second factor (Manisha 2026-06-12 §6). Both
   // null/empty for patients (their biometric arrives later in its own table).

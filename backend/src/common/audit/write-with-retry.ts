@@ -29,6 +29,13 @@ const BACKOFF_MS = [100, 500, 2000] as const // one entry per attempt
 export type AuditWriteContext =
   | { kind: 'access-log'; modelName?: string; action?: string; recordId?: string | null }
   | { kind: 'auth-log'; event: string; userId?: string | null; identifier?: string | null }
+  | {
+      kind: 'email-disclosure-log'
+      template: string
+      templateVersion: string
+      patientUserId?: string | null
+      recipientEmail?: string
+    }
 
 /**
  * Runs the audit write with bounded retry + OTEL failure reporting.
@@ -113,6 +120,14 @@ function spanAttributesForCtx(ctx: AuditWriteContext): Record<string, string> {
       ...(ctx.modelName ? { 'audit.model': ctx.modelName } : {}),
       ...(ctx.action ? { 'audit.action': ctx.action } : {}),
       ...(ctx.recordId ? { 'audit.recordId': ctx.recordId } : {}),
+    }
+  }
+  if (ctx.kind === 'email-disclosure-log') {
+    return {
+      'audit.template': ctx.template,
+      'audit.templateVersion': ctx.templateVersion,
+      ...(ctx.patientUserId ? { 'audit.patientUserId': ctx.patientUserId } : {}),
+      ...(ctx.recipientEmail ? { 'audit.recipientEmail': ctx.recipientEmail } : {}),
     }
   }
   return {
