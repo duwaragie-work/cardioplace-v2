@@ -69,7 +69,7 @@ export class TestControlService {
 
   /**
    * N7 — audit exception-report cron driver. Playwright + smoke tests fire
-   * this to trigger the daily scan on demand rather than waiting for 03:00 UTC.
+   * this to trigger the daily scan on demand rather than waiting for 03:00 ET.
    * Delegates to `AuditExceptionReportService.run(now)` which iterates every
    * detector and upserts one AuditException row per candidate.
    */

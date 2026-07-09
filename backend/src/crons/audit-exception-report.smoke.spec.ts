@@ -2,7 +2,8 @@
 //   1. AuditExceptionReportService is instantiable via DI
 //   2. AuditFailureTallyService.onModuleInit fires → tally sink is registered
 //      on the write-with-retry singleton
-//   3. The @Cron('0 3 * * *') on scheduledRun is picked up by @nestjs/schedule
+//   3. The @Cron('0 3 * * *', { timeZone: 'America/New_York' }) on scheduledRun
+//      is picked up by @nestjs/schedule
 //      (SchedulerRegistry contains one CronJob after boot)
 //   4. CRON_LABEL_TO_PRINCIPAL registry contains 'cron-audit-exception-report'
 //
@@ -80,14 +81,14 @@ describe('N7 smoke — Nest DI wiring', () => {
     expect(tally).toBeInstanceOf(AuditFailureTallyService)
   })
 
-  it('@Cron("0 3 * * *") on scheduledRun is registered with SchedulerRegistry', () => {
+  it('@Cron("0 3 * * *", { timeZone: "America/New_York" }) on scheduledRun is registered with SchedulerRegistry', () => {
     const reg = mod.get(SchedulerRegistry)
     const jobs = reg.getCronJobs()
     // The @Cron() decorator on AuditExceptionReportService.scheduledRun MUST
     // register exactly one CronJob (there are no other cron providers in the
     // smoke module). Proves Nest's discovery pipeline picked up the decorator.
     expect(jobs.size).toBe(1)
-    // The registered cron pattern must be '0 3 * * *' (03:00 UTC daily).
+    // The registered cron pattern must be '0 3 * * *' (03:00 ET daily).
     const job = [...jobs.values()][0]
     // Both node-cron implementations Nest supports expose the pattern via
     // cronTime.source (string) or cronTime.toString().
@@ -97,6 +98,10 @@ describe('N7 smoke — Nest DI wiring', () => {
     // eslint-disable-next-line no-console
     console.log('Registered cron pattern:', src)
     expect(src).toContain('0 3 * * *')
+    // Verify the timezone was applied — cron package stores it on cronTime.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tz = (job as any).cronTime?.timeZone ?? (job as any).cronTime?.tz ?? ''
+    expect(tz).toBe('America/New_York')
   })
 
   it('CRON_LABEL_TO_PRINCIPAL contains cron-audit-exception-report → audit-exception-report', () => {

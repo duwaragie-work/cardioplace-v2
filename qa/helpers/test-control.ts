@@ -116,7 +116,7 @@ export class TestControl {
   /**
    * N7 — run the audit-exception-report scanner once. Iterates every detector
    * over the past 24h of audit data, upserts AuditException rows per candidate.
-   * Bypasses the 03:00 UTC schedule so Playwright can seed a pattern → trigger
+   * Bypasses the 03:00 ET schedule so Playwright can seed a pattern → trigger
    * → assert in one test.
    */
   async runAuditExceptionReportScan(now?: Date): Promise<{
