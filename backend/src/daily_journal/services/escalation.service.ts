@@ -12,6 +12,10 @@ import { runAsCronActor } from '../../common/cls/cron-actor.util.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
 import { EMAIL_TEMPLATE_VERSION, caregiverEmailHtml } from '../../email/email-templates.js'
+import type {
+  EmailTemplateName,
+  RecipientCategoryName,
+} from '../../email/email-templates.registry.js'
 import { SmsService } from '../../sms/sms.service.js'
 import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
@@ -1185,14 +1189,25 @@ export class EscalationService {
                 afterHours: args.afterHours,
                 now: args.now,
               })
+              // N6 extension — collapse per-(tier, role) template strings to
+              // one of the 3 tier-scoped registry templates. Tier + role are
+              // preserved in metadata for regulatory queries; recipientCategory
+              // is overridden per role so the disclosure trail records exactly
+              // who received it (PATIENT vs PROVIDER vs CAREGIVER).
+              const escalationTemplate: EmailTemplateName =
+                escalationTemplateForTier(alert.tier)
               await this.emailService.sendEmail(email, rendered.subject, rendered.html, {
-                template: `escalation_tier_${alert.tier ?? 'unknown'}_${role.toLowerCase()}`,
+                template: escalationTemplate,
                 templateVersion: EMAIL_TEMPLATE_VERSION,
                 patientUserId: alert.userId,
+                recipientCategoryOverride: recipientCategoryForRole(role),
                 metadata: {
                   alertId: alert.id,
                   escalationEventId: eventId,
                   ladderStep: step.step,
+                  role,
+                  tier: alert.tier ?? 'UNKNOWN',
+                  ruleId: alert.ruleId,
                 },
               })
             }
@@ -2051,3 +2066,39 @@ export { TIER_1_LADDER }
 // Re-export the email-body helper so spec files can render and assert on the
 // output directly without spinning up the full Nest TestingModule.
 export { escalationEmailBody }
+
+// N6 extension — map the ladder's RecipientRole onto the EmailDisclosureLog
+// `recipientCategory` bucket. Kept adjacent to the escalation dispatch site
+// so a role added to the ladder can never silently miss the disclosure trail
+// (the compile-time exhaustiveness check catches it).
+function recipientCategoryForRole(role: RecipientRole): RecipientCategoryName {
+  switch (role) {
+    case 'PATIENT':
+      return 'PATIENT'
+    case 'CAREGIVER':
+      return 'CAREGIVER'
+    case 'PRIMARY_PROVIDER':
+    case 'BACKUP_PROVIDER':
+      return 'PROVIDER'
+    case 'MEDICAL_DIRECTOR':
+      return 'MEDICAL_DIRECTOR'
+    case 'HEALPLACE_OPS':
+      return 'HEALPLACE_OPS'
+  }
+}
+
+// N6 extension — map the DeviationAlert tier string onto one of the 3
+// tier-scoped registry templates. Same collapse rule as `ladderForTier`:
+//   • TIER_1_*, BP_LEVEL_1_* → escalation_tier_1_staff
+//   • TIER_2_*, BP_LEVEL_2   → escalation_tier_2_staff
+//   • TIER_3_*               → escalation_tier_3_staff
+// Unknown/null tier defaults to tier 1 (safer to over-report than under-).
+// The raw tier is preserved separately in the disclosure metadata.
+function escalationTemplateForTier(tier: string | null): EmailTemplateName {
+  if (!tier) return 'escalation_tier_1_staff'
+  if (tier.startsWith('TIER_3')) return 'escalation_tier_3_staff'
+  if (tier.startsWith('TIER_2') || tier === 'BP_LEVEL_2') {
+    return 'escalation_tier_2_staff'
+  }
+  return 'escalation_tier_1_staff'
+}

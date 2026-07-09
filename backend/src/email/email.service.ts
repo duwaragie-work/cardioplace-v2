@@ -1,9 +1,16 @@
+import { createHash } from 'node:crypto'
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ClsService } from 'nestjs-cls'
 import nodemailer, { type Transporter } from 'nodemailer'
 import { writeAuditWithRetry } from '../common/audit/write-with-retry.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import {
+  type EmailTemplateName,
+  type RecipientCategoryName,
+  computeBriefDescription,
+  resolveTemplateSpec,
+} from './email-templates.registry.js'
 
 /** A captured outbound email (test-only in-memory sink — see below). */
 export interface CapturedEmail {
@@ -20,14 +27,27 @@ export interface CapturedEmail {
  * `null` explicitly so the classification is visible at the call site.
  */
 export interface EmailDisclosureContext {
-  /** Canonical template identifier — 'welcome' | 'otp' | 'escalation_tier_1_staff' | ... */
-  template: string
+  /**
+   * Canonical template identifier. Typed as `EmailTemplateName` (union) so
+   * TypeScript rejects typos at compile time — the whole disclosure trail is
+   * typo-proof, and `purpose` + `recipientCategory` + `briefDescription` are
+   * derived from this via the central registry.
+   */
+  template: EmailTemplateName
   /** Pass `EMAIL_TEMPLATE_VERSION` from `email-templates.ts` at every call site. */
   templateVersion: string
   /** Patient the disclosure is about. NULL for aggregate/practice-wide sends. */
   patientUserId?: string | null
   /** Optional template-specific payload (alertId, escalationStep, ticketId, ...). */
   metadata?: Record<string, unknown>
+  /**
+   * Override the recipientCategory the registry infers from the template.
+   * Most templates have a fixed recipient bucket, but a few (e.g. escalation
+   * emails whose recipient depends on the ladder role, or emergency-dispatch
+   * variants that can go to caregiver OR ops fallback) need call-site
+   * disambiguation. When absent, the registry default is used.
+   */
+  recipientCategoryOverride?: RecipientCategoryName
 }
 
 /**
@@ -162,7 +182,7 @@ export class EmailService implements OnModuleInit {
 
     const delivered = await this._deliver(to, subject, html)
     if (delivered && disclosure) {
-      await this._writeDisclosure(to, subject, disclosure)
+      await this._writeDisclosure(to, subject, html, disclosure)
     }
   }
 
@@ -207,6 +227,7 @@ export class EmailService implements OnModuleInit {
   private async _writeDisclosure(
     recipientEmail: string,
     subject: string,
+    html: string,
     disclosure: EmailDisclosureContext,
   ): Promise<void> {
     const actorId = this.cls.get<string | null>('actorId') ?? null
@@ -218,16 +239,41 @@ export class EmailService implements OnModuleInit {
     // the send — a labelled unknown row is more useful than no row at all.
     const senderPrincipal = actorId ?? 'system-principal-unknown'
 
+    // N6 extension — registry-driven classification. Pulls purpose +
+    // recipientCategory + briefDescription from a central source so every
+    // template's disclosure trail is consistent across all call sites.
+    const spec = resolveTemplateSpec(disclosure.template)
+    const purpose = spec.purpose
+    const recipientCategory =
+      disclosure.recipientCategoryOverride ?? spec.recipientCategory
+    const briefDescription = computeBriefDescription(
+      disclosure.template,
+      disclosure.metadata,
+    )
+    // §164.312(c) integrity fingerprint. Storing the hash instead of the html
+    // body proves what content went out without doubling the PHI-at-rest
+    // footprint (Minimum Necessary — §164.502(b)).
+    const bodyHash = createHash('sha256').update(html).digest('hex')
+    // Multi-practice attribution — CLS carries activePracticeId for USER
+    // paths; SYSTEM_ACTOR / boot-time sends leave it null.
+    const senderPracticeContext =
+      this.cls.get<string | null>('activePracticeId') ?? null
+
     await writeAuditWithRetry(
       () =>
         this.prisma.emailDisclosureLog.create({
           data: {
             senderPrincipal,
             senderType: actorType,
+            senderPracticeContext,
             recipientEmail,
+            recipientCategory,
             patientUserId: disclosure.patientUserId ?? null,
             template: disclosure.template,
             templateVersion: disclosure.templateVersion,
+            purpose,
+            briefDescription,
+            bodyHash,
             subject,
             metadata:
               disclosure.metadata !== undefined
@@ -241,6 +287,8 @@ export class EmailService implements OnModuleInit {
         templateVersion: disclosure.templateVersion,
         patientUserId: disclosure.patientUserId ?? null,
         recipientEmail,
+        purpose,
+        recipientCategory,
       },
     )
   }

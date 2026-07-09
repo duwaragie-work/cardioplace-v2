@@ -317,6 +317,7 @@ export class AuthService {
         template: 'welcome',
         templateVersion: EMAIL_TEMPLATE_VERSION,
         patientUserId: user.id,
+        metadata: { hasDisplayId: true },
       },
     )
   }

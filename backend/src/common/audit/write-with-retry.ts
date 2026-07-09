@@ -35,6 +35,11 @@ export type AuditWriteContext =
       templateVersion: string
       patientUserId?: string | null
       recipientEmail?: string
+      // N6 extension — registry-derived classification. Included in the OTEL
+      // failure span so operators can filter dropped disclosures by purpose
+      // or recipient bucket without re-resolving the template.
+      purpose?: string
+      recipientCategory?: string
     }
 
 /**
@@ -128,6 +133,8 @@ function spanAttributesForCtx(ctx: AuditWriteContext): Record<string, string> {
       'audit.templateVersion': ctx.templateVersion,
       ...(ctx.patientUserId ? { 'audit.patientUserId': ctx.patientUserId } : {}),
       ...(ctx.recipientEmail ? { 'audit.recipientEmail': ctx.recipientEmail } : {}),
+      ...(ctx.purpose ? { 'audit.purpose': ctx.purpose } : {}),
+      ...(ctx.recipientCategory ? { 'audit.recipientCategory': ctx.recipientCategory } : {}),
     }
   }
   return {

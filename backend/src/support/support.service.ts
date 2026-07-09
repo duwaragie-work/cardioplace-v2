@@ -323,7 +323,12 @@ export class SupportService {
         template: 'support_reply',
         templateVersion: EMAIL_TEMPLATE_VERSION,
         patientUserId: ticket.userId ?? null,
-        metadata: { ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+        metadata: {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          category: ticket.category,
+          priority: ticket.priority,
+        },
       },
     )
     if (ticket.userId) {
@@ -372,7 +377,12 @@ export class SupportService {
         template: 'support_resolved',
         templateVersion: EMAIL_TEMPLATE_VERSION,
         patientUserId: ticket.userId ?? null,
-        metadata: { ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+        metadata: {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          category: ticket.category,
+          priority: ticket.priority,
+        },
       },
     )
     if (ticket.userId) {
@@ -527,7 +537,12 @@ export class SupportService {
         template: 'support_ops_notify',
         templateVersion: EMAIL_TEMPLATE_VERSION,
         patientUserId: null,
-        metadata: { ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+        metadata: {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          category: ticket.category,
+          priority: ticket.priority,
+        },
       },
     )
     const opsUsers = await this.prisma.user.findMany({

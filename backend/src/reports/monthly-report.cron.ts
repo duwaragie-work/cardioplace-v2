@@ -141,7 +141,14 @@ export class MonthlyReportCron {
             template: 'monthly_report',
             templateVersion: EMAIL_TEMPLATE_VERSION,
             patientUserId: null,
-            metadata: { practiceId: practice.id, monthYear },
+            metadata: {
+              practiceId: practice.id,
+              monthYear,
+              monthLabel,
+              totalAlerts: report.overall.totalAlerts,
+              escalatedPct: report.overall.escalatedPct,
+              ackInWindowPct: report.overall.acknowledgedInWindowPct,
+            },
           },
         )
       } catch (err) {

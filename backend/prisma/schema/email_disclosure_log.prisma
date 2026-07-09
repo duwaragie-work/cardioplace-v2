@@ -21,20 +21,76 @@
 //      than a single patient (monthly report to a provider).
 // FK ON DELETE SetNull mirrors PatientCaregiver — a hard-deleted patient
 // keeps their disclosure history for the required retention window.
+//
+// N6 extension (2026-07-11) — the minimal Day-4 shape satisfied §164.528
+// through proxies (subject line ≈ brief description; template name ≈ purpose).
+// This extension makes those §164.528 fields EXPLICIT, adds §164.312(c)
+// integrity fingerprinting, and structures recipient/sender attribution so a
+// regulator can answer the four accounting questions (date, recipient, PHI,
+// purpose) from one row without re-rendering the template.
 model EmailDisclosureLog {
-  id                String    @id @default(ulid())
-  senderPrincipal   String
-  senderType        String // 'USER' | 'SYSTEM_ACTOR'
-  recipientEmail    String
-  patientUserId     String?
-  patient           User?     @relation(fields: [patientUserId], references: [id], onDelete: SetNull)
-  template          String // 'welcome' | 'escalation_tier_1_staff' | 'gap_alert' | ...
-  templateVersion   String // stamped from EMAIL_TEMPLATE_VERSION at send time
-  subject           String
-  sentAt            DateTime  @default(now())
-  metadata          Json?
+  id                    String             @id @default(ulid())
+  senderPrincipal       String
+  senderType            String // 'USER' | 'SYSTEM_ACTOR'
+  // N6 extension — activePracticeId at send time (CLS-carried). Nullable
+  // because SYSTEM_ACTOR sends outside a per-practice context have none.
+  senderPracticeContext String?
+  recipientEmail        String
+  // N6 extension — structured "who received it" bucket. Complements
+  // recipientEmail so accounting queries filter by role without joining User.
+  recipientCategory     RecipientCategory
+  patientUserId         String?
+  patient               User?              @relation(fields: [patientUserId], references: [id], onDelete: SetNull)
+  template              String // 'welcome' | 'escalation_tier_1_staff' | 'gap_alert' | ...
+  templateVersion       String // stamped from EMAIL_TEMPLATE_VERSION at send time
+  // N6 extension — explicit §164.528 "purpose of the disclosure". Derived
+  // from the template via the central registry; always populated.
+  purpose               DisclosurePurpose
+  // N6 extension — explicit §164.528 "brief description of the PHI
+  // disclosed". Structured, ≤200 chars, generated from disclosure metadata.
+  // NEVER contains patient name / DOB / narrative — those violate Minimum
+  // Necessary in the disclosure trail.
+  briefDescription      String
+  // N6 extension — SHA-256 hex of the rendered html body (§164.312(c)
+  // integrity). Proves what content went out without duplicating PHI at rest.
+  bodyHash              String
+  subject               String
+  sentAt                DateTime           @default(now())
+  metadata              Json?
 
   @@index([patientUserId, sentAt])
   @@index([recipientEmail, sentAt])
   @@index([template, sentAt])
+  // N6 extension — new query paths for regulatory accounting.
+  @@index([purpose, sentAt])
+  @@index([recipientCategory, sentAt])
+  @@index([senderPracticeContext, sentAt])
+}
+
+// N6 extension — §164.528 "purpose of the disclosure". Categories mirror the
+// §164.502 permitted-use taxonomy so the disclosure trail maps cleanly onto
+// the regulation.
+enum DisclosurePurpose {
+  TREATMENT
+  PAYMENT
+  HEALTHCARE_OPERATIONS
+  PATIENT_DIRECTED
+  CARE_COORDINATION
+  REQUIRED_BY_LAW
+  OTHER
+}
+
+// N6 extension — structured "who received it" bucket. Enables one-shot
+// queries like "all TREATMENT disclosures to PROVIDER recipients in Q3"
+// without joining User + resolving the recipient email to a role.
+enum RecipientCategory {
+  PATIENT
+  CAREGIVER
+  PROVIDER
+  MEDICAL_DIRECTOR
+  COORDINATOR
+  HEALPLACE_OPS
+  SUPER_ADMIN
+  EXTERNAL_UNKNOWN
+  SYSTEM
 }

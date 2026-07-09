@@ -217,4 +217,173 @@ describe('EmailService — N6 disclosure logging', () => {
       }),
     })
   })
+
+  // ── N6 extension (2026-07-11) — §164.528 + §164.312(c) explicit fields ──
+  //
+  // Verifies the registry-driven derivation of purpose + recipientCategory +
+  // briefDescription, plus SHA-256 bodyHash + CLS-carried practice context.
+
+  it('N6-ext — registry derives purpose + recipientCategory from template name', async () => {
+    // Neither field is passed by the call site — both come from the central
+    // EMAIL_TEMPLATE_REGISTRY entry keyed by the typed `template` name.
+    const { prisma, createSpy } = makePrisma()
+    const cls = makeCls({
+      actorId: 'system-principal-escalation-ladder',
+      actorType: 'SYSTEM_ACTOR',
+    })
+    const service = makeService({ cls, prisma })
+    ;(service as unknown as { transporter: { sendMail: jest.Mock } }).transporter = {
+      sendMail: jest.fn<any>().mockResolvedValue({ messageId: 'msg-1' }),
+    }
+
+    await service.sendEmail(
+      'provider@clinic.test',
+      'Escalation Tier 1',
+      '<p>x</p>',
+      {
+        template: 'escalation_tier_1_staff',
+        templateVersion: '2026-07-10',
+        patientUserId: 'patient-77',
+        metadata: {
+          alertId: 'a-1',
+          ruleId: 'RULE_BP_L1_HIGH',
+          role: 'PRIMARY_PROVIDER',
+          ladderStep: 'T0',
+        },
+      },
+    )
+
+    expect(createSpy).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        purpose: 'TREATMENT',
+        recipientCategory: 'PROVIDER',
+        template: 'escalation_tier_1_staff',
+      }),
+    })
+  })
+
+  it('N6-ext — briefDescription is derived from template registry + metadata', async () => {
+    // Escalation registry entry weaves alertId + ruleId + role + step into a
+    // structured description. Never contains patient name or narrative — the
+    // registry spec enforces that separately.
+    const { prisma, createSpy } = makePrisma()
+    const cls = makeCls({ actorId: 'u1', actorType: 'USER' })
+    const service = makeService({ cls, prisma })
+    ;(service as unknown as { transporter: { sendMail: jest.Mock } }).transporter = {
+      sendMail: jest.fn<any>().mockResolvedValue({ messageId: 'msg-brief' }),
+    }
+
+    await service.sendEmail('provider@clinic.test', 'Escalation', '<p>x</p>', {
+      template: 'escalation_tier_1_staff',
+      templateVersion: '2026-07-10',
+      patientUserId: 'p-1',
+      metadata: {
+        alertId: 'a-42',
+        ruleId: 'RULE_BP_L1_HIGH',
+        role: 'MEDICAL_DIRECTOR',
+        ladderStep: 'T4H',
+      },
+    })
+
+    const call = createSpy.mock.calls[0][0] as { data: { briefDescription: string } }
+    expect(call.data.briefDescription).toContain('Tier 1 escalation dispatch')
+    expect(call.data.briefDescription).toContain('a-42')
+    expect(call.data.briefDescription).toContain('RULE_BP_L1_HIGH')
+    expect(call.data.briefDescription).toContain('MEDICAL_DIRECTOR')
+    expect(call.data.briefDescription).toContain('T4H')
+    expect(call.data.briefDescription.length).toBeLessThanOrEqual(200)
+  })
+
+  it('N6-ext — bodyHash is a deterministic 64-char SHA-256 of the html body', async () => {
+    // Integrity proof per §164.312(c): same html → same 64-char hex hash;
+    // different html → different hash. No raw body stored (Minimum Necessary).
+    const { prisma, createSpy } = makePrisma()
+    const cls = makeCls({ actorId: 'u1', actorType: 'USER' })
+    const service = makeService({ cls, prisma })
+    ;(service as unknown as { transporter: { sendMail: jest.Mock } }).transporter = {
+      sendMail: jest.fn<any>().mockResolvedValue({ messageId: 'msg-hash' }),
+    }
+
+    await service.sendEmail('a@example.com', 's', '<p>same body</p>', {
+      template: 'welcome',
+      templateVersion: '2026-07-10',
+      patientUserId: 'u1',
+    })
+    await service.sendEmail('b@example.com', 's', '<p>same body</p>', {
+      template: 'welcome',
+      templateVersion: '2026-07-10',
+      patientUserId: 'u2',
+    })
+    await service.sendEmail('c@example.com', 's', '<p>DIFFERENT body</p>', {
+      template: 'welcome',
+      templateVersion: '2026-07-10',
+      patientUserId: 'u3',
+    })
+
+    const rows = createSpy.mock.calls.map(
+      (c) => (c[0] as { data: { bodyHash: string } }).data.bodyHash,
+    )
+    expect(rows[0]).toMatch(/^[0-9a-f]{64}$/)
+    expect(rows[1]).toBe(rows[0]) // same html → same hash
+    expect(rows[2]).not.toBe(rows[0]) // different html → different hash
+    expect(rows[2]).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('N6-ext — senderPracticeContext is threaded from CLS activePracticeId', async () => {
+    // Multi-practice attribution — reads whatever the CLS carries at send
+    // time. Nullable — SYSTEM_ACTOR / boot sends have no practice context.
+    const { prisma, createSpy } = makePrisma()
+    const cls = makeCls({
+      actorId: 'u1',
+      actorType: 'USER',
+      activePracticeId: 'practice-cedar-hill',
+    })
+    const service = makeService({ cls, prisma })
+    ;(service as unknown as { transporter: { sendMail: jest.Mock } }).transporter = {
+      sendMail: jest.fn<any>().mockResolvedValue({ messageId: 'msg-p' }),
+    }
+
+    await service.sendEmail('provider@clinic.test', 's', '<p>h</p>', {
+      template: 'monthly_report',
+      templateVersion: '2026-07-10',
+      patientUserId: null,
+      metadata: { practiceId: 'practice-cedar-hill', monthYear: '2026-06' },
+    })
+
+    expect(createSpy).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        senderPracticeContext: 'practice-cedar-hill',
+        purpose: 'HEALTHCARE_OPERATIONS',
+        recipientCategory: 'MEDICAL_DIRECTOR',
+      }),
+    })
+  })
+
+  it('N6-ext — recipientCategoryOverride wins over the registry default', async () => {
+    // A template like escalation_tier_1_staff defaults to PROVIDER, but the
+    // ladder can dispatch it to a PATIENT (email channel). The call site
+    // overrides so the disclosure trail records the right recipient bucket.
+    const { prisma, createSpy } = makePrisma()
+    const cls = makeCls({
+      actorId: 'system-principal-escalation-ladder',
+      actorType: 'SYSTEM_ACTOR',
+    })
+    const service = makeService({ cls, prisma })
+    ;(service as unknown as { transporter: { sendMail: jest.Mock } }).transporter = {
+      sendMail: jest.fn<any>().mockResolvedValue({ messageId: 'msg-ov' }),
+    }
+
+    await service.sendEmail('patient@example.com', 's', '<p>h</p>', {
+      template: 'escalation_tier_1_staff',
+      templateVersion: '2026-07-10',
+      patientUserId: 'p-1',
+      recipientCategoryOverride: 'PATIENT',
+    })
+
+    expect(createSpy).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        recipientCategory: 'PATIENT',
+      }),
+    })
+  })
 })
