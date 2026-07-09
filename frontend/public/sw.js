@@ -19,7 +19,7 @@ self.addEventListener('push', (event) => {
     // blank. Icon = the app mark; badge = the small monochrome status-bar glyph.
     body: data.body || '',
     icon: '/cardioplace-icon-192.png',
-    badge: '/cardioplace-badge-96.png',
+    // badge: '/cardioplace-badge-96.png',
     data: { notificationId: data.notificationId || null },
   };
   event.waitUntil(self.registration.showNotification(title, options));
