@@ -15,9 +15,11 @@ self.addEventListener('push', (event) => {
   }
   const title = data.title || 'Cardioplace';
   const options = {
+    // Notification icons must be raster (PNG) — browsers render SVG icons as
+    // blank. Icon = the app mark; badge = the small monochrome status-bar glyph.
     body: data.body || '',
-    icon: '/cardioplace-icon.svg',
-    badge: '/cardioplace-icon.svg',
+    icon: '/cardioplace-icon-192.png',
+    badge: '/cardioplace-badge-96.png',
     data: { notificationId: data.notificationId || null },
   };
   event.waitUntil(self.registration.showNotification(title, options));
