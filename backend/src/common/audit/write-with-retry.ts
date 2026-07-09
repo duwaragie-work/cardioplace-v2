@@ -2,6 +2,27 @@ import { SpanStatusCode } from '@opentelemetry/api'
 import { auditTracer } from './audit-tracer.js'
 
 /**
+ * N7 (2026-07-11) — producer-side tally sink for the DROPPED_AUDIT_WRITES
+ * exception detector. Registered ONCE at boot (see AuditModule) so this file
+ * stays a plain module — no DI coupling to Prisma. When null (test contexts,
+ * pre-boot ordering), the tally write is silently skipped — the OTEL span +
+ * console.error still fire, so the failure signal is not lost.
+ *
+ * Contract: the callback MUST NOT throw. writeAuditWithRetry's reportFailure
+ * is already wrapped in a swallow-all catch (belt-and-suspenders), but the
+ * callback should still be defensive — a broken tally writer must never
+ * cascade into a second dropped audit row.
+ */
+export type AuditFailureTallySink = (input: {
+  kind: string
+  errorMessage: string
+}) => void
+let tallySink: AuditFailureTallySink | null = null
+export function setAuditFailureTallySink(sink: AuditFailureTallySink | null): void {
+  tallySink = sink
+}
+
+/**
  * Bounded-retry wrapper for audit writes (HIPAA §164.312(b) — N1).
  *
  * The AccessLog Prisma extension and AuthLog writer (auth.service.ts) both
@@ -117,6 +138,18 @@ function reportFailure(ctx: AuditWriteContext, err: unknown): void {
       timestamp: new Date().toISOString(),
     }),
   )
+
+  // 3. N7 — increment the per-(kind, hour) tally so the DROPPED_AUDIT_WRITES
+  //    detector can find dropped rows without reading OTEL. Sink is null in
+  //    tests / pre-boot; skip silently. Wrapped in its own catch so a broken
+  //    tally writer can't cascade back into reportFailure's outer swallow.
+  if (tallySink) {
+    try {
+      tallySink({ kind: ctx.kind, errorMessage })
+    } catch {
+      // Deliberately swallow — see contract on setAuditFailureTallySink.
+    }
+  }
 }
 
 function spanAttributesForCtx(ctx: AuditWriteContext): Record<string, string> {

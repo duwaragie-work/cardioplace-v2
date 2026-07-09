@@ -1,0 +1,121 @@
+// N7 (2026-07-11) — automated audit exception-report (HIPAA §164.308(a)(1)(ii)(D)
+// Information System Activity Review).
+//
+// One row per suspicious pattern the audit-exception cron detects in the past
+// 24h window of AccessLog / AuthLog / EmailDisclosureLog + N1 audit-write-fail
+// telemetry. Rows are the CONTRACT with Lakshitha's L3 reviewer worklist —
+// her UI adds Acknowledge / Escalate / Mark-benign, writing back into the
+// triage fields on this row. Escalate creates a separate SecurityIncident row
+// (Lakshitha owns that model, ties to §164.308(a)(6)).
+//
+// Deliberately NOT in PHI_MODELS — same recursion rationale as AccessLog /
+// AuthLog / EmailDisclosureLog (auditing the exception stream loops).
+//
+// Idempotency: each detector computes a deterministic
+//   ${detectorId}:${subjectKey}:${windowStart.toISOString()}
+// key. A second run of the cron in the same window UPDATES the row's
+// evidence + updatedAt, never inserts a duplicate. Once the row is RESOLVED
+// or FALSE_POSITIVE, the writer treats it as STICKY — the regulator has
+// already dispositioned it, so a re-fire with the same key is a no-op.
+model AuditException {
+  id                  String                    @id @default(ulid())
+
+  // WHICH detector caught it (drives Lakshitha's dispatch + worklist filters).
+  detectorId          AuditExceptionDetectorId
+  severity            AuditExceptionSeverity
+  status              AuditExceptionStatus      @default(OPEN)
+
+  // Window the detector considered. Two windows for the same (detectorId,
+  // subjectKey) never overlap — the writer's idempotencyKey pins on
+  // windowStart so re-runs land on the same row.
+  windowStart         DateTime
+  windowEnd           DateTime
+
+  // Human-readable summary (≤200 chars) — surfaces in Lakshitha's worklist
+  // row without opening the evidence blob. Structured, no PHI.
+  summary             String
+
+  // Detector-specific structured payload — numeric aggregates, record IDs,
+  // principal labels. NEVER patient names / DOBs / narrative. Rendered by the
+  // review UI when the triager opens the row.
+  evidence            Json
+
+  // Practice context so per-practice ops routing works. Nullable — cross-
+  // practice detectors + system-wide detectors (DROPPED_AUDIT_WRITES) leave
+  // it null. Indexed for "all OPEN exceptions in practice X" queries.
+  practiceContext     String?
+
+  // Deterministic dedup key. Format:
+  //   ${detectorId}:${subjectKey}:${windowStart.toISOString()}
+  // Unique index — writer.upsert pins on this.
+  idempotencyKey      String                    @unique
+
+  // Triage trail — Lakshitha's L3 UI writes these; the cron leaves them null.
+  acknowledgedBy      String?
+  acknowledgedAt      DateTime?
+  benignBy            String?
+  benignAt            DateTime?
+  benignReason        String?
+  // L3's Escalate action creates a SecurityIncident row (§164.308(a)(6)) and
+  // pins its id here. Kept as a bare String so N7 doesn't take a build-time
+  // dep on Lakshitha's not-yet-landed SecurityIncident model.
+  escalatedToIncidentId String?
+  escalatedAt         DateTime?
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([status, severity, createdAt])
+  @@index([detectorId, createdAt])
+  @@index([practiceContext, status, createdAt])
+}
+
+// N7 (2026-07-11) — HIPAA §164.312(c) integrity tally. Producer-side counter
+// incremented by writeAuditWithRetry.reportFailure when a bounded-retry
+// audit write exhausts its retries. Consumer is the DROPPED_AUDIT_WRITES
+// detector, which scans this table for hourly buckets with count > 0.
+//
+// Deliberately hourly-bucket, not per-drop — a single audit outage might
+// drop hundreds of writes; one row per hour keeps write pressure bounded
+// and gives the detector "how bad, how long" without noise.
+//
+// Producer failure mode: if the underlying DB is unhealthy (the reason the
+// original audit write failed), this upsert can fail too. That's acceptable
+// — OTEL + console.error still fire; we lose one signal, not all of them.
+model AuditWriteFailureTally {
+  id          String   @id @default(ulid())
+  kind        String // 'access-log' | 'auth-log' | 'email-disclosure-log'
+  hourBucket  DateTime // start of the hour, UTC — HH:00:00Z
+  count       Int      @default(0)
+  lastError   String? // last error_message, ≤500 chars
+  updatedAt   DateTime @updatedAt
+
+  @@unique([kind, hourBucket])
+  @@index([hourBucket])
+}
+
+// §164.308(a)(1)(ii)(D) — one enum value per shipped detector. Registry-side
+// enforcement: a static-drift guard test asserts ALL_DETECTORS.map(d => d.id)
+// equals this enum's values, so adding a detector without an enum value
+// (or vice versa) fails the build.
+enum AuditExceptionDetectorId {
+  BULK_PHI_READ
+  OFF_HOURS_PHI_ACCESS
+  CROSS_PRACTICE_ACCESS
+  REPEATED_FAILED_AUTH
+  DROPPED_AUDIT_WRITES
+  UNATTRIBUTED_SYSTEM_DISCLOSURE
+}
+
+enum AuditExceptionSeverity {
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AuditExceptionStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  FALSE_POSITIVE
+}
