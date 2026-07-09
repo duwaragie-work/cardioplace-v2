@@ -50,6 +50,7 @@ export interface SupportTicketDetail extends Omit<SupportTicketRow, 'user'> {
     roles: string[]
     mfaEnrolled: boolean
     recoveryCodesRemaining: number
+    webAuthnCount: number
   } | null
   replies: SupportTicketReply[]
   actions: SupportTicketActionRow[]
@@ -105,12 +106,11 @@ export async function replyTicket(id: string, body: string): Promise<void> {
 
 export async function verifyIdentity(
   id: string,
-  method: string,
-  notes?: string,
+  rationale: string,
 ): Promise<void> {
   const res = await fetchWithAuth(
     `${API}/api/v2/admin/support/tickets/${id}/verify-identity`,
-    { method: 'POST', body: JSON.stringify({ method, notes }) },
+    { method: 'POST', body: JSON.stringify({ rationale }) },
   )
   await jsonOrThrow(res, 'Could not record identity verification')
 }

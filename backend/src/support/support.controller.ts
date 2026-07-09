@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req } from '@nestjs/common'
+import { Body, Controller, Get, Post, Req } from '@nestjs/common'
 import type { Request } from 'express'
 import { Public } from '../auth/decorators/public.decorator.js'
 import { UserRole } from '../generated/prisma/enums.js'
@@ -39,6 +39,12 @@ export class SupportController {
       dto,
       this.ctxFrom(req),
     )
+  }
+
+  /** The signed-in user's own support tickets + reply threads (Fix 9). */
+  @Get('tickets/mine')
+  myTickets(@Req() req: AuthedReq) {
+    return this.support.listMyTickets(this.actorFrom(req))
   }
 
   /** Unauthenticated "I can't sign in" form — rate-limited 5/IP/hour in the

@@ -8,16 +8,27 @@ export default function ActionButtons({
   locked,
   isPatient,
   resolved,
+  mfaEnrolled,
+  webAuthnCount,
   onAction,
   onResolve,
 }: {
   locked: boolean; // true until identity is verified
   isPatient: boolean;
   resolved: boolean;
+  mfaEnrolled: boolean;
+  webAuthnCount: number;
   onAction: (a: SupportAction) => Promise<void>;
   onResolve: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+
+  // Grey out actions the target has nothing to reset for — a "Reset MFA" on a
+  // user with no authenticator is a confusing no-op (Fix 8). `locked` (identity
+  // not yet verified) still gates everything on top of these.
+  const noMfa = !mfaEnrolled;
+  const noWebAuthn = webAuthnCount === 0;
+  const noRecoveryBase = !mfaEnrolled && webAuthnCount === 0;
 
   const run = (key: string, fn: () => Promise<void>) => async () => {
     setBusy(key);
@@ -43,7 +54,8 @@ export default function ActionButtons({
           testid="support-action-mfa-reset"
           icon={<KeyRound className="w-3.5 h-3.5" />}
           label="Reset MFA"
-          disabled={locked || busy != null}
+          disabled={locked || noMfa || busy != null}
+          tooltip={noMfa ? 'User has no authenticator (TOTP) enrolled' : undefined}
           busy={busy === 'mfa'}
           onClick={run('mfa', () => onAction('mfa-reset'))}
         />
@@ -51,7 +63,12 @@ export default function ActionButtons({
           testid="support-action-recovery"
           icon={<RefreshCw className="w-3.5 h-3.5" />}
           label="Regenerate recovery codes"
-          disabled={locked || busy != null}
+          disabled={locked || noRecoveryBase || busy != null}
+          tooltip={
+            noRecoveryBase
+              ? 'User has no MFA method to generate recovery codes for'
+              : undefined
+          }
           busy={busy === 'recovery'}
           onClick={run('recovery', () => onAction('recovery-codes-regen'))}
         />
@@ -60,7 +77,10 @@ export default function ActionButtons({
             testid="support-action-webauthn"
             icon={<Fingerprint className="w-3.5 h-3.5" />}
             label="Reset WebAuthn"
-            disabled={locked || busy != null}
+            disabled={locked || noWebAuthn || busy != null}
+            tooltip={
+              noWebAuthn ? 'User has no biometric/WebAuthn credentials' : undefined
+            }
             busy={busy === 'webauthn'}
             onClick={run('webauthn', () => onAction('webauthn-reset'))}
           />
@@ -84,6 +104,7 @@ function ActionBtn({
   icon,
   label,
   disabled,
+  tooltip,
   busy,
   onClick,
   solid,
@@ -92,6 +113,7 @@ function ActionBtn({
   icon: React.ReactNode;
   label: string;
   disabled: boolean;
+  tooltip?: string;
   busy: boolean;
   onClick: () => void;
   solid?: boolean;
@@ -101,6 +123,7 @@ function ActionBtn({
       type="button"
       data-testid={testid}
       disabled={disabled}
+      title={tooltip}
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-sm font-semibold disabled:opacity-50 transition ${
         solid

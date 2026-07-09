@@ -331,4 +331,63 @@ describe('AccessLog conformance — every PHI-model write produces an audit row 
     const after = await waitForLogs({ actorId: providerId, action: 'READ' }, before + 1)
     expect(after).toBeGreaterThan(before)
   })
+
+  // ── N3 per-cron attributable-write conformance (Nivakaran 2026-07-09) ────────
+  //
+  // Every label in CRON_LABEL_TO_PRINCIPAL must be able to produce an audited
+  // WRITE with SYSTEM_ACTOR attribution + the matching systemActorLabel. This
+  // does NOT prove the actual @Cron() method fires (a mock DB has no cron
+  // scheduler); it proves the runAsCronActor pipeline preserves the label
+  // through Prisma-extension → AccessLog for every registered label. If a
+  // cron adds a new label without registering it in system-principals.ts,
+  // this loop misses it — but the phi-inventory unit-spec conformance test
+  // + PR review catch that on the source side.
+  describe('per-cron label attribution — every registered cron produces a labeled AccessLog write', () => {
+    // Local import kept lazy so the ESM module resolution can't race with the
+    // rest of the file's globalthis-style Nest bootstrap.
+    let CRON_LABEL_TO_PRINCIPAL: Record<string, string>
+    let runAsCronActor: <T>(cls: ClsService, label: string, fn: () => Promise<T>) => Promise<T>
+
+    beforeAll(async () => {
+      const sp = await import('../src/common/cls/system-principals.js')
+      CRON_LABEL_TO_PRINCIPAL = sp.CRON_LABEL_TO_PRINCIPAL
+      const ca = await import('../src/common/cls/cron-actor.util.js')
+      runAsCronActor = ca.runAsCronActor
+    })
+
+    it('CRON_LABEL_TO_PRINCIPAL is non-empty (registration guard)', () => {
+      expect(Object.keys(CRON_LABEL_TO_PRINCIPAL).length).toBeGreaterThan(0)
+    })
+
+    it('each label produces a SYSTEM_ACTOR AccessLog WRITE with the correct systemActorLabel', async () => {
+      const labels = Object.keys(CRON_LABEL_TO_PRINCIPAL)
+      for (const label of labels) {
+        const before = await prisma.accessLog.count({
+          where: { systemActorLabel: label, action: 'WRITE' },
+        })
+
+        // Do a tiny PHI write inside a runAsCronActor context. JournalEntry is
+        // the safest — patientId is already seeded, no relation-graph games.
+        await runAsCronActor(cls, label, async () => {
+          const je = await prisma.journalEntry.create({
+            data: {
+              userId: patientId,
+              measuredAt: new Date(),
+              systolicBP: 118,
+              diastolicBP: 76,
+            },
+          })
+          // Housekeeping — clean up so we don't leave conformance test rows in
+          // the shared docker DB between runs.
+          await prisma.journalEntry.delete({ where: { id: je.id } })
+        })
+
+        const after = await waitForLogs(
+          { systemActorLabel: label, action: 'WRITE' },
+          before + 1,
+        )
+        expect(after).toBeGreaterThan(before)
+      }
+    })
+  })
 })

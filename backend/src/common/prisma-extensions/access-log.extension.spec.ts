@@ -8,6 +8,7 @@ import {
   PHI_MODELS,
   AUDIT_STAMP_MODELS,
 } from './access-log.extension.js'
+import { CANONICAL_PHI_MODELS } from './phi-inventory.js'
 
 /**
  * Humaira N8 / 164.312-T7 — PHI access audit trail. The extension writes one
@@ -148,10 +149,44 @@ describe('computeAccessLogData — PHI gate', () => {
     expect(computeAccessLogData('User', 'someExoticOp', {}, null, USER_CLS)).toBeNull()
   })
 
-  it('the seven PHI models are exactly the audited set', () => {
-    expect([...PHI_MODELS].sort()).toEqual(
-      ['DeviationAlert', 'JournalEntry', 'Notification', 'PatientMedication', 'PatientProfile', 'PatientThreshold', 'User'].sort(),
-    )
+  it('PHI_MODELS matches CANONICAL_PHI_MODELS from phi-inventory.ts — N3 conformance guard', () => {
+    // Any drift between the runtime PHI_MODELS set and the canonical inventory
+    // fails the build. If a new Prisma model is added to the schema and the
+    // author forgets to add it to PHI_MODELS, the model won't get audited and
+    // this suite won't catch it — but if the author DID remember to update
+    // EPHI_INVENTORY.md (and therefore phi-inventory.ts) but forgot the runtime
+    // set, this assertion trips.
+    //
+    // The pair phi-inventory.ts ↔ docs/EPHI_INVENTORY.md is a human-review
+    // guard (PR reviewers check them together); this test is the machine-review
+    // guard on the runtime side.
+    expect([...PHI_MODELS].sort()).toEqual([...CANONICAL_PHI_MODELS].sort())
+    expect(PHI_MODELS.size).toBe(CANONICAL_PHI_MODELS.size)
+    // Anchor the count too so a same-size swap (one model dropped, one added
+    // without inventory update) triggers a review discussion rather than a
+    // silent pass.
+    expect(PHI_MODELS.size).toBe(20)
+  })
+
+  it('CANONICAL_PHI_MODELS never contains AccessLog / AuthLog / AuthSession — the audit-sink invariant', () => {
+    // These are the audit stream + auth stream. Auditing them would recurse
+    // (AccessLog writes trigger AccessLog writes) or double-log an event that
+    // AuthLog already captures — either way a wrong-headed addition.
+    expect(CANONICAL_PHI_MODELS.has('AccessLog')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('AuthLog')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('AuthSession')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('RefreshToken')).toBe(false)
+  })
+
+  it('CANONICAL_PHI_MODELS never contains org-config or non-clinical tables', () => {
+    // Regression guard — Practice + membership joins carry no clinical fields
+    // (see EPHI_INVENTORY.md Table 3). Adding them would flood AccessLog with
+    // every schema mutation on the practice sidebar.
+    expect(CANONICAL_PHI_MODELS.has('Practice')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('PracticeProvider')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('PracticeCoordinator')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('PracticeMedicalDirector')).toBe(false)
+    expect(CANONICAL_PHI_MODELS.has('DisplayId')).toBe(false)
   })
 })
 
@@ -180,6 +215,56 @@ describe('computeAccessLogData — actor attribution', () => {
     const userWithStrayLabel = clsWith({ actorId: 'prov-1', systemActorLabel: 'cron-x' })
     const data = computeAccessLogData('JournalEntry', 'findMany', {}, [], userWithStrayLabel)
     expect(data).toMatchObject({ actorType: 'USER', actorId: 'prov-1', systemActorLabel: null })
+  })
+})
+
+describe('computeAccessLogData — N2 runId correlation', () => {
+  // N2: runId is set by runAsCronActor (cron path) or the CLS interceptor
+  // (HTTP path) — one per invocation. Distinct runs write distinct AccessLog
+  // rows, so N7's exception-report cron can count per-run rather than per-day.
+
+  it('HTTP request with runId in CLS → runId flows through to the audit row', () => {
+    const cls = clsWith({
+      actorId: 'prov-1',
+      runId: 'req-a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+    })
+    const data = computeAccessLogData('JournalEntry', 'findMany', {}, [], cls)
+    expect(data).toMatchObject({
+      actorType: 'USER',
+      runId: 'req-a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+    })
+  })
+
+  it('cron run with runId in CLS → runId flows through, systemActorLabel unaffected', () => {
+    const cls = clsWith({
+      systemActorLabel: 'cron-gap-alert',
+      runId: 'cron-run-abc-def-123',
+    })
+    const data = computeAccessLogData('Notification', 'create', { data: {} }, { id: 'n-1' }, cls)
+    expect(data).toMatchObject({
+      actorType: 'SYSTEM_ACTOR',
+      systemActorLabel: 'cron-gap-alert',
+      runId: 'cron-run-abc-def-123',
+    })
+  })
+
+  it('no runId in CLS → runId null (pre-N2 fallback)', () => {
+    // EMPTY_CLS has no runId key — matches the pre-2026-07-07 code path.
+    const data = computeAccessLogData('JournalEntry', 'findMany', {}, [], EMPTY_CLS)
+    expect(data).toMatchObject({ runId: null })
+  })
+
+  it('two distinct runIds → two distinct audit rows (correlation isolation)', () => {
+    // Simulates two independent runs (or two HTTP requests) writing to the same
+    // PHI model. The audit rows carry different runIds so N7's per-run
+    // aggregation can distinguish them even under identical actor + model.
+    const clsA = clsWith({ actorId: 'prov-1', runId: 'run-A' })
+    const clsB = clsWith({ actorId: 'prov-1', runId: 'run-B' })
+    const dataA = computeAccessLogData('JournalEntry', 'findMany', {}, [], clsA)
+    const dataB = computeAccessLogData('JournalEntry', 'findMany', {}, [], clsB)
+    expect(dataA?.runId).toBe('run-A')
+    expect(dataB?.runId).toBe('run-B')
+    expect(dataA?.runId).not.toBe(dataB?.runId)
   })
 })
 
@@ -245,6 +330,8 @@ describe('auditAndReturn — fire-and-forget write', () => {
 
   it('failed audit write is swallowed — query result still returned, no throw', async () => {
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    // Every attempt fails so writeAuditWithRetry (3 attempts) exhausts and
+    // reports the failure. auditAndReturn must still resolve the query result.
     const create = jest.fn<(args: any) => Promise<any>>().mockRejectedValue(new Error('db down'))
     const basePrisma = { accessLog: { create } } as any
 
@@ -260,10 +347,20 @@ describe('auditAndReturn — fire-and-forget write', () => {
     )
 
     expect(result).toEqual([{ id: 'a' }])
-    // Let the rejected create's .catch() microtask run.
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(errSpy).toHaveBeenCalledWith('[AccessLog] write failed', expect.any(Error))
+    // Wait for the fire-and-forget retry loop (3 attempts with 100ms + 500ms
+    // backoff = ~600ms). writeAuditWithRetry never rejects — we assert the
+    // final structured error was emitted.
+    await new Promise((resolve) => setTimeout(resolve, 800))
+    expect(errSpy).toHaveBeenCalledTimes(1)
+    const emitted = JSON.parse(errSpy.mock.calls[0]?.[0] as string) as Record<string, unknown>
+    expect(emitted).toMatchObject({
+      audit_write_failed: true,
+      kind: 'access-log',
+      error_message: 'db down',
+      'audit.model': 'JournalEntry',
+      'audit.action': 'READ',
+    })
+    expect(create).toHaveBeenCalledTimes(3)
     errSpy.mockRestore()
   })
 

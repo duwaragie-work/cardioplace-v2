@@ -546,7 +546,7 @@ export default function RegisterPage() {
                 {/* Locked out — public support form (no auth required). */}
                 <p className="text-center mt-3">
                   <a
-                    href="/support/locked-out"
+                    href={`/support/locked-out${emailTrimmed ? `?email=${encodeURIComponent(emailTrimmed)}` : ''}`}
                     data-testid="signin-need-help"
                     className="text-[0.6875rem] lg:text-xs font-medium text-[#7B00E0] hover:underline"
                   >

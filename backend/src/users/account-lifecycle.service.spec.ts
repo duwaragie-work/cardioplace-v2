@@ -279,10 +279,15 @@ describe('AccountLifecycleService', () => {
       expect(prisma.displayId.updateMany).toHaveBeenCalled()
       expect(prisma.accountClosureLog.create).toHaveBeenCalled()
       // Final "account closed" confirmation goes to the pre-scrub email.
+      // N6 — fourth arg is the §164.528 disclosure context.
       expect(email.sendEmail).toHaveBeenCalledWith(
         'p@test',
         expect.stringContaining('closed'),
         expect.stringContaining('closed'),
+        expect.objectContaining({
+          template: 'account_closed',
+          patientUserId: expect.any(String),
+        }),
       )
     })
 
@@ -321,10 +326,15 @@ describe('AccountLifecycleService', () => {
       } as any)
       await svc.requestSelfClose('u1')
       expect(jwt.signAsync).toHaveBeenCalled()
+      // N6 — fourth arg is the §164.528 disclosure context.
       expect(email.sendEmail).toHaveBeenCalledWith(
         'p@test',
         expect.any(String),
         expect.any(String),
+        expect.objectContaining({
+          template: 'self_close_confirm',
+          patientUserId: 'u1',
+        }),
       )
     })
 

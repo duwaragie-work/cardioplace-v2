@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { ClsService } from 'nestjs-cls'
 import { resolveCronActorId } from './system-principals.js'
 
@@ -36,6 +37,11 @@ export async function runAsCronActor<T>(
     cls.set('actorId', resolveCronActorId(label))
     cls.set('actorType', 'SYSTEM_ACTOR')
     cls.set('systemActorLabel', label)
+    // N2 (2026-07-07) — per-run correlation id. `systemActorLabel` names the JOB
+    // (e.g. 'cron-gap-alert'); `runId` names this specific INVOCATION. Both flow
+    // into AccessLog rows so the exception-report cron (N7) can group audit
+    // rows by run and detect anomalies per-run rather than per-job.
+    cls.set('runId', randomUUID())
     cls.set('ip', null)
     cls.set('userAgent', null)
     return fn()

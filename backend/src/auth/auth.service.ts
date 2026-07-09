@@ -12,6 +12,7 @@ import type { Profile } from 'passport-google-oauth20'
 import { POLICY_VERSION, TRAINING_ACK_VERSION } from '@cardioplace/shared'
 import { EmailService } from '../email/email.service.js'
 import {
+  EMAIL_TEMPLATE_VERSION,
   magicLinkEmailHtml,
   otpEmailHtml,
   welcomeEmailHtml,
@@ -23,6 +24,7 @@ import {
   UserRole,
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { writeAuditWithRetry } from '../common/audit/write-with-retry.js'
 import { DisplayIdService } from '../users/display-id.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
@@ -298,6 +300,7 @@ export class AuthService {
    * See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §5.
    */
   private dispatchWelcomeEmail(user: {
+    id: string
     email: string | null
     name: string | null
     displayId: string | null
@@ -310,6 +313,12 @@ export class AuthService {
       user.email,
       'Welcome to Cardioplace — your account ID',
       welcomeEmailHtml(user.name ?? '', formatted, isPatient),
+      {
+        template: 'welcome',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: user.id,
+        metadata: { hasDisplayId: true },
+      },
     )
   }
 
@@ -1610,6 +1619,12 @@ export class AuthService {
         target.email,
         'Your Cardioplace two-factor authentication was reset',
         mfaResetEmailHtml(target.name ?? null),
+        {
+          template: 'mfa_reset',
+          templateVersion: EMAIL_TEMPLATE_VERSION,
+          patientUserId: targetUserId,
+          metadata: { resetBy: actorId, reason },
+        },
       )
     }
     return {
@@ -1983,6 +1998,12 @@ export class AuthService {
         target.email,
         'Your Cardioplace biometric sign-in was reset',
         biometricResetEmailHtml(target.name ?? null),
+        {
+          template: 'biometric_reset',
+          templateVersion: EMAIL_TEMPLATE_VERSION,
+          patientUserId: targetUserId,
+          metadata: { resetBy: actorId, reason },
+        },
       )
     }
     return {
@@ -2258,28 +2279,38 @@ export class AuthService {
      *  events. */
     practiceContext?: string | null
   }): Promise<void> {
-    try {
-      await this.prisma.authLog.create({
-        data: {
-          event: params.event,
-          identifier: params.identifier ?? null,
-          userId: params.userId ?? null,
-          method: params.method ?? null,
-          deviceId: params.deviceId ?? null,
-          ipAddress: params.ipAddress ?? null,
-          userAgent: params.userAgent ?? null,
-          metadata: params.metadata
-            ? JSON.parse(JSON.stringify(params.metadata))
-            : null,
-          success: params.success,
-          errorCode: params.errorCode ?? null,
-          practiceContext: params.practiceContext ?? null,
-        },
-      })
-    } catch (error) {
-      // Never let logging failures break the auth flow
-      console.error('Failed to log auth event:', error)
-    }
+    // N1 (2026-07-08) — bounded retry + OTEL failure span. Was a swallowed
+    // try/catch; now writeAuditWithRetry gives us 3 attempts + a loud signal
+    // on exhaust (audit.write.failed span + structured JSON error) so an
+    // AuthLog write-outage becomes observable. Still fire-and-forget from the
+    // auth flow's perspective — the wrapper never rethrows, so a failed
+    // write never breaks sign-in.
+    await writeAuditWithRetry(
+      () =>
+        this.prisma.authLog.create({
+          data: {
+            event: params.event,
+            identifier: params.identifier ?? null,
+            userId: params.userId ?? null,
+            method: params.method ?? null,
+            deviceId: params.deviceId ?? null,
+            ipAddress: params.ipAddress ?? null,
+            userAgent: params.userAgent ?? null,
+            metadata: params.metadata
+              ? JSON.parse(JSON.stringify(params.metadata))
+              : null,
+            success: params.success,
+            errorCode: params.errorCode ?? null,
+            practiceContext: params.practiceContext ?? null,
+          },
+        }),
+      {
+        kind: 'auth-log',
+        event: params.event,
+        userId: params.userId ?? null,
+        identifier: params.identifier ?? null,
+      },
+    )
   }
 
   // ─── Policy / Consent Acknowledgment ─────────────────────────────────────────
@@ -2840,9 +2871,12 @@ export class AuthService {
         success: false,
         errorCode: 'account_not_active',
       })
-      throw new ForbiddenException(
-        `Account is ${existingUser.accountStatus.toLowerCase()}`,
-      )
+      // Silent success — return the happy-path shape WITHOUT generating or
+      // sending an OTP, so we never disclose to an unauthenticated requester
+      // that this email exists-but-is-inactive (info-disclosure). The block is
+      // still audited above; a non-ACTIVE user who somehow holds a valid code
+      // is still stopped at verifyOtp.
+      return { message: 'OTP sent successfully' }
     }
 
     // Check for recent OTP request (rate limiting)
@@ -3332,9 +3366,10 @@ export class AuthService {
         success: false,
         errorCode: 'account_not_active',
       })
-      throw new ForbiddenException(
-        `Account is ${existingUser.accountStatus.toLowerCase()}`,
-      )
+      // Silent success — same as sendOtp: return the happy-path shape without
+      // creating or sending a magic link, so we never disclose that the account
+      // exists-but-is-inactive. The block is audited above.
+      return { message: 'Magic link sent successfully' }
     }
 
     // Rate limiting: 1 magic link per email per 60s
@@ -3818,18 +3853,34 @@ export class AuthService {
   // ─── Email Helpers ──────────────────────────────────────────────────────────
 
   private async sendOtpEmail(email: string, otp: string): Promise<void> {
+    // N6 — OTP is pre-auth: the identifier may not resolve to a User row yet
+    // (new sign-up flow). patientUserId stays null; identifier goes in metadata
+    // so the §164.528 trail still records which email was targeted.
     await this.emailService.sendEmail(
       email,
       'Your Cardioplace verification code',
       otpEmailHtml(otp),
+      {
+        template: 'otp',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: null,
+        metadata: { identifier: email },
+      },
     )
   }
 
   private async sendMagicLinkEmail(email: string, url: string): Promise<void> {
+    // N6 — same reasoning as sendOtpEmail (pre-auth, identifier may not resolve).
     await this.emailService.sendEmail(
       email,
       'Sign in to Cardioplace',
       magicLinkEmailHtml(url),
+      {
+        template: 'magic_link',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: null,
+        metadata: { identifier: email },
+      },
     )
   }
 }

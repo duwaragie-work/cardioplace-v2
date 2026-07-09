@@ -1523,20 +1523,19 @@ export class IntakeService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const row = await tx.patientMedication.update({ where: { id: medicationId }, data })
+      // N5 (2026-07-09) — capture the FULL clinical snapshot before + after.
+      // Was 3 fields (drugName/drugClass/frequency); now mirrors serializeMedication
+      // so an alteration on dose, notes, verificationStatus, holdReason,
+      // holdEscalationLevel, discontinuedAt, etc. is reconstructable from the
+      // audit trail (HIPAA §164.312(c) integrity, Humaira Activity 4 item 2).
+      // The patient-facing update paths at :566 already use per-field snapshots;
+      // this brings the admin edit path to the same coverage.
       await tx.profileVerificationLog.create({
         data: {
           userId: med.userId,
           fieldPath: `medication:${medicationId}`,
-          previousValue: {
-            drugName: med.drugName,
-            drugClass: med.drugClass,
-            frequency: med.frequency,
-          } as Prisma.InputJsonValue,
-          newValue: {
-            drugName: dto.drugName ?? med.drugName,
-            drugClass: newDrugClass,
-            frequency: dto.frequency ?? med.frequency,
-          } as Prisma.InputJsonValue,
+          previousValue: this.serializeMedication(med) as Prisma.InputJsonValue,
+          newValue: this.serializeMedication(row) as Prisma.InputJsonValue,
           changedBy: actor.id,
           changedByRole: role,
           changeType: VerificationChangeType.ADMIN_CORRECT,
