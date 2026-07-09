@@ -48,6 +48,7 @@ import {
 } from '@/lib/services/webauthn.service';
 import RecoveryCodesPanel from '@/components/cardio/RecoveryCodesPanel';
 import SupportContactForm from '@/components/SupportContactForm';
+import NotificationSettings from '@/components/cardio/NotificationSettings';
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -655,6 +656,11 @@ export default function SettingsPage() {
             </div>
           )}
         </section>
+
+        {/* Notifications — turn out-of-app push on/off for this device */}
+        <div className="mt-4">
+          <NotificationSettings />
+        </div>
 
         {/* Recovery codes card — only meaningful once biometric is set up */}
         {!loading && hasBiometric && (
