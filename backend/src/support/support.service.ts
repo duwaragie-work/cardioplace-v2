@@ -392,6 +392,7 @@ export class SupportService {
           channel: NotificationChannel.DASHBOARD,
           title: 'Support request closed',
           body: `Ticket ${ticket.ticketNumber} has been marked resolved.`,
+          dispatchTrigger: 'SUPPORT_RESOLVE',
         },
       })
     }
