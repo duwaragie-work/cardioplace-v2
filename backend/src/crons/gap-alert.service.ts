@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule'
 import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { EmailService } from '../email/email.service.js'
+import { EMAIL_TEMPLATE_VERSION } from '../email/email-templates.js'
 import { NotificationChannel, EnrollmentStatus, AccountStatus } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 
@@ -118,6 +119,12 @@ export class GapAlertService {
           user.email,
           `Cardioplace: ${GAP_ALERT_TITLE}`,
           renderGapAlertHtml(user.name ?? 'Patient', body),
+          {
+            template: 'gap_alert',
+            templateVersion: EMAIL_TEMPLATE_VERSION,
+            patientUserId: user.id,
+            metadata: { gapHours: GAP_HOURS },
+          },
         )
       }
 

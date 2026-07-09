@@ -478,7 +478,13 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
               'Default false.',
           },
         },
-        required: ['entry_date', 'measurement_time', 'systolic_bp', 'diastolic_bp', 'medication_taken', 'symptoms'],
+        // BP + medication_taken + symptoms are DESCRIPTION-required on normal check-ins but
+        // OMITTABLE on the Option D decline path (see decline_confirmation field). Listing them
+        // in JSON `required` blocked Gemini from calling the tool on decline turns — the model
+        // couldn't reconcile "these are required" with "pass zeros or omit" and stopped calling
+        // the tool, breaking qa/tests/60 Test 3. Description-level guidance is now the single
+        // enforcement point.
+        required: ['entry_date', 'measurement_time'],
       },
     },
     {

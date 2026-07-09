@@ -767,3 +767,141 @@ describe('IntakeService.adminAddMedication (#92)', () => {
     expect(prisma.patientMedication.create).not.toHaveBeenCalled()
   })
 })
+
+// ─── N5 — extended before/after value capture on admin medication edits ─────
+//
+// The admin-edit audit path previously snapshotted only 3 fields
+// (drugName / drugClass / frequency). Reconstructing an alteration to dose,
+// notes, verificationStatus, holdReason, holdEscalationLevel, or
+// discontinuedAt was impossible from the audit trail alone — the row said
+// "some admin edited this med" but not "from X to Y" for the clinically
+// significant fields. HIPAA §164.312(c) integrity (Humaira Activity 4 item 2)
+// requires reconstructability. N5 (2026-07-09) mirrors the create audit path
+// so previousValue + newValue now carry the FULL serialised medication.
+describe('IntakeService.adminEditMedication (N5 audit snapshot)', () => {
+  let _prisma: any
+  const prismaRef = () => _prisma
+
+  function buildPrisma(existing: any) {
+    return {
+      patientProfile: {
+        findUnique: (jest.fn() as any).mockResolvedValue({
+          aceContraindicatedAt: null,
+        }),
+      },
+      patientMedication: {
+        findUnique: (jest.fn() as any).mockResolvedValue(existing),
+        findFirst: (jest.fn() as any).mockResolvedValue(null),
+        update: (jest.fn() as any).mockImplementation((args: any) =>
+          Promise.resolve({ ...existing, ...args.data }),
+        ),
+      },
+      profileVerificationLog: { create: (jest.fn() as any).mockResolvedValue({}) },
+      $transaction: (fn: any) => Promise.resolve(fn(prismaRef())),
+    }
+  }
+
+  async function makeService(p: any) {
+    _prisma = p
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntakeService,
+        { provide: PrismaService, useValue: p },
+        { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
+        { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    return module.get<IntakeService>(IntakeService)
+  }
+
+  const actor = { id: 'admin-1', roles: ['SUPER_ADMIN'] as any }
+  const now = new Date('2026-07-01T00:00:00Z')
+
+  const existingMedFull = {
+    id: 'med-1',
+    userId: 'patient-1',
+    drugName: 'Losartan',
+    drugClass: 'ARB',
+    canonicalDrugId: 'losartan',
+    frequency: 'ONCE_DAILY',
+    isCombination: false,
+    combinationComponents: [],
+    source: 'PATIENT_SELF_REPORT',
+    rawInputText: null,
+    notes: 'take with breakfast',
+    verificationStatus: 'VERIFIED',
+    verifiedByAdminId: 'admin-old',
+    verifiedAt: now,
+    holdReason: null,
+    holdSetAt: null,
+    holdEscalationLevel: 0,
+    discontinuedAt: null,
+    reportedAt: now,
+    pillImageUrl: null,
+    plainLanguageDescription: null,
+  }
+
+  it('captures the FULL medication snapshot as previousValue + newValue (not just 3 fields)', async () => {
+    const prisma = buildPrisma(existingMedFull)
+    const service = await makeService(prisma)
+
+    // Edit only the notes field to a new value. The audit snapshot must still
+    // carry every clinical field so an auditor can reconstruct the row.
+    await service.adminEditMedication(actor, 'med-1', {
+      notes: 'take with dinner instead',
+    } as any)
+
+    const auditCall = prisma.profileVerificationLog.create.mock.calls[0][0].data
+    // previousValue carries the full pre-edit shape — dose/notes/status/hold.
+    expect(auditCall.previousValue).toMatchObject({
+      drugName: 'Losartan',
+      drugClass: 'ARB',
+      frequency: 'ONCE_DAILY',
+      notes: 'take with breakfast',
+      verificationStatus: 'VERIFIED',
+      holdEscalationLevel: 0,
+      discontinuedAt: null,
+    })
+    // newValue carries the full post-edit shape — critically, includes the
+    // changed field (notes) even though the pre-N5 code only tracked
+    // drugName/drugClass/frequency and would have missed this change entirely.
+    expect(auditCall.newValue).toEqual(
+      expect.objectContaining({
+        drugName: 'Losartan',
+        drugClass: 'ARB',
+        frequency: 'ONCE_DAILY',
+      }),
+    )
+    // The notes edit is now visible in the audit trail (was invisible pre-N5).
+    expect((auditCall.newValue as any).notes).toContain('dinner')
+  })
+
+  it('captures verificationStatus changes in the newValue snapshot', async () => {
+    // Simulate an admin edit that also triggers the angioedema auto-hold
+    // (drugClass changed to ACE on a contraindicated patient — different flow).
+    const prisma = buildPrisma({
+      ...existingMedFull,
+      drugName: 'Losartan',
+      drugClass: 'ARB',
+    })
+    // Flip the patient to angioedema-contraindicated so the class swap triggers HOLD.
+    prisma.patientProfile.findUnique = (jest.fn() as any).mockResolvedValue({
+      aceContraindicatedAt: new Date('2026-05-01'),
+    })
+    const service = await makeService(prisma)
+
+    await service.adminEditMedication(actor, 'med-1', {
+      drugName: 'Lisinopril',
+      drugClass: 'ACE_INHIBITOR',
+    } as any)
+
+    const auditCall = prisma.profileVerificationLog.create.mock.calls[0][0].data
+    // Pre-edit was VERIFIED …
+    expect((auditCall.previousValue as any).verificationStatus).toBe('VERIFIED')
+    // … post-edit was auto-flipped to HOLD, and the audit trail captures both.
+    expect((auditCall.newValue as any).verificationStatus).toBe('HOLD')
+    expect((auditCall.newValue as any).holdReason).toBe('PROVIDER_DIRECTED_HOLD')
+    expect(auditCall.discrepancyFlag).toBe(true)
+  })
+})

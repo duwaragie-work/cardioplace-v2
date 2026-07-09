@@ -26,6 +26,9 @@ export const SYSTEM_PRINCIPAL_LABELS = [
   'medication-hold-escalation',
   'monthly-report',
   'content-scheduler',
+  // N7 (2026-07-11) — automated audit exception-report cron
+  // (§164.308(a)(1)(ii)(D) Information System Activity Review).
+  'audit-exception-report',
 ] as const
 
 export type SystemPrincipalLabel = (typeof SYSTEM_PRINCIPAL_LABELS)[number]
@@ -45,6 +48,8 @@ export const CRON_LABEL_TO_PRINCIPAL: Readonly<Record<string, SystemPrincipalLab
   'cron-session-finalize': 'session-finalize',
   'cron-escalation-ladder': 'escalation-ladder',
   'cron-monthly-report': 'monthly-report',
+  // N7 (2026-07-11).
+  'cron-audit-exception-report': 'audit-exception-report',
   // Engine @OnEvent handler — no 'cron-' prefix; label == principal.
   'engine-alert-generator': 'engine-alert-generator',
 }

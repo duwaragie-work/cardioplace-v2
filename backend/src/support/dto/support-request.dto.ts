@@ -61,17 +61,15 @@ export class ReplyDto {
 }
 
 /** POST /v2/admin/support/tickets/:id/verify-identity — ops attesting they
- *  verified the requester's identity (phone callback + security questions). */
+ *  verified the requester's identity, with a free-text rationale describing how
+ *  (e.g. "matched security questions in reply email; confirmed DOB + last
+ *  visit"). No prescribed method — we have no phone-verification infrastructure
+ *  yet, so ops records whatever they actually did (Fix 7). */
 export class VerifyIdentityDto {
   @IsString()
   @IsNotEmpty()
-  @MaxLength(120)
-  method!: string
-
-  @IsOptional()
-  @IsString()
   @MaxLength(2000)
-  notes?: string
+  rationale!: string
 }
 
 /** POST /v2/admin/support/tickets/:id/actions/* — the privileged reset actions

@@ -19,8 +19,17 @@ model AccessLog {
   // runAsCronActor when actorType='SYSTEM_ACTOR'. Null for USER writes and for
   // pre-2026-07-03 / unlabelled system writes (honest — we didn't know then).
   systemActorLabel String?
+  // N2 (2026-07-07) — per-invocation correlation id. Cron path: one runId per
+  // @Cron() fire, set by runAsCronActor. HTTP path: one runId per request, set
+  // by the CLS interceptor in cls.module.ts. Groups every row emitted during
+  // the same run, so the N7 exception-report cron can compute per-run counts
+  // (e.g. "cron X wrote 0 rows this run" or "user Y read 400 records in one
+  // request") rather than day-granularity aggregates. Nullable — pre-N2 rows
+  // pre-date this column.
+  runId     String?
   createdAt DateTime @default(now())
 
   @@index([actorId, createdAt])
   @@index([modelName, recordId, createdAt])
+  @@index([runId])
 }

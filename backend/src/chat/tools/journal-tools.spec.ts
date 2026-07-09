@@ -180,9 +180,12 @@ describe('journal-tools', () => {
     it('should have required fields on submit_checkin', () => {
       const declarations = getJournalToolDeclarations()
       const submit = declarations.find((d) => d.name === 'submit_checkin')!
-      expect(submit.parameters?.required).toContain('systolic_bp')
-      expect(submit.parameters?.required).toContain('diastolic_bp')
-      expect(submit.parameters?.required).toContain('medication_taken')
+      // Only entry_date + measurement_time are JSON-schema required. BP + medication_taken +
+      // symptoms are description-required on normal check-ins but OMITTABLE on the Option D
+      // decline path — see the tool description at journal-tools.ts:470 and the schema comment
+      // above the `required` array.
+      expect(submit.parameters?.required).toContain('entry_date')
+      expect(submit.parameters?.required).toContain('measurement_time')
     })
 
     it('should have required fields on update_checkin', () => {

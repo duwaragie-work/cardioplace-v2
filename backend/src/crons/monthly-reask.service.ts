@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
 import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from '../common/cls/cron-actor.util.js'
-import { medicationReaskEmailHtml } from '../email/email-templates.js'
+import { EMAIL_TEMPLATE_VERSION, medicationReaskEmailHtml } from '../email/email-templates.js'
 import { EmailService } from '../email/email.service.js'
 import { NotificationChannel, EnrollmentStatus, AccountStatus } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
@@ -113,6 +113,11 @@ export class MonthlyReaskService {
           p.email,
           `Cardioplace: ${REASK_TITLE}`,
           medicationReaskEmailHtml(p.name ?? 'Patient', REASK_BODY),
+          {
+            template: 'medication_reask',
+            templateVersion: EMAIL_TEMPLATE_VERSION,
+            patientUserId: p.id,
+          },
         )
       }
 

@@ -19,6 +19,7 @@ function make() {
     supportTicketReply: { create: jest.fn() as any },
     supportTicketAction: { create: jest.fn((a: any) => Promise.resolve(a.data)) as any },
     mfaRecoveryCode: { count: jest.fn(async () => 0) as any },
+    webAuthnCredential: { count: jest.fn(async () => 0) as any },
   }
   const email = { sendEmail: jest.fn(async () => undefined) as any }
   const auth = {
@@ -28,8 +29,15 @@ function make() {
     regeneratePatientRecoveryCodes: jest.fn(async () => ({ recoveryCodes: [] })) as any,
   }
   const ticketNumbers = { next: jest.fn(async () => 'CP-SUP-ABCDEFG') as any }
+  const config = { get: (_k: string, d?: string) => d } as any
   prisma.user.findMany.mockResolvedValue([{ id: 'ops-1' }])
-  const svc = new SupportService(prisma as any, email as any, auth as any, ticketNumbers as any)
+  const svc = new SupportService(
+    prisma as any,
+    email as any,
+    auth as any,
+    ticketNumbers as any,
+    config,
+  )
   return { svc, prisma, email, auth }
 }
 
@@ -158,7 +166,9 @@ describe('SupportService', () => {
     it('verifyIdentity flips the flag and records IDENTITY_VERIFIED', async () => {
       const { svc, prisma } = make()
       prisma.supportTicket.findUnique.mockResolvedValue(ticketRow())
-      await svc.verifyIdentity(OPS, 'ticket-1', { method: 'phone callback', notes: 'DOB + last4' })
+      await svc.verifyIdentity(OPS, 'ticket-1', {
+        rationale: 'Confirmed DOB + last 4 via reply email',
+      })
       expect(prisma.supportTicket.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { identityVerified: true } }),
       )

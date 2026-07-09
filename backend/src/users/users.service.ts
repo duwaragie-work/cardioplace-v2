@@ -9,7 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config'
 import { createHash, randomBytes } from 'crypto'
 import { EmailService } from '../email/email.service.js'
-import { activationEmailHtml, roleLabel } from '../email/email-templates.js'
+import { EMAIL_TEMPLATE_VERSION, activationEmailHtml, roleLabel } from '../email/email-templates.js'
 import type { Prisma } from '../generated/prisma/client.js'
 import { AccountStatus, UserRole } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
@@ -1453,6 +1453,7 @@ export class UsersService {
 
   private async dispatchActivationEmail(params: {
     invite: {
+      id: string
       email: string
       name: string
       role: UserRole
@@ -1487,7 +1488,15 @@ export class UsersService {
         expiresAt: params.invite.expiresAt,
         invitedBy: params.inviterName,
       })
-      await this.emailService.sendEmail(params.invite.email, subject, html)
+      // N6 — invite activation email. No User row exists yet (that's what the
+      // invite creates on accept), so patientUserId is null. inviteId in
+      // metadata links this disclosure to the invite record.
+      await this.emailService.sendEmail(params.invite.email, subject, html, {
+        template: 'invite_activation',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: null,
+        metadata: { inviteId: params.invite.id, role: params.invite.role },
+      })
     } catch (err) {
       this.logger.error(
         `Failed to dispatch activation email to ${params.invite.email}`,

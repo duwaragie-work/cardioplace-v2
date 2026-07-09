@@ -921,6 +921,14 @@ export default function SettingsPage() {
             message and we’ll follow up by email.
           </p>
           <SupportContactForm />
+          <a
+            href="/support/my-tickets"
+            data-testid="settings-my-requests-link"
+            className="mt-4 inline-flex items-center gap-1 text-[13px] font-semibold"
+            style={{ color: 'var(--brand-primary-purple)' }}
+          >
+            View my requests →
+          </a>
         </section>
       </div>
 

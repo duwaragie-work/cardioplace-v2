@@ -8,10 +8,9 @@ export default function IdentityVerifyToggle({
   onVerify,
 }: {
   verified: boolean;
-  onVerify: (method: string, notes?: string) => Promise<void>;
+  onVerify: (rationale: string) => Promise<void>;
 }) {
-  const [method, setMethod] = useState('Phone callback + security questions');
-  const [notes, setNotes] = useState('');
+  const [rationale, setRationale] = useState('');
   const [busy, setBusy] = useState(false);
 
   if (verified) {
@@ -32,31 +31,26 @@ export default function IdentityVerifyToggle({
         <ShieldAlert className="w-4 h-4" /> Identity not verified
       </div>
       <p className="text-[12px] text-slate-500 mb-3">
-        Verify the requester out-of-band (phone callback) before any reset. Sensitive
-        actions are blocked until you confirm here.
+        Confirm the requester’s identity before any reset, then record how you did it.
+        Sensitive actions stay blocked until you attest here.
       </p>
-      <input
-        value={method}
-        onChange={(e) => setMethod(e.target.value)}
-        placeholder="Verification method"
-        aria-label="Verification method"
-        className="w-full text-[13px] rounded-xl border border-slate-200 p-2.5 outline-none mb-2"
-      />
-      <input
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        placeholder="Notes (e.g. confirmed DOB + last 4 of phone)"
-        aria-label="Verification notes"
-        className="w-full text-[13px] rounded-xl border border-slate-200 p-2.5 outline-none mb-3"
+      <textarea
+        value={rationale}
+        onChange={(e) => setRationale(e.target.value)}
+        rows={3}
+        placeholder="How was identity verified? (e.g. matched security questions in the reply email; confirmed DOB + last visit date via clinic records)"
+        aria-label="Verification rationale"
+        data-testid="support-verify-rationale"
+        className="w-full text-[13px] rounded-xl border border-slate-200 p-2.5 outline-none resize-y mb-3"
       />
       <button
         type="button"
-        disabled={busy || !method.trim()}
+        disabled={busy || !rationale.trim()}
         data-testid="support-verify-identity"
         onClick={async () => {
           setBusy(true);
           try {
-            await onVerify(method.trim(), notes.trim() || undefined);
+            await onVerify(rationale.trim());
           } finally {
             setBusy(false);
           }

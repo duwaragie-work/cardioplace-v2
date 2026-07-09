@@ -1,6 +1,7 @@
 import type { ClsService } from 'nestjs-cls'
 import { Prisma } from '../../generated/prisma/client.js'
 import type { PrismaClient } from '../../generated/prisma/client.js'
+import { writeAuditWithRetry } from '../audit/write-with-retry.js'
 
 /**
  * PHI access audit trail (Humaira N8 / 164.312-T7, HIPAA §164.312(b)) — writes
@@ -21,12 +22,24 @@ import type { PrismaClient } from '../../generated/prisma/client.js'
  *      in PHI_MODELS anyway, so even an extended write would be skipped.
  */
 
-// The seven PHI models. Everything else (AccessLog itself, AuthLog,
-// AuthSession, RefreshToken, Practice, PracticeProvider, DisplayId, …) is not
-// logged. `Notification` IS PHI — it carries clinical alert context — so both
-// its reads and writes are logged (the sprint-doc self-read carveout was
-// over-scoped; log everything on the model).
+// The 20 PHI models — source of truth is docs/EPHI_INVENTORY.md Table 1.
+// Everything else (AccessLog itself, AuthLog, AuthSession, RefreshToken,
+// Practice, PracticeProvider, DisplayId, Content*, Device, …) is deliberately
+// NOT logged; see EPHI_INVENTORY Table 3 for the full non-PHI catalog with
+// rationale.
+//
+// Change-control rule: any PR that adds a new Prisma model MUST update
+// EPHI_INVENTORY.md first, then this set. The N3 conformance suite
+// (backend/src/common/prisma-extensions/phi-inventory.ts, coming Wed 9 Jul)
+// asserts these two lists agree and fails the build if they drift.
+//
+// N4 (2026-07-08) — extended from 10 → 20 per docs/EPHI_INVENTORY.md.
+// The 10 additions cover: escalation history, clinical audit trails, raw
+// reading rejections, caregiver identity + dispatch, chat/voice content, org
+// report snapshots, and the care-team assignment relationship (§164.514
+// identifier).
 export const PHI_MODELS: ReadonlySet<string> = new Set([
+  // Original 7 (2026-06-30) — core clinical + identity.
   'User',
   'PatientProfile',
   'JournalEntry',
@@ -34,6 +47,22 @@ export const PHI_MODELS: ReadonlySet<string> = new Set([
   'Notification',
   'PatientMedication',
   'PatientThreshold',
+  // Support System (2026-07-03) — a ticket's body/email/category can carry
+  // patient PHI and the ops-action trail touches account state.
+  'SupportTicket',
+  'SupportTicketReply',
+  'SupportTicketAction',
+  // N4 (2026-07-08) — additions per EPHI_INVENTORY.md Table 1 rows 8–20.
+  'EscalationEvent', // alert dispatch history + ack/resolve trail
+  'ProfileVerificationLog', // previousValue/newValue snapshots of clinical edits
+  'RejectedReadingLog', // raw BP/pulse (the rejected ones); same content as JournalEntry
+  'PatientCaregiver', // caregiver identity + PHI-sharing consent
+  'CaregiverDispatchLog', // §164.528 disclosure trail — who was told what
+  'EmergencyEvent', // patient emergency prompt/narrative
+  'Conversation', // chat history — patient-typed clinical Q&A
+  'Session', // chat session container — same conversational stream
+  'MonthlyReportSnapshot', // frozen per-practice payload, per-patient adherence
+  'PatientProviderAssignment', // care-team relationship (§164.514 identifier)
 ])
 
 /**
@@ -105,6 +134,13 @@ export interface AccessLogData {
   // cron identified itself via runAsCronActor. Null for USER writes and for
   // pre-2026-07-03 / unlabelled system writes.
   systemActorLabel: string | null
+  // N2 (2026-07-07) — per-invocation correlation id set by runAsCronActor
+  // (cron path) or the HTTP interceptor (request path). Groups every AccessLog
+  // row emitted during the same cron run or HTTP request; the N7 exception
+  // report cron uses this to compute per-run counts and detect anomalies at
+  // run granularity rather than day granularity. Nullable because pre-N2 rows
+  // have none.
+  runId: string | null
   action: 'READ' | 'WRITE' | 'DELETE'
   modelName: string
   recordId: string | null
@@ -148,6 +184,7 @@ export function computeAccessLogData(
       : null
   const ip = cls.get<string | null>('ip') ?? null
   const userAgent = cls.get<string | null>('userAgent') ?? null
+  const runId = cls.get<string | null>('runId') ?? null
 
   let recordId: string | null = null
   if (WHERE_ID_OPS.has(operation)) {
@@ -160,6 +197,7 @@ export function computeAccessLogData(
     actorId,
     actorType,
     systemActorLabel,
+    runId,
     action,
     modelName: model,
     recordId,
@@ -351,11 +389,20 @@ export async function auditAndReturn(
   const data = computeAccessLogData(ctx.model, ctx.operation, ctx.args, result, cls)
   if (!data) return result
 
-  // Fire-and-forget on the un-extended client. Never awaited; failures are
-  // logged, never thrown — audit must not break the request.
-  void basePrisma.accessLog.create({ data }).catch((err: unknown) => {
-    // eslint-disable-next-line no-console
-    console.error('[AccessLog] write failed', err)
+  // Fire-and-forget on the un-extended client. Never awaited; the wrapper
+  // owns retry + failure reporting so an audit outage becomes an OTEL span +
+  // structured console.error (audit-pipeline observability) instead of a
+  // silent dropped row. Audit must not break the request path — the wrapper
+  // guarantees no throw even if the tracer itself misfires.
+  //
+  // N1 (2026-07-08 wiring) — supersedes the previous inline `void ... .catch`
+  // pattern documented in the file-top comment (choice 2). The choice stays
+  // "fire-and-forget from the request path", but the failure is now LOUD.
+  void writeAuditWithRetry(() => basePrisma.accessLog.create({ data }), {
+    kind: 'access-log',
+    modelName: data.modelName,
+    action: data.action,
+    recordId: data.recordId,
   })
 
   return result

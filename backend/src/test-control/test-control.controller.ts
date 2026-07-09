@@ -114,6 +114,113 @@ export class TestControlController {
     )
   }
 
+  // N7 — drive the audit-exception-report cron on demand. Playwright uses this
+  // to seed a pattern, run the scan synchronously, then assert AuditException
+  // rows landed with the expected detectorId/severity/evidence.
+  @Post('cron/audit-exception-report/run')
+  @HttpCode(200)
+  async runAuditExceptionReport(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { now?: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.runAuditExceptionReportScan(
+      body?.now ? new Date(body.now) : new Date(),
+    )
+  }
+
+  // ─── N4/N5/N6/N7 Playwright verification helpers ───────────────────────
+  @Get('audit/user-by-email')
+  async findUserByEmail(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('email') email: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.findUserByEmail(email)
+  }
+
+  @Get('audit/access-log/count')
+  async countAccessLog(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('actorId') actorId?: string,
+    @Query('modelName') modelName?: string,
+    @Query('sinceIso') sinceIso?: string,
+  ) {
+    this.assertAuthorized(secret)
+    const count = await this.svc.countAccessLog({
+      actorId,
+      modelName,
+      since: sinceIso ? new Date(sinceIso) : undefined,
+    })
+    return { count }
+  }
+
+  @Get('audit/email-disclosure-log/latest')
+  async latestEmailDisclosure(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('recipientEmail') recipientEmail: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.latestEmailDisclosureForRecipient(recipientEmail)
+  }
+
+  @Get('audit/profile-verification-log/latest')
+  async latestProfileVerificationLog(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('userId') userId: string,
+    @Query('changeType') changeType: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.latestProfileVerificationLog({ userId, changeType })
+  }
+
+  @Get('audit/audit-exception/by-actor')
+  async auditExceptionByActor(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('actorId') actorId: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.findAuditExceptionByActor(actorId)
+  }
+
+  @Post('seed/access-log-batch')
+  @HttpCode(200)
+  async seedAccessLogBatch(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      actorId: string
+      actorType: 'USER' | 'SYSTEM_ACTOR'
+      action: 'READ' | 'WRITE' | 'DELETE'
+      modelName: string
+      count: number
+      spreadMinutes: number
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.seedAccessLogBatch(body)
+  }
+
+  @Post('audit/access-log/clear-actor')
+  @HttpCode(200)
+  async clearAccessLogForActor(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { actorId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearAccessLogForActor(body.actorId)
+  }
+
+  @Post('audit/audit-exception/clear-by-prefix')
+  @HttpCode(200)
+  async clearAuditExceptionsByPrefix(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { prefix: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearAuditExceptionsByIdempotencyPrefix(body.prefix)
+  }
+
   // ─── Time advancement ───────────────────────────────────────────────────
   @Post('anchor/backdate')
   @HttpCode(200)

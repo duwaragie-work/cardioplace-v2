@@ -28,6 +28,8 @@ const SYSTEM_PRINCIPALS = [
   { label: 'medication-hold-escalation', displayName: 'Medication Hold Escalation' },
   { label: 'monthly-report', displayName: 'Monthly Report Cron' },
   { label: 'content-scheduler', displayName: 'Content Scheduler' },
+  // N7 (2026-07-11) — §164.308(a)(1)(ii)(D) Information System Activity Review.
+  { label: 'audit-exception-report', displayName: 'Audit Exception Report Cron' },
 ] as const
 
 export function systemPrincipalEmail(label: string): string {
