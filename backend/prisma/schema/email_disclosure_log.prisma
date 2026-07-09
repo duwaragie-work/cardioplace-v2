@@ -70,11 +70,22 @@ model EmailDisclosureLog {
 // N6 extension — §164.528 "purpose of the disclosure". Categories mirror the
 // §164.502 permitted-use taxonomy so the disclosure trail maps cleanly onto
 // the regulation.
+//
+// N6 extension follow-up (2026-07-11) — the old `PATIENT_DIRECTED` value
+// blended two HIPAA-distinct categories (disclosure TO the patient under
+// §164.528(a)(1)(i) — exempt from accounting — vs. disclosure PER patient
+// authorization under §164.508 — accountable). Split into:
+//   • DIRECT_TO_PATIENT — the patient IS the recipient; accounting-exempt.
+//   • PATIENT_AUTHORIZED — the patient authorized a disclosure to a third
+//     party per §164.508; accountable.
+// Renamed via Postgres ALTER TYPE ... RENAME VALUE so existing rows carry
+// over cleanly.
 enum DisclosurePurpose {
   TREATMENT
   PAYMENT
   HEALTHCARE_OPERATIONS
-  PATIENT_DIRECTED
+  DIRECT_TO_PATIENT
+  PATIENT_AUTHORIZED
   CARE_COORDINATION
   REQUIRED_BY_LAW
   OTHER

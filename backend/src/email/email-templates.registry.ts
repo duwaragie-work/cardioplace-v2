@@ -2,7 +2,7 @@
 // email template. One entry per `EmailTemplateName` — the registry is the
 // single source of truth for a template's:
 //
-//   • §164.528 purpose (TREATMENT / HEALTHCARE_OPERATIONS / PATIENT_DIRECTED …)
+//   • §164.528 purpose (TREATMENT / HEALTHCARE_OPERATIONS / DIRECT_TO_PATIENT …)
 //   • Recipient bucket (PATIENT / PROVIDER / CAREGIVER …)
 //   • Brief-description generator (structured summary of what was disclosed)
 //
@@ -68,7 +68,8 @@ export type DisclosurePurposeName =
   | 'TREATMENT'
   | 'PAYMENT'
   | 'HEALTHCARE_OPERATIONS'
-  | 'PATIENT_DIRECTED'
+  | 'DIRECT_TO_PATIENT' // disclosure TO the patient — §164.528(a)(1)(i) exempt
+  | 'PATIENT_AUTHORIZED' // per §164.508 patient authorization — accountable
   | 'CARE_COORDINATION'
   | 'REQUIRED_BY_LAW'
   | 'OTHER'
@@ -121,7 +122,7 @@ function clip(s: string): string {
 export const EMAIL_TEMPLATE_REGISTRY: Record<EmailTemplateName, TemplateSpec> = {
   // ── Patient-directed identity + account lifecycle ─────────────────────
   welcome: {
-    purpose: 'PATIENT_DIRECTED',
+    purpose: 'DIRECT_TO_PATIENT',
     recipientCategory: 'PATIENT',
     briefDescriptionFn: (m) =>
       clip(
@@ -129,40 +130,40 @@ export const EMAIL_TEMPLATE_REGISTRY: Record<EmailTemplateName, TemplateSpec> = 
       ),
   },
   otp: {
-    purpose: 'PATIENT_DIRECTED',
+    purpose: 'DIRECT_TO_PATIENT',
     recipientCategory: 'PATIENT',
     briefDescriptionFn: () => 'One-time login code',
   },
   magic_link: {
-    purpose: 'PATIENT_DIRECTED',
+    purpose: 'DIRECT_TO_PATIENT',
     recipientCategory: 'PATIENT',
     briefDescriptionFn: () => 'Magic sign-in link',
   },
   mfa_reset: {
-    purpose: 'PATIENT_DIRECTED',
+    purpose: 'DIRECT_TO_PATIENT',
     recipientCategory: 'PATIENT',
     briefDescriptionFn: (m) =>
       clip(`MFA reset notification — reason ${m.reason ?? 'unspecified'}`),
   },
   biometric_reset: {
-    purpose: 'PATIENT_DIRECTED',
+    purpose: 'DIRECT_TO_PATIENT',
     recipientCategory: 'PATIENT',
     briefDescriptionFn: (m) =>
       clip(`Biometric reset notification — reason ${m.reason ?? 'unspecified'}`),
   },
   invite_activation: {
-    purpose: 'PATIENT_DIRECTED',
+    purpose: 'DIRECT_TO_PATIENT',
     recipientCategory: 'EXTERNAL_UNKNOWN',
     briefDescriptionFn: (m) =>
       clip(`Account activation invite — role ${m.role ?? 'unspecified'}`),
   },
   account_closed: {
-    purpose: 'PATIENT_DIRECTED',
+    purpose: 'DIRECT_TO_PATIENT',
     recipientCategory: 'PATIENT',
     briefDescriptionFn: () => 'Account closed confirmation',
   },
   self_close_confirm: {
-    purpose: 'PATIENT_DIRECTED',
+    purpose: 'DIRECT_TO_PATIENT',
     recipientCategory: 'PATIENT',
     briefDescriptionFn: () => 'Self-initiated account closure confirmation',
   },

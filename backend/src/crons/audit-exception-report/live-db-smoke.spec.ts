@@ -115,7 +115,7 @@ describeIf('N7 live-DB smoke', () => {
         patientUserId: null,
         template: 'welcome',
         templateVersion: '2026-07-10',
-        purpose: 'PATIENT_DIRECTED',
+        purpose: 'DIRECT_TO_PATIENT',
         briefDescription: 'live-db smoke row',
         bodyHash: 'a'.repeat(64),
         subject: 'test',
@@ -131,7 +131,7 @@ describeIf('N7 live-DB smoke', () => {
         senderPracticeContext: true,
       },
     })
-    expect(row.purpose).toBe('PATIENT_DIRECTED')
+    expect(row.purpose).toBe('DIRECT_TO_PATIENT')
     expect(row.recipientCategory).toBe('PATIENT')
     expect(row.bodyHash).toHaveLength(64)
     expect(row.senderPracticeContext).toBe('practice-smoke')
