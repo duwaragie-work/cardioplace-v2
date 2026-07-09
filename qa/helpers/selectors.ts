@@ -756,6 +756,13 @@ export const T = {
     settingsRenameInput: 'settings-rename-input',
     settingsRegenerateCodes: 'settings-regenerate-codes',
   },
+
+  // Patient notification settings (/settings)
+  //   frontend/src/components/cardio/NotificationSettings.tsx
+  notif: {
+    enable: 'settings-notif-enable',
+    disable: 'settings-notif-disable',
+  },
 } as const
 
 export type TestId = string

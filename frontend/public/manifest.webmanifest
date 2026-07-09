@@ -1,0 +1,24 @@
+{
+  "name": "Cardioplace",
+  "short_name": "Cardioplace",
+  "description": "Cardiovascular patient monitoring and care coordination",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#7B00E0",
+  "icons": [
+    {
+      "src": "/cardioplace-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    }
+  ]
+}
