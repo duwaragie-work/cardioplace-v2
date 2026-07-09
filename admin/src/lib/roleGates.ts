@@ -298,6 +298,20 @@ export function canManageAudit(input: RoleInput | UserInput): boolean {
   return has(input, ['SUPER_ADMIN', 'HEALPLACE_OPS'])
 }
 
+// ─── Audit-exception worklist (HIPAA L3, §164.312(b) act + §164.308(a)(6)) ───
+/**
+ * Who can open the L3 reviewer worklist — triage N7's audit exceptions and run
+ * the security-incident lifecycle. Same org-wide reviewers as the L2 console.
+ *   @Roles(SUPER_ADMIN, HEALPLACE_OPS)
+ *   backend/src/worklist/admin-worklist.controller.ts
+ *
+ * Like the L2 console, the /worklist page also requires a Rules-of-Behavior
+ * acknowledgment — it reuses <AuditAccessGate/>.
+ */
+export function canReviewWorklist(input: RoleInput | UserInput): boolean {
+  return has(input, ['SUPER_ADMIN', 'HEALPLACE_OPS'])
+}
+
 // ─── MFA admin reset (phase/26) ─────────────────────────────────────────────
 /**
  * Whether the caller can reset another staff member's two-factor auth.

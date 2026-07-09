@@ -11,6 +11,7 @@ import {
   invitableRoles,
   inviteRequiresPractice,
   canManageAudit,
+  canReviewWorklist,
   assignableRoles,
   assignablePractices,
 } from './roleGates';
@@ -197,6 +198,27 @@ describe('canManageAudit (audit console — org-wide only)', () => {
     expect(canManageAudit({ roles: [] })).toBe(false);
     expect(canManageAudit(null)).toBe(false);
     expect(canManageAudit(undefined)).toBe(false);
+  });
+});
+
+// L3 reviewer worklist — same org-wide reviewers as the L2 console (also
+// ROB-gated via <AuditAccessGate/>). Mirrors backend @Roles on
+// backend/src/worklist/admin-worklist.controller.ts.
+describe('canReviewWorklist (audit worklist — org-wide only)', () => {
+  it('allows SUPER_ADMIN and HEALPLACE_OPS', () => {
+    expect(canReviewWorklist({ roles: ['SUPER_ADMIN'] })).toBe(true);
+    expect(canReviewWorklist({ roles: ['HEALPLACE_OPS'] })).toBe(true);
+  });
+  it('rejects PROVIDER, MEDICAL_DIRECTOR, COORDINATOR, PATIENT', () => {
+    expect(canReviewWorklist({ roles: ['PROVIDER'] })).toBe(false);
+    expect(canReviewWorklist({ roles: ['MEDICAL_DIRECTOR'] })).toBe(false);
+    expect(canReviewWorklist({ roles: ['COORDINATOR'] })).toBe(false);
+    expect(canReviewWorklist({ roles: ['PATIENT'] })).toBe(false);
+  });
+  it('rejects empty / null / undefined role input', () => {
+    expect(canReviewWorklist({ roles: [] })).toBe(false);
+    expect(canReviewWorklist(null)).toBe(false);
+    expect(canReviewWorklist(undefined)).toBe(false);
   });
 });
 

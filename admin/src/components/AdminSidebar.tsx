@@ -20,11 +20,13 @@ import {
   Settings,
   LifeBuoy,
   FileSearch,
+  ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import {
   canManageSupport,
   canManageAudit,
+  canReviewWorklist,
   canViewUsers,
   canViewReports,
   isCoordinatorOnly,
@@ -124,6 +126,15 @@ const SECONDARY_NAV: NavItem[] = [
     icon: FileSearch,
     matchPrefix: true,
     show: (roles) => canManageAudit(roles),
+  },
+  // L3 reviewer worklist — triage N7 audit exceptions + security incidents.
+  // HEALPLACE_OPS + SUPER_ADMIN only; also ROB-gated (AuditAccessGate).
+  {
+    href: '/worklist',
+    label: 'Worklist',
+    icon: ShieldAlert,
+    matchPrefix: true,
+    show: (roles) => canReviewWorklist(roles),
   },
   // Account-level settings (security / 2FA today). Available to every
   // signed-in staff role, including COORDINATOR.
