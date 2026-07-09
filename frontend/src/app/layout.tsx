@@ -5,7 +5,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import NavbarWrapper from "@/components/NavbarWrapper";
 import ScrollToTop from "@/components/ScrollToTop";
-import ResetZoomOnNavigate from "@/components/ResetZoomOnNavigate";
+import HardReloadOnNavigate from "@/components/HardReloadOnNavigate";
 import PoweredByFooter from "@/components/PoweredByFooter";
 import SkipLink from "@/components/SkipLink";
 import IdleWarningToast from "@/components/auth/IdleWarningToast";
@@ -44,7 +44,7 @@ export default function RootLayout({
           <LanguageProvider>
             <SkipLink />
             <ScrollToTop />
-            <ResetZoomOnNavigate />
+            <HardReloadOnNavigate />
             <IdleWarningToast />
             <PushRegistrar />
             <NavbarWrapper>{children}</NavbarWrapper>
