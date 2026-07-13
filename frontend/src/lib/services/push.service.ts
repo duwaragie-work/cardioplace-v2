@@ -19,6 +19,29 @@ function supported(): boolean {
   );
 }
 
+// Explicit per-device opt-out. Turning push OFF in Settings must STICK: browser
+// permission stays `granted` after we unsubscribe, so without this flag the auto
+// re-registration on the next page load would silently re-subscribe and pushes
+// would keep coming. registerPush() honours this flag; enablePush() clears it.
+const PUSH_OPTOUT_KEY = 'cp_push_optout';
+
+function isOptedOut(): boolean {
+  try {
+    return localStorage.getItem(PUSH_OPTOUT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setOptedOut(value: boolean): void {
+  try {
+    if (value) localStorage.setItem(PUSH_OPTOUT_KEY, '1');
+    else localStorage.removeItem(PUSH_OPTOUT_KEY);
+  } catch {
+    /* localStorage unavailable — opt-out just won't persist */
+  }
+}
+
 // VAPID public key arrives base64url-encoded; the Push API wants a Uint8Array
 // backed by a plain ArrayBuffer (not SharedArrayBuffer) for applicationServerKey.
 function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
@@ -48,6 +71,7 @@ async function getVapidPublicKey(): Promise<string | null> {
  */
 export async function registerPush(): Promise<void> {
   if (!supported()) return;
+  if (isOptedOut()) return; // user turned push OFF on this device — respect it
   try {
     const publicKey = await getVapidPublicKey();
     if (!publicKey) return; // push disabled server-side — nothing to do
@@ -90,7 +114,95 @@ export async function registerPush(): Promise<void> {
   }
 }
 
-/** Drop this browser's subscription (call on logout). Best-effort. */
+/** Live push state for this browser, for the Settings toggle. `permission` is
+ *  the browser-level (per-site) choice; `subscribed` is whether THIS browser
+ *  currently has an active push subscription. */
+export interface PushStatus {
+  supported: boolean;
+  permission: NotificationPermission | 'unsupported';
+  subscribed: boolean;
+}
+
+export async function getPushStatus(): Promise<PushStatus> {
+  if (!supported()) {
+    return { supported: false, permission: 'unsupported', subscribed: false };
+  }
+  // An explicit opt-out means OFF, even if a stale browser subscription lingers.
+  if (isOptedOut()) {
+    return { supported: true, permission: Notification.permission, subscribed: false };
+  }
+  let subscribed = false;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration(SW_URL);
+    subscribed = Boolean(await reg?.pushManager.getSubscription());
+  } catch {
+    subscribed = false;
+  }
+  return { supported: true, permission: Notification.permission, subscribed };
+}
+
+/** Outcome of an explicit user-initiated enable, so the UI can message it.
+ *  Unlike registerPush() (silent, for auto-registration), this reports WHY it
+ *  failed so Settings can guide the patient. */
+export type PushEnableResult =
+  | 'enabled'
+  | 'denied' // user has blocked notifications at the browser level
+  | 'unsupported' // browser/device can't do web push (e.g. iOS Safari in a tab)
+  | 'unavailable' // push disabled server-side (no VAPID key)
+  | 'error';
+
+/**
+ * User-initiated enable from Settings. Same ceremony as registerPush() but
+ * returns a typed result instead of swallowing everything, so the toggle can
+ * show "blocked — allow it in browser settings" vs "not supported" vs success.
+ */
+export async function enablePush(): Promise<PushEnableResult> {
+  if (!supported()) return 'unsupported';
+  // Explicit enable clears any prior opt-out so auto-registration works again.
+  setOptedOut(false);
+  try {
+    const publicKey = await getVapidPublicKey();
+    if (!publicKey) return 'unavailable';
+
+    if (Notification.permission === 'default') {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') return 'denied';
+    } else if (Notification.permission === 'denied') {
+      return 'denied';
+    }
+
+    const reg = await navigator.serviceWorker.register(SW_URL);
+    await navigator.serviceWorker.ready;
+
+    const existing = await reg.pushManager.getSubscription();
+    const subscription =
+      existing ??
+      (await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      }));
+
+    const json = subscription.toJSON() as {
+      endpoint?: string;
+      keys?: { p256dh?: string; auth?: string };
+    };
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return 'error';
+
+    const res = await fetchWithAuth(`${API}/api/v2/push/subscribe`, {
+      method: 'POST',
+      body: JSON.stringify({
+        endpoint: json.endpoint,
+        keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+      }),
+    });
+    return res.ok ? 'enabled' : 'error';
+  } catch {
+    return 'error';
+  }
+}
+
+/** Drop this browser's subscription (call on logout, or from the Settings
+ *  toggle). Best-effort. */
 export async function unsubscribePush(): Promise<void> {
   if (!supported()) return;
   try {
@@ -106,4 +218,15 @@ export async function unsubscribePush(): Promise<void> {
   } catch {
     // best-effort
   }
+}
+
+/**
+ * User-initiated turn-OFF from Settings. Unlike unsubscribePush() (used on
+ * logout), this records a per-device opt-out FIRST so auto-registration won't
+ * silently re-subscribe on the next page load — the reason "turn off" appeared
+ * to do nothing. Then it drops the subscription. Idempotent, never throws.
+ */
+export async function disablePush(): Promise<void> {
+  setOptedOut(true);
+  await unsubscribePush();
 }

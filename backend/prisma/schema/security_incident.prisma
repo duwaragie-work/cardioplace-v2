@@ -1,0 +1,92 @@
+// L3 (2026-07-12 — Lakshitha). Security-incident record for HIPAA
+// §164.308(a)(6) Security Incident Procedures. Created when a reviewer
+// ESCALATES an AuditException (N7) from the L3 worklist — the exception row is
+// then marked RESOLVED and pins this incident's id in its
+// `escalatedToIncidentId`. From here the incident carries its own triage
+// lifecycle (assign → work → resolve) with a ticket-local action timeline,
+// mirroring the SupportTicket / SupportTicketAction pair.
+//
+// Deliberately NOT in PHI_MODELS (see access-log.extension.ts): like
+// AuditException / AccessLog / AuthLog this is a security-oversight artifact —
+// auditing the audit stream would recurse. It stores only structured incident
+// metadata (labels, ops-user ids, detector name), NEVER patient names / DOBs /
+// clinical narrative. If that ever changes, it must be added to BOTH
+// CANONICAL_PHI_MODELS and PHI_MODELS + documented in docs/EPHI_INVENTORY.md.
+//
+// No FK to User on the ops-attribution columns (openedByOpsId / assignedToOpsId
+// / resolvedByOpsId) — same convention AuditException uses for its triage ids.
+// No FK to AuditException on sourceExceptionId — keeps this model free of a
+// build-time dependency on N7 and mirrors the bare-String link N7 uses forward.
+
+model SecurityIncident {
+  id String @id @default(ulid())
+
+  status   SecurityIncidentStatus   @default(OPEN)
+  severity SecurityIncidentSeverity
+
+  // Short label + structured summary (no PHI) surfaced in the worklist/detail.
+  title   String
+  summary String @db.Text
+
+  // Provenance — which AuditException / detector spawned this. Plain strings
+  // (no relation) so this model never build-depends on N7's schema.
+  sourceExceptionId String?
+  sourceDetectorId  String?
+  practiceContext   String?
+
+  // Ownership. openedByOpsId is the reviewer who escalated; assignedToOpsId is
+  // the current owner (defaults to the opener, reassignable).
+  openedByOpsId   String
+  assignedToOpsId String?
+
+  // Resolution trail.
+  resolutionNotes String?   @db.Text
+  resolvedByOpsId String?
+  resolvedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  actions SecurityIncidentAction[]
+
+  @@index([status, severity, createdAt])
+  @@index([practiceContext, status, createdAt])
+  @@index([assignedToOpsId, status])
+}
+
+// The incident-local audit trail — every ops action, in order. Mirrors
+// SupportTicketAction (the ops UI renders it as a timeline).
+model SecurityIncidentAction {
+  id         String           @id @default(ulid())
+  incidentId String
+  incident   SecurityIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  opsUserId   String
+  actionType  SecurityIncidentActionType
+  metadata    Json?
+  performedAt DateTime                    @default(now())
+
+  @@index([incidentId, performedAt])
+}
+
+enum SecurityIncidentStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+// Own enum (not shared with AuditExceptionSeverity) so this model stays
+// independent of N7's enum evolution — same three values today.
+enum SecurityIncidentSeverity {
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SecurityIncidentActionType {
+  OPENED
+  ASSIGNED
+  NOTE_ADDED
+  STATUS_CHANGED
+  RESOLVED
+}

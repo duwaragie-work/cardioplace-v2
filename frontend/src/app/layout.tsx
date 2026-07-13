@@ -24,8 +24,18 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Cardioplace",
   description: "Cardiovascular patient monitoring and care coordination platform",
+  // Web app manifest — required for "Add to Home Screen", which iOS Safari
+  // requires before it will allow Web Push at all.
+  manifest: "/manifest.webmanifest",
   icons: {
     icon: "/cardioplace-icon.svg",
+    apple: "/cardioplace-icon.svg",
+  },
+  // Marks the installed PWA as a standalone iOS web app (enables push on iOS).
+  appleWebApp: {
+    capable: true,
+    title: "Cardioplace",
+    statusBarStyle: "default",
   },
 };
 
