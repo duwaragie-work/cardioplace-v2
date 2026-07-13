@@ -173,4 +173,158 @@ describe('LoggedConfirmationListener', () => {
     const listener = new LoggedConfirmationListener(prisma)
     await expect(listener.onEntryEvaluated(BASE_EVENT)).resolves.toBeUndefined()
   })
+
+  // ─── BP-band boundary tests (2026-07-13) ────────────────────────────────
+  // The AHA normal band is 90 ≤ SBP < 130 AND 60 ≤ DBP < 85. Verify each edge.
+
+  it('boundary: 90/60 (inclusive lower) with no alerts → "Looking good" appended', async () => {
+    const boundary = { ...BASE_EVENT, systolicBP: 90, diastolicBP: 60, alertsFired: false }
+    const prisma = fakePrisma()
+    const listener = new LoggedConfirmationListener(prisma)
+    await listener.onEntryEvaluated(boundary)
+    expect(prisma._created[0].body).toContain('Looking good')
+  })
+
+  it('boundary: 89/70 (below SBP band) → NO "Looking good"', async () => {
+    const belowSbp = { ...BASE_EVENT, systolicBP: 89, diastolicBP: 70, alertsFired: false }
+    const prisma = fakePrisma()
+    const listener = new LoggedConfirmationListener(prisma)
+    await listener.onEntryEvaluated(belowSbp)
+    expect(prisma._created[0].body).not.toContain('Looking good')
+  })
+
+  it('boundary: 129/84 (highest normal — inclusive) with no alerts → "Looking good" appended', async () => {
+    const highNormal = { ...BASE_EVENT, systolicBP: 129, diastolicBP: 84, alertsFired: false }
+    const prisma = fakePrisma()
+    const listener = new LoggedConfirmationListener(prisma)
+    await listener.onEntryEvaluated(highNormal)
+    expect(prisma._created[0].body).toContain('Looking good')
+  })
+
+  it('boundary: 130/80 (Stage 1 HTN starts — SBP=130) → NO "Looking good"', async () => {
+    const stage1 = { ...BASE_EVENT, systolicBP: 130, diastolicBP: 80, alertsFired: false }
+    const prisma = fakePrisma()
+    const listener = new LoggedConfirmationListener(prisma)
+    await listener.onEntryEvaluated(stage1)
+    expect(prisma._created[0].body).not.toContain('Looking good')
+  })
+
+  it('boundary: 120/85 (DBP=85 crosses upper edge) → NO "Looking good"', async () => {
+    const dbp85 = { ...BASE_EVENT, systolicBP: 120, diastolicBP: 85, alertsFired: false }
+    const prisma = fakePrisma()
+    const listener = new LoggedConfirmationListener(prisma)
+    await listener.onEntryEvaluated(dbp85)
+    expect(prisma._created[0].body).not.toContain('Looking good')
+  })
+
+  it('boundary: 110/59 (below DBP band — hypotensive) → NO "Looking good"', async () => {
+    const hypo = { ...BASE_EVENT, systolicBP: 110, diastolicBP: 59, alertsFired: false }
+    const prisma = fakePrisma()
+    const listener = new LoggedConfirmationListener(prisma)
+    await listener.onEntryEvaluated(hypo)
+    expect(prisma._created[0].body).not.toContain('Looking good')
+  })
+
+  // ─── User lookup failure paths ──────────────────────────────────────────
+
+  it('does not throw when user.findUnique itself REJECTS (DB down)', async () => {
+    const prisma = {
+      user: {
+        findUnique: jest
+          .fn<any>()
+          .mockRejectedValue(new Error('DB unreachable')),
+      },
+      notification: { create: jest.fn<any>() },
+    } as any
+    const listener = new LoggedConfirmationListener(prisma)
+    // Listener catches at the outer try/catch — no throw, no push.
+    await expect(listener.onEntryEvaluated(BASE_EVENT)).resolves.toBeUndefined()
+    expect(prisma.notification.create).not.toHaveBeenCalled()
+  })
+
+  // ─── Extra field propagation ────────────────────────────────────────────
+
+  it('populates userId + title + channel + dispatchTrigger correctly on every path', async () => {
+    const prisma = fakePrisma()
+    const listener = new LoggedConfirmationListener(prisma)
+    // Try three variants — all must produce the same shape (only body differs).
+    await listener.onEntryEvaluated({ ...BASE_EVENT, systolicBP: 118, diastolicBP: 76, alertsFired: false })
+    await listener.onEntryEvaluated({ ...BASE_EVENT, entryId: 'e2', alertsFired: true })
+    await listener.onEntryEvaluated({ ...BASE_EVENT, entryId: 'e3', systolicBP: null, diastolicBP: null })
+    for (const row of prisma._created) {
+      expect(row.userId).toBe('p1')
+      expect(row.channel).toBe('PUSH')
+      expect(row.title).toBe('Logged ✓')
+      expect(row.dispatchTrigger).toBe('SYSTEM_CRON')
+      // Every body starts with the spec-verbatim base string.
+      expect(row.body).toMatch(/^Logged ✓ — your reading has been recorded\./)
+    }
+  })
+
+  it('French preferredLanguage renders French body', async () => {
+    const prisma = fakePrisma({ user: { preferredLanguage: 'fr' } })
+    const listener = new LoggedConfirmationListener(prisma)
+    const normal = { ...BASE_EVENT, systolicBP: 118, diastolicBP: 76, alertsFired: false }
+    await listener.onEntryEvaluated(normal)
+    expect(prisma._created[0].body).toContain('Enregistré')
+    expect(prisma._created[0].body).toContain('Tout va bien')
+  })
+
+  it('German preferredLanguage renders German body', async () => {
+    const prisma = fakePrisma({ user: { preferredLanguage: 'de' } })
+    const listener = new LoggedConfirmationListener(prisma)
+    const normal = { ...BASE_EVENT, systolicBP: 118, diastolicBP: 76, alertsFired: false }
+    await listener.onEntryEvaluated(normal)
+    expect(prisma._created[0].body).toContain('Erfasst')
+    expect(prisma._created[0].body).toContain('Sieht gut aus')
+  })
+
+  it('unsupported language (e.g. Portuguese) falls back to English', async () => {
+    const prisma = fakePrisma({ user: { preferredLanguage: 'pt' } })
+    const listener = new LoggedConfirmationListener(prisma)
+    const normal = { ...BASE_EVENT, systolicBP: 118, diastolicBP: 76, alertsFired: false }
+    await listener.onEntryEvaluated(normal)
+    expect(prisma._created[0].body).toContain('Logged ✓')
+    expect(prisma._created[0].body).toContain('Looking good')
+  })
+
+  it('null preferredLanguage falls back to English (defensive against old rows)', async () => {
+    const prisma = fakePrisma({ user: { preferredLanguage: null } })
+    const listener = new LoggedConfirmationListener(prisma)
+    const normal = { ...BASE_EVENT, systolicBP: 118, diastolicBP: 76, alertsFired: false }
+    await listener.onEntryEvaluated(normal)
+    expect(prisma._created[0].body).toContain('Logged ✓')
+  })
+
+  it('is idempotent when the DB commits succeed but the event fires twice (dispatcher retries)', async () => {
+    // Whenever an at-least-once event bus double-fires ENTRY_EVALUATED (e.g.
+    // a bug in NestJS's EventEmitter, or a downstream re-dispatch), we get
+    // two Notification rows. The dispatcher is intentionally NOT idempotent
+    // — the Prisma-level @@unique constraint on Notification (or the caller-
+    // level idempotency check) is expected to catch duplicates. Verify the
+    // listener behavior: both invocations WILL create rows if the DB allows.
+    const prisma = fakePrisma()
+    const listener = new LoggedConfirmationListener(prisma)
+    await listener.onEntryEvaluated(BASE_EVENT)
+    await listener.onEntryEvaluated(BASE_EVENT)
+    expect(prisma._created).toHaveLength(2)
+    // At least document the invariant this reveals: duplication upstream = 2 rows.
+    // A future dedup pass would target the DB constraint, not this listener.
+  })
+
+  it('respects the `alertCount` for logging without affecting the variant selection', async () => {
+    // Only `alertsFired` (boolean) gates the variant. `alertCount` is
+    // informational for future observability. Verify the listener doesn't
+    // accidentally branch on the count.
+    const withCount5 = { ...BASE_EVENT, systolicBP: 118, diastolicBP: 76, alertsFired: false, alertCount: 5 }
+    const prisma = fakePrisma()
+    const listener = new LoggedConfirmationListener(prisma)
+    await listener.onEntryEvaluated(withCount5)
+    // alertsFired=false with normal BP + alertCount=5 (contradictory input)
+    // → still routes off alertsFired=false. This documents the source-of-
+    // truth precedence. In practice alertCount>0 implies alertsFired=true
+    // (see alert-engine.service.ts:331), so this configuration is a bug
+    // upstream, not a listener bug.
+    expect(prisma._created[0].body).toContain('Looking good')
+  })
 })

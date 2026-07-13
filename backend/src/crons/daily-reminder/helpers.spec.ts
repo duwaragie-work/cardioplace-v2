@@ -2,6 +2,7 @@
 // overnight-wrap for quiet hours — the corners that Lakshitha's SMS worker
 // (L5) will hit at scale.
 import { jest } from '@jest/globals'
+import { isBpNormalRange } from '@cardioplace/shared'
 import {
   daysSinceLastReadingLocal,
   effectiveReminderSlot,
@@ -365,5 +366,193 @@ describe('hasLoggedReadingTodayForUser', () => {
     const prisma = fakePrismaWithUser(null, [])
     const r = await hasLoggedReadingTodayForUser(prisma, 'missing')
     expect(r).toBe(false)
+  })
+})
+
+// ─── Edge cases: DST, exotic timezones, malformed input ─────────────────────
+// These are the corners that break naive Date/wall-clock math. The helpers
+// here MUST stay deterministic across DST transitions (Ward 7 & 8 DC observes
+// EST/EDT) and gracefully handle bad inputs from stale seed data or a
+// misconfigured client.
+describe('localCalendarDayKey — DST + exotic zones', () => {
+  it('handles the spring-forward gap (US DST 2026-03-08 02:00 skips to 03:00)', () => {
+    // 06:59 UTC = 01:59 EST just before spring-forward; 07:00 UTC = 03:00 EDT.
+    expect(localCalendarDayKey(new Date('2026-03-08T06:59:00Z'), 'America/New_York')).toBe('2026-03-08')
+    expect(localCalendarDayKey(new Date('2026-03-08T07:00:00Z'), 'America/New_York')).toBe('2026-03-08')
+  })
+
+  it('handles the fall-back overlap (US DST ends 2026-11-01 02:00 rewinds to 01:00)', () => {
+    // 05:30 UTC on 11-01 = 01:30 EDT (first occurrence) — still 2026-11-01.
+    // 06:30 UTC on 11-01 = 01:30 EST (second occurrence) — still 2026-11-01.
+    expect(localCalendarDayKey(new Date('2026-11-01T05:30:00Z'), 'America/New_York')).toBe('2026-11-01')
+    expect(localCalendarDayKey(new Date('2026-11-01T06:30:00Z'), 'America/New_York')).toBe('2026-11-01')
+  })
+
+  it('handles fractional-offset zones (India = UTC+5:30)', () => {
+    // 18:30 UTC = 00:00 IST next day
+    expect(localCalendarDayKey(new Date('2026-07-13T18:30:00Z'), 'Asia/Kolkata')).toBe('2026-07-14')
+    // 18:29 UTC = 23:59 IST same day
+    expect(localCalendarDayKey(new Date('2026-07-13T18:29:00Z'), 'Asia/Kolkata')).toBe('2026-07-13')
+  })
+
+  it('handles a Line Islands zone (UTC+14 — the furthest-forward local day)', () => {
+    // 10:00 UTC on 13th = 00:00 next day in Kiritimati (UTC+14)
+    expect(localCalendarDayKey(new Date('2026-07-13T10:00:00Z'), 'Pacific/Kiritimati')).toBe('2026-07-14')
+  })
+})
+
+describe('localHourMinute — DST + malformed timezone', () => {
+  it('spring-forward day: 06:30 UTC = 02:30 EST/EDT boundary', () => {
+    // Before spring-forward (2026-03-08 06:30 UTC = 01:30 EST since it's before 07:00 UTC)
+    expect(localHourMinute(new Date('2026-03-08T06:30:00Z'), 'America/New_York')).toBe('01:30')
+  })
+
+  it('returns "00:00" for an invalid timezone identifier (defensive fallback)', () => {
+    expect(localHourMinute(new Date('2026-07-13T13:00:00Z'), 'Not/A/Real/Zone')).toBe('00:00')
+  })
+})
+
+describe('isHhmmWithinQuietHours — boundary + malformed handling', () => {
+  it('overnight wrap START is INCLUSIVE (22:00 counts as quiet)', () => {
+    expect(isHhmmWithinQuietHours('22:00', '22:00', '07:00')).toBe(true)
+  })
+  it('overnight wrap END is EXCLUSIVE (07:00 counts as awake)', () => {
+    expect(isHhmmWithinQuietHours('07:00', '22:00', '07:00')).toBe(false)
+  })
+  it('non-wrap START is INCLUSIVE (12:00 counts as quiet)', () => {
+    expect(isHhmmWithinQuietHours('12:00', '12:00', '14:00')).toBe(true)
+  })
+  it('non-wrap END is EXCLUSIVE (14:00 counts as awake)', () => {
+    expect(isHhmmWithinQuietHours('14:00', '12:00', '14:00')).toBe(false)
+  })
+})
+
+describe('effectiveReminderSlot — malformed input', () => {
+  it('leaves a non-30-min reminderTime (like "09:15") passed through if not inside quiet hours', () => {
+    // The UI regex normally prevents non-30-min slots, but if a legacy row exists,
+    // the helper does not mutate the value — the slot-match check downstream fails
+    // (string equality) so nothing fires. Behaviour: return the raw value.
+    expect(
+      effectiveReminderSlot({
+        reminderTime: '09:15',
+        quietHoursStart: '22:00',
+        quietHoursEnd: '07:00',
+      }),
+    ).toBe('09:15')
+  })
+
+  it('shift target for a non-30-min quietHoursEnd rounds to the nearest slot boundary', () => {
+    // '07:35' is closer to :30 than :00. `normaliseToHalfHour` currently rounds
+    // to :30 when minutes >= 30. Verify contract.
+    expect(
+      effectiveReminderSlot({
+        reminderTime: '05:00',
+        quietHoursStart: '22:00',
+        quietHoursEnd: '07:35',
+      }),
+    ).toBe('07:30')
+  })
+})
+
+describe('daysSinceLastReadingLocal — extreme + edge inputs', () => {
+  it('returns a very large positive integer for readings months in the past (no overflow)', async () => {
+    const prisma = fakePrisma([{ measuredAt: new Date('2025-01-01T12:00:00Z') }])
+    const r = await daysSinceLastReadingLocal(
+      prisma,
+      'u1',
+      'America/New_York',
+      new Date('2026-07-13T18:00:00Z'),
+    )
+    // Roughly 559 days; assert lower bound with a wide margin so daylight
+    // math variations don't flake this.
+    expect(r).toBeGreaterThan(500)
+    expect(r).toBeLessThan(700)
+  })
+
+  it('clamps to 0 (not negative) when last reading is somehow future-dated (bad seed data)', async () => {
+    const prisma = fakePrisma([{ measuredAt: new Date('2099-01-01T12:00:00Z') }])
+    const r = await daysSinceLastReadingLocal(
+      prisma,
+      'u1',
+      'America/New_York',
+      new Date('2026-07-13T18:00:00Z'),
+    )
+    // Helper uses Math.max(0, ...) so negatives clamp to 0.
+    expect(r).toBe(0)
+  })
+})
+
+// ─── isBpNormalRange boundary tests ─────────────────────────────────────────
+// Cheap SBP/DBP predicate used by the N7 listener as the belt-and-braces
+// second gate. Correctness at the band edges is what keeps borderline
+// readings from getting "Looking good" appended.
+describe('isBpNormalRange — boundaries', () => {
+  it('SBP=90/DBP=60 (inclusive lower bound) → true', () => {
+    expect(isBpNormalRange(90, 60)).toBe(true)
+  })
+  it('SBP=89 (just below) → false', () => {
+    expect(isBpNormalRange(89, 70)).toBe(false)
+  })
+  it('SBP=129/DBP=84 (inclusive upper — just inside band) → true', () => {
+    expect(isBpNormalRange(129, 84)).toBe(true)
+  })
+  it('SBP=130 (upper exclusive — Stage 1 HTN starts) → false', () => {
+    expect(isBpNormalRange(130, 80)).toBe(false)
+  })
+  it('DBP=85 (upper exclusive) → false', () => {
+    expect(isBpNormalRange(120, 85)).toBe(false)
+  })
+  it('DBP=59 (below hypotension band) → false', () => {
+    expect(isBpNormalRange(110, 59)).toBe(false)
+  })
+  it('null SBP → false (missing data never gets positive language)', () => {
+    expect(isBpNormalRange(null, 70)).toBe(false)
+  })
+  it('null DBP → false', () => {
+    expect(isBpNormalRange(110, null)).toBe(false)
+  })
+  it('both null → false', () => {
+    expect(isBpNormalRange(null, null)).toBe(false)
+  })
+  it('NaN input → false (defensive)', () => {
+    expect(isBpNormalRange(Number.NaN, 70)).toBe(false)
+    expect(isBpNormalRange(110, Number.NaN)).toBe(false)
+  })
+  it('classic AHA "normal" 118/76 → true', () => {
+    expect(isBpNormalRange(118, 76)).toBe(true)
+  })
+  it('classic AHA "elevated" 122/78 → true (predicate deliberately widens ceiling to 130)', () => {
+    // 120-129/<80 is "elevated" but not an alert — predicate treats it as
+    // OK-enough to append "Looking good" per the module-level docstring.
+    expect(isBpNormalRange(122, 78)).toBe(true)
+  })
+  it('Stage 2 HTN 165/105 → false', () => {
+    expect(isBpNormalRange(165, 105)).toBe(false)
+  })
+})
+
+// ─── hasLoggedReadingToday — deleted entries + multi-entry days ────────────
+describe('hasLoggedReadingToday — deleted-entry filter', () => {
+  it('IGNORES soft-deleted entries even if they are the most recent', async () => {
+    // Fake prisma's findFirst mock filters on `deletedAt: null` in the where
+    // clause. We simulate by only returning entries whose measuredAt exists
+    // AND the caller's where clause matches. Because our fake doesn't
+    // implement the where filter, we assert by injecting only a deleted row
+    // (empty entries list — the query returns null).
+    const prisma = fakePrisma([]) // no non-deleted rows
+    const r = await hasLoggedReadingToday(
+      prisma,
+      'u1',
+      'America/New_York',
+      new Date('2026-07-13T18:00:00Z'),
+    )
+    expect(r).toBe(false)
+    // Assert the where clause the helper builds includes deletedAt:null so a
+    // deleted "last reading" wouldn't be picked up by real Prisma either.
+    expect(prisma.journalEntry.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: null }),
+      }),
+    )
   })
 })

@@ -359,4 +359,249 @@ describe('DailyReminderService.runScan', () => {
     // p1 throws; p2 dispatches successfully.
     expect(s.dispatched).toBe(1)
   })
+
+  // ─── Edge cases (2026-07-13) ─────────────────────────────────────────────
+
+  it('fresh new patient with NO prior JournalEntry gets the Day-3+ (never-logged) message', async () => {
+    // daysSinceLastReadingLocal returns POSITIVE_INFINITY when the patient has
+    // never logged; the tier selector routes that to Day-3+ (supportive tone).
+    const prisma = fakePrisma({
+      patients: [BASE_USER],
+      lastReading: {}, // no entry for p1
+    })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    await svc.runScan(NOW_AT_SLOT)
+    expect(dispatcher.dispatch).toHaveBeenCalledTimes(1)
+    const [, payload] = dispatcher.dispatch.mock.calls[0] as any[]
+    expect(payload.body).toContain("it's been a few days since your last check-in")
+  })
+
+  it('patient with malformed reminderTime (non-30-min slot) never fires', async () => {
+    // Guards against a legacy row whose reminderTime is "09:15" — the slot
+    // match uses strict string equality against localHourMinute, which
+    // returns 30-min-aligned strings, so "09:15" never matches.
+    const badSlot = { ...BASE_USER, reminderTime: '09:15' }
+    const prisma = fakePrisma({
+      patients: [badSlot],
+      lastReading: { p1: new Date('2026-07-12T13:00:00Z') },
+    })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    // 13:00 UTC = 09:00 ET — matches BASE_USER's 09:00 slot but NOT 09:15.
+    const s = await svc.runScan(new Date('2026-07-13T13:00:00Z'))
+    expect(dispatcher.dispatch).not.toHaveBeenCalled()
+    expect(s.skippedNotSlot).toBe(1)
+  })
+
+  it('patient with NULL reminderTime skips entirely (spec §N1 — null column safe)', async () => {
+    const noSlot = { ...BASE_USER, reminderTime: null }
+    const prisma = fakePrisma({
+      patients: [noSlot],
+      lastReading: { p1: new Date('2026-07-12T13:00:00Z') },
+    })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    const s = await svc.runScan(NOW_AT_SLOT)
+    expect(dispatcher.dispatch).not.toHaveBeenCalled()
+    expect(s.skippedNotSlot).toBe(1)
+  })
+
+  it('patient with NULL name gets the "friend" fallback (never crashes on missing PII)', async () => {
+    const anon = { ...BASE_USER, name: null }
+    const prisma = fakePrisma({
+      patients: [anon],
+      lastReading: { p1: new Date('2026-07-12T13:00:00Z') },
+    })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    await svc.runScan(NOW_AT_SLOT)
+    expect(dispatcher.dispatch).toHaveBeenCalledTimes(1)
+    const [, payload] = dispatcher.dispatch.mock.calls[0] as any[]
+    // Fallback name is "friend" — greet plus "friend" opens the body.
+    expect(payload.body).toContain('friend')
+  })
+
+  it('patient with a compound first name uses only the FIRST token (spec § "First Name")', async () => {
+    const compound = { ...BASE_USER, name: 'Van Der Berg' }
+    const prisma = fakePrisma({
+      patients: [compound],
+      lastReading: { p1: new Date('2026-07-12T13:00:00Z') },
+    })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    await svc.runScan(NOW_AT_SLOT)
+    const [, payload] = dispatcher.dispatch.mock.calls[0] as any[]
+    // firstName splits on whitespace and takes [0] — "Van" only.
+    expect(payload.body).toContain('Van')
+    expect(payload.body).not.toContain('Van Der Berg')
+  })
+
+  it('unsupported preferredLanguage (e.g. "pt") falls back to English body', async () => {
+    const pt = { ...BASE_USER, preferredLanguage: 'pt' }
+    const prisma = fakePrisma({
+      patients: [pt],
+      lastReading: { p1: new Date('2026-07-12T13:00:00Z') },
+    })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    await svc.runScan(NOW_AT_SLOT)
+    const [, payload] = dispatcher.dispatch.mock.calls[0] as any[]
+    // English body: "take a moment to check your blood pressure"
+    expect(payload.body).toContain('take a moment to check your blood pressure')
+    expect(payload.body).not.toContain('presión')
+  })
+
+  it('care-team alert SKIPS when a duplicate row exists in the idempotency window', async () => {
+    const prisma = fakePrisma({
+      patients: [BASE_USER],
+      lastReading: { p1: new Date('2026-07-10T15:00:00Z') }, // 3 days
+      notifications: [
+        // Simulate a prior care-team row that landed a few hours ago.
+        {
+          id: 'ct-0',
+          userId: 'prov1',
+          title: 'Patient has not checked in',
+          sentAt: new Date('2026-07-13T09:00:00Z'), // 4h before NOW_AT_SLOT
+          patientUserId: 'p1',
+        },
+      ],
+      primaryProvider: {
+        p1: { id: 'prov1', email: 'prov1@clinic.test', name: 'Dr. Smith' },
+      },
+    })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    await svc.runScan(NOW_AT_SLOT)
+    // Patient still gets their reminder, but care-team dispatch is suppressed.
+    const calls = dispatcher.dispatch.mock.calls
+    expect(calls).toHaveLength(1) // only patient reminder, no care-team
+    const titles = calls.map((c: any[]) => (c[1] as any).title)
+    expect(titles).not.toContain('Patient has not checked in')
+  })
+
+  it('care-team fires at day 12 (a further multiple of 3 in a long gap)', async () => {
+    const prisma = fakePrisma({
+      patients: [BASE_USER],
+      lastReading: { p1: new Date('2026-07-01T15:00:00Z') }, // 12 days ago
+      primaryProvider: {
+        p1: { id: 'prov1', email: 'prov1@clinic.test', name: 'Dr. Smith' },
+      },
+    })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    const s = await svc.runScan(NOW_AT_SLOT)
+    expect(s.careTeamAlerts).toBe(1)
+    // Body carries the actual day count.
+    const careTeamPayload = dispatcher.dispatch.mock.calls.find(
+      (c: any[]) => (c[1] as any).title === 'Patient has not checked in',
+    )![1] as any
+    expect(careTeamPayload.body).toContain('12 days')
+  })
+
+  it('care-team does NOT fire at day 4 or day 5 (only 3/6/9/12/...)', async () => {
+    for (const [days, offset] of [
+      [4, '2026-07-09T15:00:00Z'],
+      [5, '2026-07-08T15:00:00Z'],
+    ] as const) {
+      const prisma = fakePrisma({
+        patients: [BASE_USER],
+        lastReading: { p1: new Date(offset) },
+        primaryProvider: {
+          p1: { id: 'prov1', email: 'prov1@clinic.test', name: 'Dr. Smith' },
+        },
+      })
+      const dispatcher = fakeDispatcher()
+      const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+      const s = await svc.runScan(NOW_AT_SLOT)
+      expect(s.careTeamAlerts).toBe(0)
+      expect(dispatcher.dispatch).toHaveBeenCalledTimes(1) // patient only
+      // Guard against a compiler complaint about `days` being unused.
+      expect(days).toBeGreaterThan(0)
+    }
+  })
+
+  it('multiple patients on the same slot each fire independently (no cross-contamination)', async () => {
+    const patients = [
+      { ...BASE_USER, id: 'p1', email: 'p1@t.local' },
+      { ...BASE_USER, id: 'p2', email: 'p2@t.local' },
+      { ...BASE_USER, id: 'p3', email: 'p3@t.local' },
+    ]
+    const prisma = fakePrisma({
+      patients,
+      lastReading: {
+        p1: new Date('2026-07-12T13:00:00Z'), // Day 1
+        p2: new Date('2026-07-11T13:00:00Z'), // Day 2
+        p3: new Date('2026-07-10T13:00:00Z'), // Day 3 → care team too
+      },
+      primaryProvider: {
+        p3: { id: 'prov1', email: 'prov1@clinic.test', name: 'Dr. Smith' },
+      },
+    })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    const s = await svc.runScan(NOW_AT_SLOT)
+    expect(s.dispatched).toBe(3) // three patient reminders
+    expect(s.careTeamAlerts).toBe(1) // one care-team (from p3)
+    expect(dispatcher.dispatch).toHaveBeenCalledTimes(4)
+  })
+
+  it('empty patient list → scan returns clean summary with zero side effects', async () => {
+    const prisma = fakePrisma({ patients: [] })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    const s = await svc.runScan(NOW_AT_SLOT)
+    expect(s.dispatched).toBe(0)
+    expect(s.skippedLoggedToday).toBe(0)
+    expect(s.skippedQuietHours).toBe(0)
+    expect(s.skippedNotSlot).toBe(0)
+    expect(s.careTeamAlerts).toBe(0)
+    expect(dispatcher.dispatch).not.toHaveBeenCalled()
+  })
+
+  it('skippedNotSlot counter tracks patients whose slot did not match', async () => {
+    // Patient with reminderTime="10:00" scanned at 09:00 → skippedNotSlot.
+    const otherSlot = { ...BASE_USER, reminderTime: '10:00' }
+    const prisma = fakePrisma({
+      patients: [otherSlot],
+      lastReading: { p1: new Date('2026-07-12T13:00:00Z') },
+    })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    const s = await svc.runScan(NOW_AT_SLOT) // 09:00 ET slot
+    expect(s.skippedNotSlot).toBe(1)
+    expect(s.dispatched).toBe(0)
+  })
+
+  it('summary counters are additive across a mixed-population scan', async () => {
+    // One patient logs (skippedLoggedToday), one dispatches, one has
+    // idempotent block. Assert each counter incremented once.
+    const patients = [
+      { ...BASE_USER, id: 'p1' },
+      { ...BASE_USER, id: 'p2' },
+      { ...BASE_USER, id: 'p3' },
+    ]
+    const prisma = fakePrisma({
+      patients,
+      lastReading: {
+        p1: new Date('2026-07-13T12:00:00Z'), // logged today
+        p2: new Date('2026-07-12T13:00:00Z'), // day 1 → dispatch
+        p3: new Date('2026-07-12T13:00:00Z'), // day 1 → idempotent
+      },
+      notifications: [
+        {
+          id: 'n0',
+          userId: 'p3',
+          title: 'Cardioplace daily check-in',
+          sentAt: new Date('2026-07-13T05:00:00Z'),
+        },
+      ],
+    })
+    const dispatcher = fakeDispatcher()
+    const svc = new DailyReminderService(prisma, dispatcher, fakeCls())
+    const s = await svc.runScan(NOW_AT_SLOT)
+    expect(s.dispatched).toBe(1)
+    expect(s.skippedLoggedToday).toBe(1)
+    expect(s.skippedIdempotent).toBe(1)
+  })
 })
