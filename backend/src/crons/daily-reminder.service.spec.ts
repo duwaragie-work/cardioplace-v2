@@ -177,7 +177,10 @@ describe('DailyReminderService.runScan', () => {
     // Morning greeting at 09:00 ET.
     expect(payload.body).toMatch(/^Good morning, /)
     expect(payload.body).not.toContain("it's been a few days")
-    expect(channels).toEqual(['DASHBOARD', 'PUSH', 'EMAIL', 'SMS'])
+    // Spec §N2 default fan-out: DASHBOARD + PUSH + EMAIL. SMS is added by
+    // Lakshitha's L5 with its own consent+phone+opt-in gates — NOT part of
+    // Niva's default array.
+    expect(channels).toEqual(['DASHBOARD', 'PUSH', 'EMAIL'])
     expect(s.dispatched).toBe(1)
     expect(s.careTeamAlerts).toBe(0)
   })

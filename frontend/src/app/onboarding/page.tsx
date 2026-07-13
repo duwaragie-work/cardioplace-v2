@@ -26,18 +26,25 @@ function getBrowserTimezone(): string | undefined {
   }
 }
 
-// N8 (2026-07-13) — 30-min slot options. Reminder is capped 06:00–21:00 per
-// spec (daytime nudges); quiet-hours pickers span the full day.
-function halfHourSlots(startHour: number, endHour: number): string[] {
+// N8 (2026-07-13) — 30-min slot options. Reminder is capped at 21:00 per
+// spec §N8 ("6:00 AM – 9:00 PM") — the last slot MUST be 21:00, no 21:30
+// tail. Quiet-hours pickers span the full day (00:00–23:30) so users can
+// carve any window; `includeHalfAtEnd=true` emits the trailing :30 slot at
+// endHour.
+function halfHourSlots(startHour: number, endHour: number, includeHalfAtEnd = true): string[] {
   const out: string[] = [];
   for (let h = startHour; h <= endHour; h++) {
     out.push(`${String(h).padStart(2, "0")}:00`);
-    if (h !== endHour) out.push(`${String(h).padStart(2, "0")}:30`);
+    if (h < endHour || includeHalfAtEnd) {
+      out.push(`${String(h).padStart(2, "0")}:30`);
+    }
   }
   return out;
 }
-const ONBOARDING_REMINDER_SLOTS = halfHourSlots(6, 21);
-const ONBOARDING_QUIET_SLOTS = halfHourSlots(0, 23);
+// Reminder cap: 06:00 → 21:00 inclusive, NO 21:30 tail (spec §N8).
+const ONBOARDING_REMINDER_SLOTS = halfHourSlots(6, 21, false);
+// Quiet hours: 00:00 → 23:30 inclusive.
+const ONBOARDING_QUIET_SLOTS = halfHourSlots(0, 23, true);
 
 export default function OnboardingPage() {
   const router = useRouter();

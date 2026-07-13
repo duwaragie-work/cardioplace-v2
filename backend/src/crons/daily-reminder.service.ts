@@ -45,13 +45,18 @@ function firstName(fullName: string | null | undefined, fallback: string): strin
 // up twice, we don't double-send.
 const IDEMPOTENCY_HOURS = 20
 
-/** Channels every patient receives by default. SMS is included in the fan-out
- *  today but the dispatcher no-ops until Lakshitha's L5 lands the transport. */
+/** Channels every patient receives by default, per spec §N2: "in-app
+ *  (DASHBOARD) + PUSH + EMAIL". SMS is a spec-defined channel on the
+ *  ReminderChannel type but is NOT included here — Lakshitha's L5 wires
+ *  SMS in with its own gates (phone, consent, opt-in, feature flag),
+ *  either by extending this array conditionally per-patient at the
+ *  dispatch call site or by adding SMS to the channel list once the
+ *  L4 enum + L5 send logic land. Never re-add SMS to the default fan-out
+ *  without those gates — SMS to a non-consenting patient is a TCPA breach. */
 const DEFAULT_REMINDER_CHANNELS: readonly ReminderChannel[] = [
   'DASHBOARD',
   'PUSH',
   'EMAIL',
-  'SMS',
 ] as const
 
 /** Provider-facing gap alert only fans out to DASHBOARD + EMAIL — no push
