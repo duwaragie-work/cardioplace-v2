@@ -6,23 +6,23 @@ import { postJournalEntry } from '../helpers/api.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
- * Cron specs: GapAlertService (48h trigger / 24h idempotency) and
+ * Cron specs: DailyReminderService (30-min slot / per-user reminderTime) and
  * MonthlyReaskService (30d trigger / 28d idempotency). Both expose public
  * `runScan(now?)` methods which we drive via /test-control/cron/*.
+ *
+ * N3 (2026-07-13) — the old GapAlertService was deleted; this file's first
+ * describe now covers the daily-reminder cron that replaces it.
  */
 
-test.describe('Gap-alert cron (48h trigger)', () => {
+test.describe('Daily reminder cron (30-min slot, escalating tone)', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  test('enrolled patient with last entry >48h ago → notification sent', async () => {
+  test('enrolled patient at their reminder slot with no reading today → notification sent', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
-    // Two pre-conditions the gap-alert cron checks (gap-alert.service.ts:46):
-    //   1. User.updatedAt <= now-48h  — enrollment-completed proxy filter.
-    //      resetUser doesn't touch the user row, so backdate it explicitly.
-    //   2. JournalEntry.measuredAt < now-48h — the actual gap.
-    //      Post one entry, then backdate measuredAt past the cutoff.
+    // Patient needs at least one prior JournalEntry so the day-count math has
+    // a "last reading" anchor; backdate it so `now` looks like Day 2.
     const patientApi = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     await postJournalEntry(patientApi, {
       measuredAt: new Date().toISOString(),
@@ -30,33 +30,39 @@ test.describe('Gap-alert cron (48h trigger)', () => {
       diastolicBP: 78,
       pulse: 72,
     })
-    await tc.backdateLastJournalEntry(u.id, 49 * 60 * 60)
-    await tc.backdateUserUpdatedAt(u.id, 49 * 60 * 60)
-    const result = await tc.runGapAlertScan(new Date())
-    expect(result.scanned).toBe(1)
+    await tc.backdateLastJournalEntry(u.id, 48 * 60 * 60)
+    // Fire the scan at 13:00 UTC — 09:00 ET, the default reminderTime.
+    const scanAt = new Date()
+    scanAt.setUTCHours(13, 0, 0, 0)
+    const result = await tc.runDailyReminderScan(scanAt)
+    // The scan is idempotent; either it dispatched OR it was already in the
+    // idempotency window. Assert one of those held.
+    expect(result.dispatched + result.skippedIdempotent).toBeGreaterThanOrEqual(1)
 
     const notes = await tc.listNotifications(u.id)
-    const gap = notes.find((n) => /time for your bp check|bp check/i.test(n.title))
-    expect(gap, 'expected a gap-alert notification row').toBeDefined()
+    const daily = notes.find((n) => /daily check-in|check-in|check in/i.test(n.title))
+    expect(daily, 'expected a daily-reminder notification row').toBeDefined()
 
     await patientApi.dispose()
     await tc.dispose()
   })
 
-  test('idempotency: second scan within 24h does not duplicate', async () => {
+  test('idempotency: second scan within the 20h window does not duplicate', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
 
-    await tc.runGapAlertScan(new Date())
+    const scanAt = new Date()
+    scanAt.setUTCHours(13, 0, 0, 0)
+    await tc.runDailyReminderScan(scanAt)
     const before = await tc.listNotifications(u.id)
-    const beforeCount = before.filter((n) => /bp check/i.test(n.title)).length
+    const beforeCount = before.filter((n) => /daily check-in|check-in|check in/i.test(n.title)).length
 
-    // Re-scan — should be a no-op
-    await tc.runGapAlertScan(new Date())
+    // Re-scan at the same slot — should be a no-op
+    await tc.runDailyReminderScan(scanAt)
     const after = await tc.listNotifications(u.id)
-    const afterCount = after.filter((n) => /bp check/i.test(n.title)).length
-    expect(afterCount, '24h idempotency window should suppress duplicates').toBe(beforeCount)
+    const afterCount = after.filter((n) => /daily check-in|check-in|check in/i.test(n.title)).length
+    expect(afterCount, '20h idempotency window should suppress duplicates').toBe(beforeCount)
 
     await tc.dispose()
   })

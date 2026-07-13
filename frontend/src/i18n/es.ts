@@ -666,6 +666,16 @@ const es: Record<TranslationKey, string> = {
   'profile.combinationPill': '2-en-1',
   'profile.reviewingChanges': 'Su equipo de atención está revisando sus últimos cambios. Esto suele tardar de 48 a 72 horas.',
   'profile.fieldsNeedRecheck': 'Su equipo de atención le pidió que verifique de nuevo: {fields}. Toque Editar en esa sección para confirmar o actualizar.',
+  // ─── Reminders (N8/N10, 2026-07-13) ────────────────────────────────────────
+  'profile.reminders.heading': 'Recordatorios',
+  'profile.reminders.editHeading': 'Editar recordatorios',
+  'profile.reminders.dailyTime': 'Hora del recordatorio diario',
+  'profile.reminders.quietHoursStart': 'Inicio de horas silenciosas',
+  'profile.reminders.quietHoursEnd': 'Fin de horas silenciosas',
+  'profile.reminders.emergencyDisclaimer': 'Las alertas de emergencia siempre llegan, incluso durante las horas silenciosas.',
+  'profile.reminders.saveButton': 'Guardar',
+  'profile.reminders.savingButton': 'Guardando…',
+  'profile.reminders.cancelButton': 'Cancelar',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'Mis Lecturas',
@@ -962,6 +972,12 @@ const es: Record<TranslationKey, string> = {
   'onboarding.selectPref': 'Selecciona tu preferencia',
   'onboarding.textFirst': 'Texto Primero',
   'onboarding.audioFirst': 'Audio Primero',
+  // ─── Reminders (N8/N10, 2026-07-13) ───────────────────────────────────────
+  'onboarding.reminders.timeLabel': '¿A qué hora prefiere su recordatorio diario?',
+  'onboarding.reminders.timeAudio': '¿Qué hora del día es mejor para su recordatorio?',
+  'onboarding.reminders.quietStartLabel': 'Inicio de horas silenciosas',
+  'onboarding.reminders.quietEndLabel': 'Fin de horas silenciosas',
+  'onboarding.reminders.emergencyDisclaimer': 'Las alertas de emergencia siempre llegan, incluso durante las horas silenciosas.',
   'onboarding.invalidDob': 'Por favor ingresa una fecha de nacimiento válida.',
   'onboarding.continue': 'Continuar',
   'onboarding.skip': 'Omitir por ahora',

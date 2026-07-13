@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { AuditExceptionReportService } from '../crons/audit-exception-report.service.js'
-import { GapAlertService } from '../crons/gap-alert.service.js'
+import { DailyReminderService, type DailyReminderScanSummary } from '../crons/daily-reminder.service.js'
 import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
@@ -22,7 +22,10 @@ export class TestControlService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gapAlerts: GapAlertService,
+    // N3 (2026-07-13) — gap-alert is replaced by daily-reminder. Test-control
+    // now drives the new cron; the qa helper's old runGapAlert() call is
+    // rewired to hit runDailyReminderScan() below.
+    private readonly dailyReminder: DailyReminderService,
     private readonly monthlyReask: MonthlyReaskService,
     private readonly escalation: EscalationService,
     private readonly medicationHoldEscalation: MedicationHoldEscalationService,
@@ -50,9 +53,13 @@ export class TestControlService {
     return { ok: true }
   }
 
-  async runGapAlertScan(now: Date): Promise<{ scanned: number; nudged: number }> {
-    const sent = await this.gapAlerts.runScan(now)
-    return { scanned: 1, nudged: sent }
+  /**
+   * N3/N2 (2026-07-13) — runs one cycle of the daily-reminder cron. Replaces
+   * the deleted runGapAlertScan(). Returns the full summary so specs can
+   * assert on tier-selection + care-team fan-out counts, not just totals.
+   */
+  async runDailyReminderScan(now: Date): Promise<DailyReminderScanSummary> {
+    return this.dailyReminder.runScan(now)
   }
 
   async runMonthlyReaskScan(now: Date): Promise<{ scanned: number; reasked: number }> {
@@ -384,11 +391,11 @@ export class TestControlService {
   }
 
   /**
-   * Backdate a User's `updatedAt`. The gap-alert cron uses
-   * `User.updatedAt <= cutoff` as the "enrollment completed ≥48h ago" proxy
-   * (see backend/src/crons/gap-alert.service.ts:51); resetUser doesn't touch
-   * the user row so without this helper the candidate filter never matches a
-   * just-seeded patient. Raw SQL is required because Prisma's `@updatedAt`
+   * Backdate a User's `updatedAt`. Historically used by the deleted gap-alert
+   * cron's "enrollment completed ≥48h ago" candidate filter. The daily-reminder
+   * cron (N2) does NOT use updatedAt in its filter, but this helper is left in
+   * place because other test paths (monthly-reask ripple flag, seed sanity
+   * checks) still rely on it. Raw SQL is required because Prisma's `@updatedAt`
    * decorator overrides any value passed via `update()`.
    */
   async backdateUserUpdatedAt(userId: string, deltaSeconds: number): Promise<void> {

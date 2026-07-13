@@ -33,6 +33,8 @@ const ALL_TEMPLATES: EmailTemplateName[] = [
   'contact_form',
   'gap_alert',
   'medication_reask',
+  'daily_reminder',
+  'care_team_gap_alert',
   'monthly_report',
 ]
 

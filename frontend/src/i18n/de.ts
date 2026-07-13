@@ -666,6 +666,16 @@ const de: Record<TranslationKey, string> = {
   'profile.combinationPill': '2-in-1',
   'profile.reviewingChanges': 'Ihr Behandlungsteam prüft Ihre letzten Änderungen. Das dauert in der Regel 48 bis 72 Stunden.',
   'profile.fieldsNeedRecheck': 'Ihr Behandlungsteam bittet Sie, Folgendes erneut zu prüfen: {fields}. Tippen Sie in diesem Abschnitt auf Bearbeiten, um es zu bestätigen oder zu aktualisieren.',
+  // ─── Reminders (N8/N10, 2026-07-13) ────────────────────────────────────────
+  'profile.reminders.heading': 'Erinnerungen',
+  'profile.reminders.editHeading': 'Erinnerungen bearbeiten',
+  'profile.reminders.dailyTime': 'Tägliche Erinnerungszeit',
+  'profile.reminders.quietHoursStart': 'Ruhezeit-Beginn',
+  'profile.reminders.quietHoursEnd': 'Ruhezeit-Ende',
+  'profile.reminders.emergencyDisclaimer': 'Notfallalarme werden auch während der Ruhezeiten immer zugestellt.',
+  'profile.reminders.saveButton': 'Speichern',
+  'profile.reminders.savingButton': 'Wird gespeichert…',
+  'profile.reminders.cancelButton': 'Abbrechen',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'Meine Messwerte',
@@ -962,6 +972,12 @@ const de: Record<TranslationKey, string> = {
   'onboarding.selectPref': 'Wählen Sie Ihre Präferenz',
   'onboarding.textFirst': 'Text Zuerst',
   'onboarding.audioFirst': 'Audio Zuerst',
+  // ─── Reminders (N8/N10, 2026-07-13) ───────────────────────────────────────
+  'onboarding.reminders.timeLabel': 'Wann möchten Sie Ihre tägliche Erinnerung?',
+  'onboarding.reminders.timeAudio': 'Welche Tageszeit passt am besten für Ihre Erinnerung?',
+  'onboarding.reminders.quietStartLabel': 'Ruhezeit-Beginn',
+  'onboarding.reminders.quietEndLabel': 'Ruhezeit-Ende',
+  'onboarding.reminders.emergencyDisclaimer': 'Notfallalarme werden auch während der Ruhezeiten immer zugestellt.',
   'onboarding.invalidDob': 'Bitte geben Sie ein gültiges Geburtsdatum ein.',
   'onboarding.continue': 'Weiter',
   'onboarding.skip': 'Vorerst Überspringen',

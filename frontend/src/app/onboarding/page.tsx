@@ -26,12 +26,30 @@ function getBrowserTimezone(): string | undefined {
   }
 }
 
+// N8 (2026-07-13) — 30-min slot options. Reminder is capped 06:00–21:00 per
+// spec (daytime nudges); quiet-hours pickers span the full day.
+function halfHourSlots(startHour: number, endHour: number): string[] {
+  const out: string[] = [];
+  for (let h = startHour; h <= endHour; h++) {
+    out.push(`${String(h).padStart(2, "0")}:00`);
+    if (h !== endHour) out.push(`${String(h).padStart(2, "0")}:30`);
+  }
+  return out;
+}
+const ONBOARDING_REMINDER_SLOTS = halfHourSlots(6, 21);
+const ONBOARDING_QUIET_SLOTS = halfHourSlots(0, 23);
+
 export default function OnboardingPage() {
   const router = useRouter();
   const { t } = useLanguage();
   const { user, isLoading, logout, markOnboardingComplete, updateUser } = useAuth();
   const [name, setName] = useState("");
   const [communicationPreference, setCommunicationPreference] = useState("");
+  // N8 (2026-07-13) — Reminder & Engagement prefs. Defaults match backend
+  // defaults so a patient who skips still ends up with usable values.
+  const [reminderTime, setReminderTime] = useState("09:00");
+  const [quietHoursStart, setQuietHoursStart] = useState("22:00");
+  const [quietHoursEnd, setQuietHoursEnd] = useState("07:00");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -136,6 +154,12 @@ export default function OnboardingPage() {
     await submitProfile({
       name: name.trim() || null,
       communicationPreference: communicationPreference || null,
+      // N8 (2026-07-13) — Reminder & Engagement prefs. Always pushed so a
+      // patient who tweaks the pickers before continuing sees their choice
+      // persist; defaults match backend so an untouched form is a no-op.
+      reminderTime,
+      quietHoursStart,
+      quietHoursEnd,
     });
   }
 
@@ -330,6 +354,72 @@ export default function OnboardingPage() {
                   <option value="TEXT_FIRST">{t('onboarding.textFirst')}</option>
                   <option value="AUDIO_FIRST">{t('onboarding.audioFirst')}</option>
                 </select>
+              </div>
+
+              {/* N8 (2026-07-13) — Reminder & Engagement pickers. Placed after
+                  the identity pair (name + comm-pref) so a patient who's
+                  already in the flow has the context to answer "what time
+                  works for you." All three have sensible defaults so a fast
+                  skip still ends up with usable values. */}
+              <div className="w-full max-w-105">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label htmlFor="onboarding-reminder-time" className="block font-semibold text-[#171717] text-xs lg:text-sm">
+                    {t('onboarding.reminders.timeLabel')}
+                  </label>
+                  <AudioButton text={t('onboarding.reminders.timeAudio')} size="sm" />
+                </div>
+                <select
+                  id="onboarding-reminder-time"
+                  data-testid="onboarding-reminder-time"
+                  value={reminderTime}
+                  onChange={(e) => setReminderTime(e.target.value)}
+                  className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                >
+                  {ONBOARDING_REMINDER_SLOTS.map((slot) => (
+                    <option key={slot} value={slot}>{slot}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="w-full max-w-105">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label htmlFor="onboarding-quiet-start" className="block font-semibold text-[#171717] text-xs lg:text-sm">
+                    {t('onboarding.reminders.quietStartLabel')}
+                  </label>
+                </div>
+                <select
+                  id="onboarding-quiet-start"
+                  data-testid="onboarding-quiet-start"
+                  value={quietHoursStart}
+                  onChange={(e) => setQuietHoursStart(e.target.value)}
+                  className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                >
+                  {ONBOARDING_QUIET_SLOTS.map((slot) => (
+                    <option key={slot} value={slot}>{slot}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="w-full max-w-105">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label htmlFor="onboarding-quiet-end" className="block font-semibold text-[#171717] text-xs lg:text-sm">
+                    {t('onboarding.reminders.quietEndLabel')}
+                  </label>
+                </div>
+                <select
+                  id="onboarding-quiet-end"
+                  data-testid="onboarding-quiet-end"
+                  value={quietHoursEnd}
+                  onChange={(e) => setQuietHoursEnd(e.target.value)}
+                  className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                >
+                  {ONBOARDING_QUIET_SLOTS.map((slot) => (
+                    <option key={slot} value={slot}>{slot}</option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs font-semibold text-[#92400E] bg-[#FEF3C7] rounded-lg px-3 py-2">
+                  {t('onboarding.reminders.emergencyDisclaimer')}
+                </p>
               </div>
 
               {/* Error Message — vibrant-red palette routed through brand

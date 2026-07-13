@@ -672,6 +672,19 @@ const am: Record<TranslationKey, string> = {
   'profile.combinationPill': '2-በ-1',
   'profile.reviewingChanges': 'የተንከባካቢ ቡድንዎ የቅርብ ጊዜ ለውጦችዎን እየገመገመ ነው። ይህ ብዙውን ጊዜ ከ48 እስከ 72 ሰዓታት ይወስዳል።',
   'profile.fieldsNeedRecheck': 'የተንከባካቢ ቡድንዎ እንዲያረጋግጡ ጠይቋል፦ {fields}። ለማረጋገጥ ወይም ለማዘመን በዚያ ክፍል ላይ አርትዕን ይንኩ።',
+  // ─── Reminders (N8/N10, 2026-07-13) ────────────────────────────────────────
+  // TODO(l10n-am): draft Amharic strings need native-speaker review before
+  // the PR merges (Duwaragie hand-off). English fallbacks are placeholders
+  // so the key-drift check passes; the runtime UI will still render them.
+  'profile.reminders.heading': 'Reminders',
+  'profile.reminders.editHeading': 'Edit reminders',
+  'profile.reminders.dailyTime': 'Daily reminder time',
+  'profile.reminders.quietHoursStart': 'Quiet hours start',
+  'profile.reminders.quietHoursEnd': 'Quiet hours end',
+  'profile.reminders.emergencyDisclaimer': 'Emergency alerts always come through, even during quiet hours.',
+  'profile.reminders.saveButton': 'Save',
+  'profile.reminders.savingButton': 'Saving…',
+  'profile.reminders.cancelButton': 'Cancel',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'ንባቦቼ',
@@ -970,6 +983,13 @@ const am: Record<TranslationKey, string> = {
   'onboarding.selectPref': 'ምርጫዎን ይምረጡ',
   'onboarding.textFirst': 'ጽሁፍ መጀመሪያ',
   'onboarding.audioFirst': 'ኦዲዮ መጀመሪያ',
+  // ─── Reminders (N8/N10, 2026-07-13) ───────────────────────────────────────
+  // TODO(l10n-am): draft Amharic strings need native-speaker review before ship.
+  'onboarding.reminders.timeLabel': 'When would you like your daily reminder?',
+  'onboarding.reminders.timeAudio': 'What time of day works best for your reminder?',
+  'onboarding.reminders.quietStartLabel': 'Quiet hours start',
+  'onboarding.reminders.quietEndLabel': 'Quiet hours end',
+  'onboarding.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
   'onboarding.invalidDob': 'እባክዎ ትክክለኛ የልደት ቀን ያስገቡ።',
   'onboarding.continue': 'ቀጥል',
   'onboarding.skip': 'ለአሁን ዝለል',

@@ -1188,6 +1188,18 @@ export class AlertEngineService {
             // (HOLD, profile reject, ack/resolve, threshold change, follow-up
             // call, gap-alert + monthly-reask crons). Provider/MD escalation
             // PUSH+EMAIL and the caregiver dispatch path remain unchanged.
+            //
+            // N6 (2026-07-13) — quiet-hours gate rationale. This path does NOT
+            // check the patient's User.quietHours{Start,End} because it does
+            // not fan out to the patient's PUSH/EMAIL channels at all
+            // (per the Group-B comment above). Tier 3 caregiver-routed rules
+            // reach the caregiver via EscalationService.dispatchCaregiverNotification;
+            // suppressing those on the PATIENT's quiet-hours preference would be
+            // wrong — the caregiver is the recipient. Provider/MD Tier 1 + BP L2
+            // dispatches are safety-critical and MUST NEVER be quiet-suppressed.
+            // If a Tier-3 patient-facing push is added back in a future sprint,
+            // gate it here with `isWithinQuietHours(patient, now)` before the
+            // notification.create — see backend/src/crons/daily-reminder/helpers.ts.
 
             return row
           },

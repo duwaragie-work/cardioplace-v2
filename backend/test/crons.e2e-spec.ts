@@ -2,13 +2,17 @@ import { INestApplication, ValidationPipe } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 import type { App } from 'supertest/types.js'
 import { AppModule } from '../src/app.module.js'
-import { GapAlertService } from '../src/crons/gap-alert.service.js'
 import { MonthlyReaskService } from '../src/crons/monthly-reask.service.js'
 import { EmailService } from '../src/email/email.service.js'
 import { PrismaService } from '../src/prisma/prisma.service.js'
 import { generateTestDisplayId } from './helpers/generate-test-display-id.js'
 
-// Phase/17 — gap-alert + monthly re-ask crons.
+// Phase/17 — monthly re-ask cron.
+//
+// N3 (2026-07-13) — the GapAlertService e2e describe block was removed with
+// the service itself. The daily-reminder cron that replaces it is fully
+// covered by src/crons/daily-reminder.service.spec.ts (unit) plus the
+// qa/tests/15 Playwright happy-path; a second e2e here would be duplicative.
 //
 // Tests call `service.runScan()` directly with injected `now` so we can
 // simulate time passage without manipulating the system clock. Same real-DB
@@ -17,15 +21,10 @@ import { generateTestDisplayId } from './helpers/generate-test-display-id.js'
 describe('Crons (e2e)', () => {
   let app: INestApplication<App>
   let prisma: PrismaService
-  let gapAlert: GapAlertService
   let reask: MonthlyReaskService
 
   const runTag = `crons-e2e-${Date.now()}`
   const emails = {
-    fresh: `${runTag}-fresh@example.com`, // logged recently, should NOT be nudged
-    gappy: `${runTag}-gappy@example.com`, // 3-day gap, SHOULD be nudged
-    empty: `${runTag}-empty@example.com`, // no entries + onboarded 3d ago, SHOULD be nudged
-    unenrolled: `${runTag}-unenrolled@example.com`, // not COMPLETED, SHOULD skip
     reask: `${runTag}-reask@example.com`, // meds reported 45d ago, SHOULD re-ask
     reaskFresh: `${runTag}-reask-fresh@example.com`, // meds reported yesterday
   }
@@ -60,7 +59,6 @@ describe('Crons (e2e)', () => {
     app = moduleFixture.createNestApplication()
     app.useGlobalPipes(new ValidationPipe({ transform: true }))
     prisma = moduleFixture.get(PrismaService)
-    gapAlert = moduleFixture.get(GapAlertService)
     reask = moduleFixture.get(MonthlyReaskService)
     await app.init()
     await cleanup()
@@ -71,161 +69,10 @@ describe('Crons (e2e)', () => {
     await app.close()
   })
 
-  // ─── Gap-alert cron ────────────────────────────────────────────────────────
-
-  describe('GapAlertService.runScan', () => {
-    let freshId: string
-    let gappyId: string
-    let emptyId: string
-    let unenrolledId: string
-    const now = new Date('2026-04-22T13:00:00Z')
-
-    beforeAll(async () => {
-      const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 3600 * 1000)
-
-      const fresh = await prisma.user.create({
-        data: {
-          email: emails.fresh,
-          name: 'Fresh Patient',
-          roles: ['PATIENT'],
-          accountStatus: 'ACTIVE',
-          onboardingStatus: 'COMPLETED',
-          enrollmentStatus: 'ENROLLED',
-          createdAt: tenDaysAgo,
-          displayId: generateTestDisplayId(['PATIENT']),
-        },
-      })
-      const gappy = await prisma.user.create({
-        data: {
-          email: emails.gappy,
-          name: 'Gappy Patient',
-          roles: ['PATIENT'],
-          accountStatus: 'ACTIVE',
-          onboardingStatus: 'COMPLETED',
-          enrollmentStatus: 'ENROLLED',
-          createdAt: tenDaysAgo,
-          displayId: generateTestDisplayId(['PATIENT']),
-        },
-      })
-      const empty = await prisma.user.create({
-        data: {
-          email: emails.empty,
-          name: 'Empty Patient',
-          roles: ['PATIENT'],
-          accountStatus: 'ACTIVE',
-          onboardingStatus: 'COMPLETED',
-          enrollmentStatus: 'ENROLLED',
-          createdAt: tenDaysAgo,
-          displayId: generateTestDisplayId(['PATIENT']),
-        },
-      })
-      // Unenrolled — identity-onboarded patients still pending admin's
-      // 4-piece gate. Gap-alert cron filters on enrollmentStatus now, so
-      // these should NOT be nudged.
-      const unenrolled = await prisma.user.create({
-        data: {
-          email: emails.unenrolled,
-          name: 'Unenrolled Patient',
-          roles: ['PATIENT'],
-          accountStatus: 'ACTIVE',
-          onboardingStatus: 'COMPLETED',
-          enrollmentStatus: 'NOT_ENROLLED',
-          createdAt: tenDaysAgo,
-          displayId: generateTestDisplayId(['PATIENT']),
-        },
-      })
-      freshId = fresh.id
-      gappyId = gappy.id
-      emptyId = empty.id
-      unenrolledId = unenrolled.id
-
-      // Fresh: logged 2h ago (no gap).
-      await prisma.journalEntry.create({
-        data: {
-          userId: freshId,
-          measuredAt: new Date(now.getTime() - 2 * 3600 * 1000),
-          systolicBP: 120,
-          diastolicBP: 80,
-        },
-      })
-      // Gappy: last entry was 3 days ago.
-      await prisma.journalEntry.create({
-        data: {
-          userId: gappyId,
-          measuredAt: new Date(now.getTime() - 3 * 24 * 3600 * 1000),
-          systolicBP: 130,
-          diastolicBP: 85,
-        },
-      })
-      // Empty + unenrolled: no entries.
-
-      // Force updatedAt to 10 days ago so the "onboarded ≥ 48h" proxy fires.
-      await prisma.user.updateMany({
-        where: { id: { in: [freshId, gappyId, emptyId, unenrolledId] } },
-        data: { updatedAt: tenDaysAgo },
-      })
-    })
-
-    it('sends gap alerts to gappy + empty patients, skips fresh + unenrolled', async () => {
-      // Scan iterates over every enrolled patient in the DB (seed-leftovers
-      // included), so bump the timeout well past the 5s default.
-      const count = await gapAlert.runScan(now)
-      expect(count).toBeGreaterThanOrEqual(2) // gappy + empty (plus any seed-leftovers)
-
-      const notifs = await prisma.notification.findMany({
-        where: {
-          userId: { in: [freshId, gappyId, emptyId, unenrolledId] },
-          title: 'Time for your BP check',
-        },
-      })
-      const usersNudged = new Set(notifs.map((n) => n.userId))
-      expect(usersNudged.has(gappyId)).toBe(true)
-      expect(usersNudged.has(emptyId)).toBe(true)
-      expect(usersNudged.has(freshId)).toBe(false)
-      expect(usersNudged.has(unenrolledId)).toBe(false)
-    }, 60000)
-
-    it('is idempotent — second scan in the same 24h window does not duplicate', async () => {
-      const before = await prisma.notification.count({
-        where: {
-          userId: gappyId,
-          title: 'Time for your BP check',
-        },
-      })
-      await gapAlert.runScan(now)
-      const after = await prisma.notification.count({
-        where: {
-          userId: gappyId,
-          title: 'Time for your BP check',
-        },
-      })
-      expect(after).toBe(before)
-    })
-
-    it('creates both PUSH and EMAIL rows for users with an email', async () => {
-      const channels = await prisma.notification.findMany({
-        where: {
-          userId: gappyId,
-          title: 'Time for your BP check',
-        },
-        select: { channel: true },
-      })
-      const set = new Set(channels.map((c) => c.channel))
-      expect(set.has('PUSH')).toBe(true)
-      expect(set.has('EMAIL')).toBe(true)
-    })
-
-    it('produces an "X day(s) since your last reading" body for gappy and a first-time body for empty', async () => {
-      const gappyNotif = await prisma.notification.findFirst({
-        where: { userId: gappyId, title: 'Time for your BP check', channel: 'PUSH' },
-      })
-      const emptyNotif = await prisma.notification.findFirst({
-        where: { userId: emptyId, title: 'Time for your BP check', channel: 'PUSH' },
-      })
-      expect(gappyNotif?.body).toMatch(/day\(s\) since your last reading/)
-      expect(emptyNotif?.body).toMatch(/don't have any blood-pressure readings/)
-    })
-  })
+  // ─── Gap-alert cron REMOVED (N3, 2026-07-13) ──────────────────────────────
+  // The GapAlertService describe block was removed with the service itself.
+  // See src/crons/daily-reminder.service.spec.ts for the replacement's unit
+  // coverage; the qa Playwright spec at qa/tests/15 covers the happy path.
 
   // ─── Monthly re-ask cron ───────────────────────────────────────────────────
 

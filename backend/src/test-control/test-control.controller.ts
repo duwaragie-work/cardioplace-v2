@@ -79,14 +79,15 @@ export class TestControlController {
     return this.svc.fireEscalationT0(body.alertId)
   }
 
-  @Post('cron/gap-alert/run')
+  // N3 (2026-07-13) — gap-alert cron deleted, superseded by daily-reminder.
+  @Post('cron/daily-reminder/run')
   @HttpCode(200)
-  async runGapAlert(
+  async runDailyReminder(
     @Headers('x-test-control-secret') secret: string,
     @Body() body: { now?: string },
   ) {
     this.assertAuthorized(secret)
-    return this.svc.runGapAlertScan(body?.now ? new Date(body.now) : new Date())
+    return this.svc.runDailyReminderScan(body?.now ? new Date(body.now) : new Date())
   }
 
   @Post('cron/monthly-reask/run')

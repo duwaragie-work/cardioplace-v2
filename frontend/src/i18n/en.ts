@@ -677,6 +677,17 @@ const en = {
   'profile.combinationPill': '2-in-1',
   'profile.reviewingChanges': 'Your care team is reviewing your latest changes. This usually takes 48 to 72 hours.',
   'profile.fieldsNeedRecheck': 'Your care team asked you to re-check: {fields}. Please tap Edit on that section to confirm or update it.',
+  // ─── Reminders (N8/N10, 2026-07-13) ────────────────────────────────────────
+  // Reading-level ≤5th grade. "Engages, does not pressure." Never blames.
+  'profile.reminders.heading': 'Reminders',
+  'profile.reminders.editHeading': 'Edit reminders',
+  'profile.reminders.dailyTime': 'Daily reminder time',
+  'profile.reminders.quietHoursStart': 'Quiet hours start',
+  'profile.reminders.quietHoursEnd': 'Quiet hours end',
+  'profile.reminders.emergencyDisclaimer': 'Emergency alerts always come through, even during quiet hours.',
+  'profile.reminders.saveButton': 'Save',
+  'profile.reminders.savingButton': 'Saving…',
+  'profile.reminders.cancelButton': 'Cancel',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'My Readings',
@@ -982,6 +993,12 @@ const en = {
   'onboarding.selectPref': 'Select your preference',
   'onboarding.textFirst': 'Text First',
   'onboarding.audioFirst': 'Audio First',
+  // ─── Reminders (N8/N10, 2026-07-13) ───────────────────────────────────────
+  'onboarding.reminders.timeLabel': 'When would you like your daily reminder?',
+  'onboarding.reminders.timeAudio': 'What time of day works best for your reminder?',
+  'onboarding.reminders.quietStartLabel': 'Quiet hours start',
+  'onboarding.reminders.quietEndLabel': 'Quiet hours end',
+  'onboarding.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
   'onboarding.invalidDob': 'Please enter a valid date of birth.',
   'onboarding.continue': 'Continue',
   'onboarding.skip': 'Skip for now',

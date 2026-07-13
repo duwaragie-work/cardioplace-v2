@@ -55,6 +55,9 @@ export type EmailTemplateName =
   // Treatment adherence + monitoring
   | 'gap_alert'
   | 'medication_reask'
+  // Reminder & Engagement (N1–N10, 2026-07-13)
+  | 'daily_reminder'
+  | 'care_team_gap_alert'
   // Healthcare operations reporting
   | 'monthly_report'
 
@@ -257,6 +260,22 @@ export const EMAIL_TEMPLATE_REGISTRY: Record<EmailTemplateName, TemplateSpec> = 
     purpose: 'TREATMENT',
     recipientCategory: 'PATIENT',
     briefDescriptionFn: () => 'Monthly medication re-confirmation prompt',
+  },
+
+  // ── Reminder & Engagement (N1–N10, 2026-07-13) ────────────────────────
+  daily_reminder: {
+    purpose: 'TREATMENT',
+    recipientCategory: 'PATIENT',
+    briefDescriptionFn: (m) =>
+      clip(`Daily BP-check reminder — day ${m.dayCount ?? '?'}`),
+  },
+  care_team_gap_alert: {
+    purpose: 'CARE_COORDINATION',
+    recipientCategory: 'PROVIDER',
+    briefDescriptionFn: (m) =>
+      clip(
+        `Care-team notice — patient reading gap of ${m.daysSinceLastReading ?? '?'} days`,
+      ),
   },
 
   // ── Healthcare operations reporting ───────────────────────────────────

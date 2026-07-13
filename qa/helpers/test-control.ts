@@ -86,9 +86,24 @@ export class TestControl {
     await this.post('test-control/escalation/fire-t0', { alertId })
   }
 
-  /** Run the gap-alert scanner. 48h trigger, 24h idempotency. */
-  async runGapAlertScan(now?: Date): Promise<{ scanned: number; nudged: number }> {
-    return this.post('test-control/cron/gap-alert/run', {
+  /**
+   * Run the daily-reminder scanner (N2, 2026-07-13). Replaces the deleted
+   * runGapAlertScan helper — every-30-min scan, per-user reminderTime slot,
+   * quiet-hours + already-logged-today suppression, escalating tone Day 1/2/3+,
+   * care-team dispatch on every 3-day multiple.
+   *
+   * Returns the full DailyReminderScanSummary so specs can assert on
+   * dispatched vs. skipped counts, not just a running total.
+   */
+  async runDailyReminderScan(now?: Date): Promise<{
+    dispatched: number
+    skippedLoggedToday: number
+    skippedQuietHours: number
+    skippedNotSlot: number
+    skippedIdempotent: number
+    careTeamAlerts: number
+  }> {
+    return this.post('test-control/cron/daily-reminder/run', {
       now: (now ?? new Date()).toISOString(),
     })
   }

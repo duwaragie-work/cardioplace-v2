@@ -19,6 +19,17 @@ model User {
   timezone                String?
   communicationPreference CommunicationPreference?
   preferredLanguage       String?                  @default("en")
+  // Reminder & Engagement preferences (N1, 2026-07-13). Semantics for all
+  // three: "HH:mm" 24-hour strings interpreted in the patient's local
+  // wall-clock (resolved via `timezone` above, fallback America/New_York).
+  // UI restricts `reminderTime` to 30-min slots 06:00–21:00; quiet-hours
+  // pickers span the full day. Compared via string equality against the
+  // current local time formatted by `Intl.DateTimeFormat` — no timezone
+  // math on the stored value itself. Nullable so migration is safe against
+  // existing rows; defaults picked to match the spec (09:00 / 22:00 / 07:00).
+  reminderTime            String?                  @default("09:00")
+  quietHoursStart         String?                  @default("22:00")
+  quietHoursEnd           String?                  @default("07:00")
   isVerified              Boolean                  @default(false)
   roles                   UserRole[]               @default([PATIENT])
   onboardingStatus        OnboardingStatus         @default(NOT_COMPLETED)

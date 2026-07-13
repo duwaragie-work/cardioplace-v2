@@ -152,6 +152,13 @@ interface AuthProfileDto {
   timezone: string | null;
   communicationPreference: CommPref;
   preferredLanguage: string | null;
+  // N8 (2026-07-13) — Reminder & Engagement preferences. All "HH:mm" 24-hour
+  // in patient-local wall clock. Backend defaults kick in if the row was
+  // created before N1, so these come back as strings even for pre-existing
+  // patients.
+  reminderTime: string | null;
+  quietHoursStart: string | null;
+  quietHoursEnd: string | null;
 }
 
 /**
@@ -173,6 +180,9 @@ async function patchAuthProfile(payload: {
   name?: string | null;
   dateOfBirth?: string | null;
   communicationPreference?: CommPref;
+  reminderTime?: string;
+  quietHoursStart?: string;
+  quietHoursEnd?: string;
 }): Promise<AuthProfileDto> {
   // Backend's PATCH only returns the patched fields (no email, no id), so
   // we re-fetch the full GET after a successful write to keep the UI state
@@ -659,6 +669,253 @@ function ProfileSkeleton() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// N8 (2026-07-13) — Reminder & Engagement modal
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 30-min slot options in patient-local wall-clock. reminderTime is capped
+// 06:00–21:00 per the spec (daytime nudges); quiet-hours pickers span the
+// full day so users can carve any window.
+function halfHourSlots(startHour: number, endHour: number): string[] {
+  const out: string[] = [];
+  for (let h = startHour; h <= endHour; h++) {
+    out.push(`${String(h).padStart(2, '0')}:00`);
+    if (h !== endHour || endHour < 24) {
+      out.push(`${String(h).padStart(2, '0')}:30`);
+    }
+  }
+  return out;
+}
+const REMINDER_TIME_OPTIONS = halfHourSlots(6, 21);
+const QUIET_HOURS_OPTIONS = halfHourSlots(0, 23);
+
+function formatTimeForDisplay(hhmm: string | null | undefined, fallback: string): string {
+  if (!hhmm) return fallback;
+  return hhmm;
+}
+
+function RemindersModal({
+  current,
+  onClose,
+  onSaved,
+}: {
+  current: AuthProfileDto;
+  onClose: () => void;
+  onSaved: (next: AuthProfileDto) => void;
+}) {
+  const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const [reminderTime, setReminderTime] = useState(current.reminderTime ?? '09:00');
+  const [quietStart, setQuietStart] = useState(current.quietHoursStart ?? '22:00');
+  const [quietEnd, setQuietEnd] = useState(current.quietHoursEnd ?? '07:00');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const dirty =
+    reminderTime !== (current.reminderTime ?? '09:00') ||
+    quietStart !== (current.quietHoursStart ?? '22:00') ||
+    quietEnd !== (current.quietHoursEnd ?? '07:00');
+
+  async function save() {
+    if (!dirty || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      const next = await patchAuthProfile({
+        reminderTime,
+        quietHoursStart: quietStart,
+        quietHoursEnd: quietEnd,
+      });
+      onSaved(next);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('profile.saveError'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}
+    >
+      <div className="absolute inset-0" onClick={onClose} />
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reminders-title"
+        initial={{ y: 60, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 60, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+        className="relative w-full sm:max-w-md bg-white sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"
+        style={{ maxHeight: '90dvh', boxShadow: '0 8px 48px rgba(0,0,0,0.18)' }}
+      >
+        <div
+          className="shrink-0 flex items-center justify-between px-5 py-4"
+          style={{ borderBottom: '1px solid var(--brand-border)' }}
+        >
+          <div className="flex items-center gap-2">
+            <h2
+              id="reminders-title"
+              className="text-[1rem] font-bold"
+              style={{ color: 'var(--brand-text-primary)' }}
+            >
+              {t('profile.reminders.editHeading')}
+            </h2>
+            <AudioButton size="sm" text={t('profile.reminders.editHeading')} />
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-11 h-11 rounded-full flex items-center justify-center cursor-pointer"
+            style={{ backgroundColor: 'var(--brand-background)' }}
+            aria-label={t('accessibility.closeDialog')}
+          >
+            <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto thin-scrollbar p-5 space-y-4">
+          <div>
+            <label
+              htmlFor="reminder-time"
+              className="block text-[0.75rem] font-semibold mb-1.5"
+              style={{ color: 'var(--brand-text-secondary)' }}
+            >
+              {t('profile.reminders.dailyTime')}
+            </label>
+            <select
+              id="reminder-time"
+              data-testid="reminder-time-select"
+              value={reminderTime}
+              onChange={(e) => setReminderTime(e.target.value)}
+              className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none bg-white"
+              style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+            >
+              {REMINDER_TIME_OPTIONS.map((slot) => (
+                <option key={slot} value={slot}>
+                  {slot}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="quiet-start"
+              className="block text-[0.75rem] font-semibold mb-1.5"
+              style={{ color: 'var(--brand-text-secondary)' }}
+            >
+              {t('profile.reminders.quietHoursStart')}
+            </label>
+            <select
+              id="quiet-start"
+              data-testid="quiet-start-select"
+              value={quietStart}
+              onChange={(e) => setQuietStart(e.target.value)}
+              className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none bg-white"
+              style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+            >
+              {QUIET_HOURS_OPTIONS.map((slot) => (
+                <option key={slot} value={slot}>
+                  {slot}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="quiet-end"
+              className="block text-[0.75rem] font-semibold mb-1.5"
+              style={{ color: 'var(--brand-text-secondary)' }}
+            >
+              {t('profile.reminders.quietHoursEnd')}
+            </label>
+            <select
+              id="quiet-end"
+              data-testid="quiet-end-select"
+              value={quietEnd}
+              onChange={(e) => setQuietEnd(e.target.value)}
+              className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none bg-white"
+              style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+            >
+              {QUIET_HOURS_OPTIONS.map((slot) => (
+                <option key={slot} value={slot}>
+                  {slot}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Emergency-alerts disclaimer — mandatory per spec §N8. Bold + small
+              so it reads as safety information, not marketing copy. */}
+          <div
+            className="rounded-xl p-3 text-[0.75rem] font-semibold"
+            style={{
+              backgroundColor: 'var(--brand-warning-amber-bg, #FEF3C7)',
+              color: 'var(--brand-warning-amber-text, #92400E)',
+            }}
+          >
+            {t('profile.reminders.emergencyDisclaimer')}
+          </div>
+
+          {error && (
+            <div
+              className="text-[0.75rem] font-semibold"
+              style={{ color: 'var(--brand-error, #DC2626)' }}
+            >
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div
+          className="shrink-0 px-5 py-3 flex items-center justify-end gap-2"
+          style={{ borderTop: '1px solid var(--brand-border)' }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-11 px-4 rounded-xl text-[0.875rem] font-semibold cursor-pointer"
+            style={{ color: 'var(--brand-text-muted)' }}
+          >
+            {t('profile.reminders.cancelButton')}
+          </button>
+          <button
+            type="button"
+            data-testid="reminders-save-button"
+            onClick={save}
+            disabled={!dirty || saving}
+            className="h-11 px-5 rounded-xl text-[0.875rem] font-bold text-white cursor-pointer disabled:cursor-not-allowed"
+            style={{
+              backgroundColor: dirty
+                ? 'var(--brand-primary, #0891B2)'
+                : 'var(--brand-text-muted, #64748B)',
+              opacity: dirty && !saving ? 1 : 0.6,
+            }}
+          >
+            {saving ? t('profile.reminders.savingButton') : t('profile.reminders.saveButton')}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main page
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -673,6 +930,8 @@ export default function ProfilePage() {
   const [authProfile, setAuthProfile] = useState<AuthProfileDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPersonalEdit, setShowPersonalEdit] = useState(false);
+  // N8 (2026-07-13) — Reminder & Engagement preferences modal.
+  const [showRemindersEdit, setShowRemindersEdit] = useState(false);
 
   // Match the right column's height to the left column's natural height.
   // CSS grid alone always sizes the row to the taller side; we want the
@@ -924,6 +1183,34 @@ export default function ProfilePage() {
                 value={commPrefLabel(authProfile?.communicationPreference ?? null, t)}
               />
             </SectionCard>
+
+            {/* N8 (2026-07-13) — Reminder & Engagement preferences. */}
+            <SectionCard
+              title={t('profile.reminders.heading')}
+              icon={<Clock className="w-4 h-4" />}
+              onEdit={authProfile ? () => setShowRemindersEdit(true) : undefined}
+              editTestId="profile-reminders-edit-button"
+              audioText={[
+                `${t('profile.reminders.heading')}.`,
+                `${t('profile.reminders.dailyTime')}: ${formatTimeForDisplay(authProfile?.reminderTime, '09:00')}.`,
+                `${t('profile.reminders.quietHoursStart')}: ${formatTimeForDisplay(authProfile?.quietHoursStart, '22:00')}.`,
+                `${t('profile.reminders.quietHoursEnd')}: ${formatTimeForDisplay(authProfile?.quietHoursEnd, '07:00')}.`,
+              ].join(' ')}
+            >
+              <Row
+                label={t('profile.reminders.dailyTime')}
+                value={formatTimeForDisplay(authProfile?.reminderTime, '09:00')}
+              />
+              <Row
+                label={t('profile.reminders.quietHoursStart')}
+                value={formatTimeForDisplay(authProfile?.quietHoursStart, '22:00')}
+              />
+              <Row
+                label={t('profile.reminders.quietHoursEnd')}
+                value={formatTimeForDisplay(authProfile?.quietHoursEnd, '07:00')}
+              />
+            </SectionCard>
+
             <SectionCard
               title={t('profile.aboutYou')}
               icon={<Info className="w-4 h-4" />}
@@ -1236,6 +1523,14 @@ export default function ProfilePage() {
               // greeting update immediately, without waiting for a reload.
               updateUser({ name: next.name ?? undefined });
             }}
+          />
+        )}
+        {/* N8 (2026-07-13) — Reminder & Engagement preferences modal. */}
+        {showRemindersEdit && authProfile && (
+          <RemindersModal
+            current={authProfile}
+            onClose={() => setShowRemindersEdit(false)}
+            onSaved={(next) => setAuthProfile(next)}
           />
         )}
       </AnimatePresence>
