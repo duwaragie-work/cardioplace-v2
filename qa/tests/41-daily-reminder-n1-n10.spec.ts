@@ -17,7 +17,7 @@
  */
 import { test, expect } from '@playwright/test'
 import { PATIENTS } from '../helpers/accounts.js'
-import { authedApi } from '../helpers/auth.js'
+import { authedApi, signInPatient } from '../helpers/auth.js'
 import { postJournalEntry } from '../helpers/api.js'
 import { TestControl } from '../helpers/test-control.js'
 
@@ -70,32 +70,10 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
   test('N8 — Profile UI shows Reminders section with defaults + emergency disclaimer', async ({
     page,
   }) => {
+    test.setTimeout(90_000)
     const patient = PATIENTS.aisha
-    // Reach the patient app via the frontend URL and sign in via OTP.
-    await page.goto(`${FRONTEND_BASE_URL}/sign-in`)
-    // Trust the existing UI flow — the exact sign-in element ids differ across
-    // builds. The spec proceeds only if a session cookie lands.
-    await page.evaluate(async ({ email, apiBase }) => {
-      // Use the demo-OTP endpoints so we don't need a real inbox.
-      await fetch(`${apiBase}/api/v2/auth/otp/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, appContext: 'patient', deviceId: 'pw-n8' }),
-      })
-      await fetch(`${apiBase}/api/v2/auth/otp/verify`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          otp: '666666',
-          deviceId: 'pw-n8',
-          appContext: 'patient',
-        }),
-      })
-    }, { email: patient.email, apiBase: API_BASE_URL })
-
-    await page.goto(`${FRONTEND_BASE_URL}/profile`)
+    await signInPatient(page, patient.email)
+    await page.goto('/profile')
     // The reminders section is anchored by the edit button test-id.
     const editBtn = page.getByTestId('profile-reminders-edit-button')
     // Give the page time to hydrate + fetch profile.
@@ -106,8 +84,14 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
     await expect(page.getByTestId('reminder-time-select')).toBeVisible()
     await expect(page.getByTestId('quiet-start-select')).toBeVisible()
     await expect(page.getByTestId('quiet-end-select')).toBeVisible()
-    // Emergency disclaimer copy (English fallback works if locale is anything).
-    await expect(page.getByText(/emergency alerts always come through/i)).toBeVisible()
+    // Post-Gap-4 spec-verbatim disclaimer copy.
+    await expect(
+      page.getByText(/emergency health alerts will always come through/i),
+    ).toBeVisible()
+    await page.screenshot({
+      path: 'screenshots-manual-run/N8-profile-reminders-modal.png',
+      fullPage: false,
+    })
   })
 
   // ─── N7 — Logged confirmation push fires after journal entry save ─────────
@@ -445,31 +429,10 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
   test('N8 — Profile RemindersModal uses single-header quiet-hours layout (Gap 5)', async ({
     page,
   }) => {
+    test.setTimeout(90_000)
     const patient = PATIENTS.aisha
-    await page.goto(`${FRONTEND_BASE_URL}/sign-in`)
-    await page.evaluate(
-      async ({ email, apiBase }) => {
-        await fetch(`${apiBase}/api/v2/auth/otp/send`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, appContext: 'patient', deviceId: 'pw-n8-layout' }),
-        })
-        await fetch(`${apiBase}/api/v2/auth/otp/verify`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email,
-            otp: '666666',
-            deviceId: 'pw-n8-layout',
-            appContext: 'patient',
-          }),
-        })
-      },
-      { email: patient.email, apiBase: API_BASE_URL },
-    )
-
-    await page.goto(`${FRONTEND_BASE_URL}/profile`)
+    await signInPatient(page, patient.email)
+    await page.goto('/profile')
     const editBtn = page.getByTestId('profile-reminders-edit-button')
     await expect(editBtn).toBeVisible({ timeout: 15_000 })
     await editBtn.click()
@@ -483,38 +446,23 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
     const modal = page.locator('[role="dialog"]')
     await expect(modal.getByText(/^Start$/)).toBeVisible()
     await expect(modal.getByText(/^End$/)).toBeVisible()
+    await page.screenshot({
+      path: 'screenshots-manual-run/N8-single-header-layout.png',
+      fullPage: false,
+    })
   })
 
   // ─── N8 — reminder time picker enforces spec ceiling (Gap 8 fix) ───────
   test('N8 — reminder-time <select> options include 21:00 but NOT 21:30 (spec ceiling)', async ({
     page,
   }) => {
+    test.setTimeout(90_000)
     const patient = PATIENTS.aisha
-    await page.goto(`${FRONTEND_BASE_URL}/sign-in`)
-    await page.evaluate(
-      async ({ email, apiBase }) => {
-        await fetch(`${apiBase}/api/v2/auth/otp/send`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, appContext: 'patient', deviceId: 'pw-n8-ceiling' }),
-        })
-        await fetch(`${apiBase}/api/v2/auth/otp/verify`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email,
-            otp: '666666',
-            deviceId: 'pw-n8-ceiling',
-            appContext: 'patient',
-          }),
-        })
-      },
-      { email: patient.email, apiBase: API_BASE_URL },
-    )
-
-    await page.goto(`${FRONTEND_BASE_URL}/profile`)
-    await page.getByTestId('profile-reminders-edit-button').click()
+    await signInPatient(page, patient.email)
+    await page.goto('/profile')
+    const editBtn = page.getByTestId('profile-reminders-edit-button')
+    await expect(editBtn).toBeVisible({ timeout: 20_000 })
+    await editBtn.click()
 
     const select = page.getByTestId('reminder-time-select')
     await expect(select).toBeVisible()
@@ -528,38 +476,23 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
     expect(values).not.toContain('21:30')
     expect(values).not.toContain('22:00')
     expect(values).not.toContain('05:30')
+    await page.screenshot({
+      path: 'screenshots-manual-run/N8-reminder-time-picker.png',
+      fullPage: false,
+    })
   })
 
   // ─── N8 — quiet-hours pickers span the full day (00:00 – 23:30) ─────────
   test('N8 — quiet-hours <select> options span the full day (00:00 through 23:30)', async ({
     page,
   }) => {
+    test.setTimeout(90_000)
     const patient = PATIENTS.aisha
-    await page.goto(`${FRONTEND_BASE_URL}/sign-in`)
-    await page.evaluate(
-      async ({ email, apiBase }) => {
-        await fetch(`${apiBase}/api/v2/auth/otp/send`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, appContext: 'patient', deviceId: 'pw-quiet-full-day' }),
-        })
-        await fetch(`${apiBase}/api/v2/auth/otp/verify`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email,
-            otp: '666666',
-            deviceId: 'pw-quiet-full-day',
-            appContext: 'patient',
-          }),
-        })
-      },
-      { email: patient.email, apiBase: API_BASE_URL },
-    )
-
-    await page.goto(`${FRONTEND_BASE_URL}/profile`)
-    await page.getByTestId('profile-reminders-edit-button').click()
+    await signInPatient(page, patient.email)
+    await page.goto('/profile')
+    const editBtn = page.getByTestId('profile-reminders-edit-button')
+    await expect(editBtn).toBeVisible({ timeout: 20_000 })
+    await editBtn.click()
 
     for (const testId of ['quiet-start-select', 'quiet-end-select']) {
       const values = await page
@@ -577,6 +510,7 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
   test('N10 — Profile Reminders modal renders Spanish disclaimer when the patient prefers es', async ({
     page,
   }) => {
+    test.setTimeout(90_000)
     const patient = PATIENTS.aisha
     const api = await authedApi(API_BASE_URL, patient.email)
     await api.patch(`${API_BASE_URL}/api/v2/auth/profile`, {
@@ -584,34 +518,19 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
     })
 
     try {
-      await page.goto(`${FRONTEND_BASE_URL}/sign-in`)
-      await page.evaluate(
-        async ({ email, apiBase }) => {
-          await fetch(`${apiBase}/api/v2/auth/otp/send`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, appContext: 'patient', deviceId: 'pw-n10-es' }),
-          })
-          await fetch(`${apiBase}/api/v2/auth/otp/verify`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email,
-              otp: '666666',
-              deviceId: 'pw-n10-es',
-              appContext: 'patient',
-            }),
-          })
-        },
-        { email: patient.email, apiBase: API_BASE_URL },
-      )
-      await page.goto(`${FRONTEND_BASE_URL}/profile`)
-      await page.getByTestId('profile-reminders-edit-button').click()
+      await signInPatient(page, patient.email)
+      await page.goto('/profile')
+      const editBtn = page.getByTestId('profile-reminders-edit-button')
+      await expect(editBtn).toBeVisible({ timeout: 20_000 })
+      await editBtn.click()
       // Spec-verbatim Spanish disclaimer copy (after Gap 4 fix).
       await expect(
         page.getByText(/alertas de salud de emergencia siempre llegarán/i),
       ).toBeVisible({ timeout: 10_000 })
+      await page.screenshot({
+        path: 'screenshots-manual-run/N10-spanish-disclaimer.png',
+        fullPage: false,
+      })
     } finally {
       // Restore English so other tests aren't affected.
       await api.patch(`${API_BASE_URL}/api/v2/auth/profile`, {

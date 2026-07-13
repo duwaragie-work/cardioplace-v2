@@ -17,10 +17,15 @@ export async function signInPatient(page: Page, email: string): Promise<void> {
   await page.locator(byTestId(T.signIn.otpTab)).click().catch(() => {})
   await page.locator(byTestId(T.signIn.emailInput)).fill(email)
   await page.locator(byTestId(T.signIn.sendOtpBtn)).click()
-  await page.locator(byTestId(T.signIn.otpInput)).fill(DEMO_OTP)
+  // The OTP input only renders after the send request completes. Prisma Cloud
+  // DB takes 15-25s per OTP write — bump this fill's implicit-wait timeout
+  // so the local dev flow doesn't flake.
+  await page.locator(byTestId(T.signIn.otpInput)).fill(DEMO_OTP, { timeout: 60_000 })
   await page.locator(byTestId(T.signIn.verifyBtn)).click()
-  // Either /dashboard (existing patient) or /onboarding (new patient) — both fine.
-  await page.waitForURL(/\/(dashboard|onboarding|clinical-intake)(\?.*)?$/, { timeout: 30_000 })
+  // OTP verify itself also hits AuthSession + RefreshToken writes on the DB;
+  // Prisma Cloud can push the total verify → redirect chain past the default
+  // 30s. Give it 60s so slow-DB latency isn't a false failure.
+  await page.waitForURL(/\/(dashboard|onboarding|clinical-intake)(\?.*)?$/, { timeout: 60_000 })
 }
 
 /**
@@ -93,14 +98,22 @@ export async function apiSignIn(
   const ctx = await pwRequest.newContext({
     baseURL: root,
     extraHTTPHeaders: { 'x-device-id': deviceId },
+    // Prisma Cloud DB can take 15-25s per AuthSession-writing transaction
+    // (the OTP verify path). Playwright's default per-request timeout is 30s
+    // — plenty for CI where the DB is co-located, but tight for local dev
+    // against a remote Cloud DB. Bump to 60s so the auth handshake never
+    // flakes on cold-cache network latency.
+    timeout: 60_000,
   })
   const sendRes = await ctx.post('/api/v2/auth/otp/send', {
     data: { email, appContext, deviceId },
+    timeout: 60_000,
   })
   expect(sendRes.ok(), `OTP send failed: ${sendRes.status()}: ${await sendRes.text()}`).toBeTruthy()
 
   const verifyRes = await ctx.post('/api/v2/auth/otp/verify', {
     data: { email, otp: DEMO_OTP, appContext, deviceId },
+    timeout: 60_000,
   })
   expect(verifyRes.ok(), `OTP verify failed: ${verifyRes.status()}: ${await verifyRes.text()}`).toBeTruthy()
 

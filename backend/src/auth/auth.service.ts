@@ -3321,6 +3321,12 @@ export class AuthService {
       communicationPreference: user.communicationPreference,
       preferredLanguage: user.preferredLanguage,
       timezone: user.timezone,
+      // N8 (2026-07-13) — Reminder & Engagement preferences. The Prisma
+      // `select` above pulls these; the Playwright PATCH+GET round-trip
+      // spec caught the omission from this response shape.
+      reminderTime: user.reminderTime,
+      quietHoursStart: user.quietHoursStart,
+      quietHoursEnd: user.quietHoursEnd,
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
       // MFA status (additive) — drives the profile Security pill.
