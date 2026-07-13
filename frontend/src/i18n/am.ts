@@ -681,7 +681,11 @@ const am: Record<TranslationKey, string> = {
   'profile.reminders.dailyTime': 'Daily reminder time',
   'profile.reminders.quietHoursStart': 'Quiet hours start',
   'profile.reminders.quietHoursEnd': 'Quiet hours end',
-  'profile.reminders.emergencyDisclaimer': 'Emergency alerts always come through, even during quiet hours.',
+  // TODO(l10n-am): Amharic native-speaker verification required per spec §N10.
+  'profile.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
+  'profile.reminders.startLabel': 'Start',
+  'profile.reminders.endLabel': 'End',
+  'profile.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
   'profile.reminders.saveButton': 'Save',
   'profile.reminders.savingButton': 'Saving…',
   'profile.reminders.cancelButton': 'Cancel',
@@ -989,6 +993,8 @@ const am: Record<TranslationKey, string> = {
   'onboarding.reminders.timeAudio': 'What time of day works best for your reminder?',
   'onboarding.reminders.quietStartLabel': 'Quiet hours start',
   'onboarding.reminders.quietEndLabel': 'Quiet hours end',
+  // TODO(l10n-am): Amharic native-speaker verification required.
+  'onboarding.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
   'onboarding.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
   'onboarding.invalidDob': 'እባክዎ ትክክለኛ የልደት ቀን ያስገቡ።',
   'onboarding.continue': 'ቀጥል',

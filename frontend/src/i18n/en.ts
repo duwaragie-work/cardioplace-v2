@@ -684,7 +684,13 @@ const en = {
   'profile.reminders.dailyTime': 'Daily reminder time',
   'profile.reminders.quietHoursStart': 'Quiet hours start',
   'profile.reminders.quietHoursEnd': 'Quiet hours end',
-  'profile.reminders.emergencyDisclaimer': 'Emergency alerts always come through, even during quiet hours.',
+  // Gap 5 (2026-07-13) — single-header layout keys for the RemindersModal +
+  // Onboarding step. `quietHoursStart`/`Ended` above stay in use for the
+  // read-only Row list in the Profile SectionCard.
+  'profile.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
+  'profile.reminders.startLabel': 'Start',
+  'profile.reminders.endLabel': 'End',
+  'profile.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
   'profile.reminders.saveButton': 'Save',
   'profile.reminders.savingButton': 'Saving…',
   'profile.reminders.cancelButton': 'Cancel',
@@ -998,6 +1004,7 @@ const en = {
   'onboarding.reminders.timeAudio': 'What time of day works best for your reminder?',
   'onboarding.reminders.quietStartLabel': 'Quiet hours start',
   'onboarding.reminders.quietEndLabel': 'Quiet hours end',
+  'onboarding.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
   'onboarding.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
   'onboarding.invalidDob': 'Please enter a valid date of birth.',
   'onboarding.continue': 'Continue',

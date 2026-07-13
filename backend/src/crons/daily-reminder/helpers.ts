@@ -7,6 +7,19 @@
 // Intl.DateTimeFormat, matching the existing convention at
 // backend/src/daily_journal/engine/adherence-window.ts:181-198
 // (calendarDayKey). No luxon / date-fns-tz dependency.
+//
+// ─── Signature note for Lakshitha (L5) ────────────────────────────────────────
+// The 2026-07-07 spec proposed simpler shapes:
+//   hasLoggedReadingToday(userId): Promise<boolean>
+//   isWithinQuietHours(user, at: Date): boolean
+// The `isWithinQuietHours` export already matches. `hasLoggedReadingToday`
+// needs `(prisma, userId, tz, now?)` because this is a shared module in the
+// backend and Nest's dependency injection is not reachable from a module-level
+// export — the caller must pass `prisma` explicitly. If you want the
+// spec-shape ergonomics (userId only) for the per-patient SMS loop, use
+// `hasLoggedReadingTodayForUser(prisma, userId)` below — it resolves the
+// timezone from the User row on your behalf at the cost of one extra query
+// per call. The cron itself uses the tz-explicit form to avoid that query.
 import type { PrismaService } from '../../prisma/prisma.service.js'
 
 /** IANA fallback for the Ward 7 & 8 DC pilot. Every downstream call uses this
@@ -80,6 +93,34 @@ export async function hasLoggedReadingToday(
   })
   if (!last) return false
   return localCalendarDayKey(last.measuredAt, tz) === localCalendarDayKey(now, tz)
+}
+
+/**
+ * Gap 2 fix (2026-07-13) — convenience wrapper matching the spec's shorter
+ * shape `hasLoggedReadingToday(userId): Promise<boolean>`. Resolves the
+ * patient's timezone from the User row (falls back to America/New_York)
+ * before delegating to the tz-explicit form above.
+ *
+ * Costs one extra User read per call — fine for Lakshitha's per-patient
+ * SMS loop; the daily-reminder cron keeps the tz-explicit form to avoid
+ * the extra query when it has already loaded the user row.
+ *
+ * Missing user → returns `false` (a patient that doesn't exist has by
+ * definition not logged today — safe default that never suppresses
+ * a subsequent nudge on stale data).
+ */
+export async function hasLoggedReadingTodayForUser(
+  prisma: PrismaService,
+  userId: string,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { timezone: true },
+  })
+  if (!user) return false
+  const tz = user.timezone ?? REMINDER_TZ_FALLBACK
+  return hasLoggedReadingToday(prisma, userId, tz, now)
 }
 
 /**

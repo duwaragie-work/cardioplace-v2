@@ -1,9 +1,14 @@
 // N7 unit spec (2026-07-13). Verifies the "Logged ✓" push confirmation
 // listener produces exactly one PUSH-channel Notification row, contains NO
 // BP values in the body, and never throws on lookup/write failure.
+//
+// Gap 1 fix (2026-07-13) — listener now consumes ENTRY_EVALUATED (not
+// ENTRY_CREATED), and gates positive language on BOTH the alert engine's
+// verdict (`alertsFired`) AND the AHA-band predicate. Payloads below carry
+// the new `alertsFired` / `alertCount` fields.
 import { jest } from '@jest/globals'
 import { LoggedConfirmationListener } from './logged-confirmation.listener.js'
-import type { JournalEntryCreatedEvent } from '../interfaces/events.interface.js'
+import type { JournalEntryEvaluatedEvent } from '../interfaces/events.interface.js'
 
 function fakePrisma(overrides: {
   user?: { preferredLanguage: string | null } | null
@@ -29,7 +34,7 @@ function fakePrisma(overrides: {
   } as any
 }
 
-const BASE_EVENT: JournalEntryCreatedEvent = {
+const BASE_EVENT: JournalEntryEvaluatedEvent = {
   userId: 'p1',
   entryId: 'e1',
   measuredAt: new Date('2026-07-13T13:00:00Z'),
@@ -38,13 +43,15 @@ const BASE_EVENT: JournalEntryCreatedEvent = {
   pulse: 68,
   weight: null,
   sessionId: 's1',
+  alertsFired: false,
+  alertCount: 0,
 }
 
 describe('LoggedConfirmationListener', () => {
-  it('creates exactly one PUSH-channel Notification row on ENTRY_CREATED', async () => {
+  it('creates exactly one PUSH-channel Notification row on ENTRY_EVALUATED', async () => {
     const prisma = fakePrisma()
     const listener = new LoggedConfirmationListener(prisma)
-    await listener.onEntryCreated(BASE_EVENT)
+    await listener.onEntryEvaluated(BASE_EVENT)
     expect(prisma._created.length).toBe(1)
     expect(prisma._created[0].channel).toBe('PUSH')
     expect(prisma._created[0].userId).toBe('p1')
@@ -55,7 +62,7 @@ describe('LoggedConfirmationListener', () => {
   it('body NEVER contains BP values (spec §N7 privacy contract)', async () => {
     const prisma = fakePrisma()
     const listener = new LoggedConfirmationListener(prisma)
-    await listener.onEntryCreated(BASE_EVENT)
+    await listener.onEntryEvaluated(BASE_EVENT)
     const body = prisma._created[0].body as string
     expect(body).not.toContain('125')
     expect(body).not.toContain('82')
@@ -63,23 +70,51 @@ describe('LoggedConfirmationListener', () => {
     expect(body).not.toMatch(/mmHg/i)
   })
 
-  it('appends "Looking good — keep it up!" for a NORMAL-range reading', async () => {
-    // 118/76 — comfortably in the normal band.
-    const normal = { ...BASE_EVENT, systolicBP: 118, diastolicBP: 76 }
+  it('appends "Looking good — keep it up!" for a NORMAL-range reading with no alerts', async () => {
+    // 118/76 — comfortably in the normal band. Engine says clean.
+    const normal = { ...BASE_EVENT, systolicBP: 118, diastolicBP: 76, alertsFired: false, alertCount: 0 }
     const prisma = fakePrisma()
     const listener = new LoggedConfirmationListener(prisma)
-    await listener.onEntryCreated(normal)
+    await listener.onEntryEvaluated(normal)
     const body = prisma._created[0].body as string
     expect(body).toContain('Looking good')
     expect(body).toContain('Logged ✓')
   })
 
-  it('does NOT append positive language for an alert-triggering reading (spec §N7)', async () => {
-    // 165/105 — Stage 2 hypertension range, would trigger BP alerts.
-    const highBp = { ...BASE_EVENT, systolicBP: 165, diastolicBP: 105 }
+  it('Gap 1 fix — SUPPRESSES positive language when the engine says alertsFired=true, even for a normal-band BP', async () => {
+    // 118/76 (normal band) BUT the engine fired an alert (e.g. AFib on HR).
+    // Prior implementation would have leaked "Looking good"; the ENTRY_EVALUATED
+    // rewire is what closes this.
+    const afib = {
+      ...BASE_EVENT,
+      systolicBP: 118,
+      diastolicBP: 76,
+      pulse: 115,
+      alertsFired: true,
+      alertCount: 1,
+    }
     const prisma = fakePrisma()
     const listener = new LoggedConfirmationListener(prisma)
-    await listener.onEntryCreated(highBp)
+    await listener.onEntryEvaluated(afib)
+    const body = prisma._created[0].body as string
+    expect(body).toContain('Logged ✓')
+    expect(body).not.toContain('Looking good')
+    expect(body).not.toContain('keep it up')
+  })
+
+  it('does NOT append positive language for an alert-triggering reading (spec §N7)', async () => {
+    // 165/105 — Stage 2 hypertension range; engine would fire BP L2. Both
+    // gates fire in the same direction (belt-and-braces).
+    const highBp = {
+      ...BASE_EVENT,
+      systolicBP: 165,
+      diastolicBP: 105,
+      alertsFired: true,
+      alertCount: 1,
+    }
+    const prisma = fakePrisma()
+    const listener = new LoggedConfirmationListener(prisma)
+    await listener.onEntryEvaluated(highBp)
     const body = prisma._created[0].body as string
     expect(body).toContain('Logged ✓')
     expect(body).not.toContain('Looking good')
@@ -89,11 +124,30 @@ describe('LoggedConfirmationListener', () => {
     expect(body).not.toContain('105')
   })
 
+  it('Gap 1 belt-and-braces — SUPPRESSES positive language when BP is outside the AHA band even if the engine says clean', async () => {
+    // Contrived scenario: 145/92 (Stage 1 HTN) but engine didn't fire any rule.
+    // Real path never hits this today, but the second gate keeps a positive
+    // tail off a reading that clearly isn't comfortable-normal.
+    const stage1 = {
+      ...BASE_EVENT,
+      systolicBP: 145,
+      diastolicBP: 92,
+      alertsFired: false,
+      alertCount: 0,
+    }
+    const prisma = fakePrisma()
+    const listener = new LoggedConfirmationListener(prisma)
+    await listener.onEntryEvaluated(stage1)
+    const body = prisma._created[0].body as string
+    expect(body).toContain('Logged ✓')
+    expect(body).not.toContain('Looking good')
+  })
+
   it('does NOT append positive language when BP values are missing', async () => {
     const missing = { ...BASE_EVENT, systolicBP: null, diastolicBP: null }
     const prisma = fakePrisma()
     const listener = new LoggedConfirmationListener(prisma)
-    await listener.onEntryCreated(missing)
+    await listener.onEntryEvaluated(missing)
     expect(prisma._created[0].body).not.toContain('Looking good')
   })
 
@@ -101,7 +155,7 @@ describe('LoggedConfirmationListener', () => {
     const prisma = fakePrisma({ user: { preferredLanguage: 'es' } })
     const listener = new LoggedConfirmationListener(prisma)
     const normal = { ...BASE_EVENT, systolicBP: 118, diastolicBP: 76 }
-    await listener.onEntryCreated(normal)
+    await listener.onEntryEvaluated(normal)
     const body = prisma._created[0].body as string
     expect(body).toContain('Registrado')
     expect(body).toContain('Se ve bien')
@@ -110,13 +164,13 @@ describe('LoggedConfirmationListener', () => {
   it('does not throw when the user lookup returns null', async () => {
     const prisma = fakePrisma({ user: null })
     const listener = new LoggedConfirmationListener(prisma)
-    await expect(listener.onEntryCreated(BASE_EVENT)).resolves.toBeUndefined()
+    await expect(listener.onEntryEvaluated(BASE_EVENT)).resolves.toBeUndefined()
     expect(prisma._created[0].body).toContain('Logged')
   })
 
   it('swallows notification.create failure so the journal write path never derails', async () => {
     const prisma = fakePrisma({ createBehaviour: 'throw' })
     const listener = new LoggedConfirmationListener(prisma)
-    await expect(listener.onEntryCreated(BASE_EVENT)).resolves.toBeUndefined()
+    await expect(listener.onEntryEvaluated(BASE_EVENT)).resolves.toBeUndefined()
   })
 })

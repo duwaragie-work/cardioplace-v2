@@ -812,52 +812,64 @@ function RemindersModal({
             </select>
           </div>
 
-          <div>
-            <label
-              htmlFor="quiet-start"
-              className="block text-[0.75rem] font-semibold mb-1.5"
+          {/* Gap 5 (2026-07-13) — single "Quiet hours…" section header per
+              spec §N8, with two sub-labelled pickers underneath and the
+              emergency disclaimer following the group. */}
+          <div className="space-y-3">
+            <div
+              className="text-[0.75rem] font-semibold"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
-              {t('profile.reminders.quietHoursStart')}
-            </label>
-            <select
-              id="quiet-start"
-              data-testid="quiet-start-select"
-              value={quietStart}
-              onChange={(e) => setQuietStart(e.target.value)}
-              className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none bg-white"
-              style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
-            >
-              {QUIET_HOURS_OPTIONS.map((slot) => (
-                <option key={slot} value={slot}>
-                  {slot}
-                </option>
-              ))}
-            </select>
-          </div>
+              {t('profile.reminders.quietHoursHeading')}
+            </div>
 
-          <div>
-            <label
-              htmlFor="quiet-end"
-              className="block text-[0.75rem] font-semibold mb-1.5"
-              style={{ color: 'var(--brand-text-secondary)' }}
-            >
-              {t('profile.reminders.quietHoursEnd')}
-            </label>
-            <select
-              id="quiet-end"
-              data-testid="quiet-end-select"
-              value={quietEnd}
-              onChange={(e) => setQuietEnd(e.target.value)}
-              className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none bg-white"
-              style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
-            >
-              {QUIET_HOURS_OPTIONS.map((slot) => (
-                <option key={slot} value={slot}>
-                  {slot}
-                </option>
-              ))}
-            </select>
+            <div>
+              <label
+                htmlFor="quiet-start"
+                className="block text-[0.75rem] font-medium mb-1.5"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('profile.reminders.startLabel')}
+              </label>
+              <select
+                id="quiet-start"
+                data-testid="quiet-start-select"
+                value={quietStart}
+                onChange={(e) => setQuietStart(e.target.value)}
+                className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none bg-white"
+                style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+              >
+                {QUIET_HOURS_OPTIONS.map((slot) => (
+                  <option key={slot} value={slot}>
+                    {slot}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="quiet-end"
+                className="block text-[0.75rem] font-medium mb-1.5"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('profile.reminders.endLabel')}
+              </label>
+              <select
+                id="quiet-end"
+                data-testid="quiet-end-select"
+                value={quietEnd}
+                onChange={(e) => setQuietEnd(e.target.value)}
+                className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none bg-white"
+                style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+              >
+                {QUIET_HOURS_OPTIONS.map((slot) => (
+                  <option key={slot} value={slot}>
+                    {slot}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Emergency-alerts disclaimer — mandatory per spec §N8. Bold + small

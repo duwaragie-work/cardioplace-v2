@@ -381,43 +381,48 @@ export default function OnboardingPage() {
                 </select>
               </div>
 
+              {/* Gap 5 (2026-07-13) — single header for the quiet-hours pair,
+                  matching Profile RemindersModal + spec §N8 layout. */}
               <div className="w-full max-w-105">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <label htmlFor="onboarding-quiet-start" className="block font-semibold text-[#171717] text-xs lg:text-sm">
-                    {t('onboarding.reminders.quietStartLabel')}
-                  </label>
+                <div className="block font-semibold text-[#171717] text-xs lg:text-sm mb-3">
+                  {t('onboarding.reminders.quietHoursHeading')}
                 </div>
-                <select
-                  id="onboarding-quiet-start"
-                  data-testid="onboarding-quiet-start"
-                  value={quietHoursStart}
-                  onChange={(e) => setQuietHoursStart(e.target.value)}
-                  className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
-                >
-                  {ONBOARDING_QUIET_SLOTS.map((slot) => (
-                    <option key={slot} value={slot}>{slot}</option>
-                  ))}
-                </select>
-              </div>
 
-              <div className="w-full max-w-105">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <label htmlFor="onboarding-quiet-end" className="block font-semibold text-[#171717] text-xs lg:text-sm">
-                    {t('onboarding.reminders.quietEndLabel')}
+                <div className="mb-3">
+                  <label htmlFor="onboarding-quiet-start" className="block text-[#525252] text-xs mb-1.5">
+                    {t('profile.reminders.startLabel')}
                   </label>
+                  <select
+                    id="onboarding-quiet-start"
+                    data-testid="onboarding-quiet-start"
+                    value={quietHoursStart}
+                    onChange={(e) => setQuietHoursStart(e.target.value)}
+                    className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                  >
+                    {ONBOARDING_QUIET_SLOTS.map((slot) => (
+                      <option key={slot} value={slot}>{slot}</option>
+                    ))}
+                  </select>
                 </div>
-                <select
-                  id="onboarding-quiet-end"
-                  data-testid="onboarding-quiet-end"
-                  value={quietHoursEnd}
-                  onChange={(e) => setQuietHoursEnd(e.target.value)}
-                  className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
-                >
-                  {ONBOARDING_QUIET_SLOTS.map((slot) => (
-                    <option key={slot} value={slot}>{slot}</option>
-                  ))}
-                </select>
-                <p className="mt-2 text-xs font-semibold text-[#92400E] bg-[#FEF3C7] rounded-lg px-3 py-2">
+
+                <div>
+                  <label htmlFor="onboarding-quiet-end" className="block text-[#525252] text-xs mb-1.5">
+                    {t('profile.reminders.endLabel')}
+                  </label>
+                  <select
+                    id="onboarding-quiet-end"
+                    data-testid="onboarding-quiet-end"
+                    value={quietHoursEnd}
+                    onChange={(e) => setQuietHoursEnd(e.target.value)}
+                    className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                  >
+                    {ONBOARDING_QUIET_SLOTS.map((slot) => (
+                      <option key={slot} value={slot}>{slot}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <p className="mt-3 text-xs font-semibold text-[#92400E] bg-[#FEF3C7] rounded-lg px-3 py-2">
                   {t('onboarding.reminders.emergencyDisclaimer')}
                 </p>
               </div>

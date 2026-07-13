@@ -6,6 +6,7 @@ import {
   daysSinceLastReadingLocal,
   effectiveReminderSlot,
   hasLoggedReadingToday,
+  hasLoggedReadingTodayForUser,
   isHhmmWithinQuietHours,
   isWithinQuietHours,
   localCalendarDayKey,
@@ -307,5 +308,62 @@ describe('localHour', () => {
   it('returns 22 for a Tokyo evening', () => {
     // 13:00 UTC = 22:00 JST
     expect(localHour(new Date('2026-07-13T13:00:00Z'), 'Asia/Tokyo')).toBe(22)
+  })
+})
+
+// Gap 2 fix (2026-07-13) — convenience wrapper for Lakshitha's L5. Resolves
+// timezone from the User row so the caller only needs to know the userId.
+describe('hasLoggedReadingTodayForUser', () => {
+  function fakePrismaWithUser(
+    user: { timezone: string | null } | null,
+    entries: Array<{ measuredAt: Date }>,
+  ) {
+    return {
+      user: {
+        findUnique: jest.fn<any>().mockResolvedValue(user),
+      },
+      journalEntry: {
+        findFirst: jest.fn<any>().mockImplementation(() => {
+          if (entries.length === 0) return null
+          return entries.sort((a, b) => b.measuredAt.getTime() - a.measuredAt.getTime())[0]
+        }),
+      },
+    } as any
+  }
+
+  it('resolves timezone from the User row and delegates to hasLoggedReadingToday', async () => {
+    const prisma = fakePrismaWithUser(
+      { timezone: 'America/New_York' },
+      [{ measuredAt: new Date('2026-07-13T13:00:00Z') }], // 09:00 ET today
+    )
+    const r = await hasLoggedReadingTodayForUser(
+      prisma,
+      'u1',
+      new Date('2026-07-13T18:00:00Z'),
+    )
+    expect(r).toBe(true)
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      select: { timezone: true },
+    })
+  })
+
+  it('falls back to America/New_York when the user has no timezone', async () => {
+    const prisma = fakePrismaWithUser(
+      { timezone: null },
+      [{ measuredAt: new Date('2026-07-13T13:00:00Z') }],
+    )
+    const r = await hasLoggedReadingTodayForUser(
+      prisma,
+      'u1',
+      new Date('2026-07-13T18:00:00Z'),
+    )
+    expect(r).toBe(true) // ET fallback puts the reading in "today"
+  })
+
+  it('returns false when the user does not exist', async () => {
+    const prisma = fakePrismaWithUser(null, [])
+    const r = await hasLoggedReadingTodayForUser(prisma, 'missing')
+    expect(r).toBe(false)
   })
 })

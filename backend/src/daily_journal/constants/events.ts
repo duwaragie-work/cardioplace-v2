@@ -18,6 +18,13 @@ export const JOURNAL_EVENTS = {
   // persists a DeviationAlert row; carries the alert id so escalation +
   // notification services can route by tier / ruleId.
   ALERT_CREATED: 'journal.alert.created',
+  // Gap 1 fix (2026-07-13) — emitted by AlertEngineService.handleEntryCreated
+  // AFTER evaluate() has finished (including all DeviationAlert commits). Carries
+  // the ENTRY_CREATED payload plus `alertsFired` / `alertCount` so downstream
+  // listeners (LoggedConfirmationListener) can decide whether a reading tripped
+  // any rule WITHOUT querying DeviationAlert themselves or racing the engine.
+  // Not consumed by the escalation ladder — that keeps listening on ALERT_CREATED.
+  ENTRY_EVALUATED: 'journal.entry.evaluated',
   ESCALATION_CREATED: 'journal.escalation.created',
   // Phase/7 — fires at each ladder step dispatch (T+0, T+4h, etc.). Payload
   // carries recipient IDs, roles, channels, and afterHours flag so downstream

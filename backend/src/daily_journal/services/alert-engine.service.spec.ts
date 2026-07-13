@@ -128,6 +128,9 @@ describe('AlertEngineService (orchestrator)', () => {
           escalated: false,
         }),
         updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
+        // Gap 1 fix (2026-07-13) — used by handleEntryCreated to count alerts
+        // after evaluate() so it can emit ENTRY_EVALUATED with `alertsFired`.
+        count: (jest.fn() as jest.Mock<any>).mockResolvedValue(0),
       },
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
@@ -1079,6 +1082,85 @@ describe('AlertEngineService (orchestrator)', () => {
       expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
       expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
       expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+    })
+  })
+
+  // ─── Gap 1 fix (2026-07-13) — ENTRY_EVALUATED emission ─────────────────────
+  describe('handleEntryCreated → ENTRY_EVALUATED emission', () => {
+    it('emits ENTRY_EVALUATED with alertsFired=false when no alert rows exist', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 118, diastolicBP: 76 }),
+      )
+      prisma.deviationAlert.count.mockResolvedValue(0)
+
+      await service.handleEntryCreated({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 72,
+        weight: null,
+        sessionId: null,
+      })
+
+      const evaluatedCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === JOURNAL_EVENTS.ENTRY_EVALUATED,
+      )
+      expect(evaluatedCall).toBeDefined()
+      const payload = evaluatedCall![1] as { alertsFired: boolean; alertCount: number }
+      expect(payload.alertsFired).toBe(false)
+      expect(payload.alertCount).toBe(0)
+    })
+
+    it('emits ENTRY_EVALUATED with alertsFired=true when alert rows exist for the entry', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 118, diastolicBP: 76, pulse: 115 }),
+      )
+      // Pretend evaluate produced 1 alert (e.g. AFib HR).
+      prisma.deviationAlert.count.mockResolvedValue(1)
+
+      await service.handleEntryCreated({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 115,
+        weight: null,
+        sessionId: null,
+      })
+
+      const evaluatedCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === JOURNAL_EVENTS.ENTRY_EVALUATED,
+      )
+      expect(evaluatedCall).toBeDefined()
+      const payload = evaluatedCall![1] as { alertsFired: boolean; alertCount: number }
+      expect(payload.alertsFired).toBe(true)
+      expect(payload.alertCount).toBe(1)
+    })
+
+    it('defaults alertsFired=true when the count query itself fails (safety invariant)', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(baseSession())
+      prisma.deviationAlert.count.mockRejectedValue(new Error('DB unreachable'))
+
+      await service.handleEntryCreated({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 72,
+        weight: null,
+        sessionId: null,
+      })
+
+      const evaluatedCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === JOURNAL_EVENTS.ENTRY_EVALUATED,
+      )
+      expect(evaluatedCall).toBeDefined()
+      const payload = evaluatedCall![1] as { alertsFired: boolean }
+      expect(payload.alertsFired).toBe(true)
     })
   })
 })

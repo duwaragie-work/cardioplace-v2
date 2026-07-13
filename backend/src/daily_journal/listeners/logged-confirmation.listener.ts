@@ -9,7 +9,7 @@ import {
 import { NotificationChannel } from '../../generated/prisma/client.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
-import type { JournalEntryCreatedEvent } from '../interfaces/events.interface.js'
+import type { JournalEntryEvaluatedEvent } from '../interfaces/events.interface.js'
 
 const SUPPORTED_LANGUAGES: readonly ReminderLanguage[] = ['en', 'es', 'am', 'fr', 'de'] as const
 function resolveLanguage(pref: string | null | undefined): ReminderLanguage {
@@ -20,27 +20,21 @@ function resolveLanguage(pref: string | null | undefined): ReminderLanguage {
 /**
  * N7 (2026-07-13) — "Logged ✓" push confirmation.
  *
- * Fires immediately after a JournalEntry is persisted (see
- * daily_journal.service.ts:491) and creates a PUSH-channel Notification row
- * with a warm, no-BP-value body. The auto-push Prisma extension
- * (backend/src/push/web-push.service.ts:117-126) then dispatches the push
- * for us — no direct WebPushService call.
+ * Fires from JOURNAL_EVENTS.ENTRY_EVALUATED, which AlertEngineService emits
+ * AFTER evaluate() has awaited every DeviationAlert commit for this entry
+ * (Gap 1 fix, 2026-07-13). Listening on ENTRY_EVALUATED instead of
+ * ENTRY_CREATED closes the spec-§N7 correctness gap: previously an AFib
+ * patient whose reading was 118/76 / HR 115 got "Looking good" appended
+ * because the BP band looked normal, even though the alert engine was
+ * about to fire RULE_AFIB_HR_HIGH. Now the engine's verdict
+ * (`payload.alertsFired`) is the primary gate; the BP-band predicate is a
+ * belt-and-braces second gate that keeps the positive tail off any reading
+ * outside the comfort window even in the rare case where the engine
+ * assessed clean.
  *
  * Copy variants (spec §N7):
- *  • normal range → base + " Looking good — keep it up!"
- *  • anything else (edge case, or reading that will trip an alert rule)
- *    → base only, NO positive language.
- *
- * The normal-range predicate is a cheap SBP/DBP check
- * (`isBpNormalRange` in @cardioplace/shared) — it deliberately does NOT
- * query the alert engine's per-rule verdict. Rationale: (a) this listener
- * runs alongside the alert engine on the same ENTRY_CREATED event, so
- * the engine's DeviationAlert row isn't guaranteed to exist yet; (b) the
- * spec's directive is "no positive tail if alert triggers" — anything
- * outside the normal band is either an alert or borderline, and both
- * warrant withholding the "Looking good" tail; (c) keeps this path
- * decoupled from every rule file (standing rule: alert rules stay
- * untouched).
+ *  • normal range AND no alerts fired → base + " Looking good — keep it up!"
+ *  • anything else                    → base only, NO positive language.
  *
  * Design notes:
  *  • PUSH ONLY (per spec §N7). No email, no SMS, no dashboard row.
@@ -58,17 +52,20 @@ export class LoggedConfirmationListener {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  @OnEvent(JOURNAL_EVENTS.ENTRY_CREATED, { async: true })
-  async onEntryCreated(payload: JournalEntryCreatedEvent): Promise<void> {
+  @OnEvent(JOURNAL_EVENTS.ENTRY_EVALUATED, { async: true })
+  async onEntryEvaluated(payload: JournalEntryEvaluatedEvent): Promise<void> {
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: payload.userId },
         select: { preferredLanguage: true },
       })
       const language = resolveLanguage(user?.preferredLanguage)
-      const variant = isBpNormalRange(payload.systolicBP, payload.diastolicBP)
-        ? 'normal-range'
-        : 'base'
+      // Gap 1 fix — the engine's verdict is the primary gate. BP-band check
+      // is a defensive second gate: if for any reason the engine said "no
+      // alert" but the numbers are outside the AHA comfort band, we still
+      // withhold the positive tail rather than shipping a wrong-signal push.
+      const bandNormal = isBpNormalRange(payload.systolicBP, payload.diastolicBP)
+      const variant = !payload.alertsFired && bandNormal ? 'normal-range' : 'base'
       const body = reminderLoggedBody(variant, language)
       await this.prisma.notification.create({
         data: {
