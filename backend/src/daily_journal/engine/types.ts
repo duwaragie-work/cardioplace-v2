@@ -13,7 +13,7 @@ import type {
 /**
  * Session-averaged reading that feeds the rule pipeline. Computed by
  * SessionAverager from one or more JournalEntry rows grouped by sessionId or
- * a 30-min proximity window (CLINICAL_SPEC Part 5).
+ * a 5-min proximity window (CLINICAL_SPEC §5.2).
  */
 export interface SessionAverage {
   /** Primary entry id (used for DeviationAlert.journalEntryId). */
@@ -26,6 +26,29 @@ export interface SessionAverage {
   systolicBP: number | null
   /** Mean DBP across all readings in the session. Integer (rounded). */
   diastolicBP: number | null
+
+  /** F7 — the anchor (just-submitted) reading's RAW SBP/DBP, before averaging.
+   *  Patient- and caregiver-facing messages cite these so the body matches the
+   *  "Recorded 145/92" header the patient just saw; the physician message keeps
+   *  the session-averaged systolicBP/diastolicBP (the engine's evaluation truth).
+   *  Undefined falls back to the averaged value (e.g. synthetic single-reading
+   *  sessions where the two are identical). */
+  submittedSystolicBP?: number | null
+  submittedDiastolicBP?: number | null
+  /** Chunk B (Manisha Backdated Readings sign-off 2026-06-06) — the anchor
+   *  entry's measurement-lag band, computed at create time (Chunk A). Drives
+   *  the engine's HISTORICAL_ENTRY suppression (fix-up: ALL tiers) + the
+   *  DELAYED_ENTRY patient 911-CTA suppression. String (not the Prisma enum)
+   *  to keep the engine types dependency-light, mirroring serializeEntry. */
+  delayBand?: string
+  /** Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06,
+   *  Recheck #1 refinement + Recheck #2) — integer hours between the anchor
+   *  entry's measurement and its DB persist (floor((createdAt − measuredAt)
+   *  / 1h), clamped ≥0). Renders the "[X] hours" placeholder in the signed
+   *  DELAYED_ENTRY physician wording. Computed in SessionAverager.aggregate
+   *  alongside delayBand; undefined when the anchor lacks createdAt (direct
+   *  test callers). */
+  delayHours?: number
   /** Mean pulse across all readings in the session. Integer. */
   pulse: number | null
   /** Mean weight (lbs) across the session, or null when unrecorded. Used by
@@ -51,6 +74,20 @@ export interface SessionAverage {
    *  in `runPipeline` so the alert fires on the lone reading with a
    *  "confirm with next reading" annotation. */
   singleReadingFinalized: boolean
+
+  /** Option D (Manisha 2026-06-12 Q2) — the anchor entry's emergencyConfirmation
+   *  state ('AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED'), or null/undefined for
+   *  non-Option-D entries. Drives the retake-resolution branch in runPipeline.
+   *  String (not the Prisma enum) to keep engine types prisma-light. The
+   *  held AWAITING first-of-pair never reaches the engine (the service skips its
+   *  ENTRY_CREATED emit), so only CONFIRMATORY + UNCONFIRMED are evaluated. */
+  emergencyConfirmation?: string | null
+  /** Option D — on a CONFIRMATORY session, the first-of-pair (BP1) reading's
+   *  raw SBP/DBP (the AWAITING reading being confirmed). BP2 is the anchor's
+   *  submittedSystolicBP/submittedDiastolicBP. Both feed the
+   *  RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL physician message (BP1/BP2). */
+  optionDInitialSystolicBP?: number | null
+  optionDInitialDiastolicBP?: number | null
 
   /** Structured symptom flags — OR-reduced across the session's entries. */
   symptoms: SessionSymptoms
@@ -174,6 +211,15 @@ export interface RuleResultMetadata {
    *  brady-surveillance Tier 3 → Tier 2 escalation. Rendered in the
    *  physician message. */
   bradySustainedSessions?: number
+  /**
+   * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, conditional
+   * exception) — gestational age in weeks for pregnancy-rule alerts.
+   * Populated by pregnancy rules + the pregnancy ACE/ARB contraindication
+   * rule when the patient profile carries a `pregnancyDueDate`.
+   * `OutputGenerator.buildContext` propagates this to `AlertContext`, which
+   * the registry physician messages render as a "(Xw gestation)" suffix.
+   */
+  gestationalAgeWeeks?: number | null
 }
 
 /**

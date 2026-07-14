@@ -12,6 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Clock, Loader2 } from 'lucide-react';
 import {
   verifyMedication,
+  type MedicationHoldReason,
   type PatientMedication,
 } from '@/lib/services/patient-detail.service';
 
@@ -22,27 +23,19 @@ interface Props {
   onConfirmed: () => void;
 }
 
-const QUICK_PICKS: { key: string; label: string; rationale: string }[] = [
-  {
-    key: 'side-effects',
-    label: 'Possible side effects — pausing to review',
-    rationale: 'Possible side effects reported — holding pending clinical review.',
-  },
-  {
-    key: 'bp-too-low',
-    label: 'BP running low — reassess dosing',
-    rationale: 'Blood pressure trending low — holding to reassess dosing.',
-  },
-  {
-    key: 'awaiting-labs',
-    label: 'Awaiting labs / further review',
-    rationale: 'Holding until lab results / further review are available.',
-  },
-  { key: 'other', label: 'Other (free text)', rationale: '' },
+// Manisha 5/24 Med §3 — structured HOLD reason codes. PROVIDER_DIRECTED_HOLD is
+// the only clinical "stop taking it" path; the rest are administrative ("keep
+// taking it, we're reviewing the paperwork"). OTHER requires a free-text note.
+const REASONS: { key: MedicationHoldReason; label: string; clinical: boolean }[] = [
+  { key: 'PROVIDER_DIRECTED_HOLD', label: 'Provider-directed — patient should pause this medication', clinical: true },
+  { key: 'AWAITING_RECORDS', label: 'Awaiting medical records', clinical: false },
+  { key: 'UNCLEAR_NAME', label: 'Medication name is unclear', clinical: false },
+  { key: 'UNCLEAR_DOSE', label: 'Dose or frequency is unclear', clinical: false },
+  { key: 'OTHER', label: 'Other (free text required)', clinical: false },
 ];
 
 export default function MedicationHoldModal({ med, open, onClose, onConfirmed }: Props) {
-  const [picked, setPicked] = useState<string>('');
+  const [picked, setPicked] = useState<MedicationHoldReason | ''>('');
   const [rationale, setRationale] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -65,19 +58,23 @@ export default function MedicationHoldModal({ med, open, onClose, onConfirmed }:
     return () => window.removeEventListener('keydown', onKey);
   }, [open, submitting, onClose]);
 
-  const canSubmit = !submitting && rationale.trim().length > 0;
+  // Rationale is mandatory only for OTHER (backend rule); a reason must be picked.
+  const rationaleRequired = picked === 'OTHER';
+  const canSubmit =
+    !submitting && picked !== '' && (!rationaleRequired || rationale.trim().length > 0);
+  const isProviderDirected = picked === 'PROVIDER_DIRECTED_HOLD';
 
-  function handlePick(key: string, presetRationale: string) {
+  function handlePick(key: MedicationHoldReason) {
     setPicked(key);
-    setRationale(key === 'other' ? '' : presetRationale);
   }
 
   async function handleSubmit() {
+    // canSubmit aliases `picked !== ''`, so this narrows picked to MedicationHoldReason.
     if (!med || !canSubmit) return;
     setSubmitting(true);
     setError('');
     try {
-      await verifyMedication(med.id, 'HOLD', rationale.trim());
+      await verifyMedication(med.id, 'HOLD', rationale.trim() || undefined, picked);
       onConfirmed();
       onClose();
     } catch (e) {
@@ -154,8 +151,10 @@ export default function MedicationHoldModal({ med, open, onClose, onConfirmed }:
 
             <div className="flex-1 overflow-y-auto thin-scrollbar p-5 space-y-4">
               <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-                The patient is notified to stop taking this medication until the
-                care team clears it. A rationale is recorded in the audit log.
+                The reason determines what the patient is told. A
+                provider-directed hold instructs the patient to pause this
+                medication; an administrative hold tells the patient to keep
+                taking their medicines as usual while the team reviews the list.
               </p>
               <div>
                 <p
@@ -165,13 +164,13 @@ export default function MedicationHoldModal({ med, open, onClose, onConfirmed }:
                   Reason
                 </p>
                 <div className="space-y-2">
-                  {QUICK_PICKS.map((q) => {
+                  {REASONS.map((q) => {
                     const selected = picked === q.key;
                     return (
                       <button
                         key={q.key}
                         type="button"
-                        onClick={() => handlePick(q.key, q.rationale)}
+                        onClick={() => handlePick(q.key)}
                         data-testid={`admin-med-hold-pick-${q.key}`}
                         className="w-full text-left rounded-lg p-3 transition-colors cursor-pointer"
                         style={{
@@ -202,6 +201,15 @@ export default function MedicationHoldModal({ med, open, onClose, onConfirmed }:
                     );
                   })}
                 </div>
+                {isProviderDirected && (
+                  <p
+                    data-testid="admin-med-hold-clinical-note"
+                    className="text-[11.5px] mt-2 px-3 py-1.5 rounded-lg"
+                    style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
+                  >
+                    The patient will be told to <strong>pause {med.drugName}</strong> until the care team clears it.
+                  </p>
+                )}
               </div>
 
               {picked && (
@@ -211,7 +219,11 @@ export default function MedicationHoldModal({ med, open, onClose, onConfirmed }:
                     style={{ color: 'var(--brand-text-secondary)' }}
                   >
                     Clinical rationale
-                    <span style={{ color: 'var(--brand-warning-amber-text)' }}> · required</span>
+                    {rationaleRequired ? (
+                      <span style={{ color: 'var(--brand-warning-amber-text)' }}> · required</span>
+                    ) : (
+                      <span style={{ color: 'var(--brand-text-muted)' }}> · optional</span>
+                    )}
                   </label>
                   <textarea
                     value={rationale}
@@ -270,12 +282,20 @@ export default function MedicationHoldModal({ med, open, onClose, onConfirmed }:
                   )}
                 </button>
               </div>
-              {picked && rationale.trim().length === 0 && (
+              {picked === '' && (
                 <p
                   className="text-[11px] mt-2 text-center"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
-                  Rationale is required to place on hold.
+                  Select a reason to place on hold.
+                </p>
+              )}
+              {rationaleRequired && rationale.trim().length === 0 && (
+                <p
+                  className="text-[11px] mt-2 text-center"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                >
+                  A rationale is required when the reason is "Other".
                 </p>
               )}
             </div>

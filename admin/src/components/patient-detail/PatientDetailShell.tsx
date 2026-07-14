@@ -50,10 +50,23 @@ import ReadingsTab from './ReadingsTab';
 import ThresholdsTab from './ThresholdsTab';
 import TimelineTab from './TimelineTab';
 import CareTeamTab from './CareTeamTab';
+import CaregiversPanel from './CaregiversPanel';
+import { listCaregivers } from '@/lib/services/caregiver.service';
 import EnrollmentCard from './EnrollmentCard';
 import ConditionPill from './ConditionPill';
 
-type TabKey = 'profile' | 'medications' | 'alerts' | 'readings' | 'thresholds' | 'careteam' | 'timeline';
+/**
+ * Formats a canonical display ID ("CPPATK8M2R4N7") with hyphens
+ * ("CP-PAT-K8M2R4N-7") for human display. Mirrors DisplayIdService.
+ */
+function formatDisplayId(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value;
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`;
+}
+
+// Manual-test round 2 Group D2 — Caregivers is now its own first-class tab,
+// out of Care Team (where it was nested at the bottom of the assignment editor).
+type TabKey = 'profile' | 'medications' | 'alerts' | 'readings' | 'thresholds' | 'careteam' | 'caregivers' | 'timeline';
 
 // v2 condition tag — backend's derivePatientConditions returns these.
 // `severity` drives the pill color; `id` is stable for keys + future
@@ -67,6 +80,10 @@ export interface ConditionTag {
 
 interface PatientHeader {
   id: string;
+  // Permanent public-facing identifier (CP-PAT-...). Set at account
+  // creation; locked forever. See
+  // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+  displayId: string | null;
   name: string | null;
   email: string | null;
   riskTier: string | null;
@@ -83,6 +100,10 @@ interface PatientHeader {
    *  between the header and the tab nav. Pulled from getPatientSummary
    *  (which already returns it). */
   enrollmentStatus: string | null;
+  /** Manisha 2026-06-12 — true when a NOT_ENROLLED patient was previously
+   *  enrolled (auto-un-enrolled on serious-condition add). Drives the alert-
+   *  card "threshold pending" badge vs the F27 "no dispatch" badge. */
+  previouslyEnrolled?: boolean;
 }
 
 interface Props {
@@ -114,6 +135,10 @@ export default function PatientDetailShell({ patientId }: Props) {
   const [alerts, setAlerts] = useState<PatientAlert[]>([]);
   const [threshold, setThreshold] = useState<PatientThreshold | null>(null);
   const [logs, setLogs] = useState<ProfileVerificationLog[]>([]);
+  // Round 2 D2 — caregivers count for the tab badge. Mirrors the
+  // medications.length pattern; the panel itself does the full fetch when the
+  // tab is opened, so this is just the count-for-badge fetch.
+  const [caregiversCount, setCaregiversCount] = useState<number>(0);
 
   const [profileLoading, setProfileLoading] = useState(false);
   const [medsLoading, setMedsLoading] = useState(false);
@@ -162,6 +187,7 @@ export default function PatientDetailShell({ patientId }: Props) {
         const p = data?.patient ?? data;
         setHeader({
           id: p?.id ?? patientId,
+          displayId: p?.displayId ?? null,
           name: p?.name ?? null,
           email: p?.email ?? null,
           riskTier: p?.riskTier ?? null,
@@ -172,6 +198,7 @@ export default function PatientDetailShell({ patientId }: Props) {
           latestBP: p?.latestBP ?? null,
           lastEntryDate: p?.lastEntryDate ?? null,
           enrollmentStatus: p?.enrollmentStatus ?? null,
+          previouslyEnrolled: p?.previouslyEnrolled ?? false,
         });
       })
       .catch((e) => {
@@ -302,6 +329,21 @@ export default function PatientDetailShell({ patientId }: Props) {
   const onMedicationsChanged = useCallback(async () => {
     await Promise.all([loadMedications(), loadLogs()]);
   }, [loadMedications, loadLogs]);
+
+  // Round 2 D2 — caregivers count for the tab badge. Best-effort; a fetch
+  // failure leaves the badge at 0 (the tab still renders + the panel does its
+  // own loading/error treatment when opened).
+  const loadCaregiversCount = useCallback(async () => {
+    try {
+      const rows = await listCaregivers(patientId);
+      setCaregiversCount(rows.length);
+    } catch {
+      setCaregiversCount(0);
+    }
+  }, [patientId]);
+  useEffect(() => {
+    void loadCaregiversCount();
+  }, [loadCaregiversCount, headerRefreshTick]);
 
   const onAlertsResolved = useCallback(async () => {
     await Promise.all([loadAlerts(), loadLogs()]);
@@ -460,12 +502,14 @@ export default function PatientDetailShell({ patientId }: Props) {
     { key: 'alerts', label: 'Alerts', icon: <Bell className="w-3.5 h-3.5" />, count: header?.activeAlertsCount },
     { key: 'readings', label: 'Readings', icon: <Activity className="w-3.5 h-3.5" /> },
     { key: 'careteam', label: 'Care team', icon: <UsersIcon className="w-3.5 h-3.5" /> },
+    // Round 2 D2 — Caregivers is its own tab now (was nested under Care team).
+    { key: 'caregivers', label: 'Caregivers', icon: <UsersIcon className="w-3.5 h-3.5" />, count: caregiversCount || undefined },
     { key: 'timeline', label: 'Timeline', icon: <Clock className="w-3.5 h-3.5" /> },
   ];
 
   return (
     <div className="h-full" style={{ backgroundColor: 'var(--brand-background)' }}>
-      <main className="p-4 md:p-8 space-y-5 md:space-y-6 max-w-[1400px] mx-auto">
+      <div className="p-4 md:p-8 space-y-5 md:space-y-6 max-w-[1400px] mx-auto">
         {/* ── Back link ───────────────────────────────────────────────────── */}
         <button
           type="button"
@@ -538,6 +582,15 @@ export default function PatientDetailShell({ patientId }: Props) {
                       <span className="inline-flex items-center gap-1 min-w-0 max-w-full">
                         <Mail className="w-3 h-3 shrink-0" />
                         <span className="truncate">{header.email}</span>
+                      </span>
+                    )}
+                    {header.displayId && (
+                      <span
+                        className="inline-flex items-center font-mono tracking-tight"
+                        data-testid="admin-patient-display-id"
+                        title="Cardioplace ID — permanent, quote on support calls"
+                      >
+                        {formatDisplayId(header.displayId)}
                       </span>
                     )}
                     {header.lastEntryDate && (
@@ -801,6 +854,7 @@ export default function PatientDetailShell({ patientId }: Props) {
               <>
                 {medsError && <LoadErrorBanner message={medsError} onRetry={loadMedications} />}
                 <MedicationsTab
+                  patientUserId={patientId}
                   medications={medications}
                   loading={medsLoading}
                   onChanged={onMedicationsChanged}
@@ -817,6 +871,12 @@ export default function PatientDetailShell({ patientId }: Props) {
                   onResolved={onAlertsResolved}
                   heightCm={profile?.heightCm ?? null}
                   patientName={header?.name ?? null}
+                  patientPreEnrollment={
+                    header?.enrollmentStatus != null &&
+                    header.enrollmentStatus !== 'ENROLLED'
+                  }
+                  previouslyEnrolled={header?.previouslyEnrolled ?? false}
+                  onSetThreshold={() => setTab('thresholds')}
                 />
               </>
             )}
@@ -837,6 +897,9 @@ export default function PatientDetailShell({ patientId }: Props) {
             )}
             {tab === 'careteam' && (
               <CareTeamTab patientId={patientId} onChanged={onCareTeamChanged} />
+            )}
+            {tab === 'caregivers' && (
+              <CaregiversPanel patientId={patientId} />
             )}
             {tab === 'timeline' && (
               <>
@@ -859,7 +922,7 @@ export default function PatientDetailShell({ patientId }: Props) {
             <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--brand-text-muted)' }} />
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }

@@ -64,6 +64,16 @@ import {
   type AlertTier,
 } from '@/lib/services/provider.service';
 
+// F1: format a Date as YYYY-MM-DD in the viewer's LOCAL timezone. toISOString()
+// is UTC, so late-evening local readings would land on "tomorrow" UTC and the
+// trend end-date would exclude the current local day's data.
+function toLocalISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ProviderStats {
@@ -89,10 +99,11 @@ interface RawAlert {
   status: string;
   createdAt: string;
   acknowledgedAt: string | null;
-  followUpScheduledAt: string | null;
   patient: {
     id: string;
     name: string | null;
+    // Permanent public handle (CP-PAT-…) — makes the queue searchable by ID.
+    displayId?: string | null;
     communicationPreference?: string | null;
     riskTier?: string;
   } | null;
@@ -150,6 +161,10 @@ function tierBucket(a: RawAlert): TierFilter {
   // Cluster 8 — angioedema buckets into TIER_1 so the dashboard TIER_1
   // filter surfaces it alongside contraindications (Manisha "resolved
   // like all Tier 1 alerts").
+  // B.5 GATE (Manisha sign-off pending): a bespoke "Airway emergency" bucket
+  // + distinctive chrome (vs the generic Tier-1 red Pill) plugs in HERE and
+  // in bucketChrome() once Dr. Singal approves the label/colour. Until then
+  // angioedema is correctly visible + resolvable as Tier 1 (no functional gap).
   if (a.tier === 'TIER_1_CONTRAINDICATION' || a.tier === 'TIER_1_ANGIOEDEMA') return 'TIER_1';
   if (a.tier === 'TIER_2_DISCREPANCY') return 'TIER_2';
   if (a.tier === 'BP_LEVEL_1_HIGH' || a.tier === 'BP_LEVEL_1_LOW') return 'BP_L1';
@@ -202,10 +217,11 @@ function bucketChrome(bucket: TierFilter): {
         icon: <Activity className="w-3 h-3" />,
       };
     case 'TIER_3':
+      // Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3 = info-blue.
       return {
-        accent: 'var(--brand-accent-teal)',
-        accentText: 'var(--brand-accent-teal)',
-        light: 'var(--brand-accent-teal-light)',
+        accent: 'var(--brand-info-blue)',
+        accentText: 'var(--brand-info-blue)',
+        light: 'var(--brand-info-blue-light)',
         label: 'Tier 3 — Info',
         icon: <Bell className="w-3 h-3" />,
       };
@@ -237,7 +253,6 @@ function toAlertPanelShape(a: RawAlert): Alert {
     level: isHigh ? 'L2' : 'L1',
     color: isHigh ? 'red' : 'amber',
     patientId: a.patient?.id ?? '',
-    followUpScheduledAt: a.followUpScheduledAt,
   };
 }
 
@@ -296,9 +311,9 @@ export default function AdminDashboard() {
   const [trendStartDate, setTrendStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
+    return toLocalISODate(d);
   });
-  const [trendEndDate, setTrendEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [trendEndDate, setTrendEndDate] = useState(() => toLocalISODate(new Date()));
   type BpPoint = { day: string; systolic: number | null; diastolic: number | null; date: string; time: string | null };
   const [bpTrendData, setBpTrendData] = useState<BpPoint[]>([]);
 
@@ -356,9 +371,15 @@ export default function AdminDashboard() {
     if (tierFilter !== 'ALL') list = list.filter((a) => tierBucket(a) === tierFilter);
     if (alertSearch.trim()) {
       const q = alertSearch.trim().toLowerCase();
+      // displayId search — normalise both sides (strip hyphens/space, uppercase)
+      // so a pasted CP-PAT-… matches the canonical/hyphenated/lowercased forms,
+      // mirroring the patient-list search (Fix 11).
+      const norm = (s: string) => s.replace(/[\s-]/g, '').toUpperCase();
+      const qId = norm(alertSearch);
       list = list.filter(
         (a) =>
           (a.patient?.name ?? '').toLowerCase().includes(q) ||
+          (a.patient?.displayId ? norm(a.patient.displayId).includes(qId) : false) ||
           readingOf(a).toLowerCase().includes(q) ||
           (a.type ?? '').toLowerCase().includes(q),
       );
@@ -403,8 +424,8 @@ export default function AdminDashboard() {
     const start = new Date();
     start.setDate(start.getDate() - days);
     setTrendPreset(preset);
-    setTrendStartDate(start.toISOString().slice(0, 10));
-    setTrendEndDate(end.toISOString().slice(0, 10));
+    setTrendStartDate(toLocalISODate(start));
+    setTrendEndDate(toLocalISODate(end));
   };
 
   useEffect(() => {
@@ -514,7 +535,7 @@ export default function AdminDashboard() {
         .admin-scroll { scrollbar-width: thin; scrollbar-color: #E0D4F5 transparent; }
       `}</style>
 
-      <main className="p-4 md:p-8">
+      <div className="p-4 md:p-8">
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="mb-6">
           <div className="flex items-center justify-between">
@@ -672,7 +693,8 @@ export default function AdminDashboard() {
                     type="text"
                     value={alertSearch}
                     onChange={(e) => setAlertSearch(e.target.value)}
-                    placeholder="Search patient or BP"
+                    placeholder="Search patient, ID, or BP"
+                    aria-label="Search patient, ID, or BP"
                     data-testid="admin-dashboard-search"
                     className="flex-1 text-[11px] outline-none bg-transparent min-w-0"
                     style={{ color: 'var(--brand-text-primary)' }}
@@ -838,14 +860,6 @@ export default function AdminDashboard() {
                                 {chrome.icon}
                                 {chrome.label}
                               </span>
-                              {a.followUpScheduledAt && (
-                                <span
-                                  className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full"
-                                  style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
-                                >
-                                  Call scheduled
-                                </span>
-                              )}
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-[11.5px] font-bold" style={{ color: chrome.accentText }}>
@@ -949,7 +963,7 @@ export default function AdminDashboard() {
                     aria-label="Trend range end date"
                     value={trendEndDate}
                     min={trendStartDate}
-                    max={new Date().toISOString().slice(0, 10)}
+                    max={toLocalISODate(new Date())}
                     onChange={(e) => {
                       setTrendEndDate(e.target.value);
                       setTrendPreset('');
@@ -1049,7 +1063,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-      </main>
+      </div>
 
       {/* ── BP Trend Bottom Sheet — mobile/tablet ─────────────────────────── */}
       <AnimatePresence>

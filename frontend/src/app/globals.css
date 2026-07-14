@@ -7,6 +7,11 @@
   --foreground: #171717;
 }
 
+/* In-page anchor jumps (hero "How It Works" → #demo) ease instead of snapping. */
+html {
+  scroll-behavior: smooth;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -28,8 +33,11 @@ body {
   /* WCAG 2.2 AA — Cedar Hill / BridgePoint patients are mostly 50+ with
      reduced contrast sensitivity. 18px baseline ensures any unstyled
      <p>/<div> reads at "large text" size; explicit Tailwind text-* classes
-     still override when smaller copy is intentional (badges, captions). */
-  font-size: 18px;
+     still override when smaller copy is intentional (badges, captions).
+     Expressed in rem (1.125rem = 18px at the default 16px root) so the whole
+     app scales with the browser/OS font-size setting — WCAG 2.2 SC 1.4.4
+     (resize text to 200%) for our mostly-50+ patients. */
+  font-size: 1.125rem;
   line-height: 1.5;
 }
 
@@ -62,23 +70,69 @@ body {
    to <main id="main"> on each page, skipping navigation. */
 .skip-link {
   position: absolute;
-  top: -48px;
+  top: 0;
   left: 0;
+  /* Hide by translating up its OWN full height (+1px guard) rather than a
+     fixed `top: -48px`. At high browser zoom the rem font + padding make the
+     link taller than 48px, so a fixed offset let its bottom edge peek below
+     the top edge. translateY(-100%) scales with the element, so it stays
+     fully hidden at any zoom level. */
+  transform: translateY(calc(-100% - 1px));
   background: var(--brand-primary-purple, #7B00E0);
   color: white;
   padding: 12px 20px;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 0.875rem;
   border-radius: 0 0 8px 0;
   z-index: 1000;
-  transition: top 120ms ease-out;
+  transition: transform 120ms ease-out;
   text-decoration: none;
 }
 .skip-link:focus,
 .skip-link:focus-visible {
-  top: 0;
+  transform: translateY(0);
   outline: 3px solid #ffffff;
   outline-offset: -3px;
+}
+
+/* ── Visible keyboard focus (WCAG 2.4.7 Focus Visible) ────────────────────
+   Many controls use Tailwind's `outline-none`, which otherwise leaves
+   keyboard focus invisible. Restore a clear, on-brand focus ring for keyboard
+   / programmatic focus only — `:focus-visible` does NOT match mouse clicks, so
+   pointer users are unaffected. `outline` (not box-shadow) can't be clipped by
+   `overflow-hidden` ancestors and stays visible in Windows high-contrast /
+   forced-colors mode. Defined after the Tailwind import so it wins over plain
+   `.outline-none` (equal specificity, later source); controls that set their
+   own `focus:ring` still show those too. */
+:focus-visible {
+  outline: 2px solid var(--brand-primary-purple, #7B00E0);
+  outline-offset: 2px;
+}
+
+/* Chat composer: the rounded, bordered box IS the input affordance, so the
+   global :focus-visible purple ring on its <textarea> reads as a stray outline
+   (text inputs match :focus-visible even on mouse click). Suppress it there;
+   keyboard focus stays visible via the container's focus-within emphasis (a
+   neutral border darken, not the purple ring). Higher specificity than the
+   bare :focus-visible rule above, so it wins without !important. */
+[data-testid="chat-input"]:focus,
+[data-testid="chat-input"]:focus-visible {
+  outline: none;
+  outline-offset: 0;
+}
+[data-testid="chat-message-input"]:focus-within {
+  border-color: var(--brand-text-muted) !important;
+}
+/* Hide the chat textarea's scrollbar. It inherits the purple `.thin-scrollbar`
+   thumb, which — when text wraps (sooner on small screens) — shows on the right
+   edge and reads as a stray vertical purple line between the text and the
+   buttons. The field stays scrollable (wheel / touch); only the bar is hidden. */
+[data-testid="chat-input"] {
+  scrollbar-width: none; /* Firefox */
+}
+[data-testid="chat-input"]::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 /* ── Thin brand scrollbar utility ─────────────────────────────────────────
@@ -151,4 +205,42 @@ input[type="time"] {
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Mobile input-zoom fix (iOS Safari).
+   iOS Safari auto-zooms the viewport when a focused form field has a computed
+   font-size below 16px — which shifts/breaks the layout on phones. Enforce a
+   16px floor on TOUCH devices only (`pointer: coarse`) so desktop keeps its
+   compact type. `max(16px, 1rem)` keeps the field scaling up with the user's
+   browser font-size setting (WCAG 1.4.4 — resize text) while never dropping
+   below the no-zoom floor. We deliberately do NOT set `user-scalable=no` /
+   `maximum-scale=1`: pinch-zoom must stay available for our 50+/low-vision
+   patients. `!important` is required to win over Tailwind `text-*` utilities
+   set on individual inputs.
+   ────────────────────────────────────────────────────────────────────────── */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: max(16px, 1rem) !important;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Readable placeholders.
+   Tailwind Preflight defaults `::placeholder` to gray-400 (#9ca3af ≈ 2.8:1 on
+   white) — faint on phones and below WCAG AA, a real problem for our mostly-50+
+   patients. Set a darker default (~7:1) and keep opacity:1 (some mobile
+   browsers fade placeholders). Scoped to `@layer base` so any explicit
+   placeholder color utility (`placeholder:text-*`, e.g. the white-on-dark
+   footer fields) — which lives in Tailwind's `utilities` layer — overrides it.
+   An UNLAYERED rule would beat every utility regardless of specificity
+   (unlayered > layered) and wrongly turn intentional white placeholders dark.
+   ────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  ::placeholder {
+    color: #595959;
+    opacity: 1;
+  }
 }

@@ -4,8 +4,11 @@
 //
 // Provider-side longitudinal view of every BP journal entry the patient
 // has logged, with the same fields the patient sees on their /readings
-// page (per V2 feature request). Read-only: this surface is for
-// review/triage; edits are patient-side only.
+// page (per V2 feature request). Clinical write roles (SUPER_ADMIN /
+// MEDICAL_DIRECTOR / PROVIDER — canManageReadings) can also add readings on
+// the patient's behalf (clinic-floor entry, multi-reading sessions) and
+// edit/delete via the per-row kebab; every mutation writes an
+// ADMIN_READING_* audit row. Other roles see the original read-only view.
 //
 // Layout:
 //   • Filter row — date range (7d / 30d / 90d / custom) and tier filter.
@@ -20,24 +23,39 @@
 // rest of the provider controller (SUPER_ADMIN, MEDICAL_DIRECTOR,
 // PROVIDER, HEALPLACE_OPS).
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
   Calendar,
   CheckCircle2,
   Clock,
+  MoreHorizontal,
+  Pencil,
   Pill,
+  Plus,
   ShieldAlert,
   Smartphone,
   Stethoscope,
+  Trash2,
   Weight as WeightIcon,
   XCircle,
 } from 'lucide-react';
 import {
   getPatientJournalEntries,
+  getPatientRejectedReadings,
   type PatientJournalEntry,
+  type RejectedReading,
 } from '@/lib/services/provider.service';
+import { getPatientMedications, getPatientProfile } from '@/lib/services/patient-detail.service';
+import { hasLargeDiscrepancy } from '@cardioplace/shared';
+import { useAuth } from '@/lib/auth-context';
+import { canManageReadings } from '@/lib/roleGates';
+import AddEditReadingModal, {
+  DeleteReadingDialog,
+  kgToLbs,
+  type ReadingMedication,
+} from './AddEditReadingModal';
 
 interface Props {
   patientId: string;
@@ -92,7 +110,8 @@ function tierChrome(b: TierFilter | 'OTHER'): { label: string; color: string; bg
     case 'TIER_1': return { label: 'Tier 1', color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
     case 'TIER_2': return { label: 'Tier 2', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
     case 'BP_L1': return { label: 'BP L1', color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
-    case 'TIER_3': return { label: 'Tier 3', color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)' };
+    // Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3 = info-blue.
+    case 'TIER_3': return { label: 'Tier 3', color: 'var(--brand-info-blue)', bg: 'var(--brand-info-blue-light)' };
     default: return { label: 'Other', color: 'var(--brand-text-muted)', bg: 'var(--brand-background)' };
   }
 }
@@ -103,8 +122,35 @@ function formatDate(iso: string): string {
   });
 }
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+function formatTime(iso: string, withSeconds = false): string {
+  return new Date(iso).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(withSeconds ? { second: '2-digit' } : {}),
+  });
+}
+
+// Bug 15 — entry ids that share their local HH:MM with another entry in the
+// list. Those render with seconds so two readings submitted moments apart (now
+// stored at full-ms precision, no DB collision) don't both show "03:11 PM" and
+// read like a duplicate. Mirrors the patient /readings rule (cross-app parity).
+export function sameMinuteCollisionIds(
+  entries: ReadonlyArray<{ id: string; measuredAt: string }>,
+): Set<string> {
+  const byMinute = new Map<string, string[]>();
+  for (const e of entries) {
+    const d = new Date(e.measuredAt);
+    if (Number.isNaN(d.getTime())) continue;
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}-${d.getMinutes()}`;
+    const arr = byMinute.get(key);
+    if (arr) arr.push(e.id);
+    else byMinute.set(key, [e.id]);
+  }
+  const colliding = new Set<string>();
+  for (const arr of byMinute.values()) {
+    if (arr.length >= 2) for (const id of arr) colliding.add(id);
+  }
+  return colliding;
 }
 
 function dateFilterCutoff(filter: DateFilter): Date | null {
@@ -116,16 +162,121 @@ function dateFilterCutoff(filter: DateFilter): Date | null {
   return d;
 }
 
+// F25 — a single BP check-in writes one JournalEntry per reading, all sharing
+// a sessionId. The flat list rendered them as N indistinguishable rows, so an
+// admin couldn't tell three rows were one sitting. Group consecutive entries
+// that share a non-null sessionId; a group of ≥2 becomes a bordered session
+// card, singletons stay plain rows.
+export type ReadingGroup =
+  | { kind: 'session'; sessionId: string; entries: PatientJournalEntry[] }
+  | { kind: 'single'; entry: PatientJournalEntry };
+
+const READINGS_PROXIMITY_MS = 5 * 60 * 1000; // CLINICAL_SPEC §5.2 — 5-min window.
+
+// Bug 5 (live-test 2026-06-15) — whether two consecutive readings belong to the
+// same sitting. Explicit sessionId is authoritative: two non-null sessionIds
+// group only when equal (and a null never merges into a sessioned group — the
+// session boundary is respected). NULL-session rows (legacy data + chat-tool
+// entries that never carried a sessionId) fall back to the 5-min time-proximity
+// window, mirroring the patient app's grouping so the two surfaces agree.
+function sameSitting(a: PatientJournalEntry, b: PatientJournalEntry): boolean {
+  if (a.sessionId != null && b.sessionId != null) return a.sessionId === b.sessionId;
+  if (a.sessionId == null && b.sessionId == null) {
+    const ta = new Date(a.measuredAt).getTime();
+    const tb = new Date(b.measuredAt).getTime();
+    if (Number.isNaN(ta) || Number.isNaN(tb)) return false;
+    return Math.abs(ta - tb) <= READINGS_PROXIMITY_MS;
+  }
+  return false;
+}
+
+export function groupReadingsBySession(entries: PatientJournalEntry[]): ReadingGroup[] {
+  const groups: ReadingGroup[] = [];
+  let i = 0;
+  while (i < entries.length) {
+    let j = i + 1;
+    while (j < entries.length && sameSitting(entries[j - 1], entries[j])) j++;
+    const slice = entries.slice(i, j);
+    if (slice.length >= 2) {
+      // Prefer a real sessionId for the key; null-proximity groups get a
+      // synthetic key derived from the anchor entry's id.
+      const sid = slice.find((e) => e.sessionId != null)?.sessionId ?? `proximity-${slice[0].id}`;
+      groups.push({ kind: 'session', sessionId: sid, entries: slice });
+    } else {
+      groups.push({ kind: 'single', entry: slice[0] });
+    }
+    i = j;
+  }
+  return groups;
+}
+
+type ReadingModal =
+  | { type: 'add' }
+  | { type: 'view'; entry: PatientJournalEntry }
+  | { type: 'edit'; entry: PatientJournalEntry }
+  | { type: 'delete'; entry: PatientJournalEntry };
+
 export default function ReadingsTab({ patientId }: Props) {
   const [entries, setEntries] = useState<PatientJournalEntry[]>([]);
+  const [rejected, setRejected] = useState<RejectedReading[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilter>('30D');
   const [tierFilter, setTierFilter] = useState<TierFilter>('ALL');
+  const [modal, setModal] = useState<ReadingModal | null>(null);
 
+  const { user } = useAuth();
+  const canManage = canManageReadings(user);
+
+  // PatientProfile.isPregnant gates the modal's Pregnancy-specific symptom
+  // section (patient-check-in parity). Non-blocking: a fetch failure (e.g. a
+  // role without profile read) just hides the section for new entries —
+  // entries that already carry a pregnancy symptom still show it.
+  const [isPregnant, setIsPregnant] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    getPatientProfile(patientId)
+      .then((p) => {
+        if (!cancelled) setIsPregnant(p?.isPregnant === true);
+      })
+      .catch(() => {
+        if (!cancelled) setIsPregnant(false);
+      });
+    return () => { cancelled = true; };
+  }, [patientId]);
+
+  // Eligible meds for the modal's per-med "taken today?" question — same
+  // filter as the patient check-in: scheduled only (no AS_NEEDED), no
+  // HOLD/REJECTED, not discontinued. Non-blocking on failure.
+  const [eligibleMeds, setEligibleMeds] = useState<ReadingMedication[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getPatientMedications(patientId)
+      .then((list) => {
+        if (cancelled) return;
+        setEligibleMeds(
+          list
+            .filter(
+              (m) =>
+                m.frequency !== 'AS_NEEDED' &&
+                m.verificationStatus !== 'HOLD' &&
+                m.verificationStatus !== 'REJECTED' &&
+                m.discontinuedAt == null,
+            )
+            .map((m) => ({ id: m.id, drugName: m.drugName, drugClass: m.drugClass })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setEligibleMeds([]);
+      });
+    return () => { cancelled = true; };
+  }, [patientId]);
+
+  // Silent (no skeleton) when reloading after a mutation — the list is
+  // already on screen; a full skeleton flash would lose scroll position.
+  const load = useCallback((opts?: { silent?: boolean }) => {
+    let cancelled = false;
+    if (!opts?.silent) setLoading(true);
     setError(null);
     getPatientJournalEntries(patientId, { limit: 200 })
       .then((data) => {
@@ -139,8 +290,23 @@ export default function ReadingsTab({ patientId }: Props) {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    // Rejected readings are a separate, non-blocking QA note — a fetch failure
+    // here shouldn't break the main readings list.
+    getPatientRejectedReadings(patientId, { limit: 20 })
+      .then((data) => {
+        if (!cancelled) setRejected(data);
+      })
+      .catch(() => {
+        if (!cancelled) setRejected([]);
+      });
     return () => { cancelled = true; };
   }, [patientId]);
+
+  useEffect(() => load(), [load]);
+
+  const reload = useCallback(() => {
+    load({ silent: true });
+  }, [load]);
 
   const filtered = useMemo(() => {
     const cutoff = dateFilterCutoff(dateFilter);
@@ -158,6 +324,23 @@ export default function ReadingsTab({ patientId }: Props) {
 
   return (
     <div className="space-y-4">
+      {/* Add Reading — clinic-floor entry on the patient's behalf. Role-gated
+          to the clinical write roles (mirror of the backend controller). */}
+      {canManage && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            data-testid="admin-readings-add"
+            onClick={() => setModal({ type: 'add' })}
+            className="inline-flex items-center gap-1.5 px-4 h-9 rounded-full text-[13px] font-bold text-white cursor-pointer"
+            style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+          >
+            <Plus className="w-4 h-4" />
+            Add Reading
+          </button>
+        </div>
+      )}
+
       {/* Filter card */}
       <div
         className="bg-white rounded-2xl p-4 md:p-5 space-y-3"
@@ -243,6 +426,14 @@ export default function ReadingsTab({ patientId }: Props) {
         </p>
       </div>
 
+      {/* Rejected-reading QA note (Manisha 5/24 Q1) — readings the patient
+          tried to log with DBP ≥ SBP were rejected at entry (never persisted)
+          to avoid a false Level-2 emergency. Surfaced so a provider can prompt
+          a cuff check / re-measurement. */}
+      {!loading && rejected.length > 0 && (
+        <RejectedReadingsNote rejected={rejected} />
+      )}
+
       {/* List */}
       {loading ? (
         <ReadingsSkeleton />
@@ -252,18 +443,238 @@ export default function ReadingsTab({ patientId }: Props) {
         <EmptyCard hasReadings={entries.length > 0} />
       ) : (
         <div className="space-y-2" data-testid="admin-readings-list">
-          {filtered.map((entry) => (
-            <ReadingCard key={entry.id} entry={entry} />
-          ))}
+          {(() => {
+            // Bug 15 — flag entries that share a minute so they render HH:MM:SS.
+            const secondsIds = sameMinuteCollisionIds(filtered);
+            return groupReadingsBySession(filtered).map((g) =>
+              g.kind === 'session' ? (
+                <SessionGroupCard
+                  key={`session-${g.sessionId}`}
+                  group={g}
+                  secondsIds={secondsIds}
+                  onView={(e) => setModal({ type: 'view', entry: e })}
+                  onEdit={canManage ? (e) => setModal({ type: 'edit', entry: e }) : undefined}
+                  onDelete={canManage ? (e) => setModal({ type: 'delete', entry: e }) : undefined}
+                />
+              ) : (
+                <ReadingCard
+                  key={g.entry.id}
+                  entry={g.entry}
+                  showSeconds={secondsIds.has(g.entry.id)}
+                  onView={(e) => setModal({ type: 'view', entry: e })}
+                  onEdit={canManage ? (e) => setModal({ type: 'edit', entry: e }) : undefined}
+                  onDelete={canManage ? (e) => setModal({ type: 'delete', entry: e }) : undefined}
+                />
+              ),
+            );
+          })()}
         </div>
       )}
+
+      {(modal?.type === 'add' || modal?.type === 'edit' || modal?.type === 'view') && (
+        <AddEditReadingModal
+          patientUserId={patientId}
+          entry={modal.type === 'add' ? null : modal.entry}
+          viewOnly={modal.type === 'view'}
+          canEdit={canManage}
+          isPregnant={isPregnant}
+          medications={eligibleMeds}
+          onClose={() => setModal(null)}
+          onSaved={reload}
+        />
+      )}
+      {modal?.type === 'delete' && (
+        <DeleteReadingDialog
+          patientUserId={patientId}
+          entry={modal.entry}
+          onClose={() => setModal(null)}
+          onDeleted={reload}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Session group ───────────────────────────────────────────────────────────
+
+function SessionGroupCard({
+  group,
+  secondsIds,
+  onView,
+  onEdit,
+  onDelete,
+}: {
+  group: Extract<ReadingGroup, { kind: 'session' }>;
+  /** Bug 15 — ids whose minute collides with another reading, so the inner
+   *  cards render HH:MM:SS. */
+  secondsIds?: Set<string>;
+  onView?: (entry: PatientJournalEntry) => void;
+  onEdit?: (entry: PatientJournalEntry) => void;
+  onDelete?: (entry: PatientJournalEntry) => void;
+}) {
+  const times = group.entries.map((e) => new Date(e.measuredAt).getTime());
+  const first = new Date(Math.min(...times)).toISOString();
+  const last = new Date(Math.max(...times)).toISOString();
+
+  // Item B — Option D first-of-pair + CONFIRMATORY pair. When the two BPs differ
+  // a lot, surface a provider-side "Large discrepancy" flag: the first reading
+  // may be a measurement error or transient spike rather than a true episode.
+  // NOTE: on confirmation the backend CLEARS the first reading's
+  // emergencyConfirmation back to null (it's now a resolved historical reading),
+  // so find the CONFIRMATORY entry first, then its first-of-pair via
+  // confirmsEntryId — don't look for a lingering 'AWAITING'.
+  const confirmatory = group.entries.find(
+    (e) =>
+      e.emergencyConfirmation === 'CONFIRMATORY' &&
+      e.systolicBP != null &&
+      e.diastolicBP != null,
+  );
+  const awaiting = confirmatory
+    ? group.entries.find(
+        (e) =>
+          e.id === confirmatory.confirmsEntryId &&
+          e.systolicBP != null &&
+          e.diastolicBP != null,
+      )
+    : undefined;
+  const largeDiscrepancy =
+    awaiting != null &&
+    confirmatory != null &&
+    hasLargeDiscrepancy(
+      { systolicBP: awaiting.systolicBP!, diastolicBP: awaiting.diastolicBP! },
+      { systolicBP: confirmatory.systolicBP!, diastolicBP: confirmatory.diastolicBP! },
+    );
+
+  return (
+    <div
+      data-testid={`admin-readings-session-${group.sessionId}`}
+      className="rounded-2xl overflow-hidden"
+      style={{
+        border: '1.5px solid var(--brand-border)',
+        backgroundColor: 'var(--brand-background)',
+      }}
+    >
+      <div
+        data-testid="admin-readings-session-header"
+        className="px-4 py-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider"
+        style={{ color: 'var(--brand-text-muted)' }}
+      >
+        <Clock className="w-3 h-3" />
+        Session: {group.entries.length} readings · {formatTime(first)} – {formatTime(last)}
+        {largeDiscrepancy && awaiting && confirmatory && (
+          <span
+            data-testid="admin-readings-discrepancy-badge"
+            className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+            style={{
+              backgroundColor: 'var(--brand-warning-amber-light)',
+              color: 'var(--brand-warning-amber-text)',
+            }}
+            title={`First reading ${awaiting.systolicBP}/${awaiting.diastolicBP}, second reading ${confirmatory.systolicBP}/${confirmatory.diastolicBP}. Possible measurement error or transient spike — review with patient.`}
+          >
+            <AlertTriangle className="w-3 h-3" />
+            Large discrepancy
+          </span>
+        )}
+      </div>
+      <div className="px-2 pb-2 space-y-2">
+        {group.entries.map((e) => (
+          <ReadingCard
+            key={e.id}
+            entry={e}
+            showSeconds={secondsIds?.has(e.id) ?? false}
+            onView={onView}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
 // ─── Reading card ──────────────────────────────────────────────────────────
 
-function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
+// Kebab (⋯) actions menu — rendered only when the caller passed handlers
+// (i.e. the viewer holds a canManageReadings role). Plain useState dropdown;
+// closes on action click or via the invisible backdrop.
+function ReadingActionsMenu({
+  entry,
+  onEdit,
+  onDelete,
+}: {
+  entry: PatientJournalEntry;
+  onEdit: (entry: PatientJournalEntry) => void;
+  onDelete: (entry: PatientJournalEntry) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      {/* stopPropagation throughout — the card itself opens the read-only
+          view modal on click; kebab interactions must not bubble into it. */}
+      <button
+        type="button"
+        data-testid={`admin-reading-kebab-${entry.id}`}
+        aria-label="Reading actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        className="w-7 h-7 rounded-full inline-flex items-center justify-center cursor-pointer"
+        style={{ color: 'var(--brand-text-muted)' }}
+      >
+        <MoreHorizontal className="w-4 h-4" />
+      </button>
+      {open && (
+        <>
+          {/* Click-away backdrop */}
+          <div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+          <div
+            role="menu"
+            className="absolute right-0 top-8 z-20 w-32 rounded-xl bg-white py-1"
+            style={{ boxShadow: 'var(--brand-shadow-card)', border: '1px solid var(--brand-border)' }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              data-testid={`admin-reading-edit-${entry.id}`}
+              onClick={(e) => { e.stopPropagation(); setOpen(false); onEdit(entry); }}
+              className="w-full px-3 py-1.5 text-left text-[12.5px] font-semibold inline-flex items-center gap-2 cursor-pointer hover:bg-gray-50"
+              style={{ color: 'var(--brand-text-primary)' }}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              Edit
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-testid={`admin-reading-delete-${entry.id}`}
+              onClick={(e) => { e.stopPropagation(); setOpen(false); onDelete(entry); }}
+              className="w-full px-3 py-1.5 text-left text-[12.5px] font-semibold inline-flex items-center gap-2 cursor-pointer hover:bg-gray-50"
+              style={{ color: 'var(--brand-alert-red-text)' }}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ReadingCard({
+  entry,
+  showSeconds = false,
+  onView,
+  onEdit,
+  onDelete,
+}: {
+  entry: PatientJournalEntry;
+  /** Bug 15 — render HH:MM:SS when this reading shares its minute with another. */
+  showSeconds?: boolean;
+  onView?: (entry: PatientJournalEntry) => void;
+  onEdit?: (entry: PatientJournalEntry) => void;
+  onDelete?: (entry: PatientJournalEntry) => void;
+}) {
   const trueSymptoms = (
     Object.keys(SYMPTOM_LABELS) as Array<keyof typeof SYMPTOM_LABELS>
   ).filter((k) => entry[k] === true);
@@ -278,9 +689,12 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
 
   return (
     <div
-      className="bg-white rounded-2xl p-4 md:p-5"
+      className={`bg-white rounded-2xl p-4 md:p-5${onView ? ' cursor-pointer' : ''}`}
       data-testid={`admin-readings-card-${entry.id}`}
       style={{ boxShadow: 'var(--brand-shadow-card)' }}
+      // Card press opens the same modal read-only (view → Edit switch). The
+      // kebab and its menu stopPropagation so actions don't double-open it.
+      onClick={onView ? () => onView(entry) : undefined}
     >
       {/* Header — date + time + source + suboptimal flag */}
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
@@ -289,11 +703,15 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
             <Calendar className="w-3.5 h-3.5" style={{ color: 'var(--brand-text-muted)' }} />
             {formatDate(entry.measuredAt)}
           </span>
-          <span className="inline-flex items-center gap-1 text-[12px]" style={{ color: 'var(--brand-text-secondary)' }}>
+          <span
+            data-testid={`admin-reading-time-${entry.id}`}
+            className="inline-flex items-center gap-1 text-[12px]"
+            style={{ color: 'var(--brand-text-secondary)' }}
+          >
             <Clock className="w-3 h-3" />
-            {formatTime(entry.measuredAt)}
+            {formatTime(entry.measuredAt, showSeconds)}
           </span>
-          <SourcePill source={entry.source} />
+          <SourcePill source={entry.source} addedByName={entry.addedByName} />
           {entry.suboptimalMeasurement && (
             <span
               className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
@@ -308,10 +726,12 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
             </span>
           )}
         </div>
-        {/* Linked alert tier badges. Cluster 8.1 Gap 5 (Manisha 5/18/26):
-            a brady-surveillance deviation gets a distinct amber "Surveillance"
-            pill so the provider sees the flagged reading at a glance (the
-            doc's "reading flagged on the trend chart" — admin has no chart). */}
+        {/* Right side: linked alert tier badges + actions kebab. Cluster 8.1
+            Gap 5 (Manisha 5/18/26): a brady-surveillance deviation gets a
+            distinct amber "Surveillance" pill so the provider sees the
+            flagged reading at a glance (the doc's "reading flagged on the
+            trend chart" — admin has no chart). */}
+        <div className="flex items-center gap-1.5">
         {entry.deviations.length > 0 && (
           <div className="flex items-center gap-1.5 flex-wrap">
             {entry.deviations.map((d) => {
@@ -347,6 +767,10 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
             })}
           </div>
         )}
+        {onEdit && onDelete && (
+          <ReadingActionsMenu entry={entry} onEdit={onEdit} onDelete={onDelete} />
+        )}
+        </div>
       </div>
 
       {/* Vitals row */}
@@ -380,10 +804,12 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
           <Stat label="Position" value={entry.position[0] + entry.position.slice(1).toLowerCase()} />
         )}
         {entry.weight != null && (
+          // Weight is stored in kg but shown in lbs (US standard) — matches
+          // the patient readings page and the reading modal.
           <Stat
             label="Weight"
-            value={entry.weight.toFixed(1)}
-            unit="kg"
+            value={kgToLbs(entry.weight).toFixed(1)}
+            unit="lbs"
             icon={<WeightIcon className="w-3 h-3" />}
           />
         )}
@@ -412,6 +838,22 @@ function ReadingCard({ entry }: { entry: PatientJournalEntry }) {
           </span>
         )}
       </div>
+
+      {/* Narrow pulse-pressure artifact (Manisha 5/24 Q1) — PP < 15 at entry;
+          physician-only flag, possible measurement artifact, no alert tier. */}
+      {entry.narrowPpArtifact && (
+        <div
+          className="mb-3 inline-flex items-start gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg"
+          data-testid={`admin-readings-narrow-pp-${entry.id}`}
+          style={{
+            backgroundColor: 'var(--brand-warning-amber-light)',
+            color: 'var(--brand-warning-amber-text)',
+          }}
+        >
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+          <span>Narrow pulse pressure (&lt;15 mmHg) — possible measurement artifact.</span>
+        </div>
+      )}
 
       {/* Medication row */}
       {(entry.medicationTaken != null || missedRows.length > 0) && (
@@ -595,8 +1037,28 @@ function Stat({
   );
 }
 
-function SourcePill({ source }: { source: string }) {
+function SourcePill({ source, addedByName }: { source: string; addedByName?: string | null }) {
   const isHealthkit = source === 'healthkit';
+  // Admin-entered reading (source = ADMIN, JournalEntry.addedByUserId set) —
+  // purple staff chip with the actor's name so the card reads as a
+  // clinic-floor entry at a glance.
+  if (source === 'admin') {
+    return (
+      <span
+        data-testid="admin-readings-staff-pill"
+        className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+        style={{
+          backgroundColor: 'var(--brand-primary-purple-light)',
+          color: 'var(--brand-primary-purple)',
+          border: '1px solid var(--brand-primary-purple-light)',
+        }}
+        title={addedByName ? `Entered by ${addedByName}` : 'Entered by care-team staff'}
+      >
+        <Stethoscope className="w-3 h-3" />
+        {addedByName ? `Staff · ${addedByName}` : 'Staff'}
+      </span>
+    );
+  }
   return (
     <span
       className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
@@ -651,6 +1113,37 @@ function EmptyCard({ hasReadings }: { hasReadings: boolean }) {
           ? 'Widen the date range or clear the tier filter.'
           : "This patient hasn't logged any blood-pressure readings."}
       </p>
+    </div>
+  );
+}
+
+function RejectedReadingsNote({ rejected }: { rejected: RejectedReading[] }) {
+  const latest = rejected[0];
+  return (
+    <div
+      className="bg-white rounded-2xl p-4 flex items-start gap-3"
+      data-testid="admin-readings-rejected-note"
+      style={{
+        boxShadow: 'var(--brand-shadow-card)',
+        borderLeft: '4px solid var(--brand-warning-amber)',
+      }}
+    >
+      <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--brand-warning-amber)' }} />
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+          {rejected.length} physiologically implausible {rejected.length === 1 ? 'reading' : 'readings'} rejected at entry
+        </p>
+        <p className="text-[12px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+          The patient attempted to log {rejected.length === 1 ? 'a reading' : 'readings'} where the bottom
+          number was not below the top number. These were not saved and did not
+          trigger alerts. Consider prompting a cuff check or re-measurement.
+        </p>
+        {latest && (latest.systolicBP != null || latest.diastolicBP != null) && (
+          <p className="text-[11.5px] mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+            Most recent: {latest.systolicBP ?? '—'}/{latest.diastolicBP ?? '—'} mmHg · {formatDate(latest.createdAt)} {formatTime(latest.createdAt)}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

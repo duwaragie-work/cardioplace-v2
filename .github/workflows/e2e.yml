@@ -58,6 +58,10 @@ jobs:
       JWT_ACCESS_EXPIRES_IN: 15m
       JWT_REFRESH_SECRET: ci-jwt-refresh-secret
       JWT_REFRESH_EXPIRES_IN: 30d
+      # MFA (TOTP) — EncryptionService requires a 32-byte key as 64 hex chars
+      # (^[0-9a-fA-F]{64}$). Without it every mfa/enroll/complete returns 500
+      # (specs 66/66b). CI-only throwaway key; prod sets a real secret.
+      MFA_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
       WEB_APP_URL: http://localhost:3000,http://localhost:3001
       ADMIN_BASE_URL: http://localhost:3001
       COOKIE_SAME_SITE: lax
@@ -68,6 +72,13 @@ jobs:
       # start step below.
       RESEND_API_KEY: re_dummy_ci_key
       GOOGLE_API_KEY: ci-noop
+      # Vertex AI — the compiled backend (node dist/main) constructs
+      # VoiceService → buildGoogleGenAIClient(), which throws at startup
+      # without GOOGLE_CLOUD_PROJECT (Cardioplace is Vertex-only). Unlike the
+      # jest LLM specs (which self-skip when it's unset), the real backend has
+      # no guard, so the project must be present or every shard's backend dies.
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+      GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
       GEMINI_CHAT_MODEL: gemini-2.5-flash
       DRUG_ENRICHMENT_ENABLED: 'false'
       CHAT_V2_PROMPT_ENABLED: 'false'
@@ -132,6 +143,19 @@ jobs:
       - name: Build admin
         working-directory: admin
         run: npm run build
+
+      # Vertex AI ADC: the @google/genai SDK authenticates via Application
+      # Default Credentials, which loads a service-account key-file PATH from
+      # GOOGLE_APPLICATION_CREDENTIALS. The secret holds the JSON content, so
+      # write it to a temp file and point ADC at it for the backend process.
+      # (Mapped via env: + printf rather than inline interpolation so the JSON
+      # body can't break the shell.)
+      - name: Write GCP service-account key
+        env:
+          GCP_SA_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+        run: |
+          printf '%s' "$GCP_SA_JSON" > "$RUNNER_TEMP/gcp-sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp-sa.json" >> "$GITHUB_ENV"
 
       - name: Start backend (compiled, single process)
         env:

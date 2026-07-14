@@ -38,6 +38,17 @@ interface Props {
    *  resolve modal showed "Unknown patient". Thread it from the shell.
    *  (Phase 1 polish Finding 8.) */
   patientName?: string | null;
+  /** F27 — true when the patient is not yet ENROLLED. The escalation pipeline
+   *  defers all dispatch until enrollment, so OPEN alerts on this patient were
+   *  never sent. AlertCard surfaces a "No dispatch — awaiting enrollment"
+   *  badge so a provider can prioritize enrolling them. */
+  patientPreEnrollment?: boolean;
+  /** Manisha 2026-06-12 — true when this NOT_ENROLLED patient was previously
+   *  enrolled. Selects the "threshold pending" badge over the F27 badge. */
+  previouslyEnrolled?: boolean;
+  /** Navigate to the patient's threshold-editing tab — wired from the shell's
+   *  setTab('thresholds'); used by the threshold-pending badge. */
+  onSetThreshold?: () => void;
 }
 
 type TierBucket = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
@@ -61,7 +72,8 @@ function bucketChromeFilter(b: TierBucket): { color: string; bg: string } {
     case 'TIER_1': return { color: 'var(--brand-alert-red-text)', bg: 'var(--brand-alert-red-light)' };
     case 'TIER_2': return { color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
     case 'BP_L1': return { color: 'var(--brand-warning-amber-text)', bg: 'var(--brand-warning-amber-light)' };
-    case 'TIER_3': return { color: 'var(--brand-accent-teal)', bg: 'var(--brand-accent-teal-light)' };
+    // Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3 = info-blue.
+    case 'TIER_3': return { color: 'var(--brand-info-blue)', bg: 'var(--brand-info-blue-light)' };
     default: return { color: 'var(--brand-text-muted)', bg: 'var(--brand-background)' };
   }
 }
@@ -78,7 +90,55 @@ function timeAgo(iso: string): string {
   return `${d}d ago`;
 }
 
-export default function AlertsTab({ alerts, loading, onResolved, heightCm, patientName }: Props) {
+// F5 — alerts co-fired off one reading (sharing JournalEntry.measuredAt) are
+// grouped into a bordered container so the provider sees they're independent
+// findings on a single event, scoped apart from the standalone alerts below.
+type AlertGroup =
+  | { kind: 'cofire'; key: string; alerts: PatientAlert[] }
+  | { kind: 'single'; alert: PatientAlert };
+
+// F6 — clinical priority within a cofire group, highest first:
+// Tier 1 > BP L2 > Tier 2 > BP L1 > Tier 3. Mirrors the dashboard banner
+// picker so the most urgent finding always leads the group (previously the
+// informational Tier 3 caregiver-edema row could sort above BP Level 1).
+const TIER_PRIORITY: Record<TierBucket, number> = {
+  TIER_1: 100,
+  BP_L2: 80,
+  TIER_2: 60,
+  BP_L1: 40,
+  TIER_3: 20,
+  OTHER: 10,
+  ALL: 0,
+};
+
+export function groupAlertsByReading(alerts: PatientAlert[]): AlertGroup[] {
+  const groups: AlertGroup[] = [];
+  let i = 0;
+  while (i < alerts.length) {
+    const key = alerts[i].journalEntry?.measuredAt ?? null;
+    if (key != null) {
+      let j = i + 1;
+      while (j < alerts.length && (alerts[j].journalEntry?.measuredAt ?? null) === key) j++;
+      if (j - i >= 2) {
+        // F6 — order the cofire members by tier priority descending. Stable
+        // for equal tiers (slice preserves the source order before sorting).
+        const members = alerts
+          .slice(i, j)
+          .sort(
+            (a, b) => TIER_PRIORITY[tierBucket(b.tier)] - TIER_PRIORITY[tierBucket(a.tier)],
+          );
+        groups.push({ kind: 'cofire', key, alerts: members });
+        i = j;
+        continue;
+      }
+    }
+    groups.push({ kind: 'single', alert: alerts[i] });
+    i++;
+  }
+  return groups;
+}
+
+export default function AlertsTab({ alerts, loading, onResolved, heightCm, patientName, patientPreEnrollment = false, previouslyEnrolled = false, onSetThreshold }: Props) {
   const [tierFilter, setTierFilter] = useState<TierBucket>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('OPEN');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -127,63 +187,67 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
     () => alerts.filter((a) => tierBucket(a.tier) === 'TIER_3'),
     [alerts],
   );
-  const nonTier3Alerts = useMemo(
-    () => alerts.filter((a) => tierBucket(a.tier) !== 'TIER_3'),
-    [alerts],
-  );
+  // Round 2 A3 — nonTier3Alerts retired. The main list now renders the full
+  // `alerts` array when ALL is selected; tier3Alerts feeds the dedicated
+  // Physician-notes section + the TIER_3 chip-filter view.
 
-  // Counts feed the pill badges. ALL excludes Tier 3 (matches main-list
-  // default: Tier 3 lives in Physician notes when filter is ALL). The
-  // Tier 3 bucket is counted from the full alerts array so its pill
-  // accurately reflects how many will appear when the user selects it.
+  // Counts feed the pill badges. Manual-test round 2 Group A3: ALL now means
+  // ALL — the count + list include Tier 3 inline so "All (6)" can't mislead
+  // a clinician scanning the queue. The dedicated "Physician notes" section
+  // below stays as a curated view available via the TIER_3 chip.
   const counts = useMemo(() => {
     const acc: Record<TierBucket, number> = { ALL: 0, BP_L2: 0, TIER_1: 0, TIER_2: 0, BP_L1: 0, TIER_3: 0, OTHER: 0 };
-    for (const a of nonTier3Alerts) {
+    for (const a of alerts) {
       if (statusFilter !== 'ALL' && a.status !== statusFilter) continue;
       acc.ALL++;
       acc[tierBucket(a.tier)]++;
     }
-    for (const a of tier3Alerts) {
-      if (statusFilter !== 'ALL' && a.status !== statusFilter) continue;
-      acc.TIER_3++;
-    }
     return acc;
-  }, [nonTier3Alerts, tier3Alerts, statusFilter]);
+  }, [alerts, statusFilter]);
 
-  // Filtered list rules:
-  //   • TIER_3 selected → show only Tier 3 alerts in the main list.
+  // Filtered list rules (Round 2 A3):
+  //   • TIER_3 selected → only Tier 3 alerts in the main list.
   //     The Physician-notes section is suppressed (rows would otherwise
   //     duplicate).
-  //   • ALL → show non-Tier-3 alerts only (Physician notes section
-  //     handles Tier 3 below the main list).
-  //   • Any other tier → show only that tier's non-Tier-3 alerts.
+  //   • ALL → every alert (Tier 3 inline with the rest).
+  //   • Any other tier → only that tier's alerts.
   const filtered = useMemo(() => {
     if (tierFilter === 'TIER_3') {
       return tier3Alerts.filter(
         (a) => statusFilter === 'ALL' || a.status === statusFilter,
       );
     }
-    return nonTier3Alerts.filter((a) => {
+    return alerts.filter((a) => {
       if (statusFilter !== 'ALL' && a.status !== statusFilter) return false;
       if (tierFilter !== 'ALL' && tierBucket(a.tier) !== tierFilter) return false;
       return true;
     });
-  }, [nonTier3Alerts, tier3Alerts, tierFilter, statusFilter]);
+  }, [alerts, tier3Alerts, tierFilter, statusFilter]);
 
   // Cluster 6 Q4 (Manisha 5/9/26) — group alerts that came off the same
   // reading (matched on JournalEntry.measuredAt — proxy for journalEntryId
-  // since the API doesn't surface the id directly). The "2 active alerts"
-  // header makes it clear to the provider that the rows are independent
+  // since the API doesn't surface the id directly). F5 wraps each ≥2 group in
+  // a bordered container; the header makes it clear the rows are independent
   // findings on one event (e.g. pregnancy ACE + L2 BP + L1 high).
-  const groupCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const a of filtered) {
-      const key = a.journalEntry?.measuredAt;
-      if (!key) continue;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    return counts;
-  }, [filtered]);
+  const alertGroups = useMemo(() => groupAlertsByReading(filtered), [filtered]);
+
+  // F4 — the pre-personalization "X of 7 baseline readings" note is patient-
+  // state metadata, not alert-tier-specific. It previously lived inside each
+  // expanded AlertCard, so it was invisible until a card was opened and read
+  // inconsistently across filter tabs. Hoist it to a single patient-header
+  // band (below) that renders once per page regardless of the active filter.
+  // Derive it from any alert carrying the flag — all of one patient's alerts
+  // share the same baseline count + threshold.
+  const personalizationNote = useMemo(() => {
+    const src = alerts.find(
+      (a) => a.preDay3 && a.personalizationThreshold != null,
+    );
+    if (!src) return null;
+    return {
+      threshold: src.personalizationThreshold as number,
+      completed: src.baselineReadingCount ?? 0,
+    };
+  }, [alerts]);
 
   const resolvable: ResolvableAlert | null = useMemo(() => {
     if (!resolving) return null;
@@ -230,6 +294,35 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
     [onResolved],
   );
 
+  // Shared AlertCard renderer — reused by both the cofire group members and
+  // the standalone single cards so the expand + handler wiring stays in one
+  // place.
+  const renderAlertCard = (a: PatientAlert) => {
+    const expanded = expandedId === a.id;
+    const toggle = () => setExpandedId(expanded ? null : a.id);
+    return (
+      <AlertCard
+        alert={a}
+        expanded={expanded}
+        // On the per-patient tab the row IS the toggle — clicking anywhere in
+        // the row body expands/collapses. The chevron mirrors that handler.
+        onRowClick={toggle}
+        onToggleExpand={toggle}
+        onResolve={() => setResolving(a)}
+        onAcknowledge={() => void handleAcknowledge(a.id)}
+        ackInFlight={acking.has(a.id)}
+        heightCm={heightCm}
+        patientPreEnrollment={patientPreEnrollment}
+        previouslyEnrolled={previouslyEnrolled}
+        onThresholdAction={onSetThreshold}
+        // P3 — the pre-personalization note is shown once in the patient-header
+        // band above; suppress the per-card copy so a cofire group doesn't
+        // repeat it on each of its alerts.
+        hideDisclaimer
+      />
+    );
+  };
+
   if (loading && alerts.length === 0) {
     return (
       <div className="bg-white rounded-2xl p-6 animate-pulse" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
@@ -245,6 +338,23 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
 
   return (
     <div className="space-y-4">
+      {/* F4 — patient-header personalization band. Standard thresholds apply
+          until the patient has the required baseline readings; surface that
+          once per page (all filters) so a provider reads every alert in
+          context without expanding each card. */}
+      {personalizationNote && (
+        <div
+          data-testid="admin-alerts-personalization-band"
+          className="bg-white rounded-2xl px-4 py-3 text-[11.5px] leading-relaxed"
+          style={{ boxShadow: 'var(--brand-shadow-card)', color: 'var(--brand-text-secondary)' }}
+        >
+          Standard threshold — personalization begins after{' '}
+          {personalizationNote.threshold} readings. This patient has completed{' '}
+          {personalizationNote.completed} of {personalizationNote.threshold}{' '}
+          baseline readings.
+        </div>
+      )}
+
       {/* Filters card */}
       <div className="bg-white rounded-2xl p-4 md:p-5 space-y-3" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
         {/* Status segmented control */}
@@ -344,53 +454,48 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
-          {filtered.map((a, idx) => {
-            const expanded = expandedId === a.id;
-            const toggle = () => setExpandedId(expanded ? null : a.id);
-            // Cluster 6 Q4 — render a "Same reading" group header above
-            // the first alert of any reading that produced ≥2 rows.
-            const measuredAtKey = a.journalEntry?.measuredAt ?? null;
-            const groupCount = measuredAtKey ? (groupCounts.get(measuredAtKey) ?? 1) : 1;
-            const prevMeasuredAtKey =
-              idx > 0 ? (filtered[idx - 1].journalEntry?.measuredAt ?? null) : null;
-            const isGroupStart =
-              groupCount >= 2 && measuredAtKey != null && measuredAtKey !== prevMeasuredAtKey;
-            return (
+        <div className="space-y-2" data-testid="admin-alerts-list">
+          {alertGroups.map((g) =>
+            g.kind === 'cofire' ? (
               <div
-                key={a.id}
+                key={`cofire-${g.key}`}
+                data-testid="admin-alert-cofire-group"
+                className="bg-white rounded-2xl overflow-hidden"
                 style={{
-                  borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none',
+                  boxShadow: 'var(--brand-shadow-card)',
+                  border: '1.5px solid var(--brand-border)',
                 }}
               >
-                {isGroupStart && (
+                <div
+                  data-testid="admin-alert-group-header"
+                  className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider"
+                  style={{
+                    backgroundColor: 'var(--brand-background)',
+                    color: 'var(--brand-text-muted)',
+                    borderBottom: '1px solid var(--brand-border)',
+                  }}
+                >
+                  {g.alerts.length} alerts from the same reading — independently resolvable
+                </div>
+                {g.alerts.map((a, idx) => (
                   <div
-                    className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider"
-                    style={{
-                      backgroundColor: 'var(--brand-background)',
-                      color: 'var(--brand-text-muted)',
-                      borderBottom: '1px solid var(--brand-border)',
-                    }}
+                    key={a.id}
+                    style={{ borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none' }}
                   >
-                    {groupCount} alerts from the same reading — independently resolvable
+                    {renderAlertCard(a)}
                   </div>
-                )}
-                <AlertCard
-                  alert={a}
-                  expanded={expanded}
-                  // On the per-patient tab the row IS the toggle — clicking
-                  // anywhere in the row body expands/collapses, matching the
-                  // pre-extract behavior. The chevron mirrors that handler.
-                  onRowClick={toggle}
-                  onToggleExpand={toggle}
-                  onResolve={() => setResolving(a)}
-                  onAcknowledge={() => void handleAcknowledge(a.id)}
-                  ackInFlight={acking.has(a.id)}
-                  heightCm={heightCm}
-                />
+                ))}
               </div>
-            );
-          })}
+            ) : (
+              <div
+                key={g.alert.id}
+                className="bg-white rounded-2xl overflow-hidden"
+                style={{ boxShadow: 'var(--brand-shadow-card)' }}
+              >
+                {renderAlertCard(g.alert)}
+              </div>
+            ),
+          )}
         </div>
       )}
 
@@ -401,23 +506,29 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
           CLINICAL_SPEC V2-C Layer 1 these are physician-only and have no
           patientMessage / caregiverMessage.
           Suppressed when the Tier 3 pill is active because the same rows
-          render in the main list above (filter target). */}
-      {tier3Alerts.length > 0 && tierFilter !== 'TIER_3' && (
+          render in the main list above (filter target). Round 2 A3 — also
+          suppressed when ALL is active so Tier 3 rows don't render twice
+          (they now appear inline in the main list under ALL). */}
+      {tier3Alerts.length > 0 && tierFilter !== 'TIER_3' && tierFilter !== 'ALL' && (
         <div
           className="bg-white rounded-2xl overflow-hidden"
           style={{ boxShadow: 'var(--brand-shadow-card)' }}
         >
+          {/* Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3
+              chrome moves from teal to info-blue across the Physician notes
+              block (background tint, icon, heading, count chip, list-item
+              avatar). */}
           <div
             className="px-4 md:px-5 py-2.5 flex items-center gap-2"
             style={{
-              backgroundColor: 'var(--brand-accent-teal-light)',
+              backgroundColor: 'var(--brand-info-blue-light)',
               borderBottom: '1px solid var(--brand-border)',
             }}
           >
-            <Stethoscope className="w-3.5 h-3.5" style={{ color: 'var(--brand-accent-teal)' }} />
+            <Stethoscope className="w-3.5 h-3.5" style={{ color: 'var(--brand-info-blue)' }} />
             <p
               className="text-[11px] font-bold uppercase tracking-wider"
-              style={{ color: 'var(--brand-accent-teal)' }}
+              style={{ color: 'var(--brand-info-blue)' }}
             >
               Physician notes
             </p>
@@ -425,7 +536,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
               className="text-[10px] font-bold px-1.5 rounded-full ml-auto"
               style={{
                 backgroundColor: 'white',
-                color: 'var(--brand-accent-teal)',
+                color: 'var(--brand-info-blue)',
                 minWidth: 18,
                 textAlign: 'center',
               }}
@@ -442,7 +553,7 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
               <div className="flex items-start gap-3">
                 <div
                   className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-white"
-                  style={{ backgroundColor: 'var(--brand-accent-teal)' }}
+                  style={{ backgroundColor: 'var(--brand-info-blue)' }}
                   aria-hidden
                 >
                   <Bell className="w-3 h-3" />

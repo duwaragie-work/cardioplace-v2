@@ -7,12 +7,114 @@ import {
   type ContextThreshold,
   type ContextAssignment,
   type DrugClassInput,
+  type EffectiveThreshold,
   type HeartFailureTypeInput,
   type MedicationSourceInput,
   type MedicationVerificationStatusInput,
   type ResolvedContext,
+  type ThresholdRuleSource,
 } from '@cardioplace/shared'
 import { PrismaService } from '../../prisma/prisma.service.js'
+import { cadDefaultUpper, cadRampApplies } from '../engine/condition-branches.js'
+
+// Item C / Bug 24 — effective-threshold constants mirror the engine rules so the
+// dashboard shows the SAME numbers the engine alerts on.
+//   pregnancy-thresholds.ts: L1 high 140/90
+//   standard.ts:             L1 high 160/100 (AHA target 140/90 + 20 SBP / 10 DBP)
+//   personalized.ts:         SBP target + 20 (no DBP-high rule — see note below)
+//   condition-branches.ts:   HFrEF default upper 160; CAD DBP-high 80 (ramp)
+const PREG_SBP = 140
+const PREG_DBP = 90
+const HFREF_DEFAULT_UPPER = 160
+const STANDARD_HIGH_SBP = 160
+const STANDARD_HIGH_DBP = 100
+const STANDARD_GOAL_SBP = 140
+const STANDARD_GOAL_DBP = 90
+const SBP_TOLERANCE = 20
+const DBP_TOLERANCE = 10
+const CAD_DBP_HIGH = 80
+
+interface ThresholdCandidate {
+  sbpAlert: number
+  dbpAlert: number
+  sbpGoal: number
+  dbpGoal: number
+  source: ThresholdRuleSource
+}
+
+/**
+ * Pure computation of the patient's effective high-alert threshold — the lowest
+ * point (across every applicable engine rule) at which an alert fires, plus the
+ * displayable goal. Mirrors the engine's rule selection so the dashboard never
+ * advertises a different alert point than the engine uses.
+ *
+ * DBP note (flagged for Manisha): the engine's HFrEF and PERSONALIZED rules are
+ * SBP-only — there is no dedicated DBP-high rule for those modes. For display we
+ * fall back to the standard DBP alert (100) for HFrEF and goal+10 for
+ * personalized. SBP (the source of the reported pregnancy bug) is exact.
+ */
+export function computeEffectiveThreshold(ctx: ResolvedContext): EffectiveThreshold {
+  const custom = ctx.threshold
+  const candidates: ThresholdCandidate[] = []
+
+  if (ctx.pregnancyThresholdsActive) {
+    candidates.push({ sbpAlert: PREG_SBP, dbpAlert: PREG_DBP, sbpGoal: PREG_SBP, dbpGoal: PREG_DBP, source: 'pregnancy' })
+  }
+  if (ctx.profile.resolvedHFType === 'HFREF') {
+    const sbp = custom?.sbpUpperTarget ?? HFREF_DEFAULT_UPPER
+    const dbp = custom?.dbpUpperTarget ?? STANDARD_HIGH_DBP // HFrEF is SBP-only in the engine
+    candidates.push({ sbpAlert: sbp, dbpAlert: dbp, sbpGoal: sbp, dbpGoal: dbp, source: 'hfref' })
+  }
+  if (ctx.profile.hasCAD) {
+    const sbp = custom?.sbpUpperTarget ?? cadDefaultUpper(ctx)
+    const dbp = custom?.dbpUpperTarget ?? (cadRampApplies(ctx) ? CAD_DBP_HIGH : STANDARD_HIGH_DBP)
+    candidates.push({ sbpAlert: sbp, dbpAlert: dbp, sbpGoal: sbp, dbpGoal: dbp, source: 'cad' })
+  }
+  if (ctx.personalizedEligible && custom?.sbpUpperTarget != null) {
+    const gSbp = custom.sbpUpperTarget
+    const gDbp = custom.dbpUpperTarget ?? STANDARD_GOAL_DBP
+    candidates.push({
+      sbpAlert: gSbp + SBP_TOLERANCE,
+      dbpAlert: gDbp + DBP_TOLERANCE,
+      sbpGoal: gSbp,
+      dbpGoal: gDbp,
+      source: 'personalized',
+    })
+  }
+  if (candidates.length === 0) {
+    candidates.push({
+      sbpAlert: STANDARD_HIGH_SBP,
+      dbpAlert: STANDARD_HIGH_DBP,
+      sbpGoal: STANDARD_GOAL_SBP,
+      dbpGoal: STANDARD_GOAL_DBP,
+      source: 'standard',
+    })
+  }
+
+  // Effective alert = MIN across applicable rules (the lowest fires first); the
+  // displayed goal comes from the rule that binds the SBP alert.
+  const sbpHighAlertThreshold = Math.min(...candidates.map((c) => c.sbpAlert))
+  const dbpHighAlertThreshold = Math.min(...candidates.map((c) => c.dbpAlert))
+  const driving = candidates.reduce((a, b) => (b.sbpAlert < a.sbpAlert ? b : a))
+
+  const overrideReason: EffectiveThreshold['overrideReason'] = ctx.pregnancyThresholdsActive
+    ? 'pregnancy'
+    : ctx.profile.resolvedHFType === 'HFREF'
+      ? 'hfref'
+      : ctx.profile.hasCAD
+        ? 'cad'
+        : null
+
+  return {
+    sbpHighAlertThreshold,
+    dbpHighAlertThreshold,
+    sbpGoal: driving.sbpGoal,
+    dbpGoal: driving.dbpGoal,
+    toleranceMmHg: overrideReason ? 0 : SBP_TOLERANCE,
+    basedOn: candidates.map((c) => c.source),
+    overrideReason,
+  }
+}
 
 /**
  * Phase/4 ProfileResolver — loads the patient's clinical context in a single
@@ -64,6 +166,29 @@ export class ProfileResolverService {
     const assignment = this.buildAssignment(user.providerAssignmentAsPatient)
 
     const preDay3Mode = readingCount < ProfileResolverService.PRE_DAY_3_MIN_READINGS
+    /**
+     * Personalization semantics (per Dr. Singal Q3, 2026-06-02):
+     *
+     * Personalization requires explicit provider-set PatientThreshold rows.
+     * The "Personalization begins after 7 readings" copy in patient-facing UI
+     * means providers CAN now set personalized thresholds — it does NOT mean
+     * the engine auto-derives them. That is exactly what this line encodes:
+     * `personalizedEligible` is true ONLY when a provider-set threshold exists
+     * AND the patient has ≥7 readings; it is never derived from the readings.
+     *
+     * Patients with no condition flags (e.g., isolated essential hypertension)
+     * remain on mode=STANDARD indefinitely unless a provider explicitly sets
+     * PatientThreshold rows.
+     *
+     * Auto-derivation is off the table: it could normalize dangerously high BP
+     * (example: 7 baseline readings averaging 155/95 → "personalized" threshold
+     * at 155 → patient stops getting alerts for clearly out-of-target readings).
+     * This crosses from alerting into clinical decision-making — the line we do
+     * not cross.
+     *
+     * Phase 2 (post-MVP, optional): admin dashboard "7+ readings" provider
+     * prompt to nudge them to review and consider personalization.
+     */
     const personalizedEligible = threshold != null && !preDay3Mode
 
     // Safety-net: pregnancy thresholds + ACE/ARB contraindication fire even on
@@ -90,8 +215,20 @@ export class ProfileResolverService {
       enrolledAt: user.enrolledAt ?? null,
       practiceName:
         user.providerAssignmentAsPatient?.practice?.name ?? null,
+      // Gap 5 — name the patient in caregiver-facing messages.
+      patientName: user.name ?? null,
       resolvedAt: now,
     }
+  }
+
+  /**
+   * Item C / Bug 24 — the effective high-alert threshold for the dashboard.
+   * Resolves the patient's full clinical context, then applies the same rule
+   * selection the engine uses, so the displayed alert point matches reality.
+   */
+  async getEffectiveThreshold(userId: string): Promise<EffectiveThreshold> {
+    const ctx = await this.resolve(userId)
+    return computeEffectiveThreshold(ctx)
   }
 
   /**
@@ -167,13 +304,14 @@ export class ProfileResolverService {
     heightCm: number | null
     isPregnant: boolean
     pregnancyDueDate: Date | null
-    historyPreeclampsia: boolean
+    historyHDP: boolean
     hasHeartFailure: boolean
     heartFailureType: string
     hasAFib: boolean
     hasCAD: boolean
     hasHCM: boolean
     hasDCM: boolean
+    hasAorticStenosis: boolean
     hasTachycardia: boolean
     hasBradycardia: boolean
     diagnosedHypertension: boolean
@@ -193,7 +331,7 @@ export class ProfileResolverService {
       heightCm: p.heightCm,
       isPregnant: p.isPregnant,
       pregnancyDueDate: p.pregnancyDueDate,
-      historyPreeclampsia: p.historyPreeclampsia,
+      historyHDP: p.historyHDP,
       hasHeartFailure: p.hasHeartFailure,
       heartFailureType: declaredHFType,
       resolvedHFType,
@@ -201,6 +339,7 @@ export class ProfileResolverService {
       hasCAD: p.hasCAD,
       hasHCM: p.hasHCM,
       hasDCM: p.hasDCM,
+      hasAorticStenosis: p.hasAorticStenosis,
       hasTachycardia: p.hasTachycardia,
       hasBradycardia: p.hasBradycardia,
       diagnosedHypertension: p.diagnosedHypertension,

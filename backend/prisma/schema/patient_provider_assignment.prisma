@@ -1,11 +1,16 @@
 model PatientProviderAssignment {
-  id                 String   @id @default(uuid())
-  userId             String   @unique
-  practiceId         String
-  primaryProviderId  String
-  backupProviderId   String
-  medicalDirectorId  String
-  assignedAt         DateTime @default(now())
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  practiceId        String
+  primaryProviderId String
+  backupProviderId  String
+  medicalDirectorId String
+  assignedAt        DateTime @default(now())
+  // Inline audit (2026-07-03) — who set / last changed the care team, auto-
+  // stamped from the CLS actor by the access-log extension. Null for system
+  // writes and pre-2026-07-03 rows. Complements AccessLog (append-only).
+  createdByActorId  String?
+  updatedByActorId  String?
 
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   practice        Practice @relation(fields: [practiceId], references: [id], onDelete: Restrict)

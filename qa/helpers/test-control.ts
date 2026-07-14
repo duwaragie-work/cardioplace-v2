@@ -32,7 +32,10 @@ export class TestControl {
   }
 
   private async post<T = unknown>(path: string, body: unknown = {}): Promise<T> {
-    const res = await this.ctx.post(path, { data: body })
+    // N7 audit-exception scan can take 30–60s on a real DB (150-row seed +
+    // 6 detector queries + upserts). Default 30s Playwright API timeout was
+    // sufficient for the other cron drivers; bump for the audit-exception one.
+    const res = await this.ctx.post(path, { data: body, timeout: 120_000 })
     if (!res.ok()) {
       throw new Error(
         `[test-control] POST ${path} failed ${res.status()}: ${await res.text()}`,
@@ -48,7 +51,12 @@ export class TestControl {
         `[test-control] GET ${path} failed ${res.status()}: ${await res.text()}`,
       )
     }
-    return res.json() as Promise<T>
+    // NestJS returns an empty body when the handler returns null — tolerate
+    // this by treating empty responses as `null`. Otherwise res.json() throws
+    // SyntaxError on empty input.
+    const text = await res.text()
+    if (!text) return null as T
+    return JSON.parse(text) as T
   }
 
   // ─── Health ─────────────────────────────────────────────────────────────
@@ -68,9 +76,34 @@ export class TestControl {
     })
   }
 
-  /** Run the gap-alert scanner. 48h trigger, 24h idempotency. */
-  async runGapAlertScan(now?: Date): Promise<{ scanned: number; nudged: number }> {
-    return this.post('test-control/cron/gap-alert/run', {
+  /**
+   * Deterministically fire T+0 for one alert. Unlike runEscalationScan (which
+   * only advances overdue ladders + fires queued events), this awaits the real
+   * fireT0 dispatch for a fresh alert, so the T+0 Notification rows are
+   * guaranteed written before the caller asserts. Idempotent.
+   */
+  async fireEscalationT0(alertId: string): Promise<void> {
+    await this.post('test-control/escalation/fire-t0', { alertId })
+  }
+
+  /**
+   * Run the daily-reminder scanner (N2, 2026-07-13). Replaces the deleted
+   * runGapAlertScan helper — every-30-min scan, per-user reminderTime slot,
+   * quiet-hours + already-logged-today suppression, escalating tone Day 1/2/3+,
+   * care-team dispatch on every 3-day multiple.
+   *
+   * Returns the full DailyReminderScanSummary so specs can assert on
+   * dispatched vs. skipped counts, not just a running total.
+   */
+  async runDailyReminderScan(now?: Date): Promise<{
+    dispatched: number
+    skippedLoggedToday: number
+    skippedQuietHours: number
+    skippedNotSlot: number
+    skippedIdempotent: number
+    careTeamAlerts: number
+  }> {
+    return this.post('test-control/cron/daily-reminder/run', {
       now: (now ?? new Date()).toISOString(),
     })
   }
@@ -80,6 +113,115 @@ export class TestControl {
     return this.post('test-control/cron/monthly-reask/run', {
       now: (now ?? new Date()).toISOString(),
     })
+  }
+
+  /**
+   * F33 — run the medication-hold escalation scanner once. Pass `now` to
+   * simulate a future time so a backdated hold crosses a rung (day 7/14/30/45)
+   * without waiting for the daily 15:00 UTC cron.
+   */
+  async runMedicationHoldEscalationScan(
+    now?: Date,
+  ): Promise<{ scanned: number; rungsFired: number }> {
+    return this.post('test-control/cron/medication-hold-escalation/run', {
+      now: (now ?? new Date()).toISOString(),
+    })
+  }
+
+  /**
+   * N7 — run the audit-exception-report scanner once. Iterates every detector
+   * over the past 24h of audit data, upserts AuditException rows per candidate.
+   * Bypasses the 03:00 ET schedule so Playwright can seed a pattern → trigger
+   * → assert in one test.
+   */
+  async runAuditExceptionReportScan(now?: Date): Promise<{
+    scanned: number
+    created: number
+    updated: number
+    stickySkipped: number
+    failedDetectors: number
+  }> {
+    return this.post('test-control/cron/audit-exception-report/run', {
+      now: (now ?? new Date()).toISOString(),
+    })
+  }
+
+  // ─── N4/N5/N6/N7 audit-read + seed helpers ─────────────────────────────
+  async findUserByEmail(email: string): Promise<{ id: string } | null> {
+    return this.get(`test-control/audit/user-by-email?email=${encodeURIComponent(email)}`)
+  }
+
+  async countAccessLog(filter: {
+    actorId?: string
+    modelName?: string
+    sinceIso?: string
+  }): Promise<{ count: number }> {
+    const q = new URLSearchParams()
+    if (filter.actorId) q.set('actorId', filter.actorId)
+    if (filter.modelName) q.set('modelName', filter.modelName)
+    if (filter.sinceIso) q.set('sinceIso', filter.sinceIso)
+    return this.get(`test-control/audit/access-log/count?${q.toString()}`)
+  }
+
+  async latestEmailDisclosure(recipientEmail: string): Promise<{
+    id: string
+    template: string
+    purpose: string
+    recipientCategory: string
+    briefDescription: string
+    bodyHash: string
+    sentAt: string
+  } | null> {
+    return this.get(
+      `test-control/audit/email-disclosure-log/latest?recipientEmail=${encodeURIComponent(recipientEmail)}`,
+    )
+  }
+
+  async latestProfileVerificationLog(filter: {
+    userId: string
+    changeType: string
+  }): Promise<{
+    id: string
+    previousValue: unknown
+    newValue: unknown
+    changedBy: string
+    changedByRole: string
+  } | null> {
+    return this.get(
+      `test-control/audit/profile-verification-log/latest?userId=${encodeURIComponent(filter.userId)}&changeType=${filter.changeType}`,
+    )
+  }
+
+  async findAuditExceptionByActor(actorId: string): Promise<{
+    id: string
+    detectorId: string
+    severity: string
+    status: string
+    idempotencyKey: string
+    evidence: unknown
+  } | null> {
+    return this.get(
+      `test-control/audit/audit-exception/by-actor?actorId=${encodeURIComponent(actorId)}`,
+    )
+  }
+
+  async seedAccessLogBatch(input: {
+    actorId: string
+    actorType: 'USER' | 'SYSTEM_ACTOR'
+    action: 'READ' | 'WRITE' | 'DELETE'
+    modelName: string
+    count: number
+    spreadMinutes: number
+  }): Promise<{ inserted: number }> {
+    return this.post('test-control/seed/access-log-batch', input)
+  }
+
+  async clearAccessLogForActor(actorId: string): Promise<{ deleted: number }> {
+    return this.post('test-control/audit/access-log/clear-actor', { actorId })
+  }
+
+  async clearAuditExceptionsByPrefix(prefix: string): Promise<{ deleted: number }> {
+    return this.post('test-control/audit/audit-exception/clear-by-prefix', { prefix })
   }
 
   // ─── Time advancement ───────────────────────────────────────────────────
@@ -120,6 +262,18 @@ export class TestControl {
   /** Backdate the latest JournalEntry for a user (for gap-alert + monthly-reask). */
   async backdateLastJournalEntry(userId: string, deltaSeconds: number): Promise<void> {
     await this.post('test-control/journal/backdate-latest', { userId, deltaSeconds })
+  }
+
+  /**
+   * June 2026 — Phase 2 idle-timeout driver. Backdate every active
+   * AuthSession.lastActivityAt for a user so the next /refresh crosses
+   * the 15-min (web) / 5-min (mobile) idle gate without sleeping.
+   */
+  async backdateAuthSessions(
+    userId: string,
+    deltaSeconds: number,
+  ): Promise<{ updated: number }> {
+    return this.post('test-control/auth-session/backdate', { userId, deltaSeconds })
   }
 
   /** Backdate a medication's `verifiedAt` / `reportedAt` (monthly-reask). */
@@ -190,12 +344,13 @@ export class TestControl {
     userId: string,
     flag:
       | 'isPregnant'
-      | 'historyPreeclampsia'
+      | 'historyHDP'
       | 'hasHeartFailure'
       | 'hasAFib'
       | 'hasCAD'
       | 'hasHCM'
       | 'hasDCM'
+      | 'hasAorticStenosis'
       | 'hasBradycardia'
       | 'hasTachycardia'
       | 'diagnosedHypertension',
@@ -226,6 +381,27 @@ export class TestControl {
     return this.post('test-control/user/set-medication', { userId, med })
   }
 
+  /**
+   * F17 — place an existing medication (matched by drugName) on HOLD with a
+   * given reason (default PROVIDER_DIRECTED_HOLD), mirroring an admin hold.
+   */
+  async setMedicationHold(
+    userId: string,
+    drugName: string,
+    holdReason:
+      | 'AWAITING_RECORDS'
+      | 'UNCLEAR_NAME'
+      | 'UNCLEAR_DOSE'
+      | 'PROVIDER_DIRECTED_HOLD'
+      | 'OTHER' = 'PROVIDER_DIRECTED_HOLD',
+  ): Promise<{ id: string }> {
+    return this.post('test-control/user/set-medication-hold', {
+      userId,
+      drugName,
+      holdReason,
+    })
+  }
+
   // ─── State reset ────────────────────────────────────────────────────────
   /**
    * Wipe journal/alert/escalation/notification rows for ALL *.cardioplace.test
@@ -242,6 +418,16 @@ export class TestControl {
   }
 
   /**
+   * phase/27 MFA — wipe a user's TOTP secret + recovery codes + WebAuthn
+   * credentials so an MFA spec starts from a clean "never enrolled" baseline.
+   * Without this, enrolling on a shared seed account leaves it permanently
+   * MFA-required and breaks the plain OTP→dashboard auth specs. Idempotent.
+   */
+  async resetUserMfa(userId: string): Promise<{ rowsDeleted: number }> {
+    return this.post('test-control/reset/user-mfa', { userId })
+  }
+
+  /**
    * Cluster 8 §D — wipe ALL of a user's PatientMedication rows. Use before
    * `setUserMedication` when the test needs an exact roster (e.g., ARB-only
    * angioedema variant on Aisha, who ships with Lisinopril+Amlodipine —
@@ -249,6 +435,15 @@ export class TestControl {
    */
   async clearUserMedications(userId: string): Promise<{ rowsDeleted: number }> {
     return this.post('test-control/reset/user-medications', { userId })
+  }
+
+  /**
+   * Delete a user's DeviationAlert rows (+ child escalations + alert-linked
+   * notifications) WITHOUT wiping reading history — for tests that need an
+   * established history but a clean alert slate before triggering (30u B2).
+   */
+  async deleteAlertsForUser(userId: string): Promise<{ rowsDeleted: number }> {
+    return this.post('test-control/reset/user-alerts', { userId })
   }
 
   /**
@@ -277,6 +472,12 @@ export class TestControl {
     status: 'NOT_ENROLLED' | 'ENROLLED',
   ): Promise<void> {
     await this.post('test-control/user/set-enrollment', { userId, status })
+  }
+
+  /** F13 — set/clear PatientProfile.aceContraindicatedAt so the ACE/ARB
+   *  re-add gate (modal + provider-review hold) can be exercised directly. */
+  async setAceContraindicated(userId: string, value: boolean): Promise<void> {
+    await this.post('test-control/user/set-ace-contraindicated', { userId, value })
   }
 
   /**
@@ -480,6 +681,63 @@ export class TestControl {
     profileVerificationStatus: string | null
   }> {
     return this.get(`test-control/user/find?email=${encodeURIComponent(email)}`)
+  }
+
+  // ─── Invite + magic-link token minting (specs 36/37/40) ───────────────────
+  /**
+   * Mint a UserInvite and get back the RAW activation token. The token is
+   * what the e-mail carries; in CI the Resend key is a dummy, so this is the
+   * only way a spec can recover it. Drive activation with
+   * `${BASE}/activate/${token}` (patient or admin app) or POST it to
+   * `/api/v2/auth/invite/${token}/accept`. Pass a negative `expiresInSeconds`
+   * to forge an already-expired invite for the error-path test.
+   */
+  async createInvite(args: {
+    email: string
+    name: string
+    role:
+      | 'PATIENT'
+      | 'PROVIDER'
+      | 'MEDICAL_DIRECTOR'
+      | 'COORDINATOR'
+      | 'HEALPLACE_OPS'
+      | 'SUPER_ADMIN'
+    practiceId?: string
+    expiresInSeconds?: number
+  }): Promise<{ inviteId: string; token: string }> {
+    return this.post('test-control/invite/create', args)
+  }
+
+  /**
+   * Mint a MagicLink for `email` and get back the raw token. Drive the real
+   * verify endpoint via `GET /api/v2/auth/magic-link/verify?token=…`. Pass a
+   * negative `expiresInSeconds` for the expired-link test, or `markUsed:true`
+   * for the already-used test.
+   */
+  async issueMagicLink(args: {
+    email: string
+    expiresInSeconds?: number
+    markUsed?: boolean
+  }): Promise<{ token: string }> {
+    return this.post('test-control/magic-link/issue', args)
+  }
+
+  // ─── Captured emails (spec 4Z — email-no-PHI) ─────────────────────────────
+  /**
+   * Read the backend's in-memory captured emails. CI SMTP is a dummy that
+   * never delivers, so EmailService captures the rendered mail in a non-prod
+   * buffer; this is the only way a spec can inspect what WOULD be sent.
+   */
+  async getCapturedEmails(
+    to?: string,
+  ): Promise<Array<{ to: string; subject: string; html: string; sentAt: string }>> {
+    const q = to ? `?to=${encodeURIComponent(to)}` : ''
+    return this.get(`test-control/emails${q}`)
+  }
+
+  /** Clear the captured-email buffer (call before triggering a send). */
+  async clearCapturedEmails(): Promise<{ ok: true }> {
+    return this.post('test-control/emails/clear')
   }
 
   async dispose(): Promise<void> {

@@ -52,6 +52,16 @@ function variantChromeFor(tier: AlertTier | string | null): {
   subtitle: string;
 } {
   const group = resolutionTierFor(tier);
+  if (group === 'TIER_1_ANGIOEDEMA') {
+    return {
+      accent: 'var(--brand-alert-red)',
+      accentText: 'var(--brand-alert-red-text)',
+      accentLight: 'var(--brand-alert-red-light)',
+      icon: <AlertTriangle className="w-4 h-4" />,
+      title: 'Resolve angioedema alert',
+      subtitle: 'Airway emergency — non-dismissable.',
+    };
+  }
   if (group === 'BP_LEVEL_2') {
     return {
       accent: 'var(--brand-alert-red)',
@@ -95,6 +105,8 @@ function variantChromeFor(tier: AlertTier | string | null): {
 export default function AlertResolutionModal({ alert, open, onClose, onResolved }: Props) {
   const [action, setAction] = useState<ResolutionAction | ''>('');
   const [rationale, setRationale] = useState('');
+  // Manisha 5/24 Q4 — angioedema sub-field answers (willGo, facility, etc.).
+  const [details, setDetails] = useState<Record<string, unknown>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -103,6 +115,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
     if (open && alert) {
       setAction('');
       setRationale('');
+      setDetails({});
       setError('');
       setSubmitting(false);
     }
@@ -113,18 +126,37 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
   const actionDef = action ? RESOLUTION_CATALOG[action] : null;
   const rationaleRequired = actionDef?.requiresRationale ?? false;
   const willTriggerRetry = actionDef?.triggersBpL2Retry ?? false;
+  const subFields = actionDef?.subFields ?? [];
 
-  // Tier 1 is non-dismissable per Flow G spec: backdrop click, Escape key, and
-  // X button are all disabled. The provider must explicitly choose Cancel or
-  // submit a resolution. (Cancel is still allowed so providers don't get locked
-  // out if they opened the wrong alert by mistake.)
+  // Required sub-fields must be answered before submit (mirrors backend
+  // missingRequiredSubFields). yesno = boolean answer; text = non-empty string.
+  const subFieldsComplete = subFields
+    .filter((f) => f.required)
+    .every((f) => {
+      const v = details[f.key];
+      return f.kind === 'yesno'
+        ? v === true || v === false
+        : typeof v === 'string' && v.trim().length > 0;
+    });
+
+  // Reset sub-field answers whenever the chosen action changes.
+  function chooseAction(key: ResolutionAction) {
+    setAction(key);
+    setDetails({});
+  }
+
+  // Tier 1 + angioedema are non-dismissable per Flow G spec: backdrop click,
+  // Escape key, and X button are all disabled. The provider must explicitly
+  // choose Cancel or submit a resolution. (Cancel is still allowed so providers
+  // don't get locked out if they opened the wrong alert by mistake.)
   const tierGroup = resolutionTierFor(alert?.tier ?? null);
-  const isNonDismissable = tierGroup === 'TIER_1';
+  const isNonDismissable = tierGroup === 'TIER_1' || tierGroup === 'TIER_1_ANGIOEDEMA';
 
   const canSubmit =
     !!action &&
     !submitting &&
-    (!rationaleRequired || rationale.trim().length > 0);
+    (!rationaleRequired || rationale.trim().length > 0) &&
+    subFieldsComplete;
 
   // Escape key closes the modal — except for Tier 1 (non-dismissable).
   useEffect(() => {
@@ -143,7 +175,12 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
     setSubmitting(true);
     setError('');
     try {
-      const result = await resolveAlert(alert.id, action, rationale.trim() || undefined);
+      const result = await resolveAlert(
+        alert.id,
+        action,
+        rationale.trim() || undefined,
+        subFields.length > 0 ? details : undefined,
+      );
       onResolved(alert.id, result);
       onClose();
     } catch (e) {
@@ -270,7 +307,7 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                           key={key}
                           data-testid={`admin-resolve-action-${key}`}
                           type="button"
-                          onClick={() => setAction(key)}
+                          onClick={() => chooseAction(key)}
                           className="w-full text-left rounded-lg p-3 transition-colors cursor-pointer"
                           style={{
                             backgroundColor: selected ? variant.accentLight : 'white',
@@ -338,9 +375,83 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                 )}
               </div>
 
+              {actionDef?.warnSideEffect && (
+                <div
+                  data-testid="admin-resolve-side-effect-warning"
+                  className="rounded-lg p-3 text-[12px] leading-relaxed flex items-start gap-2"
+                  style={{
+                    backgroundColor: 'var(--brand-alert-red-light)',
+                    color: 'var(--brand-alert-red-text)',
+                  }}
+                >
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{actionDef.warnSideEffect}</span>
+                </div>
+              )}
+
+              {action && subFields.length > 0 && (
+                <div className="space-y-3" data-testid="admin-resolve-subfields">
+                  {subFields.map((f) => (
+                    <div key={f.key}>
+                      <label
+                        htmlFor={`admin-resolve-subfield-${f.key}`}
+                        className="block text-[12px] font-semibold mb-1.5"
+                        style={{ color: 'var(--brand-text-secondary)' }}
+                      >
+                        {f.label}
+                        {f.required ? (
+                          <span style={{ color: 'var(--brand-alert-red)' }}> · required</span>
+                        ) : (
+                          <span className="font-normal" style={{ color: 'var(--brand-text-muted)' }}> · optional</span>
+                        )}
+                      </label>
+                      {f.kind === 'yesno' ? (
+                        <div className="flex gap-2">
+                          {([['YES', true], ['NO', false]] as [string, boolean][]).map(([lbl, val]) => {
+                            const selected = details[f.key] === val;
+                            return (
+                              <button
+                                key={lbl}
+                                type="button"
+                                data-testid={`admin-resolve-subfield-${f.key}-${lbl.toLowerCase()}`}
+                                onClick={() => setDetails((d) => ({ ...d, [f.key]: val }))}
+                                className="flex-1 rounded-lg py-2 text-[13px] font-semibold cursor-pointer transition-colors"
+                                style={{
+                                  backgroundColor: selected ? variant.accentLight : 'white',
+                                  border: `1.5px solid ${selected ? variant.accent : 'var(--brand-border)'}`,
+                                  color: selected ? variant.accentText : 'var(--brand-text-primary)',
+                                }}
+                              >
+                                {lbl}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <input
+                          type="text"
+                          id={`admin-resolve-subfield-${f.key}`}
+                          data-testid={`admin-resolve-subfield-${f.key}`}
+                          aria-required={f.required || undefined}
+                          value={typeof details[f.key] === 'string' ? (details[f.key] as string) : ''}
+                          onChange={(e) => setDetails((d) => ({ ...d, [f.key]: e.target.value }))}
+                          placeholder={f.label}
+                          className="w-full px-3 py-2 rounded-lg text-[13px] outline-none"
+                          style={{
+                            border: '1.5px solid var(--brand-border)',
+                            color: 'var(--brand-text-primary)',
+                          }}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {action && (
                 <div>
                   <label
+                    htmlFor="admin-resolve-rationale"
                     className="block text-[12px] font-semibold mb-1.5"
                     style={{ color: 'var(--brand-text-secondary)' }}
                   >
@@ -352,7 +463,9 @@ export default function AlertResolutionModal({ alert, open, onClose, onResolved 
                     )}
                   </label>
                   <textarea
+                    id="admin-resolve-rationale"
                     data-testid="admin-resolve-rationale"
+                    aria-required={rationaleRequired || undefined}
                     value={rationale}
                     onChange={(e) => setRationale(e.target.value)}
                     placeholder={

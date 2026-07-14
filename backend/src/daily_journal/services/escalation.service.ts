@@ -1,9 +1,22 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
+import {
+  EMERGENCY_EVENTS,
+  type EmergencyFlaggedPayload,
+} from '../../chat/emergency-events.js'
+import { RULE_IDS } from '@cardioplace/shared'
 import { Cron } from '@nestjs/schedule'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../../common/cls/cron-actor.util.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
+import { EMAIL_TEMPLATE_VERSION, caregiverEmailHtml } from '../../email/email-templates.js'
+import type {
+  EmailTemplateName,
+  RecipientCategoryName,
+} from '../../email/email-templates.registry.js'
+import { SmsService } from '../../sms/sms.service.js'
 import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import type {
@@ -21,14 +34,22 @@ import {
   type NotificationChannel as LadderChannel,
   TIER_1_BACKUP_ON_T0,
   TIER_1_LADDER,
+  // Manisha Open-Decisions sign-off 2026-06-06 (Decision 6) — BP_LEVEL_1_PATIENT_T0
+  // re-instated, cohort-gated to STANDARD mode + HIGH tier only (HFrEF/HCM
+  // suppressed to avoid alarm fatigue at tighter personalized thresholds).
   BP_LEVEL_1_PATIENT_T0,
   ANGIOEDEMA_PATIENT_T0,
+  // Manisha Open-Decisions sign-off 2026-06-06 (Decision 5) — new patient-EMAIL
+  // dispatch at T+0 to close the contraindication "continued exposure" gap.
+  TIER_1_CONTRAINDICATION_PATIENT_T0,
 } from '../escalation/ladder-defs.js'
 import {
   isWithinBusinessHours,
   nextBusinessHoursStart,
   type BusinessHoursConfig,
 } from '../utils/business-hours.js'
+import { wasEverEnrolled } from '../../practice/enrollment-helpers.js'
+import type { NotificationTrigger } from '../../generated/prisma/enums.js'
 
 /**
  * Cluster 7 A.6 — rules whose primary delivery channel is the caregiver
@@ -38,7 +59,7 @@ import {
 const CAREGIVER_ROUTED_RULES: ReadonlySet<string> = new Set<string>([
   'RULE_HF_CAREGIVER_EDEMA',
   // Cluster 8 — angioedema dispatches the approved caregiver message at T+0
-  // (idle until CAREGIVER_DISPATCH_ENABLED + Lakshitha's Gap-5 UI lands).
+  // (gated behind CAREGIVER_DISPATCH_ENABLED + the Gap 5 capture/consent loop).
   'RULE_ACE_ANGIOEDEMA',
   'RULE_GENERIC_ANGIOEDEMA',
 ])
@@ -71,7 +92,9 @@ export class EscalationService {
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
+    private readonly smsService: SmsService,
     config: ConfigService,
+    private readonly cls: ClsService,
   ) {
     // Used by escalation emails to deep-link recipients into the right app.
     // Provider/admin recipients → admin app (/patients/{userId}?alert={id});
@@ -83,6 +106,35 @@ export class EscalationService {
     this.patientBaseUrl = config
       .get<string>('PATIENT_BASE_URL', 'http://localhost:3000')
       .replace(/\/+$/, '')
+
+    // 2026-06-07 user-flagged — a localhost URL leaked into an outbound email
+    // would (a) be unclickable for recipients, (b) trigger spam-filter
+    // mismatched-domain heuristics. Loud warning at boot if NODE_ENV is
+    // production but the URLs still contain localhost — catches a missed
+    // deploy-time env var without breaking local dev.
+    const nodeEnv = config.get<string>('NODE_ENV', 'development')
+    if (nodeEnv === 'production') {
+      for (const [name, url] of [
+        ['ADMIN_BASE_URL', this.adminBaseUrl],
+        ['PATIENT_BASE_URL', this.patientBaseUrl],
+      ] as const) {
+        if (url.includes('localhost') || url.includes('127.0.0.1')) {
+          this.logger.error(
+            `${name} is set to "${url}" in production. Escalation emails will ` +
+              `contain unclickable localhost links and will likely trip ` +
+              `spam filters (domain-URL mismatch). Set this env var to the ` +
+              `production domain (e.g. https://cardioplace.ai) before ` +
+              `the next deploy.`,
+          )
+        }
+        if (!url.startsWith('https://')) {
+          this.logger.warn(
+            `${name} is not https in production ("${url}"). Email recipients ` +
+              `may see a mixed-content warning. Use https in production.`,
+          )
+        }
+      }
+    }
   }
 
   // ─── event + cron entry points ──────────────────────────────────────────
@@ -110,8 +162,134 @@ export class EscalationService {
     }
   }
 
+  /**
+   * Bug 11 — chat/voice `flag_emergency` tool fires an emergency.flagged event
+   * after ChatService persists the EmergencyEvent row. This listener pages the
+   * patient's consenting caregivers AND their assigned provider so the care
+   * team learns about an acute emergency in real time, not via DB audit
+   * scrape. Reuses findCaregivers + the SMS/email/DASHBOARD plumbing the
+   * standard alert path uses.
+   */
+  @OnEvent(EMERGENCY_EVENTS.FLAGGED, { async: true })
+  async onEmergencyFlagged(payload: EmergencyFlaggedPayload): Promise<void> {
+    try {
+      await this.dispatchEmergencyToCareTeam(payload)
+    } catch (err) {
+      this.logger.error(
+        `[SECURITY-CRITICAL] Emergency dispatch failed userId=${payload.userId} situation="${payload.situation}"`,
+        err instanceof Error ? err.stack : err,
+      )
+    }
+  }
+
+  private async dispatchEmergencyToCareTeam(
+    payload: EmergencyFlaggedPayload,
+  ): Promise<void> {
+    const subject = `URGENT — Cardioplace patient emergency`
+    const body =
+      `A Cardioplace patient flagged an acute emergency during a ${
+        payload.source === 'voice-tool' ? 'voice' : 'chat'
+      } session.\n\n` +
+      `Situation reported by the patient: ${payload.situation}\n\n` +
+      `Please reach out to the patient immediately or escalate per your practice's emergency protocol. ` +
+      `An EmergencyEvent has been recorded in the audit log.`
+
+    // 1) Consenting caregivers — same dispatch pattern as L1 alerts.
+    const caregivers = await this.findCaregivers(payload.userId)
+    for (const caregiver of caregivers) {
+      try {
+        switch (caregiver.notifyChannel) {
+          case 'EMAIL':
+            if (caregiver.email) {
+              await this.emailService.sendEmail(caregiver.email, subject, body, {
+                template: 'emergency_dispatch_caregiver',
+                templateVersion: EMAIL_TEMPLATE_VERSION,
+                patientUserId: payload.userId,
+                metadata: { caregiverId: caregiver.id },
+              })
+            }
+            break
+          case 'SMS':
+            if (caregiver.phone) {
+              await this.smsService.sendSms(caregiver.phone, body)
+            }
+            break
+          case 'DASHBOARD':
+            if (caregiver.caregiverUserId) {
+              await this.prisma.notification.create({
+                data: {
+                  userId: caregiver.caregiverUserId,
+                  patientUserId: payload.userId,
+                  channel: 'DASHBOARD',
+                  title: subject,
+                  body,
+                  // EMERGENCY_FLAGGED, not ALERT_*: this chat/voice emergency
+                  // page has no DeviationAlert backing (EmergencyEvent only), so
+                  // it never appears in the Alerts stream — it MUST stay visible
+                  // in the care team's bell. See project_notification_tab_split.
+                  dispatchTrigger: 'EMERGENCY_FLAGGED',
+                },
+              })
+            }
+            break
+          default:
+            break
+        }
+      } catch (err) {
+        this.logger.error(
+          `Emergency dispatch to caregiver ${caregiver.id} failed`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+    }
+
+    // 2) Assigned providers — DASHBOARD notification to the primary AND
+    // backup so the emergency lands in someone's inbox without depending on
+    // SMS/email config. PatientProviderAssignment uses `userId` (the
+    // patient) as the unique key, and stores `primaryProviderId` +
+    // `backupProviderId`.
+    const assignment = await this.prisma.patientProviderAssignment.findUnique({
+      where: { userId: payload.userId },
+      select: { primaryProviderId: true, backupProviderId: true },
+    })
+    const providerIds = new Set<string>()
+    if (assignment?.primaryProviderId) providerIds.add(assignment.primaryProviderId)
+    if (assignment?.backupProviderId) providerIds.add(assignment.backupProviderId)
+    for (const providerId of providerIds) {
+      try {
+        await this.prisma.notification.create({
+          data: {
+            userId: providerId,
+            patientUserId: payload.userId,
+            channel: 'DASHBOARD',
+            title: subject,
+            body,
+            // EMERGENCY_FLAGGED, not ALERT_*: no DeviationAlert backing, so this
+            // must stay visible in the provider's bell (not hidden as alert-class).
+            dispatchTrigger: 'EMERGENCY_FLAGGED',
+          },
+        })
+      } catch (err) {
+        this.logger.error(
+          `Emergency notification to provider ${providerId} failed`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+    }
+
+    this.logger.log(
+      `Emergency dispatched userId=${payload.userId} caregivers=${caregivers.length} providers=${providerIds.size} source=${payload.source}`,
+    )
+  }
+
   @Cron('*/15 * * * *')
   async handleCron(): Promise<void> {
+    return runAsCronActor(this.cls, 'cron-escalation-ladder', () =>
+      this.handleCronImpl(),
+    )
+  }
+
+  private async handleCronImpl(): Promise<void> {
     // Managed Prisma Postgres occasionally hands the pool a stale connection
     // (server hung up while idle) — first query throws "Server has closed
     // the connection" / P1017. node-postgres evicts the bad socket on that
@@ -152,6 +330,39 @@ export class EscalationService {
   }
 
   /**
+   * Test-only deterministic T+0 driver. In production, T+0 fires via the
+   * fire-and-forget `@OnEvent(ALERT_CREATED)` handler — a Playwright spec
+   * can't await that, and `runScan` does NOT fire a fresh alert's T+0 (it
+   * only does firePendingScheduled + advanceOverdueLadders). This reconstructs
+   * the AlertCreatedEvent from the persisted alert and awaits the SAME private
+   * `fireT0` path, so the T+0 Notification rows are guaranteed written before
+   * the caller continues. Idempotent — the dispatchStep dedup guard makes a
+   * second fire (or a race with the async handler) a safe no-op. Errors
+   * propagate, unlike the @OnEvent wrapper which swallows them, so a real
+   * dispatch failure surfaces to the test instead of vanishing into the log.
+   */
+  async dispatchT0ForAlert(alertId: string, now: Date = new Date()): Promise<void> {
+    const alert = await this.loadAlert(alertId)
+    if (!alert) throw new NotFoundException(`Alert ${alertId} not found`)
+    // fireT0 routes solely on alertId + tier; type/severity/escalated are not
+    // read on the dispatch path (the ladder is resolved from tier), so the
+    // narrowed AlertRow — which omits them — is sufficient. Placeholders keep
+    // the AlertCreatedEvent shape without re-fetching the full row.
+    await this.fireT0(
+      {
+        userId: alert.userId,
+        alertId: alert.id,
+        type: 'SYSTOLIC_BP',
+        severity: 'HIGH',
+        escalated: true,
+        tier: alert.tier,
+        ruleId: alert.ruleId,
+      },
+      now,
+    )
+  }
+
+  /**
    * Called by AlertResolutionService when an admin picks BP L2 #6
    * `BP_L2_UNABLE_TO_REACH_RETRY`. Creates a fresh EscalationEvent with
    * scheduledFor=now+offsetMs; the next cron pass dispatches it via
@@ -165,27 +376,33 @@ export class EscalationService {
     recipientRoles: RecipientRole[]
     channels: LadderChannel[]
     now: Date
+    /** Override the audit reason. Defaults to the BP L2 retry text. */
+    reason?: string
+    /** Override the escalation level. Defaults to LEVEL_2. */
+    escalationLevel?: 'LEVEL_1' | 'LEVEL_2'
   }): Promise<void> {
     const scheduledFor = new Date(args.now.getTime() + args.offsetMs)
     await this.prisma.escalationEvent.create({
       data: {
         alertId: args.alertId,
         userId: args.userId,
-        escalationLevel: 'LEVEL_2',
-        reason: `BP L2 retry — ${args.ladderStep} scheduled ${scheduledFor.toISOString()}`,
+        escalationLevel: args.escalationLevel ?? 'LEVEL_2',
+        reason:
+          args.reason ??
+          `BP L2 retry — ${args.ladderStep} scheduled ${scheduledFor.toISOString()}`,
         ladderStep: args.ladderStep,
         recipientIds: [],
         recipientRoles: args.recipientRoles,
         scheduledFor,
         triggeredByResolution: true,
-        // Finding 5 — scheduled by an admin's BP_L2_UNABLE_TO_REACH_RETRY
-        // resolution action, not the cron scheduler. Human-attributed.
+        // Finding 5 — scheduled by an admin resolution action, not the cron
+        // scheduler. Human-attributed.
         dispatchedBySystem: false,
         afterHours: false,
       },
     })
     this.logger.log(
-      `Scheduled BP L2 retry for alert ${args.alertId} at ${scheduledFor.toISOString()}`,
+      `Scheduled retry for alert ${args.alertId} at ${scheduledFor.toISOString()}`,
     )
   }
 
@@ -294,10 +511,23 @@ export class EscalationService {
     // fail-loud path would just write DISPATCH ERROR rows. See
     // TESTING_FLOW_GUIDE.md §6.2–§6.3.
     if (alert.user.enrollmentStatus !== 'ENROLLED') {
+      // Manisha sign-off 2026-06-12 — a patient who was EVER enrolled keeps
+      // their full dispatch + ladder after an auto-un-enroll (serious condition
+      // added without a threshold). Care team + routing are already in place;
+      // only the personalized threshold is pending. A truly never-enrolled
+      // patient still defers (original gate intent). See enrollment-gate-
+      // emergency-gap memory note.
+      const previouslyEnrolled = await wasEverEnrolled(this.prisma, alert.userId)
+      if (!previouslyEnrolled) {
+        this.logger.log(
+          `Alert ${alert.id}: patient ${alert.userId} never enrolled — deferring dispatch at T+0`,
+        )
+        return
+      }
       this.logger.log(
-        `Alert ${payload.alertId}: patient ${alert.userId} not enrolled — deferring dispatch`,
+        `Alert ${alert.id}: patient ${alert.userId} un-enrolled (threshold pending) — dispatching anyway (previously enrolled, at T+0)`,
       )
-      return
+      // fall through to normal T+0 dispatch
     }
 
     const practice = alert.user.providerAssignmentAsPatient?.practice ?? null
@@ -349,17 +579,56 @@ export class EscalationService {
       }
     }
 
-    // Phase/23 — BP Level 1 patient-side T+0. Spec mandates out-of-app
-    // notification so the patient doesn't have to open the app to learn
-    // their BP needs attention. Fires immediately regardless of business
-    // hours; channel=PUSH writes a Notification row that surfaces in-app
-    // and (once web-push transport ships) delivers as an OS-level push.
-    if (ladder.kind === 'BP_LEVEL_1') {
+    // Manisha Open-Decisions sign-off 2026-06-06 (Decision 6) — re-instate
+    // BP_LEVEL_1_PATIENT_T0 dispatch, COHORT-GATED.
+    //
+    // Original retirement (Manual-test round 2 Group B) blanket-suppressed
+    // every BP Level 1 patient-row dispatch. Manisha's clarification: standard-
+    // cohort patients at 165/100 ARE experiencing a clinically meaningful
+    // event (2025 AHA/ACC: SBP ≥140 = medication-initiation threshold for the
+    // general population) and should learn about it without having to open
+    // the app. Personalized-threshold cohorts (HFrEF, HCM) stay suppressed —
+    // their tighter thresholds would generate more frequent patient alerts
+    // and risk alarm fatigue in the very population they protect.
+    //
+    // Gate:
+    //   - tier === 'BP_LEVEL_1_HIGH'  (HIGH only — Manisha did NOT sign off on LOW)
+    //   - mode === 'STANDARD'         (engine sets PERSONALIZED for HFrEF/HCM ramps)
+    //
+    // Channel = EMAIL + DASHBOARD per the ladder-defs export (out-of-app
+    // PUSH not yet wired; EMAIL is the real reach).
+    if (alert.tier === 'BP_LEVEL_1_HIGH' && alert.mode === 'STANDARD') {
       await this.dispatchStep({
         alert,
         step: BP_LEVEL_1_PATIENT_T0,
         ladderKind: ladder.kind,
         recipientRoles: BP_LEVEL_1_PATIENT_T0.recipientRoles,
+        practice,
+        assignment,
+        now,
+      })
+    }
+
+    // Manisha Open-Decisions sign-off 2026-06-06 (Decision 5) — TIER_1
+    // CONTRAINDICATION patient-EMAIL at T+0. Closes the gap where a patient
+    // could take another dose of a teratogenic/contraindicated medication
+    // before opening the app. Email body reuses the registry patientMessage
+    // (already worded to discourage panic-driven self-discontinuation:
+    // "please don't stop any medicine without talking to your doctor").
+    // Option D (Manisha 2026-06-12 Q2) — RULE_UNCONFIRMED_EMERGENCY reuses the
+    // TIER_1_CONTRAINDICATION ladder + resolution catalog, but is PROVIDER-ONLY
+    // (Implementation Note 5: no patient, no caregiver — the reading is
+    // unconfirmed and may be artifactual). Suppress the contraindication
+    // patient-EMAIL dispatch for it; the provider ladder still fires.
+    if (
+      alert.tier === 'TIER_1_CONTRAINDICATION' &&
+      alert.ruleId !== RULE_IDS.UNCONFIRMED_EMERGENCY
+    ) {
+      await this.dispatchStep({
+        alert,
+        step: TIER_1_CONTRAINDICATION_PATIENT_T0,
+        ladderKind: ladder.kind,
+        recipientRoles: TIER_1_CONTRAINDICATION_PATIENT_T0.recipientRoles,
         practice,
         assignment,
         now,
@@ -400,10 +669,20 @@ export class EscalationService {
       // time (e.g. admin revoked enrollment). Leave the row in place;
       // re-enrollment will pick it up on the next cron pass.
       if (alert.user.enrollmentStatus !== 'ENROLLED') {
-        this.logger.debug(
-          `Pending event ${row.id}: patient ${alert.userId} not enrolled — deferring`,
+        // Manisha sign-off 2026-06-12 — previously-enrolled patients dispatch
+        // even while un-enrolled (threshold pending). See enrollment-gate-
+        // emergency-gap memory note + fireT0 gate above.
+        const previouslyEnrolled = await wasEverEnrolled(this.prisma, alert.userId)
+        if (!previouslyEnrolled) {
+          this.logger.debug(
+            `Pending event ${row.id}: patient ${alert.userId} never enrolled — deferring at firePendingScheduled`,
+          )
+          continue
+        }
+        this.logger.log(
+          `Pending event ${row.id}: patient ${alert.userId} un-enrolled (threshold pending) — dispatching anyway (previously enrolled, at firePendingScheduled)`,
         )
-        continue
+        // fall through — dispatch the queued/scheduled event
       }
 
       // Check alert still open + not acknowledged; if it's been resolved /
@@ -499,10 +778,20 @@ export class EscalationService {
       // catches alerts created pre-enrollment-split (when fireT0 didn't gate)
       // so their ladders don't keep walking once the filter kicks in.
       if (alert.user.enrollmentStatus !== 'ENROLLED') {
-        this.logger.debug(
-          `Alert ${alert.id}: patient ${alert.userId} not enrolled — ladder paused`,
+        // Manisha sign-off 2026-06-12 — previously-enrolled patients keep their
+        // ladder advancing even while un-enrolled (threshold pending). See
+        // enrollment-gate-emergency-gap memory note + fireT0 gate above.
+        const previouslyEnrolled = await wasEverEnrolled(this.prisma, alert.userId)
+        if (!previouslyEnrolled) {
+          this.logger.debug(
+            `Alert ${alert.id}: patient ${alert.userId} never enrolled — ladder paused at advanceOverdueLadders`,
+          )
+          continue
+        }
+        this.logger.log(
+          `Alert ${alert.id}: patient ${alert.userId} un-enrolled (threshold pending) — advancing ladder anyway (previously enrolled, at advanceOverdueLadders)`,
         )
-        continue
+        // fall through — advance the ladder normally
       }
 
       // Fetch all escalation events for the alert — need both dispatched rows
@@ -619,6 +908,28 @@ export class EscalationService {
       this.logger.error(
         `Alert ${alert.id} step ${step.step}: data-integrity bug — missing required roles: ${resolved.missingRequiredRoles.join(',')}. Enrollment gate should have caught this. Continuing with partial dispatch.`,
       )
+    }
+
+    // Bug 1 — idempotent dispatch. A re-run of evaluate()/fireT0 for the same
+    // alert (an immediate-fire reading later re-evaluated by the single-reading
+    // finalize, or the frontend 5-min timer racing the finalize cron) must NOT
+    // create a second EscalationEvent for the same alert+step+recipients —
+    // that's the doubled-T0 audit/timeline bug. Retries go through the separate
+    // dispatchForExistingEvent path, so a NEW dispatchStep row for an
+    // (alert, step, recipientRoles) triple is always a duplicate.
+    const alreadyDispatched = await this.prisma.escalationEvent.findFirst({
+      where: {
+        alertId: alert.id,
+        ladderStep: step.step,
+        recipientRoles: { equals: resolved.recipientRoles },
+      },
+      select: { id: true },
+    })
+    if (alreadyDispatched) {
+      this.logger.debug(
+        `dispatchStep: ${step.step} for alert ${alert.id} → [${resolved.recipientRoles.join(',')}] already exists (${alreadyDispatched.id}); skipping duplicate`,
+      )
+      return
     }
 
     if (shouldQueue && practice) {
@@ -799,6 +1110,17 @@ export class EscalationService {
   }): Promise<void> {
     const { alert, step, recipientIds, recipientRoles, eventId } = args
 
+    // Trigger keys the bell-vs-alerts tab split. These ladder rows carry
+    // `alertId` and render in the Alerts stream, so they are the alert-class
+    // triggers the bell hides: T+0 is the alert's first dispatch (ALERT_CREATED),
+    // later steps are ALERT_ESCALATION, and a resolution dispatch is
+    // ALERT_RESOLVED. See project_notification_tab_split_2026_06_04.
+    const dispatchTrigger: NotificationTrigger = args.triggeredByResolution
+      ? 'ALERT_RESOLVED'
+      : step.step === 'T0'
+        ? 'ALERT_CREATED'
+        : 'ALERT_ESCALATION'
+
     // Role ↔ recipientId pairing is 1:1 by position. getRecipientUserIds
     // preserves order.
     for (let i = 0; i < recipientIds.length; i++) {
@@ -814,6 +1136,20 @@ export class EscalationService {
       const { title, body } = content
 
       for (const channel of step.channels) {
+        // F12 — clinical alerts NEVER mirror into the patient's in-app bell.
+        // The patient still sees the alert via the /alerts list, the dashboard
+        // banner, and (for airway/emergency tiers) the out-of-app PUSH. The
+        // in-app DASHBOARD (bell) inbox is reserved for admin/care-team action
+        // events (ack / resolve / HOLD / threshold / follow-up / gap-alert).
+        // This single guard covers every clinical-alert ladder that lists
+        // PATIENT as a recipient — BP Level 2, BP-L2 symptom-override, Tier 1
+        // angioedema, the cohort-gated BP Level 1 HIGH (Manisha Open-Decisions
+        // 2026-06-06 D6), and Tier 1 contraindication (Manisha D5) — so no
+        // clinical Notification row leaks to the patient bell regardless of
+        // tier. Provider / MD / Ops DASHBOARD rows are unaffected. EMAIL is
+        // the active out-of-app channel for the patient rows.
+        if (role === 'PATIENT' && channel === 'DASHBOARD') continue
+
         // DASHBOARD notifications are implicit via DeviationAlert rows; we
         // still write a row so the admin UI can surface the escalation timeline.
         await this.prisma.notification
@@ -826,6 +1162,7 @@ export class EscalationService {
               title,
               body,
               tips: [],
+              dispatchTrigger,
             },
           })
           .catch((err: unknown) => {
@@ -852,7 +1189,27 @@ export class EscalationService {
                 afterHours: args.afterHours,
                 now: args.now,
               })
-              await this.emailService.sendEmail(email, rendered.subject, rendered.html)
+              // N6 extension — collapse per-(tier, role) template strings to
+              // one of the 3 tier-scoped registry templates. Tier + role are
+              // preserved in metadata for regulatory queries; recipientCategory
+              // is overridden per role so the disclosure trail records exactly
+              // who received it (PATIENT vs PROVIDER vs CAREGIVER).
+              const escalationTemplate: EmailTemplateName =
+                escalationTemplateForTier(alert.tier)
+              await this.emailService.sendEmail(email, rendered.subject, rendered.html, {
+                template: escalationTemplate,
+                templateVersion: EMAIL_TEMPLATE_VERSION,
+                patientUserId: alert.userId,
+                recipientCategoryOverride: recipientCategoryForRole(role),
+                metadata: {
+                  alertId: alert.id,
+                  escalationEventId: eventId,
+                  ladderStep: step.step,
+                  role,
+                  tier: alert.tier ?? 'UNKNOWN',
+                  ruleId: alert.ruleId,
+                },
+              })
             }
           }
         }
@@ -978,12 +1335,13 @@ export class EscalationService {
   }
 
   /**
-   * Cluster 7 A.6 — idle caregiver dispatch path. Writes a DASHBOARD
-   * Notification carrying the alert's caregiverMessage to every caregiver
-   * linked to the patient. Lakshitha's Gap 5 will populate the patient ↔
-   * caregiver relationship; until then `findCaregiverUserIds` returns [] and
-   * this method is a no-op. Gated behind CAREGIVER_DISPATCH_ENABLED=true so
-   * production stays silent until the UI ships.
+   * Gap 5 — caregiver dispatch. For each consented, active caregiver on a
+   * real channel, delivers the signed-off caregiverMessage (Minimum Necessary
+   * — no other PHI) via their channel: EMAIL (SMTP), DASHBOARD (account
+   * caregiver inbox), or SMS (NoopSmsService until a provider is wired). A
+   * CaregiverDispatchLog row (unique on alert+caregiver+channel) makes re-fired
+   * alerts idempotent. Gated behind CAREGIVER_DISPATCH_ENABLED so production
+   * stays silent until the capture/consent loop is live.
    */
   private async dispatchCaregiverNotification(
     payload: AlertCreatedEvent,
@@ -991,28 +1349,156 @@ export class EscalationService {
     if (!CAREGIVER_ROUTED_RULES.has(payload.ruleId ?? '')) return
     if (process.env.CAREGIVER_DISPATCH_ENABLED !== 'true') return
 
-    const caregiverUserIds = await this.findCaregiverUserIds(payload.userId)
-    if (caregiverUserIds.length === 0) return
+    // Gap 5 — only consented, active, channel-set caregivers receive PHI.
+    const caregivers = await this.findCaregivers(payload.userId)
+    if (caregivers.length === 0) return
 
     const alert = await this.loadAlert(payload.alertId)
     if (!alert?.caregiverMessage) return
+    const message = alert.caregiverMessage
+    // Gap 5 (Bug 2) — name the patient in the email subject so the caregiver
+    // can tell who it's about. The message body already names them via the
+    // registry (ctx.patientName). Name only — Minimum Necessary.
+    const patientDisplayName = alert.user?.name?.trim() || 'someone you care for'
 
-    for (const caregiverUserId of caregiverUserIds) {
-      await this.prisma.notification.create({
-        data: {
-          userId: caregiverUserId,
-          alertId: alert.id,
-          channel: 'DASHBOARD',
-          title: 'Caregiver update',
-          body: alert.caregiverMessage,
-        },
-      })
+    for (const caregiver of caregivers) {
+      try {
+        // Idempotency for non-Notification channels (email/SMS) — a re-fired
+        // alert must not double-send. createMany skipDuplicates on the unique
+        // (alertId, caregiverId, channel) returns count 0 when already sent.
+        const logged = await this.prisma.caregiverDispatchLog.createMany({
+          data: [
+            { alertId: alert.id, caregiverId: caregiver.id, channel: caregiver.notifyChannel },
+          ],
+          skipDuplicates: true,
+        })
+        if (logged.count === 0) continue // already dispatched for this alert+channel
+
+        let delivered = false
+        switch (caregiver.notifyChannel) {
+          case 'EMAIL': {
+            if (!caregiver.email) break
+            await this.emailService.sendEmail(
+              caregiver.email,
+              `Cardioplace — a health update about ${patientDisplayName}`,
+              caregiverEmailHtml(caregiver.name, message),
+              {
+                template: 'caregiver_alert',
+                templateVersion: EMAIL_TEMPLATE_VERSION,
+                patientUserId: alert.userId,
+                metadata: { alertId: alert.id, caregiverId: caregiver.id },
+              },
+            )
+            delivered = true
+            break
+          }
+          case 'DASHBOARD': {
+            // Option A — caregiver is a User with an in-app inbox.
+            if (!caregiver.caregiverUserId) break
+            await this.prisma.notification.create({
+              data: {
+                userId: caregiver.caregiverUserId,
+                alertId: alert.id,
+                channel: 'DASHBOARD',
+                title: 'Caregiver update',
+                body: message,
+                dispatchTrigger: 'CAREGIVER_UPDATE',
+              },
+            })
+            delivered = true
+            break
+          }
+          case 'SMS': {
+            // MVP: caregivers are EMAIL-ONLY (CROSS_HANDOFF_ADDENDUM Decision 2).
+            // SMS dispatch is gated OFF behind ENABLE_CAREGIVER_SMS (default
+            // false) so it can be turned on post-MVP without re-plumbing. The
+            // underlying SmsService is also a Noop today, but the flag is the
+            // explicit product gate.
+            if (process.env.ENABLE_CAREGIVER_SMS !== 'true') {
+              this.logger.warn(
+                `Caregiver SMS suppressed for ${caregiver.id} — ENABLE_CAREGIVER_SMS is off (MVP email-only).`,
+              )
+              break
+            }
+            if (!caregiver.phone) break
+            await this.smsService.sendSms(caregiver.phone, message)
+            delivered = true
+            break
+          }
+          default:
+            break // NONE — captured but not notifiable
+        }
+
+        // A6 — surface the caregiver dispatch in the canonical audit stream
+        // (EscalationEvent) so it shows in the admin timeline + the 15-field
+        // trail as a "Caregiver notified" row, not just CaregiverDispatchLog.
+        if (delivered) {
+          await this.prisma.escalationEvent.create({
+            data: {
+              alertId: alert.id,
+              userId: alert.userId,
+              escalationLevel: 'LEVEL_1',
+              reason: `Caregiver notified (${caregiver.notifyChannel.toLowerCase()})`,
+              ladderStep: 'T0',
+              recipientIds: [caregiver.caregiverUserId ?? caregiver.id],
+              recipientRoles: ['CAREGIVER'],
+              // NotificationChannel enum has no SMS — map text to PHONE for
+              // the audit row's channel chrome.
+              notificationChannel:
+                caregiver.notifyChannel === 'SMS' ? 'PHONE' : caregiver.notifyChannel,
+              notificationSentAt: new Date(),
+              dispatchedBySystem: true,
+            },
+          })
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Caregiver dispatch to ${caregiver.id} (${caregiver.notifyChannel}) failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      }
     }
   }
 
-  private async findCaregiverUserIds(_patientUserId: string): Promise<string[]> {
-    // Placeholder — PatientCaregiver model ships with Lakshitha's Gap 5.
-    return []
+  /**
+   * Gap 5 — caregivers eligible to receive an alert: active, consented
+   * (consentGivenAt is the HIPAA hard gate), and on a real dispatch channel.
+   */
+  private async findCaregivers(patientUserId: string): Promise<
+    Array<{
+      id: string
+      name: string
+      email: string | null
+      phone: string | null
+      caregiverUserId: string | null
+      notifyChannel: 'DASHBOARD' | 'SMS' | 'EMAIL'
+    }>
+  > {
+    const rows = await this.prisma.patientCaregiver.findMany({
+      where: {
+        patientUserId,
+        active: true,
+        consentGivenAt: { not: null },
+        notifyChannel: { not: 'NONE' },
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        caregiverUserId: true,
+        notifyChannel: true,
+      },
+    })
+    return rows as Array<{
+      id: string
+      name: string
+      email: string | null
+      phone: string | null
+      caregiverUserId: string | null
+      notifyChannel: 'DASHBOARD' | 'SMS' | 'EMAIL'
+    }>
   }
 
   private pickMessageForRole(alert: AlertRow, role: RecipientRole): string | null {
@@ -1135,6 +1621,7 @@ const ALERT_INCLUDE = {
       id: true,
       name: true,
       email: true,
+      displayId: true,
       dateOfBirth: true,
       enrollmentStatus: true,
       providerAssignmentAsPatient: {
@@ -1186,6 +1673,11 @@ interface AlertRow {
     id: string
     name: string | null
     email: string | null
+    // Permanent human-readable identifier (CP-PAT-... / CP-STF-...).
+    // Surfaced in the email subject for staff recipients so they can
+    // cross-reference with their own systems. See
+    // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+    displayId: string | null
     dateOfBirth: Date | null
     // Layer B dispatch gate — escalation only fires for patients the admin
     // has passed through the 4-piece enrollment gate (assignment + practice
@@ -1256,9 +1748,12 @@ function escalationEmailBody(args: {
   const isPatient = role === 'PATIENT'
 
   // Subject — patient-role emails keep the friendly, non-alarming title.
+  // Staff subjects carry NO patient identifier (HIPAA Minimum Necessary
+  // §164.502(b) — passes the lockscreen test). The patient is referenced by
+  // the non-PHI displayId inside the body only.
   const subject = isPatient
     ? patientSubject(alert.tier)
-    : `[${humanStep(step)} ${tierLabel}] ${patientName} — ${practiceName}`
+    : `[Cardioplace] ${tierLabel} - ${practiceName}`
 
   const stepPill = `${humanStep(step)}${afterHours ? ' (after-hours queued)' : ''}`
   const ackFooter = ackFooterFor(alert.tier)
@@ -1315,12 +1810,23 @@ function escalationEmailBody(args: {
   const createdLine = `<div style="margin-top:6px;font-size:12px;color:#6b7280">Alert created: <strong>${escapeHtml(createdLocal)}</strong> <span style="color:#9ca3af">(${escapeHtml(createdUtc)})</span></div>`
 
   // Footer with stable IDs so anyone replying via phone or Slack can
-  // reference exactly which alert / patient.
-  const idFooter = `<div style="margin-top:18px;font-size:11px;color:#9ca3af;font-family:ui-monospace,SFMono-Regular,monospace">Alert ID: ${escapeHtml(alert.id)} &middot; Patient ID: ${escapeHtml(alert.userId)}</div>`
+  // reference exactly which alert / patient. Prefer the human-readable
+  // displayId when present (CP-PAT-...); fall back to the ULID. The
+  // displayId is the cross-system handle clinicians actually want to use.
+  const patientRefId = alert.user.displayId
+    ? formatDisplayIdForView(alert.user.displayId)
+    : alert.userId
+  const idFooter = `<div style="margin-top:18px;font-size:11px;color:#9ca3af;font-family:ui-monospace,SFMono-Regular,monospace">Alert ID: ${escapeHtml(alert.id)} &middot; Patient ID: ${escapeHtml(patientRefId)}</div>`
 
-  // Header / clinical / detail / action / footer blocks. Keep inline styles
-  // — most email clients strip <style> tags.
-  const html = `<html><body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:auto;padding:24px;color:#111827">
+  // Standardized HIPAA confidentiality footer — rendered on BOTH the patient
+  // and the provider/MD/Ops emails (one definition, one place to update).
+  const confidentialityFooter = `<hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb"/>
+  <p style="font-size:11px;color:#9ca3af">Sent by Cardioplace escalation service. Do not reply to this email. This email may contain protected health information. If you received it in error, please notify the sender and delete it without forwarding or printing.</p>`
+
+  // Patient recipients are the data subject — they see their own reading and
+  // clinical message (their own data, not a PHI disclosure). Keep this body
+  // exactly as before.
+  const patientHtml = `<html><body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:auto;padding:24px;color:#111827">
   <div style="border-left:4px solid ${tierColor};padding:16px 20px;background:#f9fafb;border-radius:6px">
     <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${tierColor}">${escapeHtml(tierLabel)} &middot; ${escapeHtml(stepPill)}</div>
     <div style="font-size:20px;font-weight:700;margin-top:6px;color:#111827">${escapeHtml(patientName)}</div>
@@ -1337,9 +1843,31 @@ function escalationEmailBody(args: {
   <div style="margin-top:22px"><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:11px 20px;background:${tierColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">${escapeHtml(ctaLabel)}</a></div>
   ${ackFooter ? `<div style="margin-top:18px;padding:12px 14px;background:#fef3c7;border-radius:6px;font-size:12.5px;color:#78350f"><strong>Acknowledgment expected.</strong> ${escapeHtml(ackFooter)}</div>` : ''}
   ${idFooter}
-  <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb"/>
-  <p style="font-size:11px;color:#9ca3af">Sent by Cardioplace escalation service. Do not reply to this email.</p>
+  ${confidentialityFooter}
 </body></html>`
+
+  // Provider / MD / Ops recipients get the HIPAA "notify-and-link" body:
+  // NO patient PHI (no name, email, DOB, age, BP/pulse/position, clinical
+  // narrative, or rule metadata) — only the alert tier, practice, ack window,
+  // the non-PHI displayId reference, and a dashboard deep-link. Minimum
+  // Necessary §164.502(b); see the HIPAA-sprint email-refactor appendix.
+  const providerHtml = `<html><body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:auto;padding:24px;color:#111827">
+  <div style="border-left:4px solid ${tierColor};padding:16px 20px;background:#f9fafb;border-radius:6px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${tierColor}">${escapeHtml(tierLabel)} &middot; ${escapeHtml(stepPill)}</div>
+    <div style="font-size:15px;margin-top:8px;color:#111827">You have a new <strong>${escapeHtml(tierLabel)}</strong> alert from a patient in your practice.</div>
+  </div>
+  ${recipientBanner}
+  <div style="margin-top:18px;font-size:13.5px;color:#374151;line-height:1.7">
+    <div>Practice: <strong>${escapeHtml(practiceName)}</strong></div>
+    ${ackFooter ? `<div>Acknowledgment expected: <strong>${escapeHtml(ackFooter)}</strong></div>` : ''}
+    <div>Patient reference ID: <strong>${escapeHtml(patientRefId)}</strong></div>
+  </div>
+  <div style="margin-top:22px"><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:11px 20px;background:${tierColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">${escapeHtml(ctaLabel)}</a></div>
+  ${idFooter}
+  ${confidentialityFooter}
+</body></html>`
+
+  const html = isPatient ? patientHtml : providerHtml
 
   return { subject, html }
 }
@@ -1422,6 +1950,16 @@ function ageFromDob(dob: Date | null, now: Date): number | null {
   return Math.floor(years)
 }
 
+// Formats a canonical display ID ("CPPATK8M2R4N7") with hyphens for human
+// display ("CP-PAT-K8M2R4N-7"). Defensive: if input is already hyphenated
+// or off the expected length, returns it verbatim. Mirrors the formatter
+// in DisplayIdService (kept local to avoid cross-module dependency from
+// the escalation pipeline into the users module).
+function formatDisplayIdForView(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`
+}
+
 function tierLabelFor(tier: string | null): string {
   if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') {
     return 'BP EMERGENCY'
@@ -1490,6 +2028,20 @@ function patientSubject(tier: string | null): string {
   if (tier === 'BP_LEVEL_2' || tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE') {
     return 'Urgent Blood Pressure Alert — Cardioplace'
   }
+  // Manisha Open-Decisions sign-off 2026-06-06 (Decision 5) — recommended
+  // patient subject for contraindication alerts. Calm + actionable; pairs
+  // with the registry patientMessage's "please don't stop any medicine
+  // without talking to your doctor" framing in the body.
+  if (tier === 'TIER_1_CONTRAINDICATION') {
+    return 'Important medication alert from your care team — Cardioplace'
+  }
+  // Manisha Open-Decisions sign-off 2026-06-06 (Decision 6) — patient
+  // subject for the re-instated, cohort-gated BP_LEVEL_1_HIGH email
+  // (standard cohort only). Informative without alarming — frames the
+  // reading as something the care team will follow up on.
+  if (tier === 'BP_LEVEL_1_HIGH') {
+    return 'Your recent blood pressure reading — Cardioplace'
+  }
   return 'Cardioplace Alert'
 }
 
@@ -1514,3 +2066,39 @@ export { TIER_1_LADDER }
 // Re-export the email-body helper so spec files can render and assert on the
 // output directly without spinning up the full Nest TestingModule.
 export { escalationEmailBody }
+
+// N6 extension — map the ladder's RecipientRole onto the EmailDisclosureLog
+// `recipientCategory` bucket. Kept adjacent to the escalation dispatch site
+// so a role added to the ladder can never silently miss the disclosure trail
+// (the compile-time exhaustiveness check catches it).
+function recipientCategoryForRole(role: RecipientRole): RecipientCategoryName {
+  switch (role) {
+    case 'PATIENT':
+      return 'PATIENT'
+    case 'CAREGIVER':
+      return 'CAREGIVER'
+    case 'PRIMARY_PROVIDER':
+    case 'BACKUP_PROVIDER':
+      return 'PROVIDER'
+    case 'MEDICAL_DIRECTOR':
+      return 'MEDICAL_DIRECTOR'
+    case 'HEALPLACE_OPS':
+      return 'HEALPLACE_OPS'
+  }
+}
+
+// N6 extension — map the DeviationAlert tier string onto one of the 3
+// tier-scoped registry templates. Same collapse rule as `ladderForTier`:
+//   • TIER_1_*, BP_LEVEL_1_* → escalation_tier_1_staff
+//   • TIER_2_*, BP_LEVEL_2   → escalation_tier_2_staff
+//   • TIER_3_*               → escalation_tier_3_staff
+// Unknown/null tier defaults to tier 1 (safer to over-report than under-).
+// The raw tier is preserved separately in the disclosure metadata.
+function escalationTemplateForTier(tier: string | null): EmailTemplateName {
+  if (!tier) return 'escalation_tier_1_staff'
+  if (tier.startsWith('TIER_3')) return 'escalation_tier_3_staff'
+  if (tier.startsWith('TIER_2') || tier === 'BP_LEVEL_2') {
+    return 'escalation_tier_2_staff'
+  }
+  return 'escalation_tier_1_staff'
+}

@@ -11,7 +11,15 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import type { ContextMedication, ResolvedContext } from '@cardioplace/shared'
 import { PrismaService } from '../../prisma/prisma.service.js'
+import { ClsService } from 'nestjs-cls'
 import { AlertEngineService } from './alert-engine.service.js'
+
+// runAsCronActor wraps the @OnEvent handlers in cls.run — pass-through stub.
+const clsStub = {
+  run: (fn: () => unknown) => fn(),
+  set: () => undefined,
+  get: () => null,
+} as unknown as ClsService
 import { OutputGeneratorService } from './output-generator.service.js'
 import { ProfileResolverService } from './profile-resolver.service.js'
 import { SessionAveragerService } from './session-averager.service.js'
@@ -95,11 +103,15 @@ function buildCtx(over: {
   dateOfBirth?: Date | null
 } = {}): ResolvedContext {
   const isPregnant = over.isPregnant ?? over.profile?.isPregnant ?? false
-  const profile: ResolvedContext['profile'] = {
+  // Cast at the literal — `over.profile` is Partial<...> so spreading it
+  // makes every overridable field appear as `boolean | undefined` to TS,
+  // even when an explicit default precedes the spread. The cast is safe
+  // because every required key has a concrete default above the spread.
+  const profile = {
     gender: 'FEMALE',
     heightCm: 165,
     pregnancyDueDate: null,
-    historyPreeclampsia: false,
+    historyHDP: false,
     hasHeartFailure: false,
     heartFailureType: 'NOT_APPLICABLE',
     resolvedHFType: 'NOT_APPLICABLE',
@@ -109,13 +121,14 @@ function buildCtx(over: {
     hasDCM: false,
     hasTachycardia: false,
     hasBradycardia: false,
+    hasAorticStenosis: false,
     diagnosedHypertension: false,
     verificationStatus: 'VERIFIED',
     verifiedAt: TEN_YEARS_AGO,
     lastEditedAt: TEN_YEARS_AGO,
     ...over.profile,
     isPregnant,
-  }
+  } as ResolvedContext['profile']
   const readingCount = over.readingCount ?? 10
   const threshold = over.threshold ?? null
   const personalizedEligible =
@@ -138,6 +151,7 @@ function buildCtx(over: {
     triggerPregnancyContraindicationCheck: isPregnant,
     enrolledAt: null,
     practiceName: null,
+    patientName: null,
     resolvedAt: FIXED_NOW,
   }
 }
@@ -148,8 +162,8 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
   let service: AlertEngineService
   let prisma: Record<string, any>
   let eventEmitter: { emit: jest.Mock }
-  let profileResolver: { resolve: jest.Mock }
-  let sessionAverager: { averageForEntry: jest.Mock }
+  let profileResolver: { resolve: jest.Mock<any> }
+  let sessionAverager: { averageForEntry: jest.Mock<any> }
 
   beforeEach(async () => {
     prisma = {
@@ -165,6 +179,10 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       },
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+      },
+      // Pass 2 (loadAdherenceWindow) reads held meds; default to none.
+      patientMedication: {
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
       },
       notification: {
@@ -185,6 +203,7 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
         { provide: EventEmitter2, useValue: eventEmitter },
         { provide: ProfileResolverService, useValue: profileResolver },
         { provide: SessionAveragerService, useValue: sessionAverager },
+        { provide: ClsService, useValue: clsStub },
       ],
     }).compile()
     service = module.get<AlertEngineService>(AlertEngineService)
@@ -342,11 +361,11 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
 
   // ────────────────────────────────────────────────────────────────────────
   // Idempotent re-evaluation — phase/7 dedup keyed on (journalEntryId, ruleId).
-  // Re-running the pipeline on the same entry should hit findFirst → update,
-  // not double-create.
+  // F9 (JCAHO immutability): re-running the pipeline on the same entry must
+  // neither re-create NOR mutate the existing fired-record rows.
   // ────────────────────────────────────────────────────────────────────────
 
-  it('Re-evaluation is idempotent — second pass updates, does not re-create', async () => {
+  it('F9 — Re-evaluation is idempotent: second pass neither re-creates nor updates', async () => {
     // First pass: create both rows.
     const session = buildSession({ systolicBP: 95, diastolicBP: 65, pulse: 70 })
     const ctx = buildCtx({ ageGroup: '65+', profile: { hasCAD: true } })
@@ -355,17 +374,17 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     await service.evaluate(session.entryId)
 
     // Second pass: findFirst now returns existing rows (simulate DB state).
-    let createCount = prisma.deviationAlert.create.mock.calls.length
+    const createCount = prisma.deviationAlert.create.mock.calls.length
     expect(createCount).toBe(2)
     prisma.deviationAlert.findFirst = (jest.fn() as jest.Mock<any>)
-      .mockResolvedValueOnce({ id: 'existing-1' })
-      .mockResolvedValueOnce({ id: 'existing-2' })
+      .mockResolvedValueOnce({ id: 'existing-1', escalated: false })
+      .mockResolvedValueOnce({ id: 'existing-2', escalated: false })
 
     await service.evaluate(session.entryId)
 
-    // No new creates — both upserts went to update path.
+    // No new creates AND no in-place updates — the at-fire-time rows stand.
     expect(prisma.deviationAlert.create.mock.calls.length).toBe(createCount)
-    expect(prisma.deviationAlert.update.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
   })
 
   // ────────────────────────────────────────────────────────────────────────
@@ -375,9 +394,9 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
   // gets its own DeviationAlert row.
   // ────────────────────────────────────────────────────────────────────────
 
-  it('Emergency + L1 high co-fire — SBP 185 fires BOTH ABSOLUTE_EMERGENCY + STANDARD_L1_HIGH (independent ladders)', async () => {
+  it('F20 — Emergency suppresses L1-high cofire — SBP 185 fires ABSOLUTE_EMERGENCY (no STANDARD_L1_HIGH); med-adherence survives', async () => {
     // Seed two prior days of misses so the Cluster 6 2-of-3 adherence
-    // window also fires, giving us the full three-ladder picture.
+    // window also fires from its independent pass.
     const now = new Date('2026-04-22T10:00:00Z')
     prisma.journalEntry.findMany.mockResolvedValueOnce([
       { id: 'p1', measuredAt: new Date(now.getTime() - 24 * 60 * 60 * 1000), medicationTaken: false, missedMedications: null },
@@ -393,14 +412,14 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       }),
       buildCtx({ profile: { diagnosedHypertension: true } }),
     )
-    // SBP 185 violates BOTH the L2 emergency threshold (≥180) AND the L1
-    // high threshold (≥160). Per v2 addendum D, the two ladders run
-    // independently (T+0/2h/4h vs T+0/24h/72h/7d). Cluster 6 adherence
-    // (rolling 2-of-3 pattern) adds its own row.
-    expect(calls).toHaveLength(3)
+    // SBP 185 trips the L2 emergency threshold (≥180). F20: the lower-tier
+    // L1-high BP ladder is suppressed so the patient never gets a "contact
+    // tomorrow" message beside the 911 takeover. The medication-adherence
+    // row runs in its own pass (not the BP/HR pipeline) and is unaffected.
+    expect(calls).toHaveLength(2)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_ABSOLUTE_EMERGENCY')
-    expect(ids).toContain('RULE_STANDARD_L1_HIGH')
+    expect(ids).not.toContain('RULE_STANDARD_L1_HIGH')
     expect(ids).toContain('RULE_MEDICATION_MISSED')
   })
 
@@ -547,7 +566,7 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
   // co-fire fix the dedicated HR row carries the framing instead.
   // ────────────────────────────────────────────────────────────────────────
 
-  it('Reading 5b — symptom override + HR 48 + AMS + brady → 2 rows (override + brady symptomatic)', async () => {
+  it('F20 — symptom override (emergency) suppresses brady-symptomatic HR row', async () => {
     const { calls } = await run(
       buildSession({
         systolicBP: 130,
@@ -557,19 +576,16 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       }),
       buildCtx({ profile: { hasBradycardia: true } }),
     )
-    expect(calls).toHaveLength(2)
+    // AMS → symptomOverrideGeneral claims the emergency axis (911). F20
+    // suppresses the lower-tier brady-symptomatic HR row so it can't render
+    // a "contact your provider" message beside the 911 takeover.
+    expect(calls).toHaveLength(1)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    expect(ids).toContain('RULE_BRADY_HR_SYMPTOMATIC')
-    // Annotation is suppressed when an HR row exists — the row's own
-    // physicianMessage is the canonical surface for the HR finding.
-    const overrideRow = calls.find(
-      (c: { data: { ruleId: string } }) => c.data.ruleId === 'RULE_SYMPTOM_OVERRIDE_GENERAL',
-    )
-    expect(overrideRow?.data.physicianMessage).not.toContain('Stokes-Adams')
+    expect(ids).not.toContain('RULE_BRADY_HR_SYMPTOMATIC')
   })
 
-  it('Absolute emergency + brady-asymptomatic — three rows: emergency + L1 high + HR low', async () => {
+  it('F20 — absolute emergency suppresses L1-high but the Tier 1 HR<40 floor survives (Stage A)', async () => {
     const { calls } = await run(
       buildSession({
         systolicBP: 185,
@@ -579,16 +595,18 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       }),
       buildCtx({ profile: { hasBradycardia: true } }),
     )
-    // SBP 185 → absolute_emergency (emergency axis) + standardL1High
-    // (bp-high axis); HR 38 + hasBradycardia → brady_asymptomatic (hr).
-    expect(calls).toHaveLength(3)
+    // SBP 185 → absolute_emergency (emergency axis). HR 38 → brady_absolute,
+    // a Tier 1 'contraindication' airway/floor that claims its axis in Stage
+    // A and therefore survives the emergency short-circuit. The lower-tier
+    // standardL1High BP row (bp-high, Stage C) is suppressed by F20.
+    expect(calls).toHaveLength(2)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_ABSOLUTE_EMERGENCY')
-    expect(ids).toContain('RULE_STANDARD_L1_HIGH')
     expect(ids).toContain('RULE_BRADY_ABSOLUTE')
+    expect(ids).not.toContain('RULE_STANDARD_L1_HIGH')
   })
 
-  it('Symptom override + AFib HR-high — two rows: override + AFIB_HR_HIGH', async () => {
+  it('F20 — symptom override (emergency) suppresses AFib HR-high row', async () => {
     const { calls } = await run(
       buildSession({
         systolicBP: 140,
@@ -599,13 +617,16 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
       }),
       buildCtx({ profile: { hasAFib: true } }),
     )
-    expect(calls).toHaveLength(2)
+    // Chest pain → symptomOverrideGeneral (emergency / 911). The AFib HR-high
+    // row (hr axis, Stage C) is a lower-tier patient-facing message and is
+    // suppressed so it cannot contradict the 911 takeover.
+    expect(calls).toHaveLength(1)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    expect(ids).toContain('RULE_AFIB_HR_HIGH')
+    expect(ids).not.toContain('RULE_AFIB_HR_HIGH')
   })
 
-  it('Pregnancy + symptom override + brady — three rows: override + L1_HIGH + brady symptomatic', async () => {
+  it('F20 — pregnancy + symptom override (emergency) suppresses L1-high + brady-symptomatic', async () => {
     const { calls } = await run(
       buildSession({
         systolicBP: 165,
@@ -618,15 +639,16 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
         profile: { hasBradycardia: true },
       }),
     )
-    // AMS triggers symptomOverrideGeneralRule first (Stage A) which
-    // claims the emergency axis; pregnancyL2 (Stage B) sees emergency
-    // already claimed and skips. pregnancyL1High still fires on bp-high
-    // (≥140), and brady_symptomatic on hr.
-    expect(calls).toHaveLength(3)
+    // AMS triggers symptomOverrideGeneralRule first (Stage A) which claims
+    // the emergency axis; pregnancyL2 (Stage B) sees emergency already
+    // claimed and skips. F20 then short-circuits before Stage C, so the
+    // lower-tier pregnancyL1High (bp-high) and brady-symptomatic (hr) rows
+    // are suppressed — only the 911 override remains.
+    expect(calls).toHaveLength(1)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    expect(ids).toContain('RULE_PREGNANCY_L1_HIGH')
-    expect(ids).toContain('RULE_BRADY_HR_SYMPTOMATIC')
+    expect(ids).not.toContain('RULE_PREGNANCY_L1_HIGH')
+    expect(ids).not.toContain('RULE_BRADY_HR_SYMPTOMATIC')
   })
 
   it('NEGATIVE — symptom override + normal HR → no HR annotation', async () => {
@@ -738,18 +760,20 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     expect(ids).not.toContain('RULE_PREGNANCY_L2')
   })
 
-  it('Stage A + Stage B — Tier 1 PREGNANCY_ACE_ARB + BP L2 (PREGNANCY_L2) co-fire (D.5 patient-911)', async () => {
+  it('F20 — PREGNANCY_ACE_ARB + PREGNANCY_L2 co-fire; L1-high suppressed (D.5 patient-911)', async () => {
     const { calls } = await run(
       buildSession({ systolicBP: 175, diastolicBP: 115, pulse: 80 }),
       buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
     )
-    // 175/115 hits pregnancyL2 (≥160/110) and pregnancyL1High (≥140) on
-    // separate axes alongside the contraindication row → three ladders.
-    expect(calls).toHaveLength(3)
+    // 175/115 hits pregnancyL2 (≥160/110, emergency axis) alongside the Tier 1
+    // ACE/ARB contraindication (Stage A). F20: the lower-tier pregnancyL1High
+    // (≥140, bp-high) ladder is suppressed because the L2/911 row already
+    // covers the elevated BP — two ladders, not three.
+    expect(calls).toHaveLength(2)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
     expect(ids).toContain('RULE_PREGNANCY_L2')
-    expect(ids).toContain('RULE_PREGNANCY_L1_HIGH')
+    expect(ids).not.toContain('RULE_PREGNANCY_L1_HIGH')
   })
 
   it('Stage A + Stage A — Tier 1 PREGNANCY_ACE_ARB + symptom override coexist (different axes)', async () => {
@@ -806,18 +830,20 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
     expect(ids).not.toContain('RULE_PREGNANCY_L2')
   })
 
-  it('Stage A + Stage B — Tier 1 PREGNANCY_ACE_ARB + BP L2 (PREGNANCY_L2) co-fire (D.5 patient-911)', async () => {
+  it('F20 — PREGNANCY_ACE_ARB + PREGNANCY_L2 co-fire; L1-high suppressed (D.5 patient-911)', async () => {
     const { calls } = await run(
       buildSession({ systolicBP: 175, diastolicBP: 115, pulse: 80 }),
       buildCtx({ isPregnant: true, contextMeds: [buildMed()] }),
     )
-    // 175/115 hits pregnancyL2 (≥160/110) and pregnancyL1High (≥140) on
-    // separate axes alongside the contraindication row → three ladders.
-    expect(calls).toHaveLength(3)
+    // 175/115 hits pregnancyL2 (≥160/110, emergency axis) alongside the Tier 1
+    // ACE/ARB contraindication (Stage A). F20: the lower-tier pregnancyL1High
+    // (≥140, bp-high) ladder is suppressed because the L2/911 row already
+    // covers the elevated BP — two ladders, not three.
+    expect(calls).toHaveLength(2)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_PREGNANCY_ACE_ARB')
     expect(ids).toContain('RULE_PREGNANCY_L2')
-    expect(ids).toContain('RULE_PREGNANCY_L1_HIGH')
+    expect(ids).not.toContain('RULE_PREGNANCY_L1_HIGH')
   })
 
   it('Stage A + Stage A — Tier 1 PREGNANCY_ACE_ARB + symptom override coexist (different axes)', async () => {

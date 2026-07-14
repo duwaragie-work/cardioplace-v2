@@ -6,9 +6,9 @@ model PatientProfile {
   gender   Gender?
   heightCm Int?
 
-  isPregnant          Boolean   @default(false)
-  pregnancyDueDate    DateTime?
-  historyPreeclampsia Boolean   @default(false)
+  isPregnant       Boolean   @default(false)
+  pregnancyDueDate DateTime?
+  historyHDP       Boolean   @default(false)
 
   hasHeartFailure       Boolean          @default(false)
   heartFailureType      HeartFailureType @default(NOT_APPLICABLE)
@@ -16,9 +16,19 @@ model PatientProfile {
   hasCAD                Boolean          @default(false)
   hasHCM                Boolean          @default(false)
   hasDCM                Boolean          @default(false)
+  // Manisha 5/24 Q5C — aortic stenosis (fixed outflow obstruction; shares HCM
+  // hemodynamics). Interim: mandatory provider threshold config + HCM-equivalent
+  // SBP lower bound (100) until the provider sets personalized targets.
+  hasAorticStenosis     Boolean          @default(false)
   hasTachycardia        Boolean          @default(false)
   hasBradycardia        Boolean          @default(false)
   diagnosedHypertension Boolean          @default(false)
+
+  // Manisha 5/24 Q4 — permanent ACE-inhibitor contraindication, set when an
+  // angioedema alert is resolved with "ACE/ARB discontinued". Class effect:
+  // never rechallenge with any ACE inhibitor. Visible flag + dashboard note.
+  aceContraindicatedAt      DateTime?
+  aceContraindicationReason String?
 
   profileVerificationStatus ProfileVerificationStatus @default(UNVERIFIED)
   profileVerifiedAt         DateTime?

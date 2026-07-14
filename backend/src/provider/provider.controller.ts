@@ -20,7 +20,9 @@ import { RolesGuard } from '../auth/guards/roles.guard.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { ProviderService } from './provider.service.js'
 
-type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
+type AuthedReq = Request & {
+  user: { id: string; roles: UserRole[]; activePracticeId?: string | null }
+}
 
 // Admin-app dashboard endpoints. All four clinical-staff roles need read
 // access — PROVIDER + MEDICAL_DIRECTOR + HEALPLACE_OPS + SUPER_ADMIN. Per-
@@ -48,6 +50,7 @@ export class ProviderController {
     return this.providerService.getStats({
       id: req.user.id,
       roles: req.user.roles,
+      activePracticeId: req.user.activePracticeId,
     })
   }
 
@@ -68,7 +71,11 @@ export class ProviderController {
       // Pass through actor (id + roles). The scope filter is derived inside
       // PatientAccessService — PROVIDER ⇒ panel, MED_DIR ⇒ practice,
       // OPS/SUPER ⇒ unfiltered. A misconfigured frontend can't widen scope.
-      actor: { id: req.user.id, roles: req.user.roles },
+      actor: {
+        id: req.user.id,
+        roles: req.user.roles,
+        activePracticeId: req.user.activePracticeId,
+      },
     })
   }
 
@@ -94,6 +101,17 @@ export class ProviderController {
     // render a longer history in one page without paging UI.
     const l = Math.min(200, Math.max(1, parseInt(limit ?? '50', 10) || 50))
     return this.providerService.getPatientJournal(userId, p, l)
+  }
+
+  @Get('patients/:userId/rejected-readings')
+  async getPatientRejectedReadings(
+    @Req() req: AuthedReq,
+    @Param('userId') userId: string,
+    @Query('limit') limit?: string,
+  ) {
+    await this.assertCanViewPatient(req, userId)
+    const l = Math.min(100, Math.max(1, parseInt(limit ?? '20', 10) || 20))
+    return this.providerService.getPatientRejectedReadings(userId, l)
   }
 
   @Get('patients/:userId/bp-trend')
@@ -132,7 +150,11 @@ export class ProviderController {
           : escalated === 'false'
             ? false
             : undefined,
-      actor: { id: req.user.id, roles: req.user.roles },
+      actor: {
+        id: req.user.id,
+        roles: req.user.roles,
+        activePracticeId: req.user.activePracticeId,
+      },
     })
   }
 
@@ -151,7 +173,11 @@ export class ProviderController {
   ): Promise<void> {
     if (req.user.id === patientUserId) return
     await this.access.assertCanAccessPatient(
-      { id: req.user.id, roles: req.user.roles },
+      {
+        id: req.user.id,
+        roles: req.user.roles,
+        activePracticeId: req.user.activePracticeId,
+      },
       patientUserId,
     )
   }
@@ -184,36 +210,4 @@ export class ProviderController {
     return this.providerService.acknowledgeAlert(alertId, req.user.id)
   }
 
-  @Get('scheduled-calls')
-  getScheduledCalls(@Query('status') status?: string) {
-    return this.providerService.getScheduledCalls({ status })
-  }
-
-  @Post('schedule-call')
-  scheduleCall(
-    @Body()
-    body: {
-      patientUserId: string
-      alertId?: string
-      callDate: string
-      callTime: string
-      callType: string
-      notes?: string
-    },
-  ) {
-    return this.providerService.scheduleCall(body)
-  }
-
-  @Patch('scheduled-calls/:id/status')
-  updateCallStatus(
-    @Param('id') id: string,
-    @Body('status') status: string,
-  ) {
-    return this.providerService.updateCallStatus(id, status)
-  }
-
-  @Delete('scheduled-calls/:id')
-  deleteScheduledCall(@Param('id') id: string) {
-    return this.providerService.deleteScheduledCall(id)
-  }
 }

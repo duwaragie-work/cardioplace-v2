@@ -1,5 +1,17 @@
 model User {
   id                      String                   @id @default(ulid())
+  // Human-readable public identifier, e.g. "CPPATK8M2R4N7" (canonical) /
+  // "CP-PAT-K8M2R4N-7" (display). Set once at account creation, never
+  // mutated. Source of truth is the DisplayId ledger; this column is a
+  // denormalized fast-path for joins/UI.
+  //
+  // NOT NULL is enforced by migration
+  // 20260624150000_make_user_display_id_required. Every code path that
+  // inserts a User row pre-generates the displayId via
+  // DisplayIdService.issueForCreate (auth.service.ts) or via the seed
+  // helper getOrGenerateDisplayIdForEmail (prisma/seed/display-ids.ts).
+  // See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §11.
+  displayId               String                   @unique
   email                   String?                  @unique
   name                    String?
   pwdhash                 String?
@@ -7,6 +19,17 @@ model User {
   timezone                String?
   communicationPreference CommunicationPreference?
   preferredLanguage       String?                  @default("en")
+  // Reminder & Engagement preferences (N1, 2026-07-13). Semantics for all
+  // three: "HH:mm" 24-hour strings interpreted in the patient's local
+  // wall-clock (resolved via `timezone` above, fallback America/New_York).
+  // UI restricts `reminderTime` to 30-min slots 06:00–21:00; quiet-hours
+  // pickers span the full day. Compared via string equality against the
+  // current local time formatted by `Intl.DateTimeFormat` — no timezone
+  // math on the stored value itself. Nullable so migration is safe against
+  // existing rows; defaults picked to match the spec (09:00 / 22:00 / 07:00).
+  reminderTime            String?                  @default("09:00")
+  quietHoursStart         String?                  @default("22:00")
+  quietHoursEnd           String?                  @default("07:00")
   isVerified              Boolean                  @default(false)
   roles                   UserRole[]               @default([PATIENT])
   onboardingStatus        OnboardingStatus         @default(NOT_COMPLETED)
@@ -18,22 +41,45 @@ model User {
   // already-ENROLLED users so existing patients aren't treated as brand new.
   enrolledAt              DateTime?
   accountStatus           AccountStatus            @default(ACTIVE)
+
+  // ── Account lifecycle (phase/28) ──────────────────────────────────────────
+  // Session kill-switch: minted into the access token as a claim; jwt.strategy
+  // rejects any token whose version is behind this value. Bumped on deactivate,
+  // permanent-close, and role removal so every live session dies instantly
+  // without hunting down individual AuthSession / RefreshToken rows.
+  tokenVersion            Int                      @default(0)
+  // Set when the account is permanently CLOSED (tombstoned) — PII anonymised,
+  // all PHI rows retained per HIPAA §164.316. Presence distinguishes CLOSED
+  // (irreversible) from DEACTIVATED (reversible).
+  tombstonedAt            DateTime?
+  // Actor who closed the account (admin id, or the user's own id for a
+  // patient self-close). Plain scalar, not a relation, so a tombstone never
+  // dangles a FK.
+  tombstonedById          String?
+  closureReason           String?
+  // Roles / assignments captured at deactivate|close time so a later
+  // reactivate can restore prior roles ONLY when explicitly requested
+  // (restoreRoles flag). Null until the first off-transition.
+  terminationSnapshot     Json?
+
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
 
-  accounts                             Account[]
-  authLogs                             AuthLog[]
-  contentSubmitted                     Content[]                   @relation("ContentSubmittedBy")
-  contentRatings                       ContentRating[]             @relation("ContentRatings")
-  contentReviews                       ContentReview[]             @relation("ContentReviewedBy")
-  deviationAlerts                      DeviationAlert[]
-  escalationEvents                     EscalationEvent[]
-  journalEntries                       JournalEntry[]
-  notifications                        Notification[]
-  refreshTokens                        RefreshToken[]
-  scheduledCalls                       ScheduledCall[]
-  sessions                             Session[]
-  userDevices                          UserDevice[]
+  accounts            Account[]
+  authLogs            AuthLog[]
+  contentSubmitted    Content[]         @relation("ContentSubmittedBy")
+  contentRatings      ContentRating[]   @relation("ContentRatings")
+  contentReviews      ContentReview[]   @relation("ContentReviewedBy")
+  deviationAlerts     DeviationAlert[]
+  escalationEvents    EscalationEvent[]
+  journalEntries      JournalEntry[]    @relation("PatientJournalEntries")
+  journalEntriesAdded JournalEntry[]    @relation("JournalEntryAddedBy")
+  notifications       Notification[]
+  pushSubscriptions   PushSubscription[]
+  refreshTokens       RefreshToken[]
+  authSessions        AuthSession[]
+  sessions            Session[]
+  userDevices         UserDevice[]
 
   patientProfile                       PatientProfile?
   patientMedications                   PatientMedication[]
@@ -44,13 +90,39 @@ model User {
   providerAssignmentsAsMedicalDirector PatientProviderAssignment[] @relation("MedicalDirector")
   practiceMedicalDirectorMemberships   PracticeMedicalDirector[]   @relation("PracticeMedicalDirectorMemberships")
   practiceProviderMemberships          PracticeProvider[]          @relation("PracticeProviderMemberships")
+  practiceCoordinator                  PracticeCoordinator?
+  userInvitesSent                      UserInvite[]                @relation("UserInviteInvitedBy")
+  userInviteCreated                    UserInvite?                 @relation("UserInviteCreatedUser")
   profileVerificationLogs              ProfileVerificationLog[]
+  caregivers                           PatientCaregiver[]          @relation("PatientCaregivers")
+  rejectedReadingLogs                  RejectedReadingLog[]
+  accountClosureLogs                   AccountClosureLog[]
+  emailDisclosuresAsPatient            EmailDisclosureLog[]
+
+  // MFA — provider/admin TOTP second factor (Manisha 2026-06-12 §6). Both
+  // null/empty for patients (their biometric arrives later in its own table).
+  totpCredential   TotpCredential?
+  mfaRecoveryCodes MfaRecoveryCode[]
+
+  // Patient biometric sign-in (WebAuthn / passkeys). Optional, patient-side;
+  // empty for provider/admin accounts. One row per registered device.
+  webAuthnCredentials WebAuthnCredential[]
+
+  // Back-relation for the DisplayId ledger row. Always at most one row
+  // (DisplayId.userId is @unique). Tombstoned rows (userId = NULL) are
+  // not reachable from this side.
+  displayIdLedger DisplayId?
+
+  // Support System Phase 1 — tickets this user raised (signed-in contact).
+  // Locked-out tickets have userId = NULL and are not reachable from here.
+  supportTickets SupportTicket[]
 }
 
 enum UserRole {
   PATIENT
   PROVIDER
   MEDICAL_DIRECTOR
+  COORDINATOR
   HEALPLACE_OPS
   SUPER_ADMIN
 }
@@ -69,4 +141,13 @@ enum AccountStatus {
   ACTIVE
   BLOCKED
   SUSPENDED
+  DEACTIVATED
+  // Permanently closed / tombstoned (phase/28). Irreversible — PII anonymised,
+  // PHI retained. Never transitions back to ACTIVE.
+  CLOSED
+  // Reserved system-principal accounts (audit registry, 2026-07-03). One row
+  // per cron / engine process so automated PHI writes attribute to a real,
+  // joinable User id instead of null (HIPAA §164.312(b), Humaira Activity 1).
+  // Can NEVER sign in — every auth path hard-refuses this status. roles is [].
+  SYSTEM
 }

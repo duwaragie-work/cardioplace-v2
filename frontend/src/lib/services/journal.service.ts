@@ -4,6 +4,7 @@
 // booleans were added in phase/15 alongside Flow B.
 
 import { fetchWithAuth } from './token'
+import type { DelayBand } from '../delayBand'
 
 const API = process.env.NEXT_PUBLIC_API_URL
 
@@ -87,6 +88,17 @@ export interface JournalEntryPayload {
   otherSymptoms?: string[]
   notes?: string
   source?: 'manual' | 'healthkit'
+  // ── Option D — retake-to-confirm (Manisha 2026-06-12 Q2) ──────────────────
+  /** First-of-pair: persist this emergency reading as held (AWAITING) and
+   *  prompt for a confirmatory second reading. The 202 response carries
+   *  `pendingEmergencyConfirmation: true` + the entry id (data.id). */
+  beginEmergencyConfirmation?: boolean
+  /** Second-of-pair: the AWAITING first-of-pair id this reading confirms/clears. */
+  confirmsEntryId?: string
+  /** Bug 19 — the patient explicitly closed this session ("I'm good" buffer
+   *  commit / Option D confirmatory). The backend stamps `sessionClosedAt` on the
+   *  whole session so the active-session prompt won't re-offer it. */
+  closeSession?: boolean
 }
 
 export interface JournalEntryDto extends JournalEntryPayload {
@@ -94,6 +106,23 @@ export interface JournalEntryDto extends JournalEntryPayload {
   userId: string
   createdAt: string
   updatedAt: string
+  /** Chunk A backend (serializeEntry) surfaces the measurement-lag band on the
+   *  journal-entry POST response; Chunk C reads it to render the
+   *  HISTORICAL_ENTRY informational note. Defaults to 'REAL_TIME' server-side. */
+  delayBand?: DelayBand
+  /** Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) — why
+   *  real-time alerts were suppressed for this entry, if at all. 'GATE_A'
+   *  (a later-measured reading already exists) is POST-response-only;
+   *  'HISTORICAL_ENTRY' also appears on GETs (derived from delayBand). Both
+   *  render the same "recorded but won't trigger real-time alerts" banner. */
+  alertsSuppressedReason?: 'GATE_A' | 'HISTORICAL_ENTRY' | null
+  /** Option D + edit window (Manisha 2026-06-12) — ISO deadline before the
+   *  engine commits; while now < this, the readings page shows the "editable /
+   *  not yet sent" affordance. Null for admin / Option D AWAITING readings. */
+  engineEvaluationDeferredUntil?: string | null
+  /** Option D retake-confirm state: 'AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED'
+   *  or null for ordinary readings. */
+  emergencyConfirmation?: 'AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED' | null
 }
 
 /**
@@ -110,11 +139,41 @@ export class ClinicalIntakeRequiredError extends Error {
   }
 }
 
+/**
+ * Thrown when POST /daily-journal returns 422 `implausible-reading` — a
+ * physiologically-impossible reading (diastolic ≥ systolic, Manisha 5/24 Q1).
+ * The reading is NOT saved; callers prompt the patient to re-take it.
+ */
+export class ImplausibleReadingError extends Error {
+  readonly code = 'implausible-reading' as const
+  constructor(reason?: string) {
+    super(reason || "That reading doesn't look right — please check your cuff and try again.")
+    this.name = 'ImplausibleReadingError'
+  }
+}
+
+/**
+ * Bug 25 — thrown when create/update hits the @@unique([userId, measuredAt])
+ * constraint (backend ConflictException → HTTP 409). The readings edit modal
+ * catches this as the safety net behind its pre-submit collision check and
+ * shows the same friendly "you already have a reading at this time" message.
+ */
+export class ReadingTimeConflictError extends Error {
+  readonly code = 'reading-time-conflict' as const
+  constructor(reason?: string) {
+    super(reason || 'A reading already exists at this exact time.')
+    this.name = 'ReadingTimeConflictError'
+  }
+}
+
 async function unwrap<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     if (res.status === 403 && err?.message === 'clinical-intake-required') {
       throw new ClinicalIntakeRequiredError(err.reason)
+    }
+    if (res.status === 409) {
+      throw new ReadingTimeConflictError(err.message)
     }
     throw new Error(err.message || `Request failed: ${res.status}`)
   }
@@ -131,6 +190,10 @@ async function unwrap<T>(res: Response): Promise<T> {
 export interface JournalEntryCreated {
   entry: JournalEntryDto
   pendingSecondReading: boolean
+  /** Option D (Manisha 2026-06-12 Q2) — true when this was a BP-only emergency
+   *  submitted with `beginEmergencyConfirmation`: the reading is held and the
+   *  app should show the confirmatory second-reading screen (Screen B). */
+  pendingEmergencyConfirmation: boolean
 }
 
 export async function createJournalEntry(
@@ -146,13 +209,70 @@ export async function createJournalEntry(
     if (res.status === 403 && err?.message === 'clinical-intake-required') {
       throw new ClinicalIntakeRequiredError(err.reason)
     }
+    if (res.status === 422 && err?.message === 'implausible-reading') {
+      throw new ImplausibleReadingError(err.reason)
+    }
     throw new Error(err.message || `Request failed: ${res.status}`)
   }
   const json = await res.json()
   return {
     entry: (json.data ?? json) as JournalEntryDto,
     pendingSecondReading: Boolean(json.pendingSecondReading),
+    pendingEmergencyConfirmation: Boolean(json.pendingEmergencyConfirmation),
   }
+}
+
+/**
+ * GET /daily-journal/active-session — the patient's currently OPEN reading
+ * session, or null when none/expired. Drives the check-in "add to this
+ * session or start a new one?" prompt. `sessionId` is null for a time-window
+ * (un-tagged) session — join it by sending no sessionId.
+ */
+export interface ActiveSessionDto {
+  sessionId: string | null
+  openedAt: string // ISO — first reading in the session
+  lastReadingAt: string // ISO — most recent reading
+  readingCount: number
+  expiresAt: string // ISO — lastReadingAt + SESSION_WINDOW_MS (server-authoritative)
+  requiresMoreReadings: boolean // e.g. AFib && readingCount < 3
+}
+
+export async function getActiveSession(): Promise<ActiveSessionDto | null> {
+  const res = await fetchWithAuth(`${API}/api/daily-journal/active-session`)
+  if (res.status === 204) return null
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json().catch(() => null)
+  const data = (json?.data ?? json) as ActiveSessionDto | null
+  return data ?? null
+}
+
+/**
+ * GET /daily-journal/awaiting-emergency — the patient's most recent held
+ * emergency reading (Option D, Manisha 2026-06-12 Q2) awaiting its confirmatory
+ * second reading, or null when none. Drives the /check-in Screen A auto-resume
+ * and the /readings "Continue confirmation" CTA.
+ */
+export interface AwaitingEmergencyDto {
+  id: string
+  sessionId: string | null // the held first-of-pair's session (resume reuses it)
+  systolicBP: number | null
+  diastolicBP: number | null
+  measuredAt: string // ISO — when the held first-of-pair was taken
+}
+
+export async function getAwaitingEmergency(): Promise<AwaitingEmergencyDto | null> {
+  const res = await fetchWithAuth(`${API}/api/daily-journal/awaiting-emergency`)
+  if (res.status === 204) return null
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json().catch(() => null)
+  const data = (json?.data ?? json) as AwaitingEmergencyDto | null
+  return data ?? null
 }
 
 /**
@@ -169,6 +289,25 @@ export async function finalizeSingleReadingSession(entryId: string): Promise<voi
   if (!res.ok && res.status !== 200 && res.status !== 202) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.message || `Finalize failed: ${res.status}`)
+  }
+}
+
+/**
+ * Option D (Manisha 2026-06-12 Q2) — patient declined / closed the
+ * confirmatory retake (Screen C) or the 5-min window elapsed client-side.
+ * Resolves the held AWAITING first-of-pair as UNCONFIRMED (fires
+ * RULE_UNCONFIRMED_EMERGENCY, Tier 1 provider-only). Idempotent; the cron is
+ * the app-closed safety net. Best-effort — a failure is non-fatal (the cron
+ * still finalizes), so callers swallow errors.
+ */
+export async function declineEmergencyConfirmation(entryId: string): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/daily-journal/${entryId}/decline-confirmation`,
+    { method: 'POST' },
+  )
+  if (!res.ok && res.status !== 200 && res.status !== 202) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Decline failed: ${res.status}`)
   }
 }
 
@@ -276,7 +415,16 @@ export interface DeviationAlertDto {
 
 export async function getAlerts(): Promise<DeviationAlertDto[]> {
   const res = await fetchWithAuth(`${API}/api/daily-journal/alerts`)
-  return unwrap<DeviationAlertDto[]>(res)
+  const all = await unwrap<DeviationAlertDto[]>(res)
+  // Bug 12 (live-test 2026-06-15) — defense-in-depth. The backend now filters
+  // EVERY provider-only alert (empty patientMessage, any tier) out of the
+  // patient surface; this mirrors that universally so a backend regression
+  // can't leak a tier-generic "Important medication alert" card (e.g. the
+  // Tier-1 RULE_UNCONFIRMED_EMERGENCY) onto the patient. Only alerts with a
+  // real patient message render.
+  return all.filter(
+    (a) => typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0,
+  )
 }
 
 export async function acknowledgeAlert(alertId: string) {

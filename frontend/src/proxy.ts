@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { AUTH_MARKER_COOKIE, AUTH_ROLE_COOKIE } from '@/lib/cookie-names'
 
-const PUBLIC_ROUTES = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/terms', '/privacy', '/auth/callback', '/auth/magic-link']
+const PUBLIC_ROUTES = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/terms', '/privacy', '/auth/callback', '/auth/magic-link', '/activate', '/support/locked-out']
 
 const ADMIN_URL = process.env.NEXT_PUBLIC_ADMIN_URL || 'http://localhost:3001'
 
@@ -29,11 +29,15 @@ const ADMIN_URL = process.env.NEXT_PUBLIC_ADMIN_URL || 'http://localhost:3001'
 
 // Any non-patient role belongs on the admin app. Mirrors the role set in
 // admin/src/proxy.ts so a user with any of these is routed there.
+// COORDINATOR added in phase/23 — they live in the admin app (invite +
+// manage patients in their practice). Without them here, a Coordinator
+// arriving at the patient app would dead-end on its dashboard.
 const ADMIN_ROLES = new Set([
   'SUPER_ADMIN',
   'MEDICAL_DIRECTOR',
   'PROVIDER',
   'HEALPLACE_OPS',
+  'COORDINATOR',
 ])
 
 function hasAdminRole(rolesCookieValue: string | undefined): boolean {

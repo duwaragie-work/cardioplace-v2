@@ -5,8 +5,8 @@ import {
   PatientAccessService,
 } from '../common/patient-access.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { wasEverEnrolled } from '../practice/enrollment-helpers.js'
 import { EmailService } from '../email/email.service.js'
-import { scheduleCallEmailHtml } from '../email/email-templates.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import {
   pickDisplayName,
@@ -61,7 +61,7 @@ interface PatientProfileShape {
   hasBradycardia: boolean
   diagnosedHypertension: boolean
   isPregnant: boolean
-  historyPreeclampsia: boolean
+  historyHDP: boolean
 }
 
 @Injectable()
@@ -90,8 +90,8 @@ export class ProviderService {
     // later switched to OTHER) doesn't surface a "Pregnancy" pill in the
     // admin patient list / detail header.
     if (profile.gender === 'FEMALE' && profile.isPregnant) return 'Pregnancy'
-    if (profile.gender === 'FEMALE' && profile.historyPreeclampsia)
-      return 'Preeclampsia history'
+    if (profile.gender === 'FEMALE' && profile.historyHDP)
+      return 'HDP history'
     if (profile.hasHeartFailure) {
       const t = profile.heartFailureType
       if (t === 'HFREF') return 'Heart Failure (HFrEF)'
@@ -143,13 +143,13 @@ export class ProviderService {
     }
 
     // Elevated tier — recommended provider config / notation flag.
-    if (profile.gender === 'FEMALE' && profile.historyPreeclampsia && !profile.isPregnant) {
+    if (profile.gender === 'FEMALE' && profile.historyHDP && !profile.isPregnant) {
       // Hidden during active pregnancy because the Pregnancy tag above
       // already conveys the clinical state — avoids double-flagging the
       // same patient with two related pills.
       tags.push({
         id: 'preeclampsia-history',
-        label: 'Preeclampsia history',
+        label: 'HDP history',
         severity: 'elevated',
       })
     }
@@ -185,7 +185,7 @@ export class ProviderService {
     }
     const femalePregnancyRisk =
       profile.gender === 'FEMALE' &&
-      (profile.isPregnant || profile.historyPreeclampsia)
+      (profile.isPregnant || profile.historyHDP)
     if (
       femalePregnancyRisk ||
       profile.hasHeartFailure ||
@@ -215,7 +215,7 @@ export class ProviderService {
       return {
         OR: [
           { isPregnant: true },
-          { historyPreeclampsia: true },
+          { historyHDP: true },
           { hasHeartFailure: true },
           { hasHCM: true },
           { hasDCM: true },
@@ -235,7 +235,7 @@ export class ProviderService {
       return {
         AND: [
           { isPregnant: false },
-          { historyPreeclampsia: false },
+          { historyHDP: false },
           { hasHeartFailure: false },
           { hasHCM: false },
           { hasDCM: false },
@@ -266,7 +266,7 @@ export class ProviderService {
     hasBradycardia: true,
     diagnosedHypertension: true,
     isPregnant: true,
-    historyPreeclampsia: true,
+    historyHDP: true,
     // Phase/8 — Flow K patient list shows the verification status pill in
     // its own column. Including it here keeps downstream callers happy too
     // (they can just ignore the field).
@@ -280,14 +280,18 @@ export class ProviderService {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
 
-    // Role scoping mirrors getPatients / getAlerts. PROVIDER counts only
-    // their panel; MED_DIR counts only their practice's patients; OPS/SUPER
-    // count everyone. Same patientScopeFilter shape both for direct user
-    // queries (totalActivePatients) and for joined queries (alerts/journals
-    // need the filter under `user: { is: ... }`).
+    // Two scopes, deliberately different (Manisha 2026-06 / Humaira N14):
+    //   • Population + engagement (Active Patients, readings, interactions,
+    //     BP-controlled %) mirror the patient LIST → practice-wide.
+    //   • Alert counters (open alerts, patients needing attention) mirror the
+    //     dashboard QUEUE → assigned-only for a plain PROVIDER.
+    // MED_DIR / OPS / SUPER are identical under both filters, so their cards
+    // are unaffected by the split.
     const patientScope = await this.access.patientScopeFilter(actor)
+    const alertScope = await this.access.alertQueueScopeFilter(actor)
     const userWhereScope = patientScope ?? {}
-    const joinedWhereScope = patientScope ? { user: { is: patientScope } } : {}
+    const journalWhereScope = patientScope ? { user: { is: patientScope } } : {}
+    const alertWhereScope = alertScope ? { user: { is: alertScope } } : {}
 
     const [totalActivePatients, monthlyInteractions, activeAlertsCount, readingsThisMonth, recentAlertPatients] =
       await Promise.all([
@@ -297,23 +301,23 @@ export class ProviderService {
           where: { enrollmentStatus: 'ENROLLED', ...userWhereScope },
         }),
         this.prisma.journalEntry.count({
-          where: { createdAt: { gte: startOfMonth }, ...joinedWhereScope },
+          where: { createdAt: { gte: startOfMonth }, ...journalWhereScope },
         }),
         this.prisma.deviationAlert.count({
-          where: { status: 'OPEN', ...joinedWhereScope },
+          where: { status: 'OPEN', ...alertWhereScope },
         }),
         this.prisma.journalEntry.count({
           where: {
             measuredAt: { gte: startOfMonth },
             systolicBP: { not: null },
-            ...joinedWhereScope,
+            ...journalWhereScope,
           },
         }),
         this.prisma.deviationAlert.findMany({
           where: {
             status: 'OPEN',
             createdAt: { gte: twentyFourHoursAgo },
-            ...joinedWhereScope,
+            ...alertWhereScope,
           },
           select: { userId: true },
           distinct: ['userId'],
@@ -323,11 +327,17 @@ export class ProviderService {
     const usersWithEntries = await this.prisma.user.findMany({
       where: {
         enrollmentStatus: 'ENROLLED',
-        journalEntries: { some: {} },
+        // Soft-delete (L5): only count patients with at least one LIVE reading,
+        // so a patient whose readings are all soft-deleted doesn't drag the
+        // BP-control denominator.
+        journalEntries: { some: { deletedAt: null } },
         ...userWhereScope,
       },
       include: {
         journalEntries: {
+          // Soft-delete (L5): nested include the extension can't reach — a
+          // soft-deleted latest reading must not skew the BP-control rate.
+          where: { deletedAt: null },
           orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: { systolicBP: true },
@@ -393,7 +403,17 @@ export class ProviderService {
         // Threshold setAt drives the "needs threshold" list signal (missing /
         // stale). Only the timestamp is needed here.
         patientThreshold: { select: { setAt: true } },
+        // Provider slots on the assignment row — drive the patient-list
+        // "Yours" badge + mine-first sort. Practice-wide visibility is
+        // preserved (see patientScopeFilter); this only distinguishes
+        // ownership so a provider can spot their own caseload at a glance.
+        providerAssignmentAsPatient: {
+          select: { primaryProviderId: true, backupProviderId: true },
+        },
         journalEntries: {
+          // Soft-delete (L5): nested include the extension can't reach — a
+          // soft-deleted reading must not surface as the patient's latest BP.
+          where: { deletedAt: null },
           orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: {
@@ -458,8 +478,23 @@ export class ProviderService {
         alertsByTier[key] = (alertsByTier[key] ?? 0) + 1
       }
 
+      // True when the caller is the primary or backup provider on this
+      // patient's assignment. Drives the "Yours" badge + mine-first sort +
+      // "My patients only" filter chip on the patient list. Always false for
+      // MED_DIR / OPS / SUPER (never in a provider slot) — the UI suppresses
+      // the distinction for those roles.
+      const assignment = u.providerAssignmentAsPatient
+      const assignedToMe =
+        assignment != null &&
+        (filters.actor.id === assignment.primaryProviderId ||
+          filters.actor.id === assignment.backupProviderId)
+
       return {
         id: u.id,
+        // Permanent public identifier (CP-PAT-...). Used by admin UI as the
+        // patient's at-a-glance handle and quoted in escalation emails. See
+        // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+        displayId: u.displayId,
         name: u.name,
         email: u.email,
         riskTier: this.deriveRiskTier(profile, u.dateOfBirth),
@@ -479,8 +514,8 @@ export class ProviderService {
         // priority and the row doesn't double-flag. Gated on FEMALE so
         // stale rows from a previously-FEMALE patient don't surface here.
         isPregnant: profile?.gender === 'FEMALE' ? (profile?.isPregnant ?? false) : false,
-        historyPreeclampsia:
-          profile?.gender === 'FEMALE' ? (profile?.historyPreeclampsia ?? false) : false,
+        historyHDP:
+          profile?.gender === 'FEMALE' ? (profile?.historyHDP ?? false) : false,
         onboardingStatus: u.onboardingStatus,
         enrollmentStatus: u.enrollmentStatus,
         // Flow K — surface the patient's profile verification state so the
@@ -500,6 +535,7 @@ export class ProviderService {
         // latestBaseline (rolling snapshot) is gone in v2. Frontend should
         // request the BP trend endpoint when it needs averages.
         latestBaseline: null,
+        assignedToMe,
         activeAlertsCount,
         alertsByTier,
         lastEntryDate: latestEntry?.measuredAt ?? null,
@@ -607,6 +643,16 @@ export class ProviderService {
     }
     const names = await resolveUserDisplays(this.prisma, idsToResolve)
 
+    // Manisha 5/24 Q3 — provider "X of 7" pre-personalization surface. The
+    // patient's lifetime reading count drives the admin alert-detail note
+    // ("personalization begins after 7 readings; completed X of 7"). One count,
+    // attached to every alert in the list.
+    const PERSONALIZATION_READINGS = 7
+    const lifetimeReadingCount = await this.prisma.journalEntry.count({
+      where: { userId },
+    })
+    const preDay3 = lifetimeReadingCount < PERSONALIZATION_READINGS
+
     return {
       statusCode: 200,
       data: alerts.map((a) => ({
@@ -642,6 +688,10 @@ export class ProviderService {
         createdAt: a.createdAt,
         acknowledgedAt: a.acknowledgedAt,
         resolvedAt: a.resolvedAt,
+        // Manisha 5/24 Q3 — pre-personalization "X of 7" provider surface.
+        baselineReadingCount: lifetimeReadingCount,
+        personalizationThreshold: PERSONALIZATION_READINGS,
+        preDay3,
         journalEntry: a.journalEntry
           ? {
               ...a.journalEntry,
@@ -669,6 +719,9 @@ export class ProviderService {
       include: {
         patientProfile: { select: this.profileSelect },
         journalEntries: {
+          // Soft-delete (L5): nested include the extension can't reach — a
+          // soft-deleted reading must not surface as the patient's latest BP.
+          where: { deletedAt: null },
           orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: {
@@ -700,8 +753,20 @@ export class ProviderService {
     // v2 baseline: trailing 7-day mean, computed inline (not stored).
     const baseline = await this.trailing7dayMean(userId)
 
+    // Manisha sign-off 2026-06-12 — drives the alert-card badge: a NOT_ENROLLED
+    // patient who was previously enrolled (auto-un-enrolled on serious-condition
+    // add) shows "threshold pending" (dispatch DID fire) rather than the
+    // "awaiting enrollment / no dispatch" badge. Only query when un-enrolled.
+    const previouslyEnrolled =
+      user.enrollmentStatus === 'ENROLLED'
+        ? false
+        : await wasEverEnrolled(this.prisma, userId)
+
     const patient = {
       id: user.id,
+      // Permanent public identifier (CP-PAT-...). See
+      // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+      displayId: user.displayId,
       name: user.name,
       email: user.email,
       riskTier: this.deriveRiskTier(profile, user.dateOfBirth),
@@ -710,6 +775,7 @@ export class ProviderService {
       conditions: this.derivePatientConditions(profile),
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
+      previouslyEnrolled,
       latestBaseline: baseline,
       activeAlertsCount: user.deviationAlerts.length,
       lastEntryDate: latestEntry?.measuredAt ?? null,
@@ -729,7 +795,19 @@ export class ProviderService {
     }
 
     const recentEntries = await this.prisma.journalEntry.findMany({
-      where: { userId },
+      // Editable-buffer-window parity: hide readings still held in their 5-min
+      // editable window (not yet committed to the care team) — see getPatientJournal.
+      where: {
+        userId,
+        // NULL-safe held-exclusion (see getPatientJournal): include a reading
+        // unless it is unfinalized AND deferred into the future. A plain
+        // NOT(finalized=false AND deferred>now) drops NULL-deferral rows.
+        OR: [
+          { singleReadingFinalized: true },
+          { engineEvaluationDeferredUntil: null },
+          { engineEvaluationDeferredUntil: { lte: new Date() } },
+        ],
+      },
       orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
       take: 14,
       select: {
@@ -819,13 +897,37 @@ export class ProviderService {
   async getPatientJournal(userId: string, page: number, limit: number) {
     const skip = (page - 1) * limit
 
+    // Editable-buffer-window parity: a reading still HELD in its 5-min editable
+    // window (singleReadingFinalized=false AND engineEvaluationDeferredUntil in
+    // the future) has not committed to the care team and fires no alert yet —
+    // it must not surface to providers until it finalizes, exactly as a form
+    // reading isn't persisted until the patient commits. Exclude held entries.
+    // A reading is HELD (still in its 5-min editable window) iff it is NOT
+    // finalized AND its engine-evaluation deferral is still in the future.
+    // Express the INCLUDE filter as an explicit OR (de Morgan) instead of
+    // NOT(finalized=false AND deferred>now): for a reading with no deferral
+    // (engineEvaluationDeferredUntil IS NULL) the predicate `null > now` is SQL
+    // NULL, so the NOT(...) collapses to NULL and Postgres drops the row — which
+    // silently hid every normal non-finalized reading (e.g. all seeded/back-
+    // dated history). The OR form below is NULL-safe.
+    const notHeld = {
+      OR: [
+        { singleReadingFinalized: true },
+        { engineEvaluationDeferredUntil: null },
+        { engineEvaluationDeferredUntil: { lte: new Date() } },
+      ],
+    }
+
     const [entries, total] = await Promise.all([
       this.prisma.journalEntry.findMany({
-        where: { userId },
+        where: { userId, ...notHeld },
         orderBy: [{ measuredAt: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: limit,
         include: {
+          // Care-team actor on admin-entered readings (source = ADMIN) —
+          // drives the "entered by [staff]" display on the Readings tab.
+          addedBy: { select: { name: true, email: true } },
           deviationAlerts: {
             // Tier is required so the admin Readings tab can render the
             // tier badge per linked alert (V2-C). Severity stays for
@@ -850,7 +952,7 @@ export class ProviderService {
           },
         },
       }),
-      this.prisma.journalEntry.count({ where: { userId } }),
+      this.prisma.journalEntry.count({ where: { userId, ...notHeld } }),
     ])
 
     return {
@@ -896,8 +998,13 @@ export class ProviderService {
           position: entry.position,
           weight: entry.weight != null ? Number(entry.weight) : null,
           medicationTaken: entry.medicationTaken,
+          medicationScheduledLater: entry.medicationScheduledLater,
           missedDoses: entry.missedDoses,
           missedMedications: entry.missedMedications,
+          // Per-med yes/no/not-due-yet snapshot — lets the admin reading
+          // modal rebuild each med's exact answer on edit (same role it
+          // plays for the patient app's edit modal).
+          medicationStatuses: entry.medicationStatuses,
           // Structured Level-2 symptom booleans (the Readings tab renders
           // these as chips; only true ones are shown).
           severeHeadache: entry.severeHeadache,
@@ -913,12 +1020,24 @@ export class ProviderService {
           otherSymptoms: entry.otherSymptoms,
           measurementConditions: conditions,
           suboptimalMeasurement,
+          // Manisha 5/24 Q1 — narrow pulse pressure (<15) recorded at entry as a
+          // possible measurement artifact. Physician-only flag, no patient tier.
+          narrowPpArtifact: entry.narrowPpArtifact,
+          // Option D (Item B) — the AWAITING first-of-pair / CONFIRMATORY
+          // second-reading state lets the Readings tab pair them up and flag a
+          // large BP discrepancy between the two for provider review.
+          emergencyConfirmation: entry.emergencyConfirmation,
+          confirmsEntryId: entry.confirmsEntryId,
           failedConditions,
           teachBackAnswer: entry.teachBackAnswer,
           teachBackCorrect: entry.teachBackCorrect,
           notes: entry.notes,
           source: entry.source.toLowerCase(),
           sourceMetadata: entry.sourceMetadata,
+          addedByUserId: entry.addedByUserId,
+          addedByName: entry.addedBy
+            ? (entry.addedBy.name ?? entry.addedBy.email)
+            : null,
           baseline: null,
           deviations: entry.deviationAlerts.map((a) => ({
             id: a.id,
@@ -945,15 +1064,47 @@ export class ProviderService {
     }
   }
 
+  // ─── GET /provider/patients/:userId/rejected-readings ───────────────────────
+
+  // Manisha 5/24 Q1 — readings rejected at entry (DBP ≥ SBP) are never persisted
+  // as JournalEntry rows (they'd trip a false Level-2 emergency), but they ARE
+  // logged for QA + provider visibility. The Readings tab surfaces these as an
+  // informational note so a provider can see the patient attempted an
+  // implausible reading and prompt re-measurement / cuff check.
+  async getPatientRejectedReadings(userId: string, limit: number) {
+    const logs = await this.prisma.rejectedReadingLog.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    })
+    return {
+      statusCode: 200,
+      message: 'Rejected readings retrieved successfully',
+      data: logs.map((log) => ({
+        id: log.id,
+        systolicBP: log.systolicBP,
+        diastolicBP: log.diastolicBP,
+        pulse: log.pulse,
+        reason: log.reason,
+        createdAt: log.createdAt,
+      })),
+    }
+  }
+
   // ─── GET /provider/patients/:userId/bp-trend ────────────────────────────────
 
   async getPatientBpTrend(userId: string, startDate: string, endDate: string) {
+    // F1: endDate arrives as a calendar date (e.g. "2026-06-01"), which parses to
+    // UTC midnight and would exclude every reading taken during that day. Extend
+    // the upper bound to the end of the calendar day so the current day is included.
+    const endDateObj = new Date(endDate)
+    endDateObj.setUTCHours(23, 59, 59, 999)
     const entries = await this.prisma.journalEntry.findMany({
       where: {
         userId,
         measuredAt: {
           gte: new Date(startDate),
-          lte: new Date(endDate),
+          lte: endDateObj,
         },
         systolicBP: { not: null },
       },
@@ -1004,10 +1155,12 @@ export class ProviderService {
     if (filters.escalated != null) {
       where.escalated = filters.escalated
     }
-    // Role-scoped filter — same path as getPatients. patientScopeFilter
-    // returns a `providerAssignmentAsPatient` fragment; nest it under `user`
-    // because Alert.user is the patient User row.
-    const patientScope = await this.access.patientScopeFilter(filters.actor)
+    // Dashboard alert queue = the provider's focused work list, NOT the whole
+    // practice (Manisha 2026-06 / Humaira HIPAA N14). alertQueueScopeFilter
+    // narrows a plain PROVIDER to assigned patients (primary OR backup);
+    // MED_DIR / org-wide roles stay practice-wide. This one swap also narrows
+    // /admin/notifications, which is served by this same endpoint.
+    const patientScope = await this.access.alertQueueScopeFilter(filters.actor)
     if (patientScope) {
       where.user = { is: patientScope }
     }
@@ -1020,6 +1173,8 @@ export class ProviderService {
           select: {
             id: true,
             name: true,
+            // Permanent display ID surfaced on the alert row alongside name.
+            displayId: true,
             dateOfBirth: true,
             communicationPreference: true,
             patientProfile: { select: this.profileSelect },
@@ -1081,29 +1236,6 @@ export class ProviderService {
         (SEVERITY_ORDER[b.severity ?? ''] ?? 3),
     )
 
-    const alertIds = alerts.map((a) => a.id)
-    const scheduledCalls = alertIds.length
-      ? await this.prisma.scheduledCall.findMany({
-          where: { alertId: { in: alertIds } },
-          orderBy: { createdAt: 'desc' },
-          select: {
-            alertId: true,
-            callDate: true,
-            callTime: true,
-            callType: true,
-            status: true,
-            createdAt: true,
-          },
-        })
-      : []
-
-    const followUpMap = new Map<string, (typeof scheduledCalls)[0]>()
-    for (const sc of scheduledCalls) {
-      if (sc.alertId && !followUpMap.has(sc.alertId)) {
-        followUpMap.set(sc.alertId, sc)
-      }
-    }
-
     // Resolve every "by" UUID into a display name in one batched lookup so
     // the audit footer + escalation timeline can render "Acknowledged by …"
     // / "Resolved by Dr. Singal" instead of a truncated UUID. Mirrors
@@ -1122,7 +1254,6 @@ export class ProviderService {
     return {
       statusCode: 200,
       data: alerts.map((a) => {
-        const followUp = followUpMap.get(a.id)
         const profile = (a.user?.patientProfile ?? null) as PatientProfileShape | null
         return {
           id: a.id,
@@ -1162,11 +1293,6 @@ export class ProviderService {
           createdAt: a.createdAt,
           acknowledgedAt: a.acknowledgedAt,
           resolvedAt: a.resolvedAt,
-          followUpScheduledAt: followUp?.createdAt ?? null,
-          followUpCallDate: followUp?.callDate ?? null,
-          followUpCallTime: followUp?.callTime ?? null,
-          followUpCallType: followUp?.callType ?? null,
-          followUpStatus: followUp?.status ?? null,
           patient: a.user
             ? {
                 id: a.user.id,
@@ -1178,9 +1304,9 @@ export class ProviderService {
           journalEntry: a.journalEntry
             ? {
                 // entryDate is the legacy field name — kept so the
-                // dashboard AlertPanel + scheduled-calls page keep working.
-                // measuredAt mirrors the per-patient endpoint shape so
-                // AlertCard + EscalationAuditTrail consume the same field.
+                // dashboard AlertPanel keeps working. measuredAt mirrors the
+                // per-patient endpoint shape so AlertCard + EscalationAuditTrail
+                // consume the same field.
                 entryDate: a.journalEntry.measuredAt,
                 measuredAt: a.journalEntry.measuredAt,
                 systolicBP: a.journalEntry.systolicBP,
@@ -1211,6 +1337,8 @@ export class ProviderService {
           select: {
             id: true,
             name: true,
+            // Permanent display ID surfaced on the alert detail row.
+            displayId: true,
             dateOfBirth: true,
             communicationPreference: true,
             patientProfile: { select: this.profileSelect },
@@ -1377,6 +1505,9 @@ export class ProviderService {
         createdAt: alert.createdAt,
         patient: {
           id: alert.user?.id ?? '',
+          // Permanent public-facing identifier surfaced on the alert row.
+          // See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+          displayId: alert.user?.displayId ?? null,
           name: alert.user?.name ?? 'Unknown',
           dateOfBirth: alert.user?.dateOfBirth ?? null,
           communicationPreference: commPref ?? null,
@@ -1406,83 +1537,6 @@ export class ProviderService {
             }
           : null,
       },
-    }
-  }
-
-  // ─── POST /provider/schedule-call ───────────────────────────────────────────────
-
-  async scheduleCall(body: {
-    patientUserId: string
-    alertId?: string
-    callDate: string
-    callTime: string
-    callType: string
-    notes?: string
-  }) {
-    const patient = await this.prisma.user.findUnique({
-      where: { id: body.patientUserId },
-      select: { id: true, email: true, name: true },
-    })
-    if (!patient) throw new NotFoundException('Patient not found')
-
-    const scheduledCall = await this.prisma.scheduledCall.create({
-      data: {
-        userId: body.patientUserId,
-        alertId: body.alertId ?? null,
-        callDate: body.callDate,
-        callTime: body.callTime,
-        callType: body.callType,
-        notes: body.notes ?? null,
-        status: 'UPCOMING',
-      },
-    })
-
-    const notifTitle = 'Follow-up Call Scheduled'
-    const notifBody = `Your care team has scheduled a ${body.callType} call on ${body.callDate} at ${body.callTime}.${body.notes ? ` Note: ${body.notes}` : ''}`
-
-    await this.prisma.notification.create({
-      data: {
-        userId: body.patientUserId,
-        alertId: body.alertId ?? null,
-        channel: 'PUSH',
-        title: notifTitle,
-        body: notifBody,
-        tips: [],
-      },
-    })
-
-    if (patient.email) {
-      await this.prisma.notification.create({
-        data: {
-          userId: body.patientUserId,
-          alertId: body.alertId ?? null,
-          channel: 'EMAIL',
-          title: notifTitle,
-          body: notifBody,
-          tips: [],
-        },
-      })
-
-      await this.emailService.sendEmail(
-        patient.email,
-        'Follow-up Call Scheduled — Cardioplace',
-        scheduleCallEmailHtml(
-          patient.name ?? 'Patient',
-          body.callType,
-          body.callDate,
-          body.callTime,
-        ),
-      )
-    } else {
-      this.logger.warn(
-        `No email for patient ${body.patientUserId} — skipping email notification`,
-      )
-    }
-
-    return {
-      statusCode: 201,
-      message: 'Call scheduled. Patient notified.',
-      data: { scheduledCallId: scheduledCall.id },
     }
   }
 
@@ -1536,114 +1590,6 @@ export class ProviderService {
         acknowledgedAt: updated.acknowledgedAt,
       },
     }
-  }
-
-  // ─── GET /provider/scheduled-calls ──────────────────────────────────────────
-
-  async getScheduledCalls(filters: { status?: string }) {
-    const where: Record<string, unknown> = {}
-    if (filters.status) {
-      where.status = filters.status.toUpperCase()
-    }
-
-    const calls = await this.prisma.scheduledCall.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            dateOfBirth: true,
-            patientProfile: { select: this.profileSelect },
-          },
-        },
-        deviationAlert: {
-          select: {
-            id: true,
-            type: true,
-            severity: true,
-            status: true,
-            createdAt: true,
-            journalEntry: {
-              select: { systolicBP: true, diastolicBP: true, measuredAt: true },
-            },
-          },
-        },
-      },
-    })
-
-    return {
-      statusCode: 200,
-      data: calls.map((c) => {
-        const profile = (c.user?.patientProfile ?? null) as PatientProfileShape | null
-        return {
-          id: c.id,
-          callDate: c.callDate,
-          callTime: c.callTime,
-          callType: c.callType,
-          notes: c.notes,
-          status: c.status.toLowerCase(),
-          createdAt: c.createdAt,
-          updatedAt: c.updatedAt,
-          patient: c.user
-            ? {
-                id: c.user.id,
-                name: c.user.name,
-                email: c.user.email,
-                riskTier: this.deriveRiskTier(profile, c.user.dateOfBirth),
-              }
-            : null,
-          alert: c.deviationAlert
-            ? {
-                id: c.deviationAlert.id,
-                type: c.deviationAlert.type,
-                severity: c.deviationAlert.severity,
-                alertStatus: c.deviationAlert.status,
-                createdAt: c.deviationAlert.createdAt,
-                journalEntry: c.deviationAlert.journalEntry
-                  ? {
-                      systolicBP: c.deviationAlert.journalEntry.systolicBP,
-                      diastolicBP: c.deviationAlert.journalEntry.diastolicBP,
-                      entryDate: c.deviationAlert.journalEntry.measuredAt,
-                    }
-                  : null,
-              }
-            : null,
-        }
-      }),
-    }
-  }
-
-  // ─── PATCH /provider/scheduled-calls/:id/status ─────────────────────────────
-
-  async updateCallStatus(id: string, status: string) {
-    const validStatuses = ['UPCOMING', 'COMPLETED', 'MISSED', 'CANCELLED']
-    const upper = status.toUpperCase()
-    if (!validStatuses.includes(upper)) {
-      throw new NotFoundException(`Invalid status: ${status}`)
-    }
-
-    const call = await this.prisma.scheduledCall.findUnique({ where: { id } })
-    if (!call) throw new NotFoundException('Scheduled call not found')
-
-    const updated = await this.prisma.scheduledCall.update({
-      where: { id },
-      data: { status: upper as 'UPCOMING' | 'COMPLETED' | 'MISSED' | 'CANCELLED' },
-    })
-
-    return { statusCode: 200, data: { id: updated.id, status: updated.status } }
-  }
-
-  // ─── DELETE /provider/scheduled-calls/:id ───────────────────────────────────
-
-  async deleteScheduledCall(id: string) {
-    const call = await this.prisma.scheduledCall.findUnique({ where: { id } })
-    if (!call) throw new NotFoundException('Scheduled call not found')
-
-    await this.prisma.scheduledCall.delete({ where: { id } })
-    return { statusCode: 200, message: 'Scheduled call deleted' }
   }
 
   // ─── Private: trailing 7-day BP mean (v2 replacement for BaselineSnapshot) ─

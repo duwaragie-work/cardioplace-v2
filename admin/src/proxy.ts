@@ -23,7 +23,17 @@ const ROLE_COOKIE = AUTH_ROLE_COOKIE;
 // restrictions (e.g. threshold editor gated to MEDICAL_DIRECTOR/SUPER_ADMIN)
 // are enforced there. This proxy only decides "can you see /admin at all".
 // See TESTING_FLOW_GUIDE.md §2 for the full role matrix.
-const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'MEDICAL_DIRECTOR', 'PROVIDER', 'HEALPLACE_OPS']);
+// COORDINATOR added in phase/23 — they reach the admin app to invite +
+// manage patients in their own practice via /users. Page-level guards
+// (e.g. patients/page.tsx) and the backend's @Roles() decorators are
+// what actually restrict what they can do once they're in.
+const ADMIN_ROLES = new Set([
+  'SUPER_ADMIN',
+  'MEDICAL_DIRECTOR',
+  'PROVIDER',
+  'HEALPLACE_OPS',
+  'COORDINATOR',
+]);
 
 // Where a logged-in NON-admin (e.g. a PATIENT whose shared API refresh-token
 // cookie rehydrated an admin marker) gets bounced to — their own app's
@@ -46,7 +56,11 @@ const PUBLIC_PATHS = new Set<string>([
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
-  return pathname.startsWith('/sign-in') || pathname.startsWith('/auth/');
+  return (
+    pathname.startsWith('/sign-in') ||
+    pathname.startsWith('/auth/') ||
+    pathname.startsWith('/activate/')
+  );
 }
 
 function rolesFromCookie(value: string | undefined): string[] {
@@ -63,6 +77,44 @@ function rolesFromCookie(value: string | undefined): string[] {
 
 function hasAdminRole(roles: string[]): boolean {
   return roles.some((role) => ADMIN_ROLES.has(role));
+}
+
+// COORDINATOR is admin-app-eligible but non-clinical — they only have the
+// /users surface. Mirror of isCoordinatorOnly() in admin/src/lib/roleGates.ts.
+const COORDINATOR_BROADER_ROLES = new Set([
+  'SUPER_ADMIN',
+  'HEALPLACE_OPS',
+  'MEDICAL_DIRECTOR',
+  'PROVIDER',
+]);
+
+function isCoordinatorOnly(roles: string[]): boolean {
+  if (!roles.includes('COORDINATOR')) return false;
+  return !roles.some((r) => COORDINATOR_BROADER_ROLES.has(r));
+}
+
+// Paths a coordinator-only caller is allowed to navigate to. Everything else
+// in the admin app is clinical or operational chrome (Dashboard, Patients,
+// Practices, Alerts) that bounces them to /users.
+function isCoordinatorAllowed(pathname: string): boolean {
+  // /profile and /settings are every signed-in user's own-account pages —
+  // allow them alongside the coordinator's /users surface. The sidebar already
+  // shows Settings to COORDINATOR (account security / 2FA), so the guard must
+  // let them in. /practices is read-only for them (their own practice + staff;
+  // backend scopes it, CRUD buttons are OPS/SUPER-only).
+  return (
+    pathname === '/users' ||
+    pathname.startsWith('/users/') ||
+    pathname === '/practices' ||
+    pathname.startsWith('/practices/') ||
+    // Coordinators manage their practice's patient roster + care-team
+    // assignment on /patients (restricted, no clinical data — see the
+    // coordinator branch in admin/src/app/patients/page.tsx).
+    pathname === '/patients' ||
+    pathname === '/profile' ||
+    pathname === '/settings' ||
+    pathname.startsWith('/settings/')
+  );
 }
 
 export function proxy(request: NextRequest) {
@@ -87,6 +139,12 @@ export function proxy(request: NextRequest) {
     // to a blank page). The patient proxy does the symmetric redirect for
     // admin-role users landing on the patient app.
     return NextResponse.redirect(new URL('/dashboard', PATIENT_URL));
+  }
+
+  // Coordinator-only callers are locked to /users — single page-level
+  // guard so we don't have to sprinkle role checks in every other page.
+  if (isCoordinatorOnly(roles) && !isCoordinatorAllowed(pathname)) {
+    return NextResponse.redirect(new URL('/users', request.url));
   }
 
   const response = NextResponse.next();

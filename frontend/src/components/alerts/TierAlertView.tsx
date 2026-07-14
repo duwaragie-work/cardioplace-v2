@@ -7,37 +7,28 @@
 
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import {
-  AlertCircle,
-  AlertTriangle,
-  ArrowLeft,
-  ArrowUp,
-  ArrowDown,
-  Pill,
-  Heart,
-  CheckCircle2,
-  ShieldAlert,
-} from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ShieldAlert } from 'lucide-react';
 import type { DeviationAlertDto, AlertTier } from '@/lib/services/journal.service';
 import AudioButton from '@/components/intake/AudioButton';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { patientLabelForResolutionAction } from '@cardioplace/shared';
+import { getAlertPresentation } from './alert-presentation';
 
 interface Props {
   alert: DeviationAlertDto;
   acknowledging: boolean;
   onAcknowledge: () => void;
+  /** F27 — true when the patient is not yet ENROLLED. The escalation pipeline
+   *  defers all dispatch until enrollment, so we must NOT tell the patient
+   *  their care team has been notified. */
+  isPreEnrollment?: boolean;
 }
 
-interface Variant {
-  accent: string;          // border + accent color (CSS var or hex)
-  accentLight: string;     // tinted background
-  icon: React.ReactNode;
-  title: string;
-  defaultBody: string;
-  footer: string;
-  followUp: string;        // what happens next
-}
+// F27 — shown in place of any "your care team has been notified" reassurance
+// while the patient is pre-enrollment. The dispatch pipeline has NOT contacted
+// anyone yet, so the only safe guidance is to self-escalate true emergencies.
+const PRE_ENROLLMENT_NOTICE =
+  'Your enrollment is pending. If you have any concerning symptoms — chest pain, severe headache, difficulty breathing, vision changes — call 911 or go to the ER directly.';
 
 /**
  * When the v2 rule engine hasn't classified this alert yet (`tier` is null —
@@ -62,100 +53,10 @@ function deriveTier(alert: DeviationAlertDto): AlertTier {
   return 'TIER_3_INFO';
 }
 
-function variantFor(tier: AlertTier | null | undefined): Variant {
-  switch (tier) {
-    // Cluster 8 — ACE-angioedema airway emergency. Most urgent red treatment;
-    // the registry patientMessage (passed as the alert body) carries the
-    // exact approved 911 wording — these are the fallback strings.
-    case 'TIER_1_ANGIOEDEMA':
-      return {
-        accent: 'var(--brand-alert-red)',
-        accentLight: 'var(--brand-alert-red-light)',
-        icon: <AlertTriangle className="w-7 h-7" strokeWidth={2.4} />,
-        title: 'Urgent — get medical help now.',
-        defaultBody:
-          'You reported swelling of your face, lips, or tongue, or throat tightness. If you have trouble breathing or your throat feels tight, call 911 now. Otherwise go to the nearest emergency room now.',
-        footer:
-          'This can be a dangerous reaction. Your care team has been notified. Do not take any more of your blood pressure medicine until your doctor tells you it is safe.',
-        followUp:
-          'Do not wait. Call 911 or go to the emergency room now if you have any trouble breathing or throat tightness.',
-      };
-    case 'BP_LEVEL_2':
-    case 'BP_LEVEL_2_SYMPTOM_OVERRIDE':
-      return {
-        accent: 'var(--brand-alert-red)',
-        accentLight: 'var(--brand-alert-red-light)',
-        icon: <AlertTriangle className="w-7 h-7" strokeWidth={2.4} />,
-        title: 'Critical blood pressure reading.',
-        defaultBody:
-          'This reading was in the emergency range. If you have chest pain, severe headache, difficulty breathing, or vision changes right now, call 911.',
-        footer:
-          'Your care team has been notified. Please don\'t change any medicine without talking to your doctor.',
-        followUp:
-          'Recheck your blood pressure in 15 minutes while sitting quietly. If it stays this high or you develop symptoms, call 911.',
-      };
-    case 'TIER_1_CONTRAINDICATION':
-      return {
-        accent: 'var(--brand-alert-red)',
-        accentLight: 'var(--brand-alert-red-light)',
-        icon: <Pill className="w-7 h-7" strokeWidth={2.2} />,
-        title: 'Important medication alert.',
-        defaultBody:
-          'Your reported medications and conditions look like they need a closer look. Please don\'t stop or change any medicine without talking to your doctor.',
-        footer:
-          'Your care team has been notified and will contact you within the day. Please don\'t stop any medicine without talking to your doctor.',
-        followUp:
-          'A care-team member will reach out today. Keep taking your medicines as prescribed until you hear from them.',
-      };
-    case 'BP_LEVEL_1_HIGH':
-      return {
-        accent: 'var(--brand-warning-amber)',
-        accentLight: 'var(--brand-warning-amber-light)',
-        icon: <ArrowUp className="w-7 h-7" strokeWidth={2.5} />,
-        title: 'Your blood pressure is elevated.',
-        defaultBody:
-          'Your latest reading is higher than your usual range. Sit quietly for 5 minutes and take it again.',
-        footer: 'Your care team will review within 24 hours.',
-        followUp:
-          'Stay hydrated, avoid caffeine for the next few hours, and recheck before bed.',
-      };
-    case 'BP_LEVEL_1_LOW':
-      return {
-        accent: '#3B82F6',
-        accentLight: '#DBEAFE',
-        icon: <ArrowDown className="w-7 h-7" strokeWidth={2.5} />,
-        title: 'Your blood pressure is low.',
-        defaultBody:
-          'Your latest reading is lower than your usual range. If you feel dizzy or lightheaded, sit down or lie down right away.',
-        footer:
-          'Your care team will review this. Stand up slowly and stay hydrated.',
-        followUp:
-          'If you feel faint, get to a safe seated position. Eat a small salty snack and drink water.',
-      };
-    case 'TIER_3_INFO':
-      return {
-        accent: 'var(--brand-success-green)',
-        accentLight: 'var(--brand-success-green-light)',
-        icon: <Heart className="w-7 h-7" strokeWidth={2.2} />,
-        title: 'For your information.',
-        defaultBody:
-          'A small note from your care team about your most recent reading.',
-        footer: 'No action needed right now.',
-        followUp:
-          'Keep up your regular check-ins. Your care team is watching.',
-      };
-    default:
-      return {
-        accent: 'var(--brand-text-muted)',
-        accentLight: 'var(--brand-background)',
-        icon: <AlertCircle className="w-7 h-7" strokeWidth={2.2} />,
-        title: 'Care-team notice.',
-        defaultBody: 'Your care team has noted this reading.',
-        footer: 'They will follow up if anything needs attention.',
-        followUp: 'Continue your regular check-ins.',
-      };
-  }
-}
+// variantFor() lifted to shared/alert-presentation.tsx so the dashboard banner
+// (Dashboard.tsx:variantForTopAlert) uses the same chrome + rule-id overrides.
+// Round 2 A1 — RULE_HF_DECOMPENSATION renders as a fluid/attention alert
+// (amber + Heart + neutral title) instead of inheriting BP_LEVEL_1_LOW chrome.
 
 function formatBp(alert: DeviationAlertDto): string | null {
   const sys = alert.journalEntry?.systolicBP;
@@ -178,13 +79,16 @@ function formatTime(iso: string): string {
   }
 }
 
-export default function TierAlertView({ alert, acknowledging, onAcknowledge }: Props) {
+export default function TierAlertView({ alert, acknowledging, onAcknowledge, isPreEnrollment = false }: Props) {
   const router = useRouter();
   const { t, locale } = useLanguage();
   // Use the rule engine's tier when present; otherwise derive one from the
   // legacy fields so v1 alerts still render meaningfully.
   const effectiveTier = alert.tier ?? deriveTier(alert);
-  const v = variantFor(effectiveTier);
+  // Round 2 A1 — pass ruleId so RULE_HF_DECOMPENSATION (engine tier
+  // BP_LEVEL_1_LOW) doesn't inherit the low-BP chrome.
+  const v = getAlertPresentation({ tier: effectiveTier, ruleId: alert.ruleId });
+  const { Icon } = v;
   // Cluster 8 Gap 1 (Manisha 5/18/26, P0) — the angioedema emergency text is
   // a Priority-1 translation. The backend persists the English string (kept
   // as the fallback + the JCAHO audit record); the patient app renders it
@@ -203,7 +107,10 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
     ? formatTime(alert.journalEntry.measuredAt)
     : formatTime(alert.createdAt);
   const isResolved = alert.status === 'ACKNOWLEDGED' || alert.status === 'RESOLVED';
-  const audioText = `${v.title} ${body} ${v.footer}`;
+  // F27 — while pre-enrollment, the footer reassurance must not claim the care
+  // team was notified (dispatch is deferred). Swap in the self-escalation notice.
+  const effectiveFooter = isPreEnrollment ? PRE_ENROLLMENT_NOTICE : v.footer;
+  const audioText = `${v.title} ${body} ${effectiveFooter}`;
 
   return (
     <main id="main" className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
@@ -220,7 +127,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
               router.push('/dashboard');
             }
           }}
-          className="inline-flex items-center gap-1.5 text-[13px] font-semibold cursor-pointer"
+          className="inline-flex items-center gap-1.5 text-[0.8125rem] font-semibold cursor-pointer"
           style={{ color: 'var(--brand-text-secondary)' }}
         >
           <ArrowLeft className="w-4 h-4" /> {t('alerts.tier.back')}
@@ -249,7 +156,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                 }}
                 aria-hidden
               >
-                {v.icon}
+                <Icon className="w-7 h-7" strokeWidth={2.4} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-3">
@@ -260,7 +167,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                   <h1
                     data-testid="alert-detail-tier-badge"
                     lang="en"
-                    className="text-[20px] sm:text-[22px] font-bold leading-tight"
+                    className="text-[1.25rem] sm:text-[1.375rem] font-bold leading-tight"
                     style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                   >
                     {v.title}
@@ -271,7 +178,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                 </div>
 
                 {bp && (
-                  <p className="text-[13px] mt-1" style={{ color: v.accent, fontWeight: 600 }}>
+                  <p className="text-[0.8125rem] mt-1" style={{ color: v.accent, fontWeight: 600 }}>
                     {bp}
                     <span className="opacity-80 font-medium" style={{ color: 'var(--brand-text-muted)' }}>
                       {' · '}
@@ -283,7 +190,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                 <p
                   data-testid="alert-message-patient"
                   lang={angioedemaKey ? locale : 'en'}
-                  className="text-[14.5px] sm:text-[15px] mt-3 leading-relaxed"
+                  className="text-[0.90625rem] sm:text-[0.9375rem] mt-3 leading-relaxed"
                   style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                 >
                   {body}
@@ -295,14 +202,15 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
           {/* Footer message inside banner */}
           <div
             lang="en"
-            className="px-5 sm:px-6 py-4 text-[13px] sm:text-[13.5px] leading-relaxed"
+            className="px-5 sm:px-6 py-4 text-[0.8125rem] sm:text-[0.84375rem] leading-relaxed"
             style={{
               backgroundColor: 'rgba(255,255,255,0.6)',
               color: 'var(--brand-text-secondary)',
               borderTop: `1px solid ${v.accent}`,
             }}
+            data-testid="alert-footer"
           >
-            {v.footer}
+            {effectiveFooter}
           </div>
         </motion.div>
 
@@ -313,7 +221,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
         >
           <div className="flex items-start justify-between gap-3 mb-1.5">
             <p
-              className="text-[12px] font-bold uppercase tracking-wider"
+              className="text-[0.75rem] font-bold uppercase tracking-wider"
               style={{ color: 'var(--brand-primary-purple)' }}
             >
               {t('alerts.tier.whatNext')}
@@ -322,7 +230,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
           </div>
           <p
             lang="en"
-            className="text-[13.5px] leading-relaxed"
+            className="text-[0.84375rem] leading-relaxed"
             style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
           >
             {v.followUp}
@@ -365,14 +273,14 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                 />
                 <div className="flex-1 min-w-0">
                   <p
-                    className="text-[13px] font-semibold"
+                    className="text-[0.8125rem] font-semibold"
                     style={{ color: 'var(--brand-success-green)' }}
                   >
                     {t('alerts.tier.resolvedAction')}
                   </p>
                   <p
                     lang="en"
-                    className="text-[13px] mt-1 leading-relaxed"
+                    className="text-[0.8125rem] mt-1 leading-relaxed"
                     style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
                   >
                     {actionLabel}
@@ -380,12 +288,47 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                   {rationale && (
                     <p
                       lang="en"
-                      className="text-[12.5px] mt-1.5 leading-relaxed"
+                      className="text-[0.78125rem] mt-1.5 leading-relaxed"
                       style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
                     >
                       {rationale}
                     </p>
                   )}
+                </div>
+              </div>
+            );
+          } else if (isPreEnrollment) {
+            // F27 — pre-enrollment: dispatch is deferred, so do NOT claim the
+            // care team was notified. Tell the patient the truth and how to
+            // self-escalate a true emergency.
+            statusPanel = (
+              <div
+                data-testid="alert-pre-enrollment-notice"
+                className="rounded-xl px-4 py-3 flex items-start gap-3"
+                style={{
+                  backgroundColor: 'var(--brand-warning-amber-light)',
+                  border: '1px solid rgba(217,119,6,0.25)',
+                }}
+              >
+                <ShieldAlert
+                  className="w-5 h-5 shrink-0 mt-0.5"
+                  style={{ color: 'var(--brand-warning-amber-text)' }}
+                />
+                <div>
+                  <p
+                    className="text-[0.84375rem] font-bold mb-1"
+                    style={{ color: 'var(--brand-warning-amber-text)' }}
+                  >
+                    Your enrollment is pending
+                  </p>
+                  <p
+                    className="text-[0.78125rem] leading-relaxed"
+                    style={{ color: 'var(--brand-text-secondary)' }}
+                  >
+                    If you have any concerning symptoms — chest pain, severe
+                    headache, difficulty breathing, vision changes — call 911 or
+                    go to the ER directly.
+                  </p>
                 </div>
               </div>
             );
@@ -404,13 +347,13 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                 />
                 <div>
                   <p
-                    className="text-[13.5px] font-bold mb-1"
+                    className="text-[0.84375rem] font-bold mb-1"
                     style={{ color: 'var(--brand-primary-purple)' }}
                   >
                     Your care team has been notified
                   </p>
                   <p
-                    className="text-[12.5px] leading-relaxed"
+                    className="text-[0.78125rem] leading-relaxed"
                     style={{ color: 'var(--brand-text-secondary)' }}
                   >
                     A clinician needs to review this with you before it can be
@@ -431,7 +374,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                   className="w-5 h-5 shrink-0"
                   style={{ color: 'var(--brand-success-green)' }}
                 />
-                <p className="text-[13px]" style={{ color: 'var(--brand-success-green)' }}>
+                <p className="text-[0.8125rem]" style={{ color: 'var(--brand-success-green)' }}>
                   {t('alerts.tier.seenResolved')}
                 </p>
               </div>
@@ -447,7 +390,7 @@ export default function TierAlertView({ alert, acknowledging, onAcknowledge }: P
                   data-testid="alert-acknowledge-button"
                   onClick={onAcknowledge}
                   disabled={acknowledging}
-                  className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer transition"
+                  className="w-full h-12 rounded-full text-white font-bold text-[0.875rem] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer transition"
                   style={{
                     backgroundColor: 'var(--brand-primary-purple)',
                     boxShadow: 'var(--brand-shadow-button)',

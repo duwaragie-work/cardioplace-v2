@@ -27,6 +27,9 @@ export interface Practice {
   updatedAt: string
   patientCount?: number
   staffCount?: number
+  /** User ids of the practice's medical directors (from PracticeMedicalDirector).
+   *  Present on the detail response; drives canEditThisPractice for MED_DIR. */
+  medicalDirectorIds?: string[]
 }
 
 export type StaffSlot = 'PRIMARY' | 'BACKUP' | 'MEDICAL_DIRECTOR'

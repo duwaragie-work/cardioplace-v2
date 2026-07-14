@@ -8,7 +8,6 @@ const am: Record<TranslationKey, string> = {
   'nav.chat': 'ውይይት',
   'nav.provider': 'የእንክብካቤ ቡድን',
   'nav.patients': 'ታካሚዎች',
-  'nav.calls': 'ጥሪዎች',
 
   // ─── Common ────────────────────────────────────────────────────────────────
   'common.save': 'አስቀምጥ',
@@ -18,6 +17,7 @@ const am: Record<TranslationKey, string> = {
   'common.submit': 'አስገባ',
   'common.loading': 'በመጫን ላይ...',
   'common.saving': 'በማስቀመጥ ላይ...',
+  'common.refresh': 'አድስ',
   'common.deleting': 'በመሰረዝ ላይ...',
   'common.delete': 'ሰርዝ',
   'common.edit': 'አርም',
@@ -328,15 +328,11 @@ const am: Record<TranslationKey, string> = {
   'provider.lastCheckin': 'የመጨረሻ ቼክ-ኢን',
   'provider.alerts': 'ማንቂያዎች',
   'provider.noPatients': 'ታካሚ አልተገኘም',
-  'provider.scheduledCalls': 'የተያዙ ጥሪዎች',
-  'provider.searchCalls': 'ጥሪዎችን ፈልግ...',
   'provider.allStatuses': 'ሁሉም ሁኔታዎች',
   'provider.upcoming': 'የሚመጣ',
   'provider.completed': 'ተጠናቋል',
   'provider.missed': 'ተዘልሏል',
   'provider.cancelled': 'ተሰርዟል',
-  'provider.noCalls': 'የተያዘ ጥሪ አልተገኘም',
-  'provider.scheduleCall': 'ጥሪ ያዝ',
   'provider.reason': 'ምክንያት',
   'provider.scheduledFor': 'የተያዘለት',
   'provider.patientDetails': 'የታካሚ ዝርዝሮች',
@@ -350,7 +346,6 @@ const am: Record<TranslationKey, string> = {
   'provider.bpTrend': 'የደም ግፊት አዝማሚያ',
   'provider.review': 'ግምገማ',
   'provider.requiresAction': 'እርምጃ ያስፈልጋል',
-  'provider.followUpScheduled': 'ክትትል ተይዟል',
   'provider.addPatient': 'ታካሚ ጨምር',
   'provider.careTeamAlert': 'የእንክብካቤ ቡድን ማንቂያ',
   'provider.followUpRequired': 'በ24 ሰዓት ውስጥ ክትትል ያስፈልጋል',
@@ -362,7 +357,6 @@ const am: Record<TranslationKey, string> = {
   'provider.audioFirstDesc': 'የቃል ግንኙነት እና ምስላዊ ረዳቶችን ይጠቀሙ። ታካሚ ከጽሁፍ ይልቅ የተናገረ መመሪያ ይመርጣል።',
   'provider.sevenDayBpTrend': 'የ7 ቀን የደም ግፊት አዝማሚያ',
   'provider.markReviewed': 'እንደተገመገመ ምልክት አድርግ',
-  'provider.scheduleFollowUp': 'የክትትል ጥሪ ያዝ',
   'provider.loadingAlert': 'የማንቂያ ዝርዝሮችን በመጫን ላይ...',
   'provider.callDetails': 'የጥሪ ዝርዝሮች',
   'provider.markCompleted': 'እንደተጠናቀቀ ምልክት አድርግ',
@@ -384,22 +378,6 @@ const am: Record<TranslationKey, string> = {
   'provider.email': 'ኢሜይል',
 
   // ─── Schedule Modal ─────────────────────────────────────────────────────────
-  'schedule.title': 'የክትትል ጥሪ ያዝ',
-  'schedule.patient': 'ታካሚ',
-  'schedule.callType': 'የጥሪ ዓይነት',
-  'schedule.phoneCall': 'የስልክ ጥሪ',
-  'schedule.videoCall': 'የቪዲዮ ጥሪ',
-  'schedule.selectDate': 'ቀን ይምረጡ',
-  'schedule.selectTime': 'ሰዓት ይምረጡ',
-  'schedule.notes': 'ማስታወሻዎች (አማራጭ)',
-  'schedule.notesPlaceholder': 'ለምሳሌ፡ የመድሃኒት ተገዢነት፣ የደም ግፊት ንባቦችን ይወያዩ...',
-  'schedule.cancel': 'አቁም',
-  'schedule.confirm': 'መርሃ ግብር አረጋግጥ',
-  'schedule.scheduling': 'በማዘጋጀት ላይ...',
-  'schedule.success': 'ክትትል ተይዟል!',
-  'schedule.successMsg': 'ጥሪ ተይዟል። ታካሚ ተነግሯል።',
-  'schedule.today': 'ዛሬ',
-  'schedule.tomorrow': 'ነገ',
 
   // ─── Provider Dashboard (stats + trend) ────────────────────────────────────
   'provider.dcWards': 'ዲሲ ዎርዶች 7 እና 8',
@@ -491,6 +469,7 @@ const am: Record<TranslationKey, string> = {
   'register.adminAccessDenied': 'ለአስተዳዳሪ መተግበሪያ መድረስ ፈቃድ የለዎትም። እባክዎ ከአስተዳዳሪዎ ጋር ይገናኙ።',
   'register.accountSuspended': 'ይህ መለያ ታግዷል። እባክዎ ድጋፍ ያግኙ።',
   'register.accountBlocked': 'ይህ መለያ ተዘግቷል። እባክዎ ድጋፍ ያግኙ።',
+  'register.accountDeactivated': 'ይህ መለያ ተሰናክሏል። እንደገና ለማንቃት እባክዎ ድጋፍ ያግኙ።',
   'register.showOtp': 'ኮድ አሳይ',
   'register.hideOtp': 'ኮድ ደብቅ',
   'register.failedResend': 'OTP እንደገና መላክ አልተቻለም።',
@@ -606,6 +585,12 @@ const am: Record<TranslationKey, string> = {
   'home.ctaTitle': 'ምልልሱን መዝጋት ይህን ይመስላል።',
   'home.ctaDesc': "ከ DC Hospital Association ጋር የተገነባ። በዋሽንግተን ዲሲ ከፍተኛ-አደጋ ማህበረሰቦች ውስጥ ተሰማርቷል። ባህላዊ የጤና ቴክኖሎጂ ከኋላ የሚያስቀራቸውን ታካሚዎች ለመድረስ የተዘጋጀ።",
   'home.ctaButton': 'ስለ ፕሮግራሙ',
+  // TODO i18n — placeholder English copy; translate when demo video is finalised.
+  'home.demoEyebrow': 'See it in action',
+  'home.demoTitle': 'A five-minute walkthrough',
+  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
+  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
+  'home.demoCloseLabel': 'Close demo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'ታሪካችን',
@@ -694,6 +679,107 @@ const am: Record<TranslationKey, string> = {
   'about.closingButton': 'ስለ ፕሮግራሙ የበለጠ ይወቁ',
   'about.closingFooter': 'Cardioplace · ከ DC Hospital Association ጋር በመተባበር · ኤፕሪል 2026',
 
+  // ─── User Management (phase/23) ────────────────────────────────────────────
+  'userManagement.nav': 'ተጠቃሚዎች',
+  'userManagement.headerPatients': 'ታካሚዎች',
+  'userManagement.headerAll': 'የተጠቃሚ አያያዝ',
+  'userManagement.subtitle': 'መለያዎችን ይጋብዙ፣ ያቦዙ እና ያስተዳድሩ።',
+  'userManagement.subtitleCoordinator': 'ታካሚዎችን ይጋብዙ እና መዳረሻቸውን ያስተዳድሩ።',
+  'userManagement.inviteSingleCta': '+ ተጠቃሚ ይጋብዙ',
+  'userManagement.invitePatientCta': '+ ታካሚ ይጋብዙ',
+  'userManagement.addMultipleCta': '+ ብዙዎችን ይጨምሩ',
+  'userManagement.uploadCsvCta': 'CSV ይስቀሉ',
+  'userManagement.search.placeholder': 'በስም ወይም ኢሜል ይፈልጉ',
+  'userManagement.filter.all': 'ሁሉም',
+  'userManagement.filter.patient': 'ታካሚ',
+  'userManagement.filter.provider': 'አቅራቢ',
+  'userManagement.filter.medicalDirector': 'ሕክምና ዳይሬክተር',
+  'userManagement.filter.coordinator': 'አስተባባሪ',
+  'userManagement.filter.ops': 'OPS',
+  'userManagement.filter.superAdmin': 'ሱፐር አስተዳዳሪ',
+  'userManagement.filter.statusActive': 'ንቁ',
+  'userManagement.filter.statusPending': 'ግብዣ በመጠባበቅ',
+  'userManagement.filter.statusDeactivated': 'ተቦዟል',
+  'userManagement.field.name': 'ስም',
+  'userManagement.field.email': 'ኢሜል',
+  'userManagement.field.role': 'ሚና',
+  'userManagement.field.practice': 'ክሊኒክ',
+  'userManagement.field.status': 'ሁኔታ',
+  'userManagement.field.invitedBy': 'የጋበዘ',
+  'userManagement.field.invitedAt': 'የተጋበዘ ቀን',
+  'userManagement.field.actions': 'እርምጃዎች',
+  'userManagement.field.reason': 'ምክንያት (አማራጭ)',
+  'userManagement.placeholder.name': 'ስም ያስገቡ',
+  'userManagement.placeholder.email': 'mail@example.com',
+  'userManagement.placeholder.practice': 'ክሊኒክ ይምረጡ',
+  'userManagement.placeholder.role': 'ሚና ይምረጡ',
+  'userManagement.placeholder.reason': 'በኦዲት መዝገብ ውስጥ የሚቀመጥ አማራጭ ማስታወሻ።',
+  'userManagement.error.nameRequired': 'ስም ያስፈልጋል።',
+  'userManagement.error.emailRequired': 'ኢሜል ያስፈልጋል።',
+  'userManagement.error.emailInvalid': 'ትክክለኛ ኢሜል ያስገቡ።',
+  'userManagement.error.roleRequired': 'ሚና ይምረጡ።',
+  'userManagement.error.practiceRequired': 'ለዚህ ሚና ክሊኒክ ይምረጡ።',
+  'userManagement.error.tooManyRows': 'ብዙ ረድፎች — ከፍተኛው 500 ነው።',
+  'userManagement.error.csvParse': 'CSV ማንበብ አልተቻለም — ትክክለኛ .csv ፋይል መሆኑን ያረጋግጡ።',
+  'userManagement.modal.inviteTitle': 'ተጠቃሚ ይጋብዙ',
+  'userManagement.modal.invitePatientTitle': 'ታካሚ ይጋብዙ',
+  'userManagement.modal.inviteDescription': 'የመግቢያ ሊንክ ያለው ኢሜል ይደርሳቸዋል። ግብዣው በ48 ሰዓታት ውስጥ ያልፋል።',
+  'userManagement.modal.send': 'ግብዣ ይላኩ',
+  'userManagement.modal.sending': 'በመላክ ላይ…',
+  'userManagement.modal.cancel': 'ሰርዝ',
+  'userManagement.modal.deactivateTitle': 'ተጠቃሚውን ያቦዙ?',
+  'userManagement.modal.deactivateBody': 'ወዲያውኑ መዳረሻ ያጣሉ። መረጃዎቻቸው ይቆያሉ እና በኋላ መነቃቃት ይችላሉ። ይህ መሰረዝ አይደለም።',
+  'userManagement.modal.deactivateConfirm': 'አቦዝ',
+  'userManagement.modal.closeTitle': 'Permanently close {name}?',
+  'userManagement.modal.closeBody': 'This cannot be undone. They lose access immediately and their personal profile is removed. Medical records are retained as the law requires.',
+  'userManagement.modal.closeConfirm': 'Close permanently',
+  'userManagement.modal.closeGate': 'Type the Display ID to confirm: {displayId}',
+  'userManagement.modal.closeMismatch': 'The Display ID does not match.',
+  'userManagement.field.confirmDisplayId': 'Confirm Display ID',
+  'userManagement.action.closePermanently': 'Close permanently',
+  'userManagement.action.menu': 'Account actions',
+  'userManagement.bulk.title': 'ብዙ ተጠቃሚዎችን ይጋብዙ',
+  'userManagement.bulk.titlePatients': 'ብዙ ታካሚዎችን ይጋብዙ',
+  'userManagement.bulk.addRow': 'ረድፍ ጨምር',
+  'userManagement.bulk.removeRow': 'ረድፍ አስወግድ',
+  'userManagement.bulk.sendAll': 'ሁሉንም ላክ',
+  'userManagement.bulk.sendingAll': 'ግብዣዎች በመላክ ላይ…',
+  'userManagement.bulk.collapse': 'ሰርዝ',
+  'userManagement.bulk.atomicNotice': 'ሁሉም ረድፎች ይላካሉ ወይም አንዳቸውም አይላኩም። ስህተቶችን ያስተካክሉ።',
+  'userManagement.csv.title': 'ከCSV በብዛት ይጋብዙ',
+  'userManagement.csv.step1Title': 'ደረጃ 1 · አብነቱን አውርዱ',
+  'userManagement.csv.step1Body': 'የሚያስፈልጉ አምድ ራስጌዎች ያሉበትን CSV አብነት ያውርዱ።',
+  'userManagement.csv.step1Cta': 'አብነት አውርድ',
+  'userManagement.csv.step2Title': 'ደረጃ 2 · ፋይል ይስቀሉ',
+  'userManagement.csv.step2Body': 'እስከ 500 ረድፎች ያለበት .csv ይስቀሉ።',
+  'userManagement.csv.step2Cta': 'CSV ምረጥ',
+  'userManagement.csv.step3Title': 'ደረጃ 3 · ይገምግሙ እና ይላኩ',
+  'userManagement.csv.step3Body': 'ግብዣዎች ከመፈጠራቸው በፊት እያንዳንዱ ረድፍ ይረጋገጣል።',
+  'userManagement.csv.sendN': '{count} ግብዣዎችን ላክ',
+  'userManagement.csv.cancel': 'ሰርዝ',
+  'userManagement.csv.reupload': 'ሌላ ፋይል ምረጥ',
+  'userManagement.list.empty': 'በእነዚህ ማጣሪያዎች ውስጥ ምንም ተጠቃሚ የለም።',
+  'userManagement.list.emptyCoordinator': 'እስካሁን ምንም ታካሚ የለም። የመጀመሪያ ግብዣዎን ይላኩ።',
+  'userManagement.list.previous': 'ቀዳሚ',
+  'userManagement.list.next': 'ቀጣይ',
+  'userManagement.list.pageOf': 'ገጽ {page} ከ {total}',
+  'userManagement.status.active': 'ንቁ',
+  'userManagement.status.blocked': 'የተዘጋ',
+  'userManagement.status.suspended': 'የተንጠለጠለ',
+  'userManagement.status.deactivated': 'ተቦዟል',
+  'userManagement.status.invitePending': 'ግብዣ በመጠባበቅ',
+  'userManagement.action.deactivate': 'አቦዝ',
+  'userManagement.action.reactivate': 'አንቃ',
+  'userManagement.action.resend': 'ግብዣ እንደገና ላክ',
+  'userManagement.action.revoke': 'ግብዣ መልስ',
+  'userManagement.toast.inviteSent': 'ግብዣ ለ {email} ተልኳል',
+  'userManagement.toast.bulkSent': '{count} ግብዣዎች ተልከዋል',
+  'userManagement.toast.resent': 'ግብዣ እንደገና ተልኳል',
+  'userManagement.toast.revoked': 'ግብዣ ተመልሷል',
+  'userManagement.toast.deactivated': 'ተጠቃሚ ተቦዟል',
+  'userManagement.toast.reactivated': 'ተጠቃሚ ተነቅቷል',
+  'userManagement.toast.dismiss': 'ማስታወቂያ ዝጋ',
+
   // ─── Language Names ────────────────────────────────────────────────────────
   'lang.en': 'English',
   'lang.es': 'Español',
@@ -706,8 +792,30 @@ const am: Record<TranslationKey, string> = {
   'lang.ar': 'العربية',
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
-
-
+  'timeline.filter.readings': 'ንባቦች', // EN: Readings
+  'alerts.badge.thresholdPending':
+    'የታካሚ ገደብ በመጠባበቅ ላይ — ብጁ ገደብ ያዘጋጁ እና ማንቂያውን ይገምግሙ', // EN: Patient threshold pending — set personalized threshold and review alert
+  // --- Phase/practice-identity — sign-in selector + top-bar switcher chip ---
+  'signIn.selectPractice.title': 'በየትኛው ክሊኒክ በመሆን ይሰራሉ?', // EN: Which practice are you acting as?
+  'signIn.selectPractice.intro':
+    'ከአንድ በላይ ክሊኒኮች አባል ነዎት። ለዚህ ክፍለ ጊዜ የሚሰሩበት ክሊኒክ ይምረጡ — እያንዳንዱ እርምጃ በተመረጠው ክሊኒክ ስም ይመዘገባል። ቆይተው ከላይ ካለው ባር ላይ መቀየር ይችላሉ።', // EN: You're a member of more than one practice...
+  'signIn.selectPractice.continue': 'ቀጥል', // EN: Continue
+  'signIn.selectPractice.signingIn': 'በመመዝገብ ላይ…', // EN: Signing in…
+  'signIn.selectPractice.contactAdmin':
+    'ትክክለኛውን ክሊኒክ ካላገኙ? ይውጡና ስራ አስኪያጅዎን ያነጋግሩ።', // EN: Not seeing the right practice?...
+  'signIn.selectPractice.error': 'ክሊኒክ መምረጥ አልተቻለም', // EN: Unable to select practice
+  'signIn.selectPractice.expired.title': 'የመግቢያ ክፍለ ጊዜ አብቅቷል', // EN: Sign-in session expired
+  'signIn.selectPractice.expired.body':
+    'ለደህንነት ሲባል የክሊኒክ ምርጫ 5 ደቂቃ ብቻ ይቆያል። እባክዎ መልሰው ይመዝገቡ።', // EN: For your security...5-minute window.
+  'signIn.selectPractice.expired.back': 'ወደ መግቢያ ይመለሱ', // EN: Back to sign in
+  'signIn.zeroPractice.title': 'ምንም የክሊኒክ አባልነት የለም', // EN: No practice membership
+  'signIn.zeroPractice.body':
+    'እስካሁን የየትኛውም ክሊኒክ አባል አይደሉም። ከመመዝገብዎ በፊት እንዲጨመሩ ስራ አስኪያጅዎን ያነጋግሩ።', // EN: You aren't a member of any practice yet...
+  'topBar.actingAs.label': 'በመሆን', // EN: Acting as
+  'topBar.actingAs.switchTo': 'ክሊኒክ ቀይር', // EN: Switch practice
+  'topBar.actingAs.switching': 'በመቀየር ላይ…', // EN: Switching…
+  'topBar.actingAs.switched': 'አሁን በ', // EN: Now acting as
+  'topBar.actingAs.current': 'አሁን', // EN: Current
 };
 
 export default am;

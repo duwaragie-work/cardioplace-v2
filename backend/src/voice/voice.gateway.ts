@@ -15,6 +15,27 @@ import { VoiceService } from './voice.service.js'
 
 interface StartSessionPayload {
   sessionId?: string
+  /**
+   * IANA timezone string from `Intl.DateTimeFormat().resolvedOptions().timeZone`
+   * on the client. When present and valid, the backend uses this for "now"
+   * resolution in voice check-ins instead of the stored User.timezone — so
+   * a patient travelling away from their registered timezone still gets
+   * measuredAt that matches their browser's wall clock.
+   */
+  clientTimezone?: string
+}
+
+/**
+ * Allowed WebSocket origins — mirrors the HTTP CORS allow-list in main.ts so
+ * voice stays in lockstep with normal API CORS across every environment.
+ * Read from env at connection time, so prod / dev / local each enforce their
+ * own `WEB_APP_URL` with no hardcoded domains.
+ */
+function voiceCorsAllowedOrigins(): string[] {
+  return (process.env.WEB_APP_URL ?? 'http://localhost:3000,http://localhost:3001')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
 }
 
 @WebSocketGateway({
@@ -22,8 +43,17 @@ interface StartSessionPayload {
   pingInterval: 10_000,
   pingTimeout: 15_000,
   cors: {
-    origin: (origin: string, callback: (err: Error | null, allow?: boolean) => void) => {
-      callback(null, true)
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      // No Origin header → non-browser client (e.g. native/mobile voice). These
+      // can't mount a CSRF-style cross-site attack, so allow them through.
+      if (!origin) {
+        callback(null, true)
+        return
+      }
+      callback(null, voiceCorsAllowedOrigins().includes(origin))
     },
     credentials: true,
   },
@@ -54,9 +84,23 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
-      const payload = this.jwtService.verify<{ sub: string }>(token, {
+      const payload = this.jwtService.verify<{ sub: string; roles?: string[] }>(token, {
         secret: this.config.getOrThrow('JWT_ACCESS_SECRET'),
       })
+      // Role gate (least privilege): voice is a patient-only surface. A
+      // misissued PROVIDER / MEDICAL_DIRECTOR / SUPER_ADMIN token must not
+      // be able to open a voice session and burn LLM tokens against an
+      // account that has no PatientProfile. Mirrors @Roles(UserRole.PATIENT)
+      // on the HTTP controllers.
+      const roles = Array.isArray(payload.roles) ? payload.roles : []
+      if (!roles.includes('PATIENT')) {
+        this.logger.warn(
+          `[SECURITY] voice_role_denied user=${payload.sub} roles=${roles.join(',')} [socket=${client.id}]`,
+        )
+        client.emit('session_error', { message: 'Voice is a patient-only surface' })
+        client.disconnect()
+        return
+      }
       client.data = { userId: payload.sub, token }
       this.logger.log(`[FLOW] Step 2 — WS connected + JWT verified [socket=${client.id}, user=${payload.sub}] (${Date.now() - t0}ms)`)
     } catch {
@@ -85,6 +129,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const authToken = data?.token ?? ''
     const chatSessionId = payload?.sessionId
+    const clientTimezone = typeof payload?.clientTimezone === 'string' ? payload.clientTimezone : undefined
 
     const sessionStart = Date.now()
     this.logger.log(`[FLOW] Step 3 START — creating session [socket=${client.id}, chatSession=${chatSessionId ?? 'new'}]`)
@@ -103,6 +148,16 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
             this.logger.log(`[VOICE NestJS→WS] emit audio_response bytes=${audioBase64.length} [socket=${client.id}]`)
           }
           client.emit('audio_response', { audio: audioBase64 })
+        },
+        onGenerationComplete: () => {
+          if (process.env.VOICE_DEBUG_AUDIO === '1') {
+            this.logger.log(`[VOICE NestJS→WS] emit agent_generation_complete [socket=${client.id}]`)
+          }
+          client.emit('agent_generation_complete', {})
+        },
+        onInterrupted: () => {
+          this.logger.log(`[VOICE NestJS→WS] emit agent_interrupted [socket=${client.id}]`)
+          client.emit('agent_interrupted', {})
         },
         onTranscript: (text: string, isFinal: boolean, speaker: 'user' | 'agent') => {
           if (isFinal && text.trim()) {
@@ -144,6 +199,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       },
       authToken,
       chatSessionId,
+      clientTimezone,
     )
   }
 

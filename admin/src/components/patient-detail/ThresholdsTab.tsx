@@ -37,6 +37,7 @@ import {
 } from '@/lib/services/patient-detail.service';
 import { useAuth } from '@/lib/auth-context';
 import { canEditThresholds } from '@/lib/roleGates';
+import { patientConditionLabel } from '@/lib/clinical/conditions';
 
 interface Props {
   patientId: string;
@@ -299,15 +300,8 @@ export default function ThresholdsTab({
               Mandatory configuration required
             </p>
             <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--brand-text-secondary)' }}>
-              This patient has{' '}
-              {[
-                profile?.heartFailureType === 'HFREF' ? 'HFrEF' : null,
-                profile?.hasHCM ? 'HCM' : null,
-                profile?.hasDCM ? 'DCM' : null,
-              ]
-                .filter(Boolean)
-                .join(' / ')}
-              {' '}— set a personalized SBP / DBP target before any further check-ins.
+              This patient has {patientConditionLabel(profile)} — set a
+              personalized SBP / DBP target before any further check-ins.
             </p>
           </div>
         </div>
@@ -436,6 +430,21 @@ export default function ThresholdsTab({
             upperTestId="admin-threshold-sbp-upper"
             lowerTestId="admin-threshold-sbp-lower"
           />
+          {/* PERSONALIZED +20 tolerance band (CLINICAL_SPEC §4.1) — the engine
+              fires RULE_PERSONALIZED_HIGH at sbpUpperTarget + 20, not at the
+              target itself. Surface it so a provider who sets 130 isn't
+              surprised that high alerts begin at 150. */}
+          {Number(form.sbpUpperTarget) > 0 && (
+            <p
+              data-testid="admin-threshold-sbp-band-helper"
+              className="text-[11.5px] -mt-2 ml-0.5"
+              style={{ color: 'var(--brand-text-secondary)' }}
+            >
+              High alerts fire at{' '}
+              <strong>{Number(form.sbpUpperTarget) + 20} mmHg</strong>{' '}
+              — your upper target ({form.sbpUpperTarget}) plus a 20 mmHg tolerance band.
+            </p>
+          )}
           <PairRow
             title="Diastolic BP (DBP)"
             unit="mmHg"
@@ -466,10 +475,11 @@ export default function ThresholdsTab({
 
         {/* Notes */}
         <div className="mt-5">
-          <label className="block text-[11.5px] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+          <label htmlFor="admin-threshold-notes" className="block text-[11.5px] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
             Clinical rationale
           </label>
           <textarea
+            id="admin-threshold-notes"
             value={form.notes}
             onChange={(e) => set('notes', e.target.value)}
             data-testid="admin-threshold-notes"
@@ -519,6 +529,7 @@ export default function ThresholdsTab({
                 value={reviewNote}
                 onChange={(e) => setReviewNote(e.target.value)}
                 data-testid="admin-threshold-review-note"
+                aria-label="Review note (optional)"
                 placeholder="Review note (optional)"
                 className="px-3 h-9 rounded-lg text-[12.5px] outline-none"
                 style={{ border: '1px solid var(--brand-border)', minWidth: 220 }}

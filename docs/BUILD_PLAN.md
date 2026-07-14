@@ -116,7 +116,7 @@ heightCm                       Int?                    // one-time entry (adults
 // Pregnancy
 isPregnant                     Boolean  default(false)
 pregnancyDueDate               DateTime?
-historyPreeclampsia            Boolean  default(false)
+historyHDP            Boolean  default(false)
 
 // Cardiac conditions
 hasHeartFailure                Boolean  default(false)
@@ -196,7 +196,7 @@ Example: patient enters readings in this insertion order — 1:00 PM, 12:00 PM, 
 - Reject if `measuredAt > now + 5 minutes` (prevent future timestamps; 5 min slack for clock skew)
 - Reject if `measuredAt < now - 30 days` (sane backfill limit)
 
-**Session averaging rule (phase/5 implementation, schema-relevant now):** two readings share a session if they have the same `sessionId` OR fall within 30 minutes of each other (`abs(measuredAt.a − measuredAt.b) ≤ 30 min`). Frontend generates a `sessionId` (UUID) client-side when the user taps "add another reading in this session."
+**Session averaging rule (phase/5 implementation, schema-relevant now):** two readings share a session if they fall within 5 minutes of each other (`abs(measuredAt.a − measuredAt.b) ≤ 5 min`, per CLINICAL_SPEC §5.2's 5-minute rolling window) — this bounds both same-`sessionId` and proximity grouping. Frontend generates a `sessionId` (UUID) client-side when the user taps "add another reading in this session."
 
 ### 2.3 New model: `PatientThreshold` (admin-only write)
 
@@ -592,7 +592,7 @@ Each checklist is organized by the phase branches the dev owns. Phase numbers ma
 
 #### Phase 5 — Alert Engine (branch `phase/5-alert-engine`) ✅
 - [x] New service: `/backend/src/daily_journal/services/alert-engine.service.ts` + `SessionAveragerService` + 12 pure rule functions in `engine/`
-- [x] Session averaging: group readings by `sessionId` or 30-min proximity, compute mean SBP/DBP/pulse. AFib gate blocks BP/HR rules when <3 readings (contraindications + symptom overrides still fire).
+- [x] Session averaging: group readings by `sessionId` or 5-min proximity (CLINICAL_SPEC §5.2), compute mean SBP/DBP/pulse. AFib gate blocks BP/HR rules when <3 readings (contraindications + symptom overrides still fire).
 - [x] Pipeline matches BUILD_PLAN §3.2 evaluation order with short-circuit:
   1. Pregnancy + ACE/ARB contraindication → Tier 1
   2. NDHP-CCB + HFrEF contraindication → Tier 1 (checks combo components; respects verification status)

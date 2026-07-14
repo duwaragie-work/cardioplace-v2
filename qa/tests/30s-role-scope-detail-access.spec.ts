@@ -18,6 +18,14 @@ import { byTestId, T } from '../helpers/selectors.js'
  * ForbiddenException for PROVIDER + MED_DIR (scoped roles) but short-circuits
  * for OPS/SUPER (unscoped → the downstream lookup 404s instead, which is NOT
  * the out-of-scope redirect — that's the negative assertion in case 4).
+ *
+ * June 2026 update (Manisha 2026-06-12 Doc 3 Q2): the PROVIDER detail check
+ * is now practice-membership-based, not primary/backup-OR. With the single
+ * seed practice both checks deny the same absent-id case, so this spec keeps
+ * its coverage unchanged. The new positive case (PROVIDER opens a non-
+ * assigned in-practice patient → detail loads) is in 31-practice-visibility-
+ * refactor.spec.ts. Negative cross-practice case is gated on seed expansion
+ * (see SCOPE NOTE in 30r-role-scope-lists.spec.ts).
  */
 
 // Well-formed but guaranteed-absent ULID. assertCanAccessPatient findUnique
@@ -76,6 +84,64 @@ test.describe('30s — patient-detail role-scope access guard', () => {
       res.status(),
       `expected 403 for out-of-scope profile read, got ${res.status()}: ${await res.text()}`,
     ).toBe(403)
+    await api.dispose()
+  })
+})
+
+// NIVA_CAREGIVER_AUTHZ_FIX — the admin caregiver endpoints (PHI-sharing config)
+// must enforce per-patient scope, not just @Roles. A scoped PROVIDER must be
+// blocked from another practice's patient on every verb; an unscoped OPS must
+// not. ABSENT_PATIENT_ID is the deterministic out-of-scope fixture (no
+// assignment row → assertCanAccessPatient throws for scoped roles).
+test.describe('30s — admin caregiver endpoints enforce per-patient scope (PHI)', () => {
+  const base = `admin/patients/${ABSENT_PATIENT_ID}/caregivers`
+
+  test('PROVIDER GET caregivers → 403 for out-of-scope patient', async () => {
+    const api = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
+    const res = await api.get(base)
+    expect(res.status(), await res.text()).toBe(403)
+    await api.dispose()
+  })
+
+  test('PROVIDER POST caregiver → 403 for out-of-scope patient', async () => {
+    const api = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
+    // Valid body (name is the only required field) so the request reaches the
+    // handler's scope check rather than 400-ing at the validation pipe.
+    const res = await api.post(base, { data: { name: 'Scope Test' } })
+    expect(res.status(), await res.text()).toBe(403)
+    await api.dispose()
+  })
+
+  test('PROVIDER PATCH caregiver → 403 for out-of-scope patient', async () => {
+    const api = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
+    const res = await api.patch(`${base}/cg-x`, { data: { name: 'Scope Test' } })
+    expect(res.status(), await res.text()).toBe(403)
+    await api.dispose()
+  })
+
+  test('PROVIDER DELETE caregiver → 403 for out-of-scope patient', async () => {
+    const api = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
+    const res = await api.delete(`${base}/cg-x`)
+    expect(res.status(), await res.text()).toBe(403)
+    await api.dispose()
+  })
+
+  test('OPS GET caregivers → NOT 403 (org-wide scope, short-circuits)', async () => {
+    const api = await authedApi(API_BASE_URL, ADMINS.ops.email, 'admin')
+    const res = await api.get(base)
+    expect(res.status()).not.toBe(403)
+    await api.dispose()
+  })
+
+  test('assigned PROVIDER GET caregivers → allowed (in-scope patient)', async () => {
+    // Every seed patient is on primaryProvider's panel (see 30s happy path),
+    // so Priya is in scope — the per-patient check passes and the read returns.
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const priya = await tc.findUser(PATIENTS.priya.email)
+    await tc.dispose()
+    const api = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
+    const res = await api.get(`admin/patients/${priya.id}/caregivers`)
+    expect(res.status(), await res.text()).toBe(200)
     await api.dispose()
   })
 })

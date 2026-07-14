@@ -229,6 +229,13 @@ test.describe('Pre-enrollment dispatch gate (Layer B)', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
+    // Manisha 2026-06-12 — the dispatch gate now defers ONLY for a patient who
+    // was NEVER enrolled; a previously-enrolled (auto-un-enrolled) patient
+    // dispatches via the was-ever-enrolled bypass. Clear the enrollment-audit
+    // history so this patient is unambiguously never-enrolled for the gate test
+    // (otherwise leftover ENROLLED/revert audit rows from sibling specs in the
+    // shard would trip the bypass and dispatch).
+    await tc.clearProfileVerificationLogs(u.id)
     await tc.setEnrollment(u.id, 'NOT_ENROLLED')
 
     const patientApi = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
@@ -244,7 +251,7 @@ test.describe('Pre-enrollment dispatch gate (Layer B)', () => {
 
     const aId = alerts[0]!.id
     const events = await tc.listEscalationEvents(aId)
-    expect(events.length, 'NO escalation events when NOT_ENROLLED (Layer B gate)').toBe(0)
+    expect(events.length, 'NO escalation events when never-enrolled (Layer B gate)').toBe(0)
 
     // Restore enrolled state for downstream tests
     await tc.setEnrollment(u.id, 'ENROLLED')

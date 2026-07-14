@@ -9,6 +9,21 @@ export interface JournalEntryCreatedEvent {
   sessionId: string | null
 }
 
+/**
+ * Gap 1 fix (2026-07-13) — fires from AlertEngineService.handleEntryCreated
+ * AFTER evaluate() resolves. Extends the ENTRY_CREATED payload with the
+ * engine's per-entry alert verdict so the N7 "Logged ✓" listener can decide
+ * whether to append "Looking good — keep it up!" without racing the engine.
+ *
+ * `alertsFired === true` when evaluate() persisted ≥1 DeviationAlert row for
+ * this entry. Assumed `true` on evaluate() failure so a positive confirmation
+ * is never appended to a reading whose clinical status is unknown.
+ */
+export interface JournalEntryEvaluatedEvent extends JournalEntryCreatedEvent {
+  alertsFired: boolean
+  alertCount: number
+}
+
 export interface JournalEntryUpdatedEvent {
   userId: string
   entryId: string

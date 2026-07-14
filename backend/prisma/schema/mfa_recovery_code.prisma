@@ -1,0 +1,16 @@
+// One-time recovery codes issued at TOTP enrollment (10 per user). Used to
+// unlock the account when the authenticator device is lost — each code works
+// once, then is marked usedAt and forces TOTP re-enrollment. Codes are bcrypt
+// hashed (never stored plaintext). The [userId, usedAt] index serves the
+// "fetch this user's still-usable codes" lookup on the recovery path.
+model MfaRecoveryCode {
+  id        String    @id @default(ulid())
+  userId    String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+}

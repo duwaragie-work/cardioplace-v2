@@ -7,6 +7,7 @@
 // optional alert tier banner, and an audio button reading the saved
 // summary aloud (reuses humanizeReading() prose style).
 
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   CheckCircle,
@@ -14,11 +15,15 @@ import {
   Heart,
   AlertTriangle,
   ExternalLink,
+  Clock,
+  Check,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useLanguage } from '@/contexts/LanguageContext';
 import AudioButton from '@/components/intake/AudioButton';
 import type { CheckinSummary } from '@/hooks/useVoiceSession';
+import { isEditableBadgeVisible } from '@/lib/readingEdit';
+import { finalizeSingleReadingSession } from '@/lib/services/journal.service';
 
 const STRUCTURED_SYMPTOM_LABELS: Record<string, string> = {
   severeHeadache: 'Severe headache',
@@ -62,6 +67,38 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
     : null;
   const audioText = buildAudio(summary);
 
+  // Editable-buffer-window parity. While editableUntil is in the future the
+  // reading is HELD (no alert, not surfaced to the care team); show a live
+  // countdown and an "I'm good" button that finalizes it early. Tick once a
+  // second so the countdown + auto-hide stay honest. `finalized` latches the
+  // local state the moment the patient confirms so the badge clears instantly.
+  const [now, setNow] = useState(() => Date.now());
+  const [finalized, setFinalized] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  const editable =
+    !finalized && summary.saved && isEditableBadgeVisible(summary.editableUntil, now);
+  useEffect(() => {
+    if (!editable) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [editable]);
+  const remainingMs = summary.editableUntil
+    ? Math.max(0, new Date(summary.editableUntil).getTime() - now)
+    : 0;
+  const remainingLabel = fmtMMSS(remainingMs);
+  async function handleImGood() {
+    if (!summary.entryId || finalizing) return;
+    setFinalizing(true);
+    try {
+      await finalizeSingleReadingSession(summary.entryId);
+    } catch {
+      // Non-fatal — the server-side cron finalizes the window regardless.
+    } finally {
+      setFinalized(true);
+      setFinalizing(false);
+    }
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16, scale: 0.97 }}
@@ -90,13 +127,13 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
           )}
           <div className="min-w-0">
             <p
-              className="font-bold text-[15px] leading-tight"
+              className="font-bold text-[0.9375rem] leading-tight"
               style={{ color: 'var(--brand-text-primary)' }}
             >
               {summary.saved ? t('chat.card.checkinSaved') : t('chat.card.checkinFailed')}
             </p>
             {measuredAtLabel && (
-              <p className="text-[11px] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.6875rem] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
                 {measuredAtLabel}
               </p>
             )}
@@ -105,6 +142,26 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
         <AudioButton size="sm" text={audioText} lang="en" />
       </div>
 
+      {/* Editable-window strip — mirrors the check-in form's "editable for a few
+          more minutes" badge. Shown only while the reading is HELD (no alert,
+          not yet sent to the care team). Tell the patient they can still change
+          it, with a live countdown. */}
+      {editable && (
+        <div
+          className="px-5 py-2.5 flex items-center gap-2 text-[0.75rem] font-semibold"
+          style={{
+            backgroundColor: 'var(--brand-warning-amber-light)',
+            color: 'var(--brand-warning-amber-text)',
+            borderBottom: '1px solid var(--brand-border)',
+          }}
+        >
+          <Clock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+          <span aria-live="polite">
+            {t('chat.card.editableWindow').replace('{time}', remainingLabel)}
+          </span>
+        </div>
+      )}
+
       {/* BP big-number row */}
       {summary.systolicBP != null && summary.diastolicBP != null && (
         <div className="px-5 pt-4">
@@ -112,33 +169,33 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             <div className="flex items-baseline gap-1">
               <span
                 lang="en"
-                className="text-[42px] font-bold leading-none"
+                className="text-[2.625rem] font-bold leading-none"
                 style={{ color: status.color }}
               >
                 {summary.systolicBP}
               </span>
               <span
-                className="text-[28px] font-light"
+                className="text-[1.75rem] font-light"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 /
               </span>
               <span
                 lang="en"
-                className="text-[42px] font-bold leading-none"
+                className="text-[2.625rem] font-bold leading-none"
                 style={{ color: status.color }}
               >
                 {summary.diastolicBP}
               </span>
               <span
-                className="text-[12px] ml-1"
+                className="text-[0.75rem] ml-1"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 mmHg
               </span>
             </div>
             <span
-              className="px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider"
+              className="px-3 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider"
               style={{ backgroundColor: status.pillBg, color: status.color }}
             >
               {status.label}
@@ -148,7 +205,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
           <div className="flex items-center gap-3 mt-2 flex-wrap">
             {summary.pulse != null && (
               <span
-                className="inline-flex items-center gap-1 text-[12px]"
+                className="inline-flex items-center gap-1 text-[0.75rem]"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 <Heart className="w-3.5 h-3.5" aria-hidden="true" />
@@ -157,7 +214,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             )}
             {positionLabel && (
               <span
-                className="text-[12px]"
+                className="text-[0.75rem]"
                 style={{ color: 'var(--brand-text-secondary)' }}
               >
                 · {positionLabel}
@@ -165,7 +222,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             )}
             {summary.pulsePressureWide && (
               <span
-                className="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                className="text-[0.6875rem] px-2 py-0.5 rounded-md font-medium"
                 style={{
                   backgroundColor: 'var(--brand-accent-teal-light)',
                   color: 'var(--brand-accent-teal)',
@@ -194,7 +251,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             aria-hidden="true"
           />
           <p
-            className="text-[12px] leading-snug"
+            className="text-[0.75rem] leading-snug"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {summary.alert.patientMessage ?? alertTierFallback(summary.alert.tier)}
@@ -211,31 +268,31 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
           {summary.weight != null && (
             <div>
               <p
-                className="text-[10px] font-semibold uppercase tracking-wider"
+                className="text-[0.625rem] font-semibold uppercase tracking-wider"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 Weight
               </p>
               <p
                 lang="en"
-                className="text-[16px] font-bold"
+                className="text-[1rem] font-bold"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
-                {summary.weight} <span className="text-[11px] font-normal">lbs</span>
+                {summary.weight} <span className="text-[0.6875rem] font-normal">lbs</span>
               </p>
             </div>
           )}
           {summary.bmi != null && (
             <div>
               <p
-                className="text-[10px] font-semibold uppercase tracking-wider"
+                className="text-[0.625rem] font-semibold uppercase tracking-wider"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 BMI
               </p>
               <p
                 lang="en"
-                className="text-[16px] font-bold"
+                className="text-[1rem] font-bold"
                 style={{ color: 'var(--brand-text-primary)' }}
               >
                 {summary.bmi.toFixed(1)}
@@ -251,13 +308,13 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
         style={{ borderTop: '1px solid var(--brand-border)' }}
       >
         <p
-          className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
+          className="text-[0.625rem] font-semibold uppercase tracking-wider mb-1.5"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           Medications
         </p>
         <p
-          className="text-[13px] font-medium"
+          className="text-[0.8125rem] font-medium"
           style={{
             color: medicationColor(summary),
           }}
@@ -272,14 +329,14 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
         style={{ borderTop: '1px solid var(--brand-border)' }}
       >
         <p
-          className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
+          className="text-[0.625rem] font-semibold uppercase tracking-wider mb-1.5"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           Symptoms
         </p>
         {flaggedSymptoms.length === 0 &&
         (!summary.otherSymptoms || summary.otherSymptoms.length === 0) ? (
-          <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+          <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>
             No symptoms reported
           </p>
         ) : (
@@ -287,7 +344,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             {flaggedSymptoms.map((s) => (
               <span
                 key={s}
-                className="text-[11px] px-2 py-1 rounded-md font-semibold inline-flex items-center gap-1"
+                className="text-[0.6875rem] px-2 py-1 rounded-md font-semibold inline-flex items-center gap-1"
                 style={{
                   backgroundColor: 'var(--brand-alert-red-light)',
                   color: 'var(--brand-alert-red-text)',
@@ -300,7 +357,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
             {(summary.otherSymptoms ?? []).map((s, i) => (
               <span
                 key={`other-${i}`}
-                className="text-[11px] px-2 py-1 rounded-md font-medium"
+                className="text-[0.6875rem] px-2 py-1 rounded-md font-medium"
                 style={{
                   backgroundColor: 'var(--brand-warning-amber-light)',
                   color: 'var(--brand-warning-amber-text)',
@@ -320,7 +377,7 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
       >
         <Link
           href="/readings"
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] inline-flex items-center justify-center gap-1.5 transition hover:opacity-90"
+          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] inline-flex items-center justify-center gap-1.5 transition hover:opacity-90"
           style={{
             backgroundColor: 'var(--brand-primary-purple-light)',
             color: 'var(--brand-primary-purple)',
@@ -329,22 +386,48 @@ export default function CheckinCard({ summary, onDismiss }: Props) {
           {t('chat.card.viewOnReadings')}
           <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
         </Link>
-        <button
-          onClick={onDismiss}
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] text-white transition hover:opacity-90"
-          style={{
-            background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
-            boxShadow: '0 4px 14px rgba(123,0,224,0.28)',
-          }}
-        >
-          {t('chat.card.dismiss')}
-        </button>
+        {editable && summary.entryId ? (
+          // "I'm good / all set" — finalize the held reading now (sends it to
+          // the care team) instead of waiting out the window. Mirrors the
+          // form's BufferReviewScreen "I'm good" action.
+          <button
+            onClick={handleImGood}
+            disabled={finalizing}
+            className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] text-white transition hover:opacity-90 inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+            style={{
+              background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
+              boxShadow: '0 4px 14px rgba(123,0,224,0.28)',
+            }}
+          >
+            <Check className="w-3.5 h-3.5" aria-hidden="true" />
+            {finalizing ? t('chat.card.sending') : t('chat.card.imGood')}
+          </button>
+        ) : (
+          <button
+            onClick={onDismiss}
+            className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] text-white transition hover:opacity-90"
+            style={{
+              background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
+              boxShadow: '0 4px 14px rgba(123,0,224,0.28)',
+            }}
+          >
+            {t('chat.card.dismiss')}
+          </button>
+        )}
       </div>
     </motion.div>
   );
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
+
+/** Format a millisecond duration as M:SS for the editable-window countdown. */
+function fmtMMSS(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 function bpStatus(
   sbp: number | undefined,
@@ -389,6 +472,20 @@ function bpStatus(
 }
 
 function medicationLabel(s: CheckinSummary): string {
+  // Bug 60 — 0-meds patients have medicationTaken=true vacuously (per
+  // Bug 53 the bot skips the adherence question and passes true to the
+  // required-field gate). Rendering "All taken ✓" for someone with no
+  // medications is misleading; surface "No medications" so the card
+  // reflects reality.
+  if (s.hasActiveMedications === false) return 'No medications on file';
+  // Bug 16C — when the patient explicitly missed one or more meds, surface
+  // the names ("Missed: Norvasc, Toprol") instead of the generic boolean
+  // rollup. Drives the same card whether the backend received
+  // medication_taken=true (Bug 16A normalises this to false) or false.
+  if (s.missedMedications && s.missedMedications.length > 0) {
+    const names = s.missedMedications.map((m) => m.drugName).join(', ');
+    return `Missed: ${names}`;
+  }
   if (s.medicationScheduledLater) return 'Scheduled for later — not due yet';
   if (s.medicationTaken === true) return 'All taken ✓';
   if (s.medicationTaken === false) return 'Missed — care team has been notified';
@@ -396,6 +493,16 @@ function medicationLabel(s: CheckinSummary): string {
 }
 
 function medicationColor(s: CheckinSummary): string {
+  // Bug 60 — 0-meds patients get a neutral muted color (matches the
+  // "No medications on file" label) so the card doesn't visually imply
+  // adherence success.
+  if (s.hasActiveMedications === false) return 'var(--brand-text-muted)';
+  // Bug 16C — non-empty missedMedications means at least one was missed,
+  // even if the boolean wasn't set. Show the alert-red color so the card
+  // visually matches its label.
+  if (s.missedMedications && s.missedMedications.length > 0) {
+    return 'var(--brand-alert-red)';
+  }
   if (s.medicationScheduledLater) return 'var(--brand-warning-amber)';
   if (s.medicationTaken === true) return 'var(--brand-success-green)';
   if (s.medicationTaken === false) return 'var(--brand-alert-red)';
@@ -453,7 +560,12 @@ function buildAudio(s: CheckinSummary): string {
     bp += '.';
     parts.push(bp);
   }
-  if (s.medicationScheduledLater) parts.push('Medication scheduled for later.');
+  // Bug 60 — 0-meds patients should NOT hear "You took your medications" —
+  // that's a false claim (they have nothing to take). Skip the medication
+  // sentence entirely.
+  if (s.hasActiveMedications === false) {
+    // skip — no medication line for 0-meds patients
+  } else if (s.medicationScheduledLater) parts.push('Medication scheduled for later.');
   else if (s.medicationTaken === true) parts.push('You took your medications.');
   else if (s.medicationTaken === false) parts.push('You missed at least one medication.');
   const flagged =

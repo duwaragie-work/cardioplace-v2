@@ -17,5 +17,32 @@
     "dev:backend": "npm run start:dev -w backend",
     "dev:frontend": "npm run dev -w frontend",
     "dev:admin": "npm run dev -w admin"
+  },
+  "overrides": {
+    "@huggingface/transformers": {
+      "onnxruntime-node": "1.20.1"
+    },
+    "onnxruntime-node": "1.20.1"
+  },
+  "devDependencies": {
+    "enhanced-resolve": "^5.24.1"
+  },
+  "optionalDependencies": {
+    "lightningcss-linux-x64-gnu": "*",
+    "lightningcss-linux-x64-musl": "*",
+    "@tailwindcss/oxide-linux-x64-gnu": "*",
+    "@tailwindcss/oxide-linux-x64-musl": "*",
+    "@napi-rs/canvas-linux-x64-gnu": "0.1.80",
+    "@napi-rs/canvas-linux-x64-musl": "0.1.80",
+    "@napi-rs/canvas-darwin-x64": "0.1.80",
+    "@napi-rs/canvas-darwin-arm64": "0.1.80",
+    "@img/sharp-linux-x64": "0.34.5",
+    "@img/sharp-libvips-linux-x64": "1.2.4",
+    "@img/sharp-linuxmusl-x64": "0.34.5",
+    "@img/sharp-libvips-linuxmusl-x64": "1.2.4",
+    "@img/sharp-darwin-x64": "0.34.5",
+    "@img/sharp-darwin-arm64": "0.34.5",
+    "@img/sharp-libvips-darwin-x64": "1.2.4",
+    "@img/sharp-libvips-darwin-arm64": "1.2.4"
   }
 }

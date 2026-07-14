@@ -6,6 +6,8 @@ import { INestApplication, ValidationPipe } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { AppModule } from '../../src/app.module.js'
 import { PrismaService } from '../../src/prisma/prisma.service.js'
+import { UserRole } from '../../src/generated/prisma/enums.js'
+import { generateTestDisplayId } from '../helpers/generate-test-display-id.js'
 
 export interface TestContext {
   app: INestApplication
@@ -29,7 +31,9 @@ export async function setupTestApp(): Promise<TestContext> {
   const prisma = app.get(PrismaService)
   const jwtService = app.get(JwtService)
 
-  // Create or find test user — use Prisma enum values
+  // Create or find test user — needs the PATIENT role so the @Roles(PATIENT)
+  // guard on /chat routes passes. jwt.strategy maps payload.roles → req.user.roles,
+  // so a roleless token makes RolesGuard throw (500) on every chat request.
   const email = 'llm-judge-test@healplace.test'
   let user = await prisma.user.findFirst({ where: { email } })
   if (!user) {
@@ -39,12 +43,52 @@ export async function setupTestApp(): Promise<TestContext> {
         name: 'Test Patient',
         preferredLanguage: 'en',
         dateOfBirth: new Date('1975-06-15'),
+        roles: [UserRole.PATIENT],
+        displayId: generateTestDisplayId([UserRole.PATIENT]),
       },
+    })
+  } else if (!user.roles?.includes(UserRole.PATIENT)) {
+    // Heal a user left over from an earlier run that predates the role fix.
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { roles: [UserRole.PATIENT] },
     })
   }
 
-  // Sign JWT using the same secret the app reads from env
-  const jwt = jwtService.sign({ sub: user.id, email: user.email })
+  // Create a minimal PatientProfile so the chat's intake gate is "complete".
+  // Without this, IntakeStatusService.getStatus → {completed:false}, and
+  // SystemPromptService.appendIntakeStatus injects the "Do NOT call
+  // submit_checkin / update_checkin / log_*" prohibition block — which is
+  // exactly what the chatbot was doing, causing "Full check-in" + "Multi-turn"
+  // judge tests to score Tool Use 1/5. Mirrors the gate at
+  // DailyJournalService.create + IntakeStatusService.getStatus
+  // (presence of PatientProfile row → intake complete).
+  //
+  // diagnosedHypertension is deliberately FALSE. With it set true, the bot
+  // hallucinated "140/90 is within your goals" on Test 2 (Health question)
+  // — there's no PatientThreshold here, so "your goals" is invented. As a
+  // neutral / non-diagnosed user the bot falls back to general AHA
+  // education (Stage 2 HTN), which matches what Test 2 asserts.
+  await prisma.patientProfile.upsert({
+    where: { userId: user.id },
+    create: {
+      userId: user.id,
+      gender: 'FEMALE',
+      heightCm: 165,
+      diagnosedHypertension: false,
+    },
+    update: {
+      diagnosedHypertension: false, // heal stale runs that pre-date this flip
+    },
+  })
+
+  // Sign JWT mirroring the app's payload shape (auth.service signs
+  // { sub, email, roles }; jwt.strategy reads roles straight off the token).
+  const jwt = jwtService.sign({
+    sub: user.id,
+    email: user.email,
+    roles: user.roles,
+  })
 
   return { app, jwt, userId: user.id, prisma }
 }

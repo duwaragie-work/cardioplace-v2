@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common'
 import { Public } from '../auth/decorators/public.decorator.js'
 import { TestControlService } from './test-control.service.js'
+import { EmailService } from '../email/email.service.js'
 
 /**
  * Dev-only test-control endpoints. Mounted ONLY when ENABLE_TEST_CONTROL=true
@@ -66,14 +67,27 @@ export class TestControlController {
     return this.svc.runEscalationScan(body?.now ? new Date(body.now) : new Date())
   }
 
-  @Post('cron/gap-alert/run')
+  // Deterministic T+0 fire for one alert (spec 22 G.4) — runScan does not
+  // dispatch a fresh alert's T+0, so the spec drives it explicitly here.
+  @Post('escalation/fire-t0')
   @HttpCode(200)
-  async runGapAlert(
+  async fireEscalationT0(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { alertId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.fireEscalationT0(body.alertId)
+  }
+
+  // N3 (2026-07-13) — gap-alert cron deleted, superseded by daily-reminder.
+  @Post('cron/daily-reminder/run')
+  @HttpCode(200)
+  async runDailyReminder(
     @Headers('x-test-control-secret') secret: string,
     @Body() body: { now?: string },
   ) {
     this.assertAuthorized(secret)
-    return this.svc.runGapAlertScan(body?.now ? new Date(body.now) : new Date())
+    return this.svc.runDailyReminderScan(body?.now ? new Date(body.now) : new Date())
   }
 
   @Post('cron/monthly-reask/run')
@@ -84,6 +98,128 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     return this.svc.runMonthlyReaskScan(body?.now ? new Date(body.now) : new Date())
+  }
+
+  // F33 — drive the medication-hold escalation ladder on demand instead of
+  // waiting for the daily 15:00 UTC cron. Lets the audit + Playwright suites
+  // backdate a hold then fire the scan synchronously.
+  @Post('cron/medication-hold-escalation/run')
+  @HttpCode(200)
+  async runMedicationHoldEscalation(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { now?: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.runMedicationHoldEscalationScan(
+      body?.now ? new Date(body.now) : new Date(),
+    )
+  }
+
+  // N7 — drive the audit-exception-report cron on demand. Playwright uses this
+  // to seed a pattern, run the scan synchronously, then assert AuditException
+  // rows landed with the expected detectorId/severity/evidence.
+  @Post('cron/audit-exception-report/run')
+  @HttpCode(200)
+  async runAuditExceptionReport(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { now?: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.runAuditExceptionReportScan(
+      body?.now ? new Date(body.now) : new Date(),
+    )
+  }
+
+  // ─── N4/N5/N6/N7 Playwright verification helpers ───────────────────────
+  @Get('audit/user-by-email')
+  async findUserByEmail(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('email') email: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.findUserByEmail(email)
+  }
+
+  @Get('audit/access-log/count')
+  async countAccessLog(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('actorId') actorId?: string,
+    @Query('modelName') modelName?: string,
+    @Query('sinceIso') sinceIso?: string,
+  ) {
+    this.assertAuthorized(secret)
+    const count = await this.svc.countAccessLog({
+      actorId,
+      modelName,
+      since: sinceIso ? new Date(sinceIso) : undefined,
+    })
+    return { count }
+  }
+
+  @Get('audit/email-disclosure-log/latest')
+  async latestEmailDisclosure(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('recipientEmail') recipientEmail: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.latestEmailDisclosureForRecipient(recipientEmail)
+  }
+
+  @Get('audit/profile-verification-log/latest')
+  async latestProfileVerificationLog(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('userId') userId: string,
+    @Query('changeType') changeType: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.latestProfileVerificationLog({ userId, changeType })
+  }
+
+  @Get('audit/audit-exception/by-actor')
+  async auditExceptionByActor(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('actorId') actorId: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.findAuditExceptionByActor(actorId)
+  }
+
+  @Post('seed/access-log-batch')
+  @HttpCode(200)
+  async seedAccessLogBatch(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      actorId: string
+      actorType: 'USER' | 'SYSTEM_ACTOR'
+      action: 'READ' | 'WRITE' | 'DELETE'
+      modelName: string
+      count: number
+      spreadMinutes: number
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.seedAccessLogBatch(body)
+  }
+
+  @Post('audit/access-log/clear-actor')
+  @HttpCode(200)
+  async clearAccessLogForActor(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { actorId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearAccessLogForActor(body.actorId)
+  }
+
+  @Post('audit/audit-exception/clear-by-prefix')
+  @HttpCode(200)
+  async clearAuditExceptionsByPrefix(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { prefix: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearAuditExceptionsByIdempotencyPrefix(body.prefix)
   }
 
   // ─── Time advancement ───────────────────────────────────────────────────
@@ -131,6 +267,16 @@ export class TestControlController {
     this.assertAuthorized(secret)
     await this.svc.backdateLastJournalEntry(body.userId, body.deltaSeconds)
     return { ok: true }
+  }
+
+  @Post('auth-session/backdate')
+  @HttpCode(200)
+  async backdateAuthSessions(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; deltaSeconds: number },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.backdateAuthSessions(body.userId, body.deltaSeconds)
   }
 
   @Post('medication/backdate-verified')
@@ -204,12 +350,13 @@ export class TestControlController {
       userId: string
       flag:
         | 'isPregnant'
-        | 'historyPreeclampsia'
+        | 'historyHDP'
         | 'hasHeartFailure'
         | 'hasAFib'
         | 'hasCAD'
         | 'hasHCM'
         | 'hasDCM'
+        | 'hasAorticStenosis'
         | 'hasBradycardia'
         | 'hasTachycardia'
         | 'diagnosedHypertension'
@@ -245,6 +392,27 @@ export class TestControlController {
     return this.svc.setUserMedication(body.userId, body.med)
   }
 
+  // F17 — place an existing medication on HOLD (provider-directed by default)
+  // so the "held meds surface in daily check-in" spec can set up state.
+  @Post('user/set-medication-hold')
+  @HttpCode(200)
+  async setMedicationHold(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: {
+      userId: string
+      drugName: string
+      holdReason?:
+        | 'AWAITING_RECORDS'
+        | 'UNCLEAR_NAME'
+        | 'UNCLEAR_DOSE'
+        | 'PROVIDER_DIRECTED_HOLD'
+        | 'OTHER'
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.setMedicationHold(body.userId, body.drugName, body.holdReason)
+  }
+
   // ─── Reset ──────────────────────────────────────────────────────────────
   @Post('reset/test-patients')
   @HttpCode(200)
@@ -263,6 +431,19 @@ export class TestControlController {
     return this.svc.resetUser(body.userId)
   }
 
+  // phase/27 MFA E2E — wipe a user's TOTP secret + recovery codes + WebAuthn
+  // credentials so each MFA spec starts from a clean "never enrolled" baseline
+  // (and the shared seed accounts don't stay MFA-required for the other specs).
+  @Post('reset/user-mfa')
+  @HttpCode(200)
+  async resetUserMfa(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.resetUserMfa(body.userId)
+  }
+
   // Cluster 8 §D — clear ALL of a user's PatientMedication rows so a test
   // can set up an exact medication state without inheriting seed rows
   // (Aisha ships with Lisinopril+Amlodipine; an ARB test needs neither).
@@ -274,6 +455,19 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     return this.svc.clearUserMedications(body.userId)
+  }
+
+  // Delete a user's DeviationAlert rows (+ child escalations + alert-linked
+  // notifications) WITHOUT wiping their reading history — for tests that need an
+  // established history but a clean alert slate before triggering (30u B2).
+  @Post('reset/user-alerts')
+  @HttpCode(200)
+  async deleteAlertsForUser(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.deleteAlertsForUser(body.userId)
   }
 
   // THR-REVIEW / IVR-04 E2E setup — delete a user's threshold so the
@@ -309,6 +503,18 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     await this.svc.setEnrollment(body.userId, body.status)
+    return { ok: true }
+  }
+
+  // F13 — set/clear the ACE/ARB contraindication flag for med-re-add specs.
+  @Post('user/set-ace-contraindicated')
+  @HttpCode(200)
+  async setAceContraindicated(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { userId: string; value: boolean },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setAceContraindicated(body.userId, body.value)
     return { ok: true }
   }
 
@@ -395,6 +601,9 @@ export class TestControlController {
         resolvedBy?: string
         resolutionAction?: string
         resolutionRationale?: string
+        patientMessage?: string
+        caregiverMessage?: string
+        physicianMessage?: string
       }>
     },
   ) {
@@ -476,6 +685,63 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     return this.svc.findUser(email)
+  }
+
+  // ─── Captured emails (spec 4Z — email-no-PHI) ─────────────────────────────
+  // CI SMTP is a dummy that never delivers, so specs can't read a real inbox.
+  // EmailService captures the rendered mail in a non-prod in-memory buffer;
+  // these endpoints let a Playwright spec read (and reset) it.
+  @Get('emails')
+  getEmails(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('to') to?: string,
+  ) {
+    this.assertAuthorized(secret)
+    return EmailService.getCapturedEmails(to)
+  }
+
+  @Post('emails/clear')
+  @HttpCode(200)
+  clearEmails(@Headers('x-test-control-secret') secret: string) {
+    this.assertAuthorized(secret)
+    EmailService.clearCapturedEmails()
+    return { ok: true }
+  }
+
+  // ─── Invite + magic-link token minting (specs 36/37/40) ───────────────────
+  // Return the RAW token (which the e-mail would carry) so a spec can drive
+  // the real activation / magic-link-verify endpoints without reading e-mail.
+  @Post('invite/create')
+  @HttpCode(200)
+  async createInvite(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: {
+      email: string
+      name: string
+      role: string
+      practiceId?: string
+      expiresInSeconds?: number
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.createInvite({
+      email: body.email,
+      name: body.name,
+      // Prisma validates the enum value; the controller just forwards it.
+      role: body.role as never,
+      practiceId: body.practiceId,
+      expiresInSeconds: body.expiresInSeconds,
+    })
+  }
+
+  @Post('magic-link/issue')
+  @HttpCode(200)
+  async issueMagicLink(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { email: string; expiresInSeconds?: number; markUsed?: boolean },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.issueMagicLink(body)
   }
 
   // Spec 12 — drive the enrollment-gate "practice-missing-business-hours"

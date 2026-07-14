@@ -5,6 +5,7 @@ import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
 import {
   postJournalEntry,
+  postSessionWithTwoReadings,
   adminAcknowledgeAlert,
   adminResolveAlert,
   adminAuditAlert,
@@ -283,29 +284,37 @@ test.describe('Bug #6/#7 — clean reading does NOT auto-resolve open BP L1 aler
     await tc.resetUser(u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
 
-    // Each reading gets its own sessionId so the engine evaluates them
-    // independently rather than averaging into a single session.
+    // Each setup reading is a 2-reading session so the engine bypasses the
+    // Cluster 6 Q2 single-reading gate deterministically. Pre-Day-3 mode
+    // also exempts the gate (resetUser wipes Aisha's seed readings →
+    // lifetime count <7), but relying on that exposes a CI-only race:
+    // Reading 2's event handler can run before Reading 1 has been COMMITTED
+    // to a transaction visible to ProfileResolver.count, leaving the
+    // pre-Day-3 derivation deterministic only for the first reading. The
+    // 2-reading-session pattern was applied by commit 540c537 to spec 30u
+    // for the same class of failure. Reading 3 (clean) stays single — it
+    // is supposed to fire NOTHING, so the gate doesn't matter for it.
     const session1 = randomUUID()
     const session2 = randomUUID()
     const session3 = randomUUID()
 
-    // Reading 1 — fires BP_LEVEL_1_HIGH
-    await postJournalEntry(api, {
-      measuredAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+    // Reading 1 — 2-reading session at 165/95 → fires BP_LEVEL_1_HIGH
+    await postSessionWithTwoReadings(api, {
+      sessionId: session1,
+      firstMeasuredAt: new Date(Date.now() - 5 * 60_000).toISOString(),
       systolicBP: 165,
       diastolicBP: 95,
       pulse: 78,
-      sessionId: session1,
     })
     await new Promise((r) => setTimeout(r, 1500))
 
-    // Reading 2 — fires BP_LEVEL_1_LOW (AGE_65_LOW)
-    await postJournalEntry(api, {
-      measuredAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+    // Reading 2 — 2-reading session at 90/55 → fires BP_LEVEL_1_LOW (AGE_65_LOW)
+    await postSessionWithTwoReadings(api, {
+      sessionId: session2,
+      firstMeasuredAt: new Date(Date.now() - 3 * 60_000).toISOString(),
       systolicBP: 90,
       diastolicBP: 55,
       pulse: 72,
-      sessionId: session2,
     })
 
     // Poll for BOTH alerts to land. The engine is event-driven and the
@@ -824,7 +833,7 @@ test.describe('AlertsTab — Acknowledged status filter (bug #3)', () => {
 test.describe('Phase 2 — Finding 3: journal-delete cascade (current behavior, CTO-deferred)', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  test('DELETE /daily-journal/:id cascades to linked DeviationAlert + EscalationEvent (flagged for CTO review)', async () => {
+  test('DELETE /daily-journal/:id soft-deletes the reading; its DeviationAlert + EscalationEvent SURVIVE', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     let u: Awaited<ReturnType<typeof tc.findUser>>
     try {
@@ -862,25 +871,22 @@ test.describe('Phase 2 — Finding 3: journal-delete cascade (current behavior, 
     ).toBeTruthy()
     await new Promise((r) => setTimeout(r, 500))
 
-    // CURRENT BEHAVIOR (documented, not endorsed): the linked DeviationAlert
-    // is cascade-deleted...
+    // SOFT-DELETE (HIPAA L5, Duwaragie sign-off 2026-07-06 — b6972f16): deleting
+    // a reading stamps `deletedAt` instead of removing the row, so the FK
+    // `onDelete: Cascade` never fires and the fired DeviationAlert SURVIVES.
+    // This is the "soft-supersede" move the prior TODO anticipated.
     const alertsAfter = await tc.listAlerts(u.id)
     expect(
       alertsAfter.some((a) => a.id === alertId),
-      'CURRENT cascade behavior: DeviationAlert is removed when its JournalEntry is deleted',
-    ).toBe(false)
+      'soft-delete: the fired DeviationAlert survives its reading being deleted',
+    ).toBe(true)
 
-    // ...and so are its EscalationEvent rows (the audit trail).
+    // ...and so does its EscalationEvent audit trail (nothing erased).
     const eventsAfter = await tc.listEscalationEvents(alertId)
     expect(
       eventsAfter.length,
-      `CURRENT cascade behavior: EscalationEvent rows removed (had ${eventsBefore.length})`,
-    ).toBe(0)
-
-    // TODO(CTO + Manisha + counsel — Phase 1 §G.3): if the architecture moves
-    // to soft-supersede (reading correction keeps prior alert as historical
-    // evidence), update this test to assert the alert/escalation rows PERSIST
-    // (marked superseded) instead of being erased.
+      `soft-delete: EscalationEvent audit rows survive (had ${eventsBefore.length})`,
+    ).toBe(eventsBefore.length)
 
     await patientApi.dispose()
     await tc.dispose()

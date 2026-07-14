@@ -16,6 +16,7 @@
 //  - physician: clinical shorthand. Includes drug name, threshold, and any
 //    Tier 3 physician annotations (wide PP, loop-diuretic sensitivity).
 
+import { RULE_AXIS } from './rule-ids.js'
 import type { RuleId } from './rule-ids.js'
 
 // ─── public types ────────────────────────────────────────────────────────────
@@ -89,6 +90,32 @@ export interface AlertContext {
    *  "— confirm with next reading" annotation on the physician message. */
   singleReadingSession?: boolean
 
+  /** Chunk B (Manisha Backdated Readings sign-off 2026-06-06) — the firing
+   *  entry's measurement-lag band ('REAL_TIME' | 'NEAR_REAL_TIME' |
+   *  'DELAYED_ENTRY' | 'HISTORICAL_ENTRY'). When 'DELAYED_ENTRY' the four BP
+   *  Level-2 patient messages suppress the 911 CTA and the physician messages
+   *  carry a [DELAYED ENTRY] badge. String (not the Prisma enum) to keep the
+   *  registry prisma-dependency-free, matching the rest of AlertContext. */
+  delayBand?: string
+
+  /** Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06,
+   *  Recheck #1 refinement) — measurement timestamp of the firing session
+   *  (latest sibling reading), used by the signed DELAYED_ENTRY physician
+   *  wording to render the "[date/time]" placeholder. */
+  measuredAt?: Date
+
+  /** Chunk B fix-up — integer hours between measurement and entry
+   *  (floor((loggedAt − measuredAt) / 1h), clamped ≥0). Renders the "[X]
+   *  hours" placeholder in the signed DELAYED_ENTRY physician wording.
+   *  Always populated by OutputGenerator in production; optional for
+   *  direct test callers (helpers fall back to band-only phrasing). */
+  delayHours?: number
+
+  /** Chunk B fix-up — IANA timezone for rendering measuredAt in the
+   *  patient's local time (pilot default America/New_York — rendering UTC
+   *  would read 4–5h off to providers). */
+  timezone?: string | null
+
   /** Cluster 8 — which angioedema symptom(s) the patient reported. Drives
    *  whether the message leads with face-swelling or throat-tightness
    *  phrasing. Populated only for the angioedema rules. */
@@ -98,6 +125,74 @@ export interface AlertContext {
   /** Cluster 8 Q1 — consecutive ≤45 bpm sessions, rendered in the
    *  brady-surveillance physician message. */
   bradySustainedSessions?: number
+
+  /** #83 — the firing rule's id, used to scope the single-reading caveat to
+   *  BP/HR threshold rules only (see physSuffix). Optional so direct test
+   *  callers can omit it; OutputGenerator always populates it in production. */
+  ruleId?: RuleId
+
+  /**
+   * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, conditional
+   * exception) — gestational age in weeks. Threaded through to the
+   * pregnancy-rule physician messages because teratogenic ACE/ARB risk
+   * differs by trimester (first-trimester carries a lower but still
+   * elevated risk; second/third trimester causes classic fetopathy:
+   * renal dysgenesis, oligohydramnios, pulmonary hypoplasia). Populated
+   * by OutputGenerator from PatientProfile when the rule fires against a
+   * pregnant patient; null when unknown or non-pregnancy alerts.
+   */
+  gestationalAgeWeeks?: number | null
+
+  /**
+   * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4) — patient age
+   * in completed years. Decision 4 backlog item #1 (issue #68). Threaded
+   * through to physician messages where age modifies clinical
+   * significance (e.g. brady surveillance in patients on rate-controlling
+   * meds — MESA study found HR ≤50 bpm associated with markedly elevated
+   * mortality in this population, varying by age). Populated by
+   * OutputGenerator from `User.dateOfBirth` and `session.measuredAt` at
+   * fire-time. Null when DOB unknown.
+   *
+   * NOTE: which specific rule messages render this suffix is an open
+   * clinical-wording decision — see issue #68 for the candidate list
+   * pending Manisha confirmation. The helper `agePhrase(ctx)` always
+   * returns the rendered fragment ("(age 67)" or ""), so a future
+   * commit can apply it without re-touching the plumbing.
+   */
+  patientAgeYears?: number | null
+
+  /**
+   * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4) — patient's
+   * full active medication list, EXCLUDING the triggering drug(s) already
+   * cited via `drugNames`. Decision 4 backlog item #2 (issue #69).
+   *
+   * Threaded through to contraindication-related physician messages where
+   * the broader regimen context helps the clinician judge substitution
+   * options (e.g. for a pregnancy + ACE/ARB contraindication, knowing the
+   * patient is also on a thiazide and a beta-blocker frames the
+   * substitution decision).
+   *
+   * Populated by OutputGenerator from `ResolvedContext.contextMeds`. The
+   * dedup against `drugNames` happens at populate-time so the rendered
+   * "currently taking: …" list never duplicates a drug the message
+   * already names. Empty array when no other active meds exist.
+   *
+   * NOTE: which specific rule messages render this list is an open
+   * clinical-wording decision — see issue #69 for the candidate list
+   * pending Manisha confirmation. The helper `medicationListPhrase(ctx)`
+   * always returns the rendered fragment ("currently also taking:
+   * Atenolol, HCTZ" or ""), so a future commit can apply it without
+   * re-touching the plumbing.
+   */
+  activeMedications?: Array<{ drugName: string; drugClass: string }>
+
+  /** Option D (Manisha 2026-06-12 Q2) — RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL
+   *  only. The patient's INITIAL emergency-range reading (BP1) in the
+   *  retake-to-confirm flow. The confirmatory below-threshold reading (BP2) is
+   *  the standard `systolicBP` / `diastolicBP`. Undefined for every other rule
+   *  (the helper renders "?/?" — never reached in production for those rules). */
+  initialSystolicBP?: number | null
+  initialDiastolicBP?: number | null
 }
 
 export type MessageBuilder = (ctx: AlertContext) => string
@@ -110,11 +205,206 @@ export interface RuleMessages {
 
 // ─── fragments + helpers ─────────────────────────────────────────────────────
 
-const EMERGENCY_CTA =
-  ' If you have chest pain, severe headache, trouble breathing, weakness, or vision changes, call 911 now.'
+// Handoff 4 / Doc 2 — three reusable, Manisha-verbatim fragments. Exported so
+// the same canonical strings back the patient/caregiver alert bodies, the
+// email templates, and any future surface. Each carries a leading space so it
+// composes onto a preceding sentence.
+//
+// MVP US-only: emergency number hardcoded to 911. See CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
+// Post-MVP: replace with {{emergencyNumber}} resolved by locale.
+export const EMERGENCY_CTA =
+  ' If you are having chest pain, trouble breathing, or feel like you might faint, call 911 right away.'
 
+// Doc 2 Fragment 2 — care-team notification. Manisha's patient/caregiver bodies
+// close on this passive assurance ("we told them") rather than an active
+// "please contact" instruction, except where the rule needs the patient to act.
+export const CARE_TEAM_NOTIFIED = 'Your care team has been notified.'
+
+// Doc 2 Fragment 3 — safety-critical. Patients who receive an alarming alert may
+// self-discontinue a medication, which can cause rebound harm. Never let an alert
+// imply "stop your medicine" unless a provider directed it.
+export const DO_NOT_STOP_MED =
+  'Please do not stop taking any medication on your own without talking to your care team.'
+
+// ─── Reminder & Engagement (N1–N10, 2026-07-13) ───────────────────────────────
+// Patient-facing daily nudge copy. Governing principle from Duwaragie's spec:
+// "engages, does not pressure". ≤5th-grade reading level, never blames, never
+// says "you missed your check-in". Copy strings below are the SIGNED-OFF
+// verbatim wording from the 2026-07-07 Final Engineering Specification —
+// paraphrasing without a fresh sign-off is a spec regression.
+//
+// Title stays stable across all three day tiers so the idempotency filter in
+// DailyReminderService (mirroring the gap-alert/monthly-reask pattern) can
+// deduplicate by title match. The tone escalation lives in the body.
+export const REMINDER_DAILY_TITLE = 'Cardioplace daily check-in'
+
+export type ReminderLanguage = 'en' | 'es' | 'am' | 'fr' | 'de'
+
+/**
+ * Time-of-day greeting per spec §N2. Bucket is patient-local hour
+ * (0–23). Returned string is a locale-appropriate greeting that opens
+ * every Day-1 message.
+ *
+ *   <12:00  → morning
+ *   12–16   → midday / neutral
+ *   17+     → evening
+ */
+export function reminderGreeting(hour: number, language: ReminderLanguage = 'en'): string {
+  const bucket: 'morning' | 'midday' | 'evening' =
+    hour < 12 ? 'morning' : hour < 17 ? 'midday' : 'evening'
+  const GREETINGS: Record<ReminderLanguage, Record<typeof bucket, string>> = {
+    en: { morning: 'Good morning', midday: 'Hi', evening: 'Good evening' },
+    es: { morning: 'Buenos días', midday: 'Hola', evening: 'Buenas tardes' },
+    fr: { morning: 'Bonjour', midday: 'Bonjour', evening: 'Bonsoir' },
+    de: { morning: 'Guten Morgen', midday: 'Hallo', evening: 'Guten Abend' },
+    // Amharic — TODO(l10n-am): native-speaker verified before ship.
+    // Fallback English strings so nothing breaks at runtime.
+    am: { morning: 'Good morning', midday: 'Hi', evening: 'Good evening' },
+  }
+  return GREETINGS[language]?.[bucket] ?? GREETINGS.en[bucket]
+}
+
+/**
+ * Day 1 (standard). Spec §N2 verbatim wording. Interpolates the
+ * time-of-day greeting AND the patient's first name.
+ */
+export function reminderBodyDay1(
+  name: string,
+  hour: number,
+  language: ReminderLanguage = 'en',
+): string {
+  const greet = reminderGreeting(hour, language)
+  const TEMPLATES: Record<ReminderLanguage, (g: string, n: string) => string> = {
+    en: (g, n) => `${g}, ${n}. When you're ready, take a moment to check your blood pressure. Your care team sees every reading.`,
+    es: (g, n) => `${g}, ${n}. Cuando esté listo, tómese un momento para revisar su presión arterial. Su equipo de atención ve cada lectura.`,
+    fr: (g, n) => `${g}, ${n}. Quand vous êtes prêt·e, prenez un instant pour vérifier votre tension artérielle. Votre équipe soignante voit chaque mesure.`,
+    de: (g, n) => `${g}, ${n}. Wenn Sie bereit sind, nehmen Sie sich einen Moment Zeit, um Ihren Blutdruck zu messen. Ihr Behandlungsteam sieht jede Messung.`,
+    // TODO(l10n-am): native-speaker verified before ship.
+    am: (g, n) => `${g}, ${n}. When you're ready, take a moment to check your blood pressure. Your care team sees every reading.`,
+  }
+  return (TEMPLATES[language] ?? TEMPLATES.en)(greet, name)
+}
+
+/**
+ * Day 1 TTS variant — read aloud by the voice-first surface (§N2). Uses
+ * "have a moment" instead of "take a moment" so the spoken cadence
+ * lands warmer.
+ */
+export function reminderBodyDay1Tts(
+  name: string,
+  hour: number,
+  language: ReminderLanguage = 'en',
+): string {
+  const greet = reminderGreeting(hour, language)
+  const TEMPLATES: Record<ReminderLanguage, (g: string, n: string) => string> = {
+    en: (g, n) => `${g}, ${n}. When you have a moment, go ahead and check your blood pressure. Your care team sees every reading you log.`,
+    es: (g, n) => `${g}, ${n}. Cuando tenga un momento, adelante y revise su presión arterial. Su equipo de atención ve cada lectura que registra.`,
+    fr: (g, n) => `${g}, ${n}. Quand vous aurez un instant, mesurez votre tension artérielle. Votre équipe soignante voit chaque mesure que vous enregistrez.`,
+    de: (g, n) => `${g}, ${n}. Wenn Sie einen Moment haben, messen Sie bitte Ihren Blutdruck. Ihr Behandlungsteam sieht jede Messung, die Sie erfassen.`,
+    am: (g, n) => `${g}, ${n}. When you have a moment, go ahead and check your blood pressure. Your care team sees every reading you log.`,
+  }
+  return (TEMPLATES[language] ?? TEMPLATES.en)(greet, name)
+}
+
+/** Day 2 — spec §N4 verbatim. Interpolates first name only. */
+export function reminderBodyDay2(name: string, language: ReminderLanguage = 'en'): string {
+  const TEMPLATES: Record<ReminderLanguage, (n: string) => string> = {
+    en: (n) => `Hi ${n} — just a gentle reminder to check your blood pressure when you can. Your care team is here for you.`,
+    es: (n) => `Hola ${n}: solo un recordatorio suave para revisar su presión arterial cuando pueda. Su equipo de atención está aquí para usted.`,
+    fr: (n) => `Bonjour ${n} — un petit rappel pour vérifier votre tension artérielle quand vous le pouvez. Votre équipe soignante est là pour vous.`,
+    de: (n) => `Hallo ${n} — nur eine sanfte Erinnerung, Ihren Blutdruck zu messen, wenn Sie können. Ihr Behandlungsteam ist für Sie da.`,
+    am: (n) => `Hi ${n} — just a gentle reminder to check your blood pressure when you can. Your care team is here for you.`,
+  }
+  return (TEMPLATES[language] ?? TEMPLATES.en)(name)
+}
+
+/**
+ * Day 3+ — spec §N4 verbatim. Repeats daily while the gap persists;
+ * day count resets on ANY logged reading. Spec deliberately does NOT
+ * interpolate {days} into the visible copy — the tone stays constant.
+ */
+export function reminderBodyDay3Plus(
+  name: string,
+  _days: number,
+  language: ReminderLanguage = 'en',
+): string {
+  const TEMPLATES: Record<ReminderLanguage, (n: string) => string> = {
+    en: (n) => `Hi ${n}, it's been a few days since your last check-in. Your care team is here if anything is making it hard. You can check in anytime.`,
+    es: (n) => `Hola ${n}, han pasado unos días desde su último registro. Su equipo de atención está aquí si algo lo está dificultando. Puede registrarse en cualquier momento.`,
+    fr: (n) => `Bonjour ${n}, cela fait quelques jours depuis votre dernière saisie. Votre équipe soignante est là si quelque chose vous complique la tâche. Vous pouvez vous enregistrer à tout moment.`,
+    de: (n) => `Hallo ${n}, es sind ein paar Tage seit Ihrer letzten Erfassung vergangen. Ihr Behandlungsteam ist da, falls etwas es Ihnen schwer macht. Sie können sich jederzeit melden.`,
+    am: (n) => `Hi ${n}, it's been a few days since your last check-in. Your care team is here if anything is making it hard. You can check in anytime.`,
+  }
+  return (TEMPLATES[language] ?? TEMPLATES.en)(name)
+}
+
+/**
+ * N7 — "Logged ✓" push. Body is spec §N7 verbatim. Copy variants:
+ *  • base: "Logged ✓ — your reading has been recorded."
+ *  • normal-range: base + " Looking good — keep it up!"
+ *  • alert-triggering: base only (NO positive language).
+ *
+ * BP values NEVER appear in the body (lock-screen preview safety).
+ */
+export const REMINDER_LOGGED_TITLE = 'Logged ✓'
+
+const LOGGED_BASE: Record<ReminderLanguage, string> = {
+  en: 'Logged ✓ — your reading has been recorded.',
+  es: 'Registrado ✓ — su lectura ha sido guardada.',
+  fr: 'Enregistré ✓ — votre mesure a été enregistrée.',
+  de: 'Erfasst ✓ — Ihre Messung wurde gespeichert.',
+  am: 'Logged ✓ — your reading has been recorded.',
+}
+const LOGGED_POSITIVE_SUFFIX: Record<ReminderLanguage, string> = {
+  en: ' Looking good — keep it up!',
+  es: ' ¡Se ve bien — siga así!',
+  fr: ' Tout va bien — continuez !',
+  de: ' Sieht gut aus — weiter so!',
+  am: ' Looking good — keep it up!',
+}
+
+export function reminderLoggedBody(
+  variant: 'base' | 'normal-range' | 'alert-triggering' = 'base',
+  language: ReminderLanguage = 'en',
+): string {
+  const base = LOGGED_BASE[language] ?? LOGGED_BASE.en
+  if (variant === 'normal-range') {
+    return base + (LOGGED_POSITIVE_SUFFIX[language] ?? LOGGED_POSITIVE_SUFFIX.en)
+  }
+  // 'alert-triggering' and 'base' both return the plain base — the alert
+  // engine owns any clinical follow-up messaging.
+  return base
+}
+
+/** N5 — care-team gap alert (provider-visible). Clinical wording is OK here. */
+export const CARE_TEAM_GAP_TITLE = 'Patient has not checked in'
+export function careTeamGapBody(patientName: string, days: number): string {
+  return `Patient ${patientName} has not logged a reading in ${days} days. Consider outreach.`
+}
+
+/**
+ * Cheap normal-range predicate for the N7 "Looking good" gate.
+ * Deliberately CONSERVATIVE — a reading only counts as normal when both
+ * SBP and DBP sit inside a comfortable window with no missing values.
+ * The alert engine is the source of truth for anything clinical; this
+ * helper is only used to decide whether to append encouraging copy.
+ *
+ * Reference: AHA "normal" BP is SBP < 120 AND DBP < 80. We widen the
+ * ceiling slightly to SBP < 130 / DBP < 85 because "elevated" (120–129/<80)
+ * doesn't merit an alert either — the patient is still doing fine.
+ */
+export function isBpNormalRange(sbp: number | null, dbp: number | null): boolean {
+  if (sbp == null || dbp == null) return false
+  if (!Number.isFinite(sbp) || !Number.isFinite(dbp)) return false
+  return sbp >= 90 && sbp < 130 && dbp >= 60 && dbp < 85
+}
+
+// Manisha 5/24 Q3 — pre-personalization fires Level 1 WITH this disclaimer
+// (option a), and personalization is anchored on a reading count, not a calendar
+// day. Wording updated "after Day 3" → "after 7 readings" to match the actual
+// gate (PRE_DAY_3_MIN_READINGS = 7).
 const PRE_DAY_3_DISCLAIMER =
-  ' (Standard threshold — personalization begins after Day 3.)'
+  ' (Standard threshold — personalization begins after 7 readings.)'
 
 const SUBOPTIMAL_SUFFIX =
   ' Please retake the reading following the measurement checklist.'
@@ -129,11 +419,29 @@ function hr(ctx: AlertContext): string {
   return `HR ${ctx.pulse ?? '?'} bpm`
 }
 
+// Option D (Manisha 2026-06-12 Q2) — renders the INITIAL emergency-range
+// reading (BP1) for RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL. BP2 (the
+// confirmatory reading) uses the standard bp(ctx).
+function initialBp(ctx: AlertContext): string {
+  const sbp = ctx.initialSystolicBP ?? '?'
+  const dbp = ctx.initialDiastolicBP ?? '?'
+  return `${sbp}/${dbp} mmHg`
+}
+
 function physSuffix(ctx: AlertContext): string {
   const parts: string[] = []
   if (ctx.physicianAnnotations.length) parts.push(...ctx.physicianAnnotations)
   // Cluster 6 Q2 (Manisha 5/9/26) — single-reading-session caveat.
-  if (ctx.singleReadingSession) {
+  // #83 (2026-06-03) — "confirm with next reading" is BP-averaging language:
+  // a second reading could change a threshold-band call. It is clinically
+  // irrelevant on the medication / contraindication / symptom-driven rules
+  // (RULE_AXIS 'profile' — adherence, angioedema, ACE cough, palpitations,
+  // etc.), where the finding doesn't depend on a repeat BP/HR measurement.
+  // Gate the caveat to non-'profile' (systolic / diastolic / hr) rules. When
+  // ruleId is absent (direct test callers) we keep the legacy behavior.
+  const suffixApplies =
+    ctx.ruleId == null || RULE_AXIS[ctx.ruleId] !== 'profile'
+  if (ctx.singleReadingSession && suffixApplies) {
     parts.push('Single-reading session — confirm with next reading')
   }
   return parts.length ? ` | ${parts.join(' | ')}` : ''
@@ -143,8 +451,102 @@ function preDaySuffix(ctx: AlertContext): string {
   return ctx.preDay3 ? PRE_DAY_3_DISCLAIMER : ''
 }
 
+/**
+ * Manisha Q5 (2026-06-02) — severe-Stage-2 band label for RULE_STANDARD_L1_HIGH,
+ * naming the axis that crossed so the physician message can't self-contradict:
+ *   • SBP ≥160, DBP <100  → "severe Stage 2 SBP (SBP ≥160)"
+ *   • DBP ≥100, SBP <160  → "severe Stage 2 DBP (DBP ≥100)"
+ *   • both                → "severe Stage 2 (≥160/100)"
+ * The rule fires when EITHER axis crosses, so these three cases are exhaustive;
+ * a missing-value edge falls through to the combined label.
+ */
+function stage2Band(ctx: AlertContext): string {
+  const sbpHigh = ctx.systolicBP != null && ctx.systolicBP >= 160
+  const dbpHigh = ctx.diastolicBP != null && ctx.diastolicBP >= 100
+  if (sbpHigh && !dbpHigh) return 'severe Stage 2 SBP (SBP ≥160)'
+  if (dbpHigh && !sbpHigh) return 'severe Stage 2 DBP (DBP ≥100)'
+  return 'severe Stage 2 (≥160/100)'
+}
+
 function suboptimalSuffix(ctx: AlertContext): string {
   return ctx.suboptimalMeasurement ? SUBOPTIMAL_SUFFIX : ''
+}
+
+/**
+ * Caregiver-tier name lead. Manisha's Doc 2 caregiver wording opens with
+ * "[Patient name]'s blood pressure is…"; fall back to "The patient" when the
+ * name is unavailable so the possessive still reads naturally.
+ */
+function patientNameOr(ctx: AlertContext): string {
+  return ctx.patientName?.trim() || 'The patient'
+}
+
+/**
+ * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, conditional
+ * exception) — render gestational age as a clinician-readable suffix that
+ * inlines naturally after the BP value or drug-list. Returns empty string
+ * when GA is unknown (non-pregnancy alert, missing profile field, or
+ * pre-pilot data). Format follows obstetrics convention "Xw" (weeks).
+ *
+ * Examples:
+ *   gestationalAgePhrase({...gestationalAgeWeeks: 28}) → " (28w)"
+ *   gestationalAgePhrase({...gestationalAgeWeeks: null}) → ""
+ *
+ * Kept generic (no rule-id check) — every pregnancy rule that wants it
+ * just inlines the call.
+ */
+function gestationalAgePhrase(ctx: AlertContext): string {
+  const ga = ctx.gestationalAgeWeeks
+  if (ga == null) return ''
+  if (!Number.isFinite(ga) || ga < 1 || ga > 45) return ''
+  return ` (${ga}w gestation)`
+}
+
+/**
+ * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, issue #68) —
+ * render the patient's age as a clinician-readable suffix like `(age 67)`.
+ * Returns empty string when age is unknown (DOB missing, future date,
+ * implausibly old). Format follows convention used in escalation emails
+ * (`ageFromDob` + `age X` suffix on the patient identifier block).
+ *
+ * Kept generic (no rule-id check) — any rule that wants it inlines the call.
+ * Plausibility clamp: 0–130 years; anything outside returns empty string.
+ *
+ * Example use in a physician message:
+ *   `BRADY SURVEILLANCE — HR ${hr}${agePhrase(ctx)}. Sustained HR ≤49…`
+ *   →  "BRADY SURVEILLANCE — HR 45 (age 67). Sustained HR ≤49…"
+ */
+function agePhrase(ctx: AlertContext): string {
+  const age = ctx.patientAgeYears
+  if (age == null) return ''
+  if (!Number.isFinite(age) || age < 0 || age > 130) return ''
+  return ` (age ${age})`
+}
+
+/**
+ * Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, issue #69) —
+ * render the patient's other active medications as a clinician-readable
+ * suffix. Format: `" Currently also taking: Atenolol, HCTZ."` or empty
+ * string when no other meds.
+ *
+ * Dedup is done at the populate-time in OutputGenerator (it strips any
+ * drug already named in `drugNames`), so this helper just renders.
+ *
+ * Plain-English join: "X" / "X and Y" / "X, Y, and Z" — matches
+ * `formatDrugList` already used in patient/caregiver messages so the
+ * three tiers read consistently.
+ *
+ * Example use in a physician message:
+ *   `CONTRAINDICATION — ${drug}.${medicationListPhrase(ctx)} Recommend…`
+ *   → "CONTRAINDICATION — Lisinopril. Currently also taking: Atenolol
+ *      and HCTZ. Recommend immediate substitution…"
+ */
+function medicationListPhrase(ctx: AlertContext): string {
+  const meds = ctx.activeMedications
+  if (!meds || meds.length === 0) return ''
+  const names = meds.map((m) => m.drugName).filter(Boolean)
+  if (names.length === 0) return ''
+  return ` Currently also taking: ${formatDrugList(names)}.`
 }
 
 /**
@@ -159,150 +561,308 @@ function formatDrugList(names: string[]): string {
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
 }
 
+// ─── Chunk B: backdated-reading message modifiers ─────────────────────────────
+// Manisha Backdated Readings sign-off 2026-06-06. A reading logged ≥1h after it
+// was measured (DELAYED_ENTRY) can't confirm an active emergency, so the four BP
+// Level-2 patient messages drop the directive 911 CTA and redirect to the care
+// team; the physician messages carry Manisha's signed delayed-entry flag
+// (Recheck #1 refinement — physL2DelayedFlag below). Level-1 physician
+// messages get a provider-only disclaimer (Recheck #2 — physL1DelayedDisclaimer
+// below, applied centrally by OutputGenerator keyed on tier). HISTORICAL_ENTRY
+// (≥24h) never reaches this layer — the engine suppresses ALL alerts upstream
+// (alert-engine.service.ts, Chunk B fix-up). The patient "recorded but won't
+// alert" courtesy note renders off serializeEntry's delayBand /
+// alertsSuppressedReason on the entry response (Chunk C) — no new rule_id,
+// no new dispatch path.
+function isDelayedEntry(ctx: AlertContext): boolean {
+  return ctx.delayBand === 'DELAYED_ENTRY'
+}
+
+// Band-only physician badge — retained as the graceful fallback when a direct
+// caller supplies delayBand without delayHours/measuredAt (production always
+// populates both via OutputGenerator). Trailing space so it composes as a prefix.
+const PHYS_DELAYED_BADGE =
+  '[DELAYED ENTRY — logged ≥1h after measurement; confirm current symptoms before acting] '
+
+/** "1 hour" / "n hours" — Manisha's signed template substitutes an integer
+ *  into "[X] hours"; plural-aware rendering is a grammatical instantiation,
+ *  not a wording change (approved 2026-06-10). */
+function delayHoursPhrase(hours: number): string {
+  return `${hours} hour${hours === 1 ? '' : 's'}`
+}
+
+/** Render a measurement timestamp in the patient's local time, e.g.
+ *  "Jun 9, 2026, 2:30 PM". Falls back to America/New_York (the pilot
+ *  population) when the profile timezone is missing or invalid. */
+function formatMeasuredAt(
+  measuredAt: Date,
+  timezone: string | null | undefined,
+): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      ...opts,
+      timeZone: timezone || 'America/New_York',
+    }).format(measuredAt)
+  } catch {
+    return new Intl.DateTimeFormat('en-US', {
+      ...opts,
+      timeZone: 'America/New_York',
+    }).format(measuredAt)
+  }
+}
+
+/**
+ * Chunk B fix-up — Manisha's SIGNED physician-tier delayed-entry flag for the
+ * four BP Level-2 rules (Backdated Readings sign-off 2026-06-06, Recheck #1
+ * refinement, signed verbatim):
+ *   "Delayed entry: patient reported [BP] for [date/time]. Reading entered
+ *    [X] hours later. Verify current BP and assess for headache, visual
+ *    changes, chest pain, or dyspnea. If unable to reach patient, escalate
+ *    per standard protocol."
+ * [BP] renders via bp(ctx) (registry house style, mmHg-suffixed). Trailing
+ * space so it composes as a prefix on the rule's physician message.
+ */
+function physL2DelayedFlag(ctx: AlertContext): string {
+  if (!isDelayedEntry(ctx)) return ''
+  if (ctx.delayHours == null || ctx.measuredAt == null) return PHYS_DELAYED_BADGE
+  return `Delayed entry: patient reported ${bp(ctx)} for ${formatMeasuredAt(ctx.measuredAt, ctx.timezone)}. Reading entered ${delayHoursPhrase(ctx.delayHours)} later. Verify current BP and assess for headache, visual changes, chest pain, or dyspnea. If unable to reach patient, escalate per standard protocol. `
+}
+
+/**
+ * Chunk B fix-up — Recheck #2 provider-only disclaimer for Level-1 alerts on
+ * DELAYED_ENTRY: "Note: this reading was entered [X] hours after measurement.
+ * Clinical context may have changed." Patient + caregiver tiers stay identical
+ * to real-time (the patient already knows they backdated — repeating it adds
+ * no clinical value, per the signed doc). Applied CENTRALLY by OutputGenerator
+ * to every rule result whose tier is BP_LEVEL_1_HIGH / BP_LEVEL_1_LOW —
+ * Recheck #2 is reading-generic, so the HR-axis and HF-decompensation L1
+ * rules are included. Leading space so it composes as a suffix.
+ *
+ * TIER_1 contraindication + TIER_2 discrepancy DELAYED disclaimers are NOT
+ * itemized in the signed doc — deferred until clarified with Manisha; do not
+ * widen the OutputGenerator dispatch without a sign-off.
+ */
+export function physL1DelayedDisclaimer(ctx: AlertContext): string {
+  if (!isDelayedEntry(ctx)) return ''
+  const lag =
+    ctx.delayHours == null ? 'more than 1 hour' : delayHoursPhrase(ctx.delayHours)
+  return ` Note: this reading was entered ${lag} after measurement. Clinical context may have changed.`
+}
+
 // ─── registry ────────────────────────────────────────────────────────────────
 
 export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   // ── Tier 1 contraindications ──────────────────────────────────────────
+  // Doc 2 (Manisha 6/2) — patient must NOT be frightened into abruptly stopping
+  // the medication (rebound hypertension risk). Name every offending drug — the
+  // patient may be on Prinivil + Zestoretic — using the brand/generic names from
+  // their pillbox, no drug-class jargon in the patient tier.
   RULE_PREGNANCY_ACE_ARB: {
     patientMessage: (ctx) => {
-      // Name every offending drug — patient may be on Prinivil + Zestoretic,
-      // and discontinuing only the named one is unsafe. Plain language only;
-      // patient hears the brand/generic names they recognize from their
-      // pillbox, no drug-class jargon.
       const names = ctx.drugNames.length > 0 ? ctx.drugNames : ctx.drugName ? [ctx.drugName] : []
       const drugList = formatDrugList(names)
-      const lead = drugList
-        ? `Your care team needs to review ${drugList} because you are pregnant.`
-        : 'Your care team needs to review your blood pressure medicine because you are pregnant.'
-      return `${lead} Please call your provider today before taking your next dose.`
+      const med = drugList ? ` (${drugList})` : ''
+      return `One of your medications${med} is not recommended during pregnancy. Please do not stop taking it on your own — your care team has been notified and will contact you to discuss a safe alternative.`
     },
     caregiverMessage: (ctx) => {
       const names = ctx.drugNames.length > 0 ? ctx.drugNames : ctx.drugName ? [ctx.drugName] : []
       const drugList = formatDrugList(names)
-      const lead = drugList
-        ? `The patient is pregnant and is taking ${drugList}, which need urgent provider review.`
-        : 'The patient is pregnant and has a blood pressure medicine that needs urgent provider review.'
-      return `${lead} Please help them contact their care team today.`
+      const med = drugList ? ` (${drugList})` : ''
+      return `${patientNameOr(ctx)} is taking a medication${med} that is not recommended during pregnancy. Their care team has been notified and will follow up.`
     },
     physicianMessage: (ctx) => {
       const names =
         ctx.drugNames.length > 0
           ? ctx.drugNames.join(', ')
           : (ctx.drugName ?? 'unknown')
-      return `Tier 1 — ACE/ARB (${names}, ${ctx.drugClass ?? 'unknown'}) in pregnant patient. Teratogenic; discontinue and switch to CHAP-protocol alternative (labetalol or long-acting nifedipine).${physSuffix(ctx)}`
+      const cls = ctx.drugClass ?? 'ACE inhibitor/ARB'
+      // Decision 4 conditional — gestational age is most clinically
+      // meaningful for the ACE/ARB rule: 2nd/3rd trimester carries the
+      // classic fetopathy (renal dysgenesis, oligohydramnios, pulmonary
+      // hypoplasia); 1st trimester carries lower but still elevated risk.
+      return `CONTRAINDICATION — Pregnant patient on ${cls}: ${names}${gestationalAgePhrase(ctx)}.${medicationListPhrase(ctx)} ACE/ARBs are contraindicated in pregnancy (FDA Category D/X). Recommend immediate substitution (CHAP-protocol alternative — labetalol or long-acting nifedipine). Patient has been advised not to self-discontinue.${physSuffix(ctx)}`
     },
   },
 
+  // Doc 2 (Manisha 6/2) — same patient-safety guardrail as PREGNANCY_ACE_ARB:
+  // do not let the patient self-discontinue. Tone is serious but not alarming.
   RULE_NDHP_HFREF: {
-    patientMessage: () =>
-      'Your care team needs to review one of your heart medicines with you. Please call your provider today before taking your next dose.',
-    caregiverMessage: () =>
-      'The patient has a heart-failure diagnosis and is taking a medication that needs urgent provider review. Please help them contact their care team today.',
+    patientMessage: (ctx) => {
+      const names = ctx.drugNames.length > 0 ? ctx.drugNames : ctx.drugName ? [ctx.drugName] : []
+      const drugList = formatDrugList(names)
+      const med = drugList ? ` (${drugList})` : ''
+      return `One of your medications${med} may need to be reviewed because of your heart condition. ${CARE_TEAM_NOTIFIED} Please do not stop taking it on your own.`
+    },
+    caregiverMessage: (ctx) => {
+      const names = ctx.drugNames.length > 0 ? ctx.drugNames : ctx.drugName ? [ctx.drugName] : []
+      const drugList = formatDrugList(names)
+      const med = drugList ? ` (${drugList})` : ''
+      return `${patientNameOr(ctx)} is taking a medication${med} that may need to be reviewed given their heart failure diagnosis. ${CARE_TEAM_NOTIFIED}`
+    },
     physicianMessage: (ctx) =>
-      `Tier 1 — Nondihydropyridine CCB (${ctx.drugName ?? 'unknown'}) in HFrEF. Negative inotropic; discontinue per 2025 AHA/ACC.${physSuffix(ctx)}`,
+      `CONTRAINDICATION — HFrEF patient on non-dihydropyridine CCB: ${ctx.drugName ?? 'unknown'} (diltiazem/verapamil).${medicationListPhrase(ctx)} NDHP-CCBs are potentially harmful in HFrEF (negative inotropy) per 2022 AHA/ACC/HFSA HF guideline. Recommend review and substitution.${physSuffix(ctx)}`,
   },
 
   // ── BP Level 2 symptom overrides ──────────────────────────────────────
+  // Doc 2 (Manisha 6/2). Symptom list comes from ctx.conditionLabel; report
+  // time is referenced in Manisha's clinician wording but isn't on AlertContext
+  // (omitted). MVP US-only: 911 hardcoded per CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   RULE_SYMPTOM_OVERRIDE_GENERAL: {
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)} and you reported serious symptoms.${EMERGENCY_CTA}`,
+      isDelayedEntry(ctx)
+        ? "You logged symptoms from earlier along with this reading. Because it wasn't just recorded, we can't treat it as an active emergency — please share it with your care team today."
+        : 'Based on what you reported, your care team needs to know right away. If you are having chest pain, trouble breathing, or feel like you might faint, call 911. Otherwise, your care team has been notified and will contact you.',
     caregiverMessage: (ctx) =>
-      `The patient reported symptoms consistent with hypertensive emergency at ${bp(ctx)}.${EMERGENCY_CTA}`,
+      `${patientNameOr(ctx)} reported symptoms that need attention: ${ctx.conditionLabel ?? '—'}. ${CARE_TEAM_NOTIFIED} If they are having chest pain, trouble breathing, or feel faint, please help them call 911.`,
     physicianMessage: (ctx) =>
-      `BP Level 2 — symptom override at ${bp(ctx)}. Reported: ${ctx.conditionLabel ?? '—'}.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP at time of report: ${bp(ctx)}, ${hr(ctx)}. Symptoms triggered override regardless of BP threshold. Recommend urgent clinical assessment.${physSuffix(ctx)}`,
   },
 
+  // Doc 2 (Manisha 6/2) supersedes the Cluster 6 Q6 (5/9) "preeclampsia"
+  // patient wording — newest sign-off wins. Gestational age omitted (not on
+  // AlertContext). MVP US-only: 911 hardcoded per CROSS_HANDOFF_ADDENDUM.
   RULE_SYMPTOM_OVERRIDE_PREGNANCY: {
-    // Cluster 6 Q6 (Manisha 5/9/26): current patient-facing wording approved
-    // — keep "preeclampsia" since pregnant patients routinely encounter the
-    // term in prenatal care. Caregiver + physician wording stays as-is.
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
     patientMessage: (ctx) =>
-      `You reported a symptom that may signal preeclampsia at ${bp(ctx)}.${EMERGENCY_CTA}`,
+      isDelayedEntry(ctx)
+        ? "You logged pregnancy-related symptoms from earlier. Because they weren't just recorded, please contact your doctor or care team today to discuss them."
+        : "Some of the symptoms you reported can be serious during pregnancy. Please call your doctor or go to the hospital right away. If you have trouble breathing or a very bad headache that won't go away, call 911.",
     caregiverMessage: (ctx) =>
-      `The pregnant patient reported symptoms consistent with preeclampsia at ${bp(ctx)}.${EMERGENCY_CTA}`,
+      `${patientNameOr(ctx)} reported pregnancy-related symptoms that may be serious: ${ctx.conditionLabel ?? '—'}. Please help them contact their doctor or go to the hospital. If they have trouble breathing, call 911.`,
     physicianMessage: (ctx) =>
-      `BP Level 2 — pregnancy symptom override at ${bp(ctx)}. Reported: ${ctx.conditionLabel ?? '—'}. Assess for preeclampsia with severe features.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}PREGNANCY SYMPTOM OVERRIDE — Patient reported: ${ctx.conditionLabel ?? '—'}. BP: ${bp(ctx)}. Evaluate for preeclampsia with severe features. ACOG criteria: headache unresponsive to medication, visual disturbances, RUQ/epigastric pain, thrombocytopenia, elevated LFTs, renal insufficiency.${physSuffix(ctx)}`,
   },
 
   // ── Absolute emergency ────────────────────────────────────────────────
+  // Doc 2 (Manisha 6/2) — the most urgent alert in the system. Patient copy is
+  // directive, not suggestive. No raw BP number in the patient tier (anxiety);
+  // caregiver + clinician carry the reading.
+  // MVP US-only: emergency number hardcoded to 911. See CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
+  // Post-MVP: replace with {{emergencyNumber}} resolved by locale.
   RULE_ABSOLUTE_EMERGENCY: {
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
     patientMessage: (ctx) =>
-      `Your blood pressure is very high: ${bp(ctx)}.${EMERGENCY_CTA}`,
+      isDelayedEntry(ctx)
+        ? "You logged a high blood pressure reading from earlier. Because it wasn't just taken, we can't treat it as a current emergency — but it still matters. Please share it with your care team today."
+        : 'Your blood pressure is dangerously high and you are having symptoms that need emergency care. Call 911 or go to the nearest emergency room right now. Do not wait.',
     caregiverMessage: (ctx) =>
-      `The patient's blood pressure is very high: ${bp(ctx)}.${EMERGENCY_CTA}`,
+      `URGENT — ${patientNameOr(ctx)}'s blood pressure is dangerously high (${bp(ctx)}) and they are having symptoms. Please help them call 911 or get to the nearest emergency room immediately.`,
     physicianMessage: (ctx) =>
-      `BP Level 2 — ${bp(ctx)} (SBP ≥180 or DBP ≥120). Prompt symptom assessment; treat per hypertensive-urgency protocol if confirmed target organ involvement.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}HYPERTENSIVE EMERGENCY — BP ${bp(ctx)} with symptoms: ${ctx.conditionLabel ?? '—'}. Meets criteria for hypertensive emergency (SBP ≥180 and/or DBP ≥120 with target organ damage). Patient advised to call 911. Immediate evaluation required.${physSuffix(ctx)}`,
   },
 
   // ── Pregnancy thresholds ──────────────────────────────────────────────
+  // Doc 2 (Manisha 6/2). Gestational age threaded through to the physician
+  // tier per Manisha Open-Decisions sign-off 2026-06-06 (Decision 4,
+  // conditional exception): the pilot population includes pregnant patients
+  // on ACE/ARB, so trimester-specific teratogenic risk context becomes
+  // pilot-priority. Other Decision-4 placeholders ([age], [medication list])
+  // remain backlogged. MVP US-only: 911 hardcoded per
+  // CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   RULE_PREGNANCY_L2: {
+    // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on sign-off doc.
+    // Tone matches existing patient-tier style. Removes 911 CTA per Manisha 2026-06-06 backdated-
+    // readings sign-off (DELAYED_ENTRY: stale data cannot confirm active emergency).
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is very high for pregnancy.${EMERGENCY_CTA}`,
+      isDelayedEntry(ctx)
+        ? "You logged a high blood pressure reading from earlier in your pregnancy. Because it wasn't just taken, please share it with your doctor or care team today rather than treating it as an emergency right now."
+        : "Your blood pressure is very high. During pregnancy, this needs urgent attention. Please call your doctor or go to the hospital right away. If you can't reach your doctor, call 911.",
     caregiverMessage: (ctx) =>
-      `The pregnant patient's BP is severely elevated at ${bp(ctx)}.${EMERGENCY_CTA}`,
+      `URGENT — ${patientNameOr(ctx)}'s blood pressure is very high (${bp(ctx)}) during pregnancy. Please help them contact their doctor or go to the hospital immediately.`,
     physicianMessage: (ctx) =>
-      `BP Level 2 — pregnancy ≥160/110 at ${bp(ctx)}. Severe-range hypertension; treat within 15 minutes per ACOG.${physSuffix(ctx)}`,
+      `${physL2DelayedFlag(ctx)}PREGNANCY BP LEVEL 2 — BP ${bp(ctx)}${gestationalAgePhrase(ctx)}. Meets ACOG criteria for severe hypertension in pregnancy (SBP ≥160 or DBP ≥110). Initiate antihypertensive therapy within 30–60 min. Evaluate for preeclampsia with severe features.${physSuffix(ctx)}`,
   },
 
   RULE_PREGNANCY_L1_HIGH: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is higher than the goal for pregnancy. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is higher than recommended during pregnancy. ${CARE_TEAM_NOTIFIED} They will follow up with you. If you develop a severe headache, vision changes, or upper belly pain, call your doctor right away.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The pregnant patient's BP is elevated at ${bp(ctx)}; needs same-day provider review.`,
+      `${patientNameOr(ctx)}'s blood pressure is elevated (${bp(ctx)}) during pregnancy. ${CARE_TEAM_NOTIFIED} Watch for severe headache, vision changes, or upper belly pain — if these occur, help them contact their doctor immediately.`,
     physicianMessage: (ctx) =>
-      `BP Level 1 High — pregnancy ≥140/90 at ${bp(ctx)}. Assess for preeclampsia features.${physSuffix(ctx)}`,
+      `PREGNANCY BP LEVEL 1 HIGH — BP ${bp(ctx)}${gestationalAgePhrase(ctx)}. Above pregnancy HTN threshold (≥140/90). Monitor for progression to severe range or preeclampsia features.${physSuffix(ctx)}`,
   },
 
   // ── HFrEF ─────────────────────────────────────────────────────────────
+  // Doc 2 (Manisha 6/2). Patient tier carries no raw number; caregiver +
+  // clinician do. Clinician threshold uses the engine value (ctx.thresholdValue)
+  // rather than a hardcoded literal so wording can't drift from the rule.
+  // "[medication list]" is referenced in Manisha's clinician wording but not on
+  // AlertContext — omitted.
   RULE_HFREF_LOW: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is lower than the goal set for you. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is lower than expected. If you feel dizzy, lightheaded, or faint, please sit or lie down right away. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is low at ${bp(ctx)} (HFrEF).`,
+      `${patientNameOr(ctx)}'s blood pressure is low (${bp(ctx)}). If they feel dizzy or lightheaded, help them sit or lie down. ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 Low — HFrEF SBP < ${ctx.thresholdValue ?? 85}: ${bp(ctx)}.${physSuffix(ctx)}`,
+      `HFrEF LOW BP — SBP < ${ctx.thresholdValue ?? 85}: ${bp(ctx)}. Assess for symptomatic hypotension. Consider GDMT dose adjustment if symptomatic. Note: asymptomatic low SBP alone is not a contraindication to GDMT continuation per 2022 AHA/ACC/HFSA guideline.${physSuffix(ctx)}`,
   },
   RULE_HFREF_HIGH: {
+    // Q2 (Handoff 1) keeps this rule firing on a single reading — that's engine
+    // behavior; the single-reading caveat rides on physSuffix. Wording per Doc 2.
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is higher than the goal for your heart. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is a bit higher than your target. Your care team has been notified and may want to adjust your treatment.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is elevated at ${bp(ctx)} (HFrEF).`,
+      `${patientNameOr(ctx)}'s blood pressure is above their target (${bp(ctx)}). ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 High — HFrEF SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}.${physSuffix(ctx)}`,
+      `HFrEF HIGH BP — SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}. Consider uptitration of GDMT or addition of antihypertensive therapy per 2025 AHA/ACC guideline.${physSuffix(ctx)}`,
   },
 
   // ── HFpEF ─────────────────────────────────────────────────────────────
   RULE_HFPEF_LOW: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is lower than the goal for you. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is lower than expected. If you feel dizzy or lightheaded, please sit or lie down. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is low at ${bp(ctx)} (HFpEF).`,
+      `${patientNameOr(ctx)}'s blood pressure is low (${bp(ctx)}). ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 Low — HFpEF SBP < ${ctx.thresholdValue ?? 110}: ${bp(ctx)}.${physSuffix(ctx)}`,
+      `HFpEF LOW BP — SBP < ${ctx.thresholdValue ?? 110}: ${bp(ctx)}. Assess for symptomatic hypotension and volume status.${physSuffix(ctx)}`,
   },
   RULE_HFPEF_HIGH: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is higher than the goal for your heart. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is higher than your target. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is elevated at ${bp(ctx)} (HFpEF).`,
+      `${patientNameOr(ctx)}'s blood pressure is above their target (${bp(ctx)}). ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 High — HFpEF SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}.${physSuffix(ctx)}`,
+      `HFpEF HIGH BP — SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}. Consider antihypertensive optimization.${physSuffix(ctx)}`,
   },
 
   // ── CAD ───────────────────────────────────────────────────────────────
+  // Doc 2 (Manisha 6/2) patient + caregiver wording. Physician tier keeps the
+  // threshold-accurate Cluster 8 Q2 (5/18) detail — the alert fires at the
+  // engine's ctx.thresholdValue, so the message must not assert a different
+  // number.
+  //
+  // Manisha sign-off 2026-06-06 (Open Decisions Doc, Decision 2): the engine's
+  // Cluster 8 Q2 thresholds stand (SBP ≥140 alert, DBP <70 perfusion warning).
+  // Doc 2's ≥130 was a treatment-initiation target, not an alert threshold.
+  // Physician-tier wording here matches the engine; Doc 2 markdown will be
+  // updated separately to cite ≥140.
   RULE_CAD_DBP_CRITICAL: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}. The lower number is concerning for your heart. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your bottom blood pressure number is lower than expected. If you feel dizzy, have chest pain, or feel faint, please sit down and call your care team. If symptoms are severe, call 911.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's DBP is low at ${bp(ctx)} (CAD). Needs same-day provider review.`,
+      `${patientNameOr(ctx)}'s diastolic blood pressure is critically low (${ctx.diastolicBP ?? '?'} mmHg). If they have chest pain or feel faint, help them call 911.`,
     physicianMessage: (ctx) =>
-      `BP Level 1 Low — CAD DBP < 70 at ${bp(ctx)}. J-curve risk per CLARIFY; reassess antihypertensive intensity.${physSuffix(ctx)}`,
+      `CAD DBP CRITICAL — DBP < ${ctx.thresholdValue ?? 70}: ${bp(ctx)}${agePhrase(ctx)}. Low DBP may compromise coronary perfusion (J-curve). Assess for symptomatic hypotension. Consider dose reduction of antihypertensives, particularly vasodilators.${physSuffix(ctx)}`,
   },
   RULE_CAD_HIGH: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is higher than your goal. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is higher than your target. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is elevated at ${bp(ctx)} (CAD).`,
+      `${patientNameOr(ctx)}'s blood pressure is above their target (${bp(ctx)}). ${CARE_TEAM_NOTIFIED}`,
     // Cluster 8 Q2 (Manisha 5/18/26) — default alert threshold lowered to
     // SBP ≥140 (Stage 2 HTN floor). Always surface the AHA/ACC 130/80
     // treatment target + the DBP coronary-perfusion caution so the provider
@@ -314,9 +874,9 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   // alert trigger" (145/95 fires this alongside RULE_CAD_HIGH).
   RULE_CAD_DBP_HIGH: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is higher than your goal. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is higher than your target. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's lower BP number is elevated at ${bp(ctx)} (CAD).`,
+      `${patientNameOr(ctx)}'s blood pressure is above their target (${bp(ctx)}). ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
       `BP Level 1 High — CAD DBP ≥ ${ctx.thresholdValue ?? 80}: ${bp(ctx)} (session average). AHA/ACC treatment target 130/80. Consider medication adjustment. NOTE: coronary perfusion (J-curve) risk if DBP < 70 — reassess antihypertensive class rather than over-titrating. Customise the alert threshold in patient settings.${physSuffix(ctx)}`,
   },
@@ -325,109 +885,152 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
   // Cluster 7 A.5 (Manisha 5/11/26, Appendix B1.4): HCM patients are
   // preload-dependent — low BP can reduce perfusion. Patient-facing wording
   // names the symptoms to watch for so they know when to act.
+  // Doc 2 (Manisha 6/2) supersedes the Cluster 7 A.5 patient wording. HCM is
+  // preload-dependent — Manisha's patient copy adds the hydration + slow-stand
+  // guidance directly.
   RULE_HCM_LOW: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is too low for you. With your heart condition, low blood pressure can reduce blood flow to your body — watch for dizziness, lightheadedness, or feeling faint. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is lower than expected. Please drink some water and sit or lie down. Avoid standing up quickly. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is low at ${bp(ctx)} (HCM). Watch for dizziness, lightheadedness, or fainting and help them contact their care team.`,
+      `${patientNameOr(ctx)}'s blood pressure is low (${bp(ctx)}). Help them sit or lie down and drink water. ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 Low — HCM SBP < ${ctx.thresholdValue ?? 100}: ${bp(ctx)}. Preload-dependent — under-perfusion + dynamic LVOT obstruction risk.${physSuffix(ctx)}`,
+      `HCM LOW BP — SBP < ${ctx.thresholdValue ?? 100}: ${bp(ctx)}. Hypotension may worsen dynamic LVOT obstruction. Assess hydration status. Review vasodilator use. Avoid volume depletion.${physSuffix(ctx)}`,
   },
   RULE_HCM_HIGH: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is higher than the goal for you. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is higher than your target. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is elevated at ${bp(ctx)} (HCM).`,
+      `${patientNameOr(ctx)}'s blood pressure is above their target (${bp(ctx)}). ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 High — HCM SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}.${physSuffix(ctx)}`,
+      `HCM HIGH BP — SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}. Consider antihypertensive adjustment. Avoid pure vasodilators in obstructive HCM.${physSuffix(ctx)}`,
   },
   RULE_HCM_VASODILATOR: {
     patientMessage: () => '',
     caregiverMessage: () => '',
     physicianMessage: (ctx) =>
-      `Tier 3 — HCM + ${ctx.drugClass ?? 'vasodilator/nitrate/loop'} (${ctx.drugName ?? 'unknown'}): may worsen LVOT obstruction. Review per 2024 AHA/ACC HCM guideline.${physSuffix(ctx)}`,
+      `HCM VASODILATOR ALERT — Patient with HCM is on ${ctx.drugName ?? 'a vasodilator'} (${ctx.drugClass ?? 'vasodilator'} class). Vasodilators may worsen dynamic LVOT obstruction in obstructive HCM. Review indication and consider alternative.${physSuffix(ctx)}`,
+  },
+
+  // ── Aortic stenosis (Manisha 5/24 Q5C) ────────────────────────────────
+  // Interim HCM-style thresholds (low <100, high ≥160). Fixed valvular outflow
+  // obstruction → preload/afterload sensitive; low BP is the bigger concern.
+  RULE_AORTIC_STENOSIS_LOW: {
+    patientMessage: (ctx) =>
+      `Your blood pressure reading is ${bp(ctx)}, which is too low for you. With your heart valve condition, low blood pressure can reduce blood flow to your body — watch for dizziness, lightheadedness, chest pain, or feeling faint. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+    caregiverMessage: (ctx) =>
+      `The patient's BP is low at ${bp(ctx)} (aortic stenosis). Watch for dizziness, lightheadedness, chest pain, or fainting and help them contact their care team.`,
+    physicianMessage: (ctx) =>
+      `BP Level 1 Low — aortic stenosis SBP < ${ctx.thresholdValue ?? 100}: ${bp(ctx)}. Fixed outflow obstruction — afterload/preload sensitive; hypotension risks syncope + coronary under-perfusion. Interim HCM-style thresholds pending provider-set targets.${physSuffix(ctx)}`,
+  },
+  RULE_AORTIC_STENOSIS_HIGH: {
+    patientMessage: (ctx) =>
+      `Your blood pressure reading is ${bp(ctx)}, which is higher than the goal for you. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+    caregiverMessage: (ctx) =>
+      `The patient's BP is elevated at ${bp(ctx)} (aortic stenosis).`,
+    physicianMessage: (ctx) =>
+      `BP Level 1 High — aortic stenosis SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}. Interim HCM-style thresholds pending provider-set targets.${physSuffix(ctx)}`,
   },
 
   // ── DCM ───────────────────────────────────────────────────────────────
+  // Doc 2 (Manisha 6/2). DCM is managed as HFrEF clinically; keep that note.
   RULE_DCM_LOW: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is lower than the goal for you. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is lower than expected. If you feel dizzy or lightheaded, please sit or lie down. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is low at ${bp(ctx)} (DCM).`,
+      `${patientNameOr(ctx)}'s blood pressure is low (${bp(ctx)}). ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 Low — DCM SBP < ${ctx.thresholdValue ?? 85}: ${bp(ctx)}. Managed as HFrEF.${physSuffix(ctx)}`,
+      `DCM LOW BP — SBP < ${ctx.thresholdValue ?? 85}: ${bp(ctx)}. Managed as HFrEF. Assess for symptomatic hypotension. Consider GDMT dose adjustment if symptomatic.${physSuffix(ctx)}`,
   },
   RULE_DCM_HIGH: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is higher than your goal. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is higher than your target. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is elevated at ${bp(ctx)} (DCM).`,
+      `${patientNameOr(ctx)}'s blood pressure is above their target (${bp(ctx)}). ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 High — DCM SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}.${physSuffix(ctx)}`,
+      `DCM HIGH BP — SBP ≥ ${ctx.thresholdValue ?? 160}: ${bp(ctx)}. Consider antihypertensive optimization.${physSuffix(ctx)}`,
   },
 
   // ── Personalized mode ─────────────────────────────────────────────────
+  // Doc 2 (Manisha 6/2). "the target your care team set for you" (not "provider").
   RULE_PERSONALIZED_HIGH: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is above the target your provider set for you. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is higher than the target your care team set for you. They've been notified.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is above provider-set target: ${bp(ctx)}.`,
+      `${patientNameOr(ctx)}'s blood pressure (${bp(ctx)}) is above their personalized target. ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 High — personalized: SBP ≥ target + 20 = ${ctx.thresholdValue ?? '?'}. Current ${bp(ctx)}.${physSuffix(ctx)}`,
+      `PERSONALIZED HIGH — BP ${bp(ctx)} exceeds patient-specific threshold of ${ctx.thresholdValue ?? '?'}. Review and adjust as indicated.${physSuffix(ctx)}`,
   },
   RULE_PERSONALIZED_LOW: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is below the target your provider set for you. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is lower than the target your care team set for you. If you feel dizzy or lightheaded, please sit or lie down. They've been notified.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is below provider-set lower target: ${bp(ctx)}.`,
+      `${patientNameOr(ctx)}'s blood pressure (${bp(ctx)}) is below their personalized target. ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 Low — personalized: SBP < lower target ${ctx.thresholdValue ?? '?'}. Current ${bp(ctx)}.${physSuffix(ctx)}`,
+      `PERSONALIZED LOW — BP ${bp(ctx)} below patient-specific threshold of ${ctx.thresholdValue ?? '?'}. Assess for symptomatic hypotension.${physSuffix(ctx)}`,
   },
 
   // ── Standard mode ─────────────────────────────────────────────────────
   RULE_STANDARD_L1_HIGH: {
+    // F26 — the pre-personalization disclaimer is admin-only. It used to be
+    // appended to patientMessage (preDaySuffix) and leaked the
+    // "(Standard threshold — personalization begins after 7 readings.)"
+    // parenthetical into the patient alerts tab / banner / detail page. The
+    // patient gets only the clinical instruction; the disclaimer now rides on
+    // the physicianMessage (admin surface) instead.
+    // Doc 2 (Manisha 6/2) patient + caregiver wording. Physician tier is the
+    // Q5 axis-specific build (Handoff 2) — left untouched per H4 scope.
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is high. Please contact your care team today.${preDaySuffix(ctx)}${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is quite high. Your care team has been notified and will follow up with you.${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is elevated at ${bp(ctx)}.`,
+      `${patientNameOr(ctx)}'s blood pressure is significantly elevated (${bp(ctx)}). ${CARE_TEAM_NOTIFIED}`,
+    // Manisha Q5 (2026-06-02) — axis-specific severe-Stage-2 wording. The old
+    // flat "≥160/100" label self-contradicted when only one axis crossed
+    // (e.g. 119/109 read "≥160/100" though SBP 119 is well under 160). Name
+    // the axis that actually triggered. Evaluated on the session-averaged
+    // values (physicianCtx), which is the engine's evaluation truth.
     physicianMessage: (ctx) =>
-      `BP Level 1 High — severe Stage 2 (≥160/100) at ${bp(ctx)}.${physSuffix(ctx)}`,
+      `BP Level 1 High — ${stage2Band(ctx)} at ${bp(ctx)}${agePhrase(ctx)}.${preDaySuffix(ctx)}${physSuffix(ctx)}`,
   },
   RULE_STANDARD_L1_LOW: {
+    // F26 — disclaimer is admin-only, not patient. Wording per Doc 2 (Manisha 6/2).
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is low. Please contact your care team today.${preDaySuffix(ctx)}${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is lower than expected. If you feel dizzy or lightheaded, please sit or lie down. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is low at ${bp(ctx)}.`,
+      `${patientNameOr(ctx)}'s blood pressure is low (${bp(ctx)}). If they feel dizzy, help them sit or lie down. ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 Low — SBP <90 at ${bp(ctx)}.${physSuffix(ctx)}`,
+      `BP LEVEL 1 LOW — SBP < ${ctx.thresholdValue ?? 90}: ${bp(ctx)}. Assess for symptomatic hypotension. Review antihypertensive regimen.${preDaySuffix(ctx)}${physSuffix(ctx)}`,
   },
 
   // ── Age 65+ override ─────────────────────────────────────────────────
+  // Doc 2 (Manisha 6/2). Age is referenced in Manisha's clinician wording but
+  // not on AlertContext — omitted.
   RULE_AGE_65_LOW: {
     patientMessage: (ctx) =>
-      `Your blood pressure reading is ${bp(ctx)}, which is low. Please contact your care team today and watch for dizziness or fall risk.${suboptimalSuffix(ctx)}`,
+      `Your blood pressure is lower than expected. Please be careful when standing up — move slowly. If you feel dizzy or unsteady, sit or lie down right away. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's BP is low at ${bp(ctx)}; assess for orthostatic symptoms and fall risk.`,
+      `${patientNameOr(ctx)}'s blood pressure is low (${bp(ctx)}). Please watch for dizziness or unsteadiness, especially when standing. ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `BP Level 1 Low — age 65+ override: SBP <100 at ${bp(ctx)}.${physSuffix(ctx)}`,
+      `AGE 65+ LOW BP — SBP < ${ctx.thresholdValue ?? 100}: ${bp(ctx)}. Assess for orthostatic hypotension (sustained SBP drop ≥20 or DBP drop ≥10 within 3 min of standing). Review medications for OH-aggravating agents. Consider fall risk assessment.${physSuffix(ctx)}`,
   },
 
   // ── HR branches ───────────────────────────────────────────────────────
+  // Doc 2 (Manisha 6/2). Caregiver uses bare "(N bpm)"; physician keeps the
+  // "HR N bpm" helper. Threshold uses the engine value.
   RULE_AFIB_HR_HIGH: {
     patientMessage: (ctx) =>
-      `Your heart rate is ${hr(ctx)}, which is higher than your goal. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your heart rate is faster than expected. If you feel your heart racing, feel short of breath, or feel dizzy, please sit down and rest. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's heart rate is elevated at ${hr(ctx)} (AFib).`,
+      `${patientNameOr(ctx)}'s heart rate is elevated (${ctx.pulse ?? '?'} bpm). If they feel their heart racing or are short of breath, help them sit down. ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `HR Level 1 High — AFib HR >110: ${hr(ctx)}. Rate-uncontrolled AFib.${physSuffix(ctx)}`,
+      `AFib HR HIGH — ${hr(ctx)} (threshold >${ctx.thresholdValue ?? 110}). Assess for triggers (missed medication, dehydration, infection, caffeine). Consider rate control adjustment. If HF present, stricter target (80 bpm) may apply.${physSuffix(ctx)}`,
   },
   RULE_AFIB_HR_LOW: {
     patientMessage: (ctx) =>
-      `Your heart rate is ${hr(ctx)}, which is lower than your goal. Please contact your care team today.${suboptimalSuffix(ctx)}`,
+      `Your heart rate is slower than expected. If you feel dizzy, lightheaded, or faint, please sit or lie down. ${CARE_TEAM_NOTIFIED}${suboptimalSuffix(ctx)}`,
     caregiverMessage: (ctx) =>
-      `The patient's heart rate is low at ${hr(ctx)} (AFib).`,
+      `${patientNameOr(ctx)}'s heart rate is low (${ctx.pulse ?? '?'} bpm). If they feel dizzy or faint, help them sit or lie down. ${CARE_TEAM_NOTIFIED}`,
     physicianMessage: (ctx) =>
-      `HR Level 1 Low — AFib HR <50: ${hr(ctx)}.${physSuffix(ctx)}`,
+      `AFib HR LOW — ${hr(ctx)} (threshold <${ctx.thresholdValue ?? 50}). Assess for symptomatic bradycardia and rate-controlling agent burden.${physSuffix(ctx)}`,
   },
   RULE_TACHY_HR: {
     patientMessage: (ctx) =>
@@ -461,6 +1064,27 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     physicianMessage: (ctx) =>
       `Tier 3 — Wide pulse pressure: ${ctx.pulsePressure ?? '?'} mmHg (>60) at ${bp(ctx)}. Consider arterial stiffness / isolated systolic HTN workup.${physSuffix(ctx)}`,
   },
+  // Manisha 5/24 Q2 — narrow pulse pressure on the session average (<25 mmHg).
+  // Physician-only; condition-specific wording keyed on conditionLabel set by
+  // the rule ('HFrEF' [also DCM], 'HFpEF', 'HCM'/'aortic stenosis', else null).
+  RULE_PULSE_PRESSURE_NARROW: {
+    patientMessage: () => '',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) => {
+      const pp = `${bp(ctx)} (PP = ${ctx.pulsePressure ?? '?'} mmHg)`
+      const label = ctx.conditionLabel
+      if (label === 'HFrEF') {
+        return `Tier 3 — Narrow pulse pressure: ${pp}. In HFrEF, narrow PP may indicate reduced stroke volume. Consider clinical correlation — echocardiography if new finding or worsening trend.${physSuffix(ctx)}`
+      }
+      if (label === 'HFpEF') {
+        return `Tier 3 — Narrow pulse pressure: ${pp}. Note: In HFpEF, narrow PP is less prognostically significant than in HFrEF. Clinical correlation recommended.${physSuffix(ctx)}`
+      }
+      if (label === 'HCM' || label === 'aortic stenosis') {
+        return `Tier 3 — Narrow pulse pressure: ${pp}. In the context of ${label}, narrow PP may reflect fixed outflow obstruction. Clinical correlation recommended.${physSuffix(ctx)}`
+      }
+      return `Tier 3 — Narrow pulse pressure: ${pp}. If confirmed on repeat measurement, consider evaluation for reduced cardiac output.${physSuffix(ctx)}`
+    },
+  },
   RULE_LOOP_DIURETIC_HYPOTENSION: {
     patientMessage: () => '',
     caregiverMessage: () => '',
@@ -479,15 +1103,29 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
           'Please try to take your next dose on time, and let your care team know if anything is making it hard to stay on schedule.'
         )
       }
+      // #86 (2026-06-03) — RULE_MEDICATION_MISSED fires on a rolling 3-day
+      // pattern (≥2 of last 3 days). Anchor the wording to "the last few days",
+      // never to "today", so a patient who just logged a clean check-in isn't
+      // told they missed today. i18n: backend-rendered patient string,
+      // English-only for the US pilot per CROSS_HANDOFF_ADDENDUM (backend
+      // alert-template i18n is a Phase-2 retrofit); flagged in
+      // I18N_TRANSLATION_FLAGS.
       if (list) {
+        // Today's session also reported missed meds — acknowledge "today".
         return (
-          `It looks like you may have missed ${list} a couple of times recently. These medicines help protect your heart and keep your blood pressure steady. ` +
-          'If anything is making it hard to take them, your care team can help.'
+          `It looks like some medication doses have been missed in the last few days, including ${list} today. ` +
+          'Taking your medicine every day helps keep your blood pressure steady. ' +
+          'Your care team is here to help if anything makes it hard to stay on schedule.'
         )
       }
+      // No per-medication detail for this session — we can't tell whether
+      // today was clean or missed-without-specifying. Use neutral, history-
+      // anchored wording (handoff Option B) that's accurate either way and
+      // still never claims "today".
       return (
-        'It looks like you may have missed your medicine a couple of times recently. Taking your medicine regularly helps keep your blood pressure steady. ' +
-        'If something is making it hard to stay on schedule, your care team can help.'
+        'In the last few days, some medication doses may have been missed. ' +
+        'Taking your medicine every day helps keep your blood pressure steady. ' +
+        'Your care team is here to help if anything makes it hard to stay on schedule.'
       )
     },
     caregiverMessage: (ctx) => {
@@ -656,7 +1294,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       "You told us you've taken a pain reliever like ibuprofen, Advil, Aleve, or naproxen. These can raise your blood pressure and make your blood-pressure medicine work less well, especially if you take them often. If your pain needs a few days of relief, acetaminophen (Tylenol) is usually a safer choice — please check with your care team.",
     caregiverMessage: () => '',
     physicianMessage: (ctx) =>
-      `Tier 3 — NSAID use reported alongside antihypertensive therapy. Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend.${physSuffix(ctx)}`,
+      `Tier 3 — NSAID use reported alongside antihypertensive therapy.${medicationListPhrase(ctx)} Blunts ACE/ARB/diuretic efficacy + drives sodium retention. Counsel patient on acetaminophen alternative; reassess BP trend.${physSuffix(ctx)}`,
   },
 
   RULE_ACE_COUGH: {
@@ -687,6 +1325,7 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       const name = ctx.patientName?.trim() || 'The patient'
       return `${name} reported swelling of their face, lips, or tongue. This can be a dangerous reaction to one of their blood pressure medicines. If they have trouble breathing or throat tightness, call 911 now. If not, take them to the nearest emergency room now. Do not let them take another dose of that medicine.`
     },
+    // D4 #2 — Manisha 2026-06-09: med-list rejected here (airway emergency). Tier 2 post-resolution provider note deferred to backlog.
     physicianMessage: (ctx) => {
       const drug = ctx.drugName ?? 'unknown'
       const airway = ctx.angioedemaThroat
@@ -727,20 +1366,54 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
       const cls = ctx.drugClass ?? 'rate-control'
       const sessions = ctx.bradySustainedSessions ?? 0
       if (sessions >= 3) {
-        return `Tier 2 — Sustained asymptomatic bradycardia: mean resting HR ≤45 bpm on ${sessions} consecutive sessions (current ${hr} bpm). Patient is on ${med} (${cls}). ECG and medication-dose review recommended.${physSuffix(ctx)}`
+        return `Tier 2 — Sustained asymptomatic bradycardia: mean resting HR ≤45 bpm on ${sessions} consecutive sessions (current ${hr} bpm)${agePhrase(ctx)}. Patient is on ${med} (${cls}). ECG and medication-dose review recommended.${physSuffix(ctx)}`
       }
-      return `Tier 3 — Surveillance: resting HR ${hr} bpm (asymptomatic). Patient is on ${med} (${cls}). Consider: is this the therapeutic target? Trend review recommended. If HR persists ≤45 on multiple sessions, consider ECG and medication-dose review.${physSuffix(ctx)}`
+      return `Tier 3 — Surveillance: resting HR ${hr} bpm${agePhrase(ctx)} (asymptomatic). Patient is on ${med} (${cls}). Consider: is this the therapeutic target? Trend review recommended. If HR persists ≤45 on multiple sessions, consider ECG and medication-dose review.${physSuffix(ctx)}`
     },
   },
 
   // ── Cluster 8 Q3 — first-month educational adherence nudge ─────────────
-  // Patient-only, Tier 3, one-time. Verbatim from the sign-off (doc p.7).
-  // No provider/caregiver message — educational, not clinical.
+  // Patient-only, Tier 3, one-time. Hybrid of sign-off doc p.7 + educational
+  // sentence (approved 2026-06-02 by Dr. Singal, Q1). The "that's okay — just"
+  // softening clause is clinically load-bearing (AHA Medication Adherence
+  // statement — non-judgmental tone); the third sentence is the evidence-based
+  // educational reinforcement. No provider/caregiver message — educational.
+  // i18n: patient-facing string rendered backend-side; English-only for the US
+  // pilot per CROSS_HANDOFF_ADDENDUM_2026_06_03 (backend alert-template i18n is
+  // a Phase-2 retrofit). Translation flag logged in I18N_TRANSLATION_FLAGS.
   RULE_FIRST_MONTH_ADHERENCE_NUDGE: {
     patientMessage: () =>
-      'Starting a new medicine can take some getting used to. If you missed a dose, try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule.',
+      "Starting a new medicine can take some getting used to. If you missed a dose, that's okay — just try to take your next one on time. Taking your medicine every day helps keep your blood pressure steady. Your care team is here to help if anything makes it hard to stay on schedule.",
     caregiverMessage: () => '',
     physicianMessage: () => '',
+  },
+
+  // ── Option D — retake-to-confirm outcomes (Manisha 2026-06-12 Q2) ───────
+  // Both are PROVIDER-ONLY (no patient/caregiver message). The physician
+  // wording is LOCKED to Manisha's 2026-06-12 sign-off (Edit-Window + Session
+  // Policy, Q2 + Implementation Note 5) — do NOT soften without a fresh
+  // sign-off. No physSuffix() is appended: the strings are verbatim-locked and
+  // self-contained (the single-reading caveat would be redundant — these rules
+  // ARE the single-/unconfirmed-reading outcome).
+
+  // Patient declined the confirmatory measurement / closed the app / the 5-min
+  // window expired. Tier 1 provider-only (Implementation Note 5: unconfirmed,
+  // possibly artifactual → Tier 1, NOT Tier 2). [BP] = the unconfirmed reading.
+  RULE_UNCONFIRMED_EMERGENCY: {
+    patientMessage: () => '',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Single unconfirmed emergency-range reading: ${bp(ctx)}. Patient did not complete confirmatory measurement. Recommend phone outreach to verify current status.`,
+  },
+
+  // Second reading came back below the emergency threshold — no emergency
+  // alert fired. Tier 3 informational, no ladder. [BP1] = initial emergency
+  // reading; [BP2] = confirmatory below-threshold reading.
+  RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL: {
+    patientMessage: () => '',
+    caregiverMessage: () => '',
+    physicianMessage: (ctx) =>
+      `Patient's initial reading was ${initialBp(ctx)} (emergency range); confirmatory reading was ${bp(ctx)} (below emergency threshold). No emergency alert fired. Review at next encounter.`,
   },
 }
 
@@ -759,13 +1432,37 @@ function angioedemaPatientLead(ctx: AlertContext): string {
 }
 
 /**
- * Cluster 7 A.7 — system message dispatched directly to the patient's inbox
- * when a provider marks a medication on "Hold" from the admin app. Not a
- * RuleId — fires from the medication verification handler, not the alert
- * engine. Quoted from MANISHA_MASTER_GUIDE_V3 Appendix B1.7.
+ * Cluster 7 A.7 + Manisha 5/24 Med §3 — system message dispatched to the
+ * patient's inbox when a provider places a medication on HOLD. TWO PATHS
+ * (patient-safety critical): a provider-directed hold is a clinical "pause it"
+ * instruction; an administrative hold (awaiting records / unclear name or dose /
+ * other) must NOT tell the patient to stop a medication they're correctly
+ * taking — abrupt β-blocker discontinuation for a paperwork delay can cause
+ * rebound harm. The administrative message does not name the medication.
  */
-export function systemMsgMedicationHold(drugName: string): string {
-  return `Your care team has placed ${drugName} on hold while they review it. This means you should NOT take ${drugName} until they tell you it is safe to restart. If you have questions, call your care team. If you feel unwell after recently taking it — chest pain, severe weakness, fainting — call 911.`
+export type MedicationHoldMessageReason =
+  | 'AWAITING_RECORDS'
+  | 'UNCLEAR_NAME'
+  | 'UNCLEAR_DOSE'
+  | 'PROVIDER_DIRECTED_HOLD'
+  | 'OTHER'
+
+export function systemMsgMedicationHold(
+  drugName: string,
+  reason: MedicationHoldMessageReason,
+): string {
+  if (reason === 'PROVIDER_DIRECTED_HOLD') {
+    return `Your care team has asked you to pause ${drugName} until they can review it with you. Do not take it until your care team tells you it is okay.`
+  }
+  // Administrative holds — keep taking everything as usual; do not name the med.
+  return `Your care team is reviewing your medicine list to make sure everything is up to date. Keep taking your medicines as usual unless your care team tells you otherwise.`
+}
+
+/** True for the clinical "stop taking it" hold path. */
+export function isProviderDirectedHold(
+  reason: MedicationHoldMessageReason,
+): boolean {
+  return reason === 'PROVIDER_DIRECTED_HOLD'
 }
 
 /**
@@ -785,4 +1482,19 @@ export function systemMsgProfileFieldRejected(fieldLabel: string): string {
  */
 export function systemMsgThresholdUpdated(): string {
   return `Your care team updated your blood-pressure monitoring targets. Your future check-ins will use the new targets. If you have questions, contact your care team.`
+}
+
+/**
+ * Handoff 4 A6 (Manisha Doc 1) — transparent disclosure when a provider
+ * CORRECTS a self-reported profile field (changes its value), as opposed to
+ * asking the patient to re-check it (systemMsgProfileFieldRejected). Manisha
+ * verbatim. The emission path (a Notification row on admin-correct) is not yet
+ * wired — backlog: emit this from the verification/correct flow so the patient
+ * is always told what changed.
+ */
+export function systemMsgProfileFieldCorrected(
+  fieldLabel: string,
+  newValue: string,
+): string {
+  return `Your care team made a change to your profile. ${fieldLabel} was updated to ${newValue}. If you have questions, please contact your care team.`
 }

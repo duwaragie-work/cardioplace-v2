@@ -77,6 +77,8 @@ import {
   STEP_ORDER,
 } from '@/lib/intake/draft';
 import { EMPTY_INTAKE_STATE, type IntakeFormState, type IntakeStepKey, type SelectedMedication } from '@/lib/intake/types';
+import { categoriesForSelectedMeds } from '@/lib/intake/categories';
+import CaregiversCard from '@/components/cardio/CaregiversCard';
 
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
@@ -160,7 +162,8 @@ function computeFlow(state: IntakeFormState): IntakeStepKey[] {
   // an empty list the patient just sees "you can skip ahead" copy and a
   // disabled Continue — drop the step entirely instead.
   if (state.selectedMedications.length > 0) flow.push('A9');
-  flow.push('A10', 'A11');
+  // Gap 5 — optional caregiver capture sits just before review.
+  flow.push('ACG', 'A10', 'A11');
   return flow;
 }
 
@@ -289,8 +292,8 @@ function buildProfilePayload(s: IntakeFormState): IntakeProfilePayload {
       s.gender === 'FEMALE' && s.isPregnant === true
         ? (s.pregnancyDueDate || null)
         : null,
-    historyPreeclampsia:
-      s.gender === 'FEMALE' ? (s.historyPreeclampsia ?? false) : false,
+    historyHDP:
+      s.gender === 'FEMALE' ? (s.historyHDP ?? false) : false,
     hasHeartFailure: s.hasHeartFailure ?? false,
     heartFailureType: s.hasHeartFailure
       ? (s.heartFailureType ?? 'UNKNOWN')
@@ -299,6 +302,7 @@ function buildProfilePayload(s: IntakeFormState): IntakeProfilePayload {
     hasCAD: s.hasCAD ?? false,
     hasHCM: s.hasHCM ?? false,
     hasDCM: s.hasDCM ?? false,
+    hasAorticStenosis: s.hasAorticStenosis ?? false,
     diagnosedHypertension: s.diagnosedHypertension ?? false,
   };
 }
@@ -345,20 +349,20 @@ function A0bIntro({ onBegin, onSaveLater }: { onBegin: () => void; onSaveLater: 
       </motion.div>
 
       <div className="flex items-center gap-2 mb-2">
-        <h1 className="text-[26px] sm:text-[28px] font-bold tracking-tight" style={{ color: 'var(--brand-text-primary)' }}>
+        <h1 className="text-[1.625rem] sm:text-[1.75rem] font-bold tracking-tight" style={{ color: 'var(--brand-text-primary)' }}>
           {t('intake.a0b.title')}
         </h1>
         <AudioButton text={t('intake.a0b.audio')} />
       </div>
 
-      <p className="text-[15px] max-w-md leading-relaxed mb-8" style={{ color: 'var(--brand-text-secondary)' }}>
+      <p className="text-[0.9375rem] max-w-md leading-relaxed mb-8" style={{ color: 'var(--brand-text-secondary)' }}>
         {t('intake.a0b.desc')}
       </p>
 
       <motion.button
         type="button"
         onClick={onBegin}
-        className="w-full max-w-sm h-12 rounded-full font-bold text-white text-[15px] mb-3 cursor-pointer"
+        className="w-full max-w-sm h-12 rounded-full font-bold text-white text-[0.9375rem] mb-3 cursor-pointer"
         style={{
           backgroundColor: 'var(--brand-primary-purple)',
           boxShadow: 'var(--brand-shadow-button)',
@@ -371,7 +375,7 @@ function A0bIntro({ onBegin, onSaveLater }: { onBegin: () => void; onSaveLater: 
       <button
         type="button"
         onClick={onSaveLater}
-        className="text-[13px] font-semibold cursor-pointer"
+        className="text-[0.8125rem] font-semibold cursor-pointer"
         style={{ color: 'var(--brand-text-muted)' }}
       >
         {t('intake.a0b.saveForLater')}
@@ -433,7 +437,7 @@ function A1Demographics({ state, setState }: StepProps) {
           placeholder={t('intake.datePlaceholder')}
           onChange={(v) => setState((p) => ({ ...p, dateOfBirth: v || undefined }))}
         />
-        <p className="text-[12px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
+        <p className="text-[0.75rem] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
           {t('intake.a1.dobHint')}
         </p>
       </div>
@@ -478,7 +482,7 @@ function A1Demographics({ state, setState }: StepProps) {
               {unit === 'ftin' ? (
                 <div className="flex items-end gap-3">
                   <div className="flex-1">
-                    <label htmlFor="intake-a1-height-ft" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                    <label htmlFor="intake-a1-height-ft" className="block text-[0.6875rem] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
                       {t('intake.a1.heightFeetLabel')}
                     </label>
                     <div className="flex items-center gap-2">
@@ -497,7 +501,7 @@ function A1Demographics({ state, setState }: StepProps) {
                           updateHeightFromFtIn(feet, storedInches);
                         }}
                         placeholder="5"
-                        className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                        className="flex-1 h-14 px-4 rounded-xl text-[1.125rem] outline-none transition box-border text-center"
                         style={{
                           border: '2px solid var(--brand-border)',
                           color: 'var(--brand-text-primary)',
@@ -517,7 +521,7 @@ function A1Demographics({ state, setState }: StepProps) {
                     </div>
                   </div>
                   <div className="flex-1">
-                    <label htmlFor="intake-a1-height-in" className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+                    <label htmlFor="intake-a1-height-in" className="block text-[0.6875rem] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand-text-muted)' }}>
                       {t('intake.a1.heightInchesLabel')}
                     </label>
                     <div className="flex items-center gap-2">
@@ -538,7 +542,7 @@ function A1Demographics({ state, setState }: StepProps) {
                           updateHeightFromFtIn(storedFeet, inches);
                         }}
                         placeholder="9"
-                        className="flex-1 h-14 px-4 rounded-xl text-[18px] outline-none transition box-border text-center"
+                        className="flex-1 h-14 px-4 rounded-xl text-[1.125rem] outline-none transition box-border text-center"
                         style={{
                           border: '2px solid var(--brand-border)',
                           color: 'var(--brand-text-primary)',
@@ -574,7 +578,7 @@ function A1Demographics({ state, setState }: StepProps) {
                         updateHeightFromCm(Number.isFinite(v) ? v : 0);
                       }}
                       placeholder="165"
-                      className="w-full h-14 pl-4 pr-14 rounded-xl text-[18px] outline-none transition box-border"
+                      className="w-full h-14 pl-4 pr-14 rounded-xl text-[1.125rem] outline-none transition box-border"
                       style={{
                         border: '2px solid var(--brand-border)',
                         color: 'var(--brand-text-primary)',
@@ -584,7 +588,7 @@ function A1Demographics({ state, setState }: StepProps) {
                       onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
                     />
                     <span
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[16px]"
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[1rem]"
                       style={{ color: 'var(--brand-text-muted)' }}
                     >
                       cm
@@ -601,13 +605,13 @@ function A1Demographics({ state, setState }: StepProps) {
                 </div>
               )}
               {state.heightCm ? (
-                <p className="text-[13px] mt-3 font-medium" style={{ color: 'var(--brand-primary-purple)' }}>
+                <p className="text-[0.8125rem] mt-3 font-medium" style={{ color: 'var(--brand-primary-purple)' }}>
                   {unit === 'ftin'
                     ? `≈ ${state.heightCm} cm`
                     : `≈ ${cmToFtIn(state.heightCm).feet} ft ${cmToFtIn(state.heightCm).inches} in`}
                 </p>
               ) : null}
-              <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.75rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('intake.a1.heightHint')}
               </p>
             </>
@@ -663,7 +667,7 @@ function A2Pregnancy({ state, setState }: StepProps) {
                 ...p,
                 isPregnant: false,
                 // Due date is gated behind the Yes panel so it's safe to
-                // wipe here. historyPreeclampsia is its own independent
+                // wipe here. historyHDP is its own independent
                 // question now and is left untouched.
                 pregnancyDueDate: undefined,
               }))
@@ -685,7 +689,7 @@ function A2Pregnancy({ state, setState }: StepProps) {
               ariaLabel={t('intake.a2.dueDateLabel')}
               value={state.pregnancyDueDate ?? ''}
               placeholder={t('intake.datePlaceholder')}
-              textSizeClass="text-[15px]"
+              textSizeClass="text-[0.9375rem]"
               onChange={(v) => setState((p) => ({ ...p, pregnancyDueDate: v || undefined }))}
             />
           </motion.div>
@@ -702,17 +706,22 @@ function A2Pregnancy({ state, setState }: StepProps) {
             icon={<Shield className="w-6 h-6" />}
             title={t('intake.a2.yesTitle')}
             description={t('intake.a2.preeclampsiaYesDesc')}
-            selected={state.historyPreeclampsia === true}
-            onClick={() => setState((p) => ({ ...p, historyPreeclampsia: true }))}
+            selected={state.historyHDP === true}
+            onClick={() => setState((p) => ({ ...p, historyHDP: true }))}
             audioText={t('intake.a2.preeclampsiaYesAudio')}
+            // #16 — testId the qa intake helper already targets. Was missing,
+            // so the HDP step's click silently no-op'd (helper .catch()).
+            // Stable id kept as `preeclampsia` to match the i18n key naming.
+            testId="intake-preeclampsia-yes"
           />
           <ChoiceCard
             icon={<Heart className="w-6 h-6" />}
             title={t('intake.a2.noTitle')}
             description={t('intake.a2.preeclampsiaNoDesc')}
-            selected={state.historyPreeclampsia === false}
-            onClick={() => setState((p) => ({ ...p, historyPreeclampsia: false }))}
+            selected={state.historyHDP === false}
+            onClick={() => setState((p) => ({ ...p, historyHDP: false }))}
             audioText={t('intake.a2.preeclampsiaNoAudio')}
+            testId="intake-preeclampsia-no"
           />
         </div>
       </div>
@@ -787,6 +796,15 @@ function A3Conditions({ state, setState }: StepProps) {
           audioText={t('intake.a3.dcmAudio')}
         />
         <ChoiceCard
+          icon={<Stethoscope className="w-6 h-6" />}
+          title={t('intake.a3.aorticStenosisTitle')}
+          description={t('intake.a3.aorticStenosisDesc')}
+          selected={has('hasAorticStenosis')}
+          onClick={() => set('hasAorticStenosis', !state.hasAorticStenosis)}
+          audioText={t('intake.a3.aorticStenosisAudio')}
+          testId="intake-condition-AORTIC_STENOSIS"
+        />
+        <ChoiceCard
           icon={<X className="w-6 h-6" />}
           title={t('intake.a3.noneTitle')}
           description={t('intake.a3.noneDesc')}
@@ -799,6 +817,7 @@ function A3Conditions({ state, setState }: StepProps) {
             hasCAD: false,
             hasHCM: false,
             hasDCM: false,
+            hasAorticStenosis: false,
             heartFailureType: undefined,
             // Explicit acknowledgement — distinguishes "user said no"
             // from "user hasn't touched the step yet".
@@ -878,7 +897,7 @@ function MedicationGroup({
   const alsoKnown = t('intake.a5.audioAlsoKnown');
   return (
     <div>
-      <h3 className="text-[13px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--brand-text-muted)' }}>
+      <h3 className="text-[0.8125rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--brand-text-muted)' }}>
         {title}
       </h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1035,25 +1054,53 @@ function useRejectedDrugKeys(): Set<string> {
 // `requestAdd` runs `doAdd` immediately for a drug that wasn't previously
 // rejected, or defers it behind the modal when it was (option c: warn → allow).
 // Render the returned `modal` somewhere in the consuming step's JSX.
-function useReAddConfirm(): {
-  requestAdd: (canonicalKey: string, displayName: string, doAdd: () => void) => void;
+function useReAddConfirm(aceContraindicated = false): {
+  requestAdd: (
+    canonicalKey: string,
+    displayName: string,
+    doAdd: () => void,
+    drugClass?: string,
+  ) => void;
   modal: React.ReactNode;
 } {
   const rejectedKeys = useRejectedDrugKeys();
-  const [pending, setPending] = useState<{ name: string; onConfirm: () => void } | null>(null);
+  const [pending, setPending] = useState<{
+    name: string;
+    onConfirm: () => void;
+    variant: 'rejected' | 'contraindicated';
+    drugClass?: string;
+  } | null>(null);
 
-  const requestAdd = (canonicalKey: string, displayName: string, doAdd: () => void) => {
+  const requestAdd = (
+    canonicalKey: string,
+    displayName: string,
+    doAdd: () => void,
+    drugClass?: string,
+  ) => {
+    // F13 — ACE/ARB on a contraindicated patient: gate behind the
+    // contraindication warning (takes priority over the rejected re-add path).
+    // The backend independently holds the med for provider review + notifies
+    // the care team, so this modal is the patient-facing transparency layer.
+    if (
+      aceContraindicated &&
+      (drugClass === 'ACE_INHIBITOR' || drugClass === 'ARB')
+    ) {
+      setPending({ name: displayName, onConfirm: doAdd, variant: 'contraindicated', drugClass });
+      return;
+    }
     if (!rejectedKeys.has(canonicalKey)) {
       doAdd();
       return;
     }
-    setPending({ name: displayName, onConfirm: doAdd });
+    setPending({ name: displayName, onConfirm: doAdd, variant: 'rejected' });
   };
 
   const modal = (
     <ReAddConfirmModal
       open={pending != null}
       drugName={pending?.name ?? ''}
+      variant={pending?.variant ?? 'rejected'}
+      drugClass={pending?.drugClass}
       onConfirm={() => {
         const p = pending;
         setPending(null);
@@ -1067,7 +1114,7 @@ function useReAddConfirm(): {
 }
 
 function A5CoreMeds({ state, setState }: StepProps) {
-  const { requestAdd, modal: reAddModal } = useReAddConfirm();
+  const { requestAdd, modal: reAddModal } = useReAddConfirm(state.aceContraindicated);
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.filter((m) => !m.isCombination).map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
@@ -1104,7 +1151,9 @@ function A5CoreMeds({ state, setState }: StepProps) {
       return;
     }
     // IVR-19 — re-adding a med the care team rejected: confirm via modal first.
-    requestAdd(med.id, med.brandName, () => addMed(med));
+    // F13 — pass drugClass so an ACE/ARB re-add on a contraindicated patient
+    // is gated behind the contraindication warning.
+    requestAdd(med.id, med.brandName, () => addMed(med), med.drugClass);
   };
 
   // Phase/28 — OTHER_UNVERIFIED meds list at the bottom of A5. The hook
@@ -1238,7 +1287,7 @@ function A5CoreMeds({ state, setState }: StepProps) {
 
 function A6Combos({ state, setState }: StepProps) {
   const { t } = useLanguage();
-  const { requestAdd, modal: reAddModal } = useReAddConfirm();
+  const { requestAdd, modal: reAddModal } = useReAddConfirm(state.aceContraindicated);
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.filter((m) => m.isCombination).map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
@@ -1274,6 +1323,9 @@ function A6Combos({ state, setState }: StepProps) {
       return;
     }
     // IVR-19 — re-adding a combo the care team rejected: confirm via modal first.
+    // F13 — combo entries don't expose a single drugClass, so the modal-level
+    // ACE/ARB gate doesn't apply here; the backend still holds any ACE/ARB
+    // component for provider review on a contraindicated patient.
     requestAdd(combo.id, combo.brandName, () => addCombo(combo));
   };
   const contains = t('intake.a6.audioContains');
@@ -1312,20 +1364,32 @@ function A8Categories({ state, setState }: StepProps) {
   // a Furosemide tick when they go check the blood-thinner list. Selections
   // already persist cross-category in state.selectedMedications; this just
   // matches the UI affordance to that reality.
-  const [activeCategories, setActiveCategories] = useState<Set<string>>(() => {
-    // Auto-expand any category that already has a selected med — e.g. a
+  const [activeCategories, setActiveCategories] = useState<Set<string>>(() =>
+    // Auto-expand any category that already has a selected med on mount — e.g. a
     // prescription scan matched a water pill / blood thinner that lives inside
     // one of these dropdowns. Without this the med is selected but hidden, so
-    // the patient can't see it was picked up. (selectedIds already shows it as
-    // checked; this just reveals the right dropdown on entry.)
-    const set = new Set<string>();
-    for (const m of state.selectedMedications) {
-      if (!m.catalogId) continue;
-      const cat = CATEGORY_MEDS.find((c) => c.id === m.catalogId);
-      if (cat?.category) set.add(cat.category);
-    }
-    return set;
-  });
+    // the patient can't see it was picked up.
+    categoriesForSelectedMeds(state.selectedMedications),
+  );
+  // The lazy initializer above runs once on mount. A prescription scan
+  // (addOcrMedications) or any other LATE add updates selectedMedications
+  // afterwards, so a newly-matched category med would be ticked yet its card
+  // left collapsed. React to selection changes and union the matched
+  // categories in — add-only, so we never auto-collapse a card the patient
+  // manually closed.
+  useEffect(() => {
+    setActiveCategories((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const cat of categoriesForSelectedMeds(state.selectedMedications)) {
+        if (!next.has(cat)) {
+          next.add(cat);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [state.selectedMedications]);
   const [otherText, setOtherText] = useState(state.otherDraft?.text ?? '');
   // Phase/25 — inline dedup error for the voice/photo "anything else" path.
   // Cleared on next keystroke or after a 3.5s timeout so the UI doesn't
@@ -1335,7 +1399,7 @@ function A8Categories({ state, setState }: StepProps) {
   // dictation instead. Backend still accepts PATIENT_PHOTO source for
   // back-compat; we just don't surface that path in the UI any more.
 
-  const { requestAdd, modal: reAddModal } = useReAddConfirm();
+  const { requestAdd, modal: reAddModal } = useReAddConfirm(state.aceContraindicated);
   const selectedIds = useMemo(
     () => new Set(state.selectedMedications.map((m) => m.catalogId).filter(Boolean) as string[]),
     [state.selectedMedications],
@@ -1369,7 +1433,9 @@ function A8Categories({ state, setState }: StepProps) {
       return;
     }
     // IVR-19 — re-adding a med the care team rejected: confirm via modal first.
-    requestAdd(med.id, med.brandName, () => addCategoryMed(med));
+    // F13 — category meds carry drugClass; ARBs (e.g. Cozaar) live here and are
+    // gated when the patient is contraindicated.
+    requestAdd(med.id, med.brandName, () => addCategoryMed(med), med.drugClass);
   };
 
   const addOther = (source: 'PATIENT_VOICE' | 'PATIENT_PHOTO', rawText: string) => {
@@ -1465,13 +1531,14 @@ function A8Categories({ state, setState }: StepProps) {
           .map((cat) => (
             <motion.div
               key={cat.key}
+              data-testid={`intake-cat-expanded-${cat.key}`}
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               className="pt-2"
             >
               <p
-                className="text-[11px] font-bold uppercase tracking-wider mb-2"
+                className="text-[0.6875rem] font-bold uppercase tracking-wider mb-2"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 {cat.label}
@@ -1502,7 +1569,7 @@ function A8Categories({ state, setState }: StepProps) {
             className="space-y-4 pt-2"
           >
             <div className="rounded-2xl p-4" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-              <p className="text-[12px] mb-3" style={{ color: 'var(--brand-text-secondary)' }}>
+              <p className="text-[0.75rem] mb-3" style={{ color: 'var(--brand-text-secondary)' }}>
                 {t('intake.a8.otherBlurb')}
               </p>
 
@@ -1514,7 +1581,7 @@ function A8Categories({ state, setState }: StepProps) {
                   <Mic className="w-5 h-5" />
                 </div>
                 <div className="flex-1">
-                  <label htmlFor="intake-a8-other" className="block text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
+                  <label htmlFor="intake-a8-other" className="block text-[0.75rem] font-semibold mb-1" style={{ color: 'var(--brand-text-primary)' }}>
                     {t('intake.a8.otherSpeakLabel')}
                   </label>
                   <div className="flex items-center gap-2">
@@ -1530,7 +1597,7 @@ function A8Categories({ state, setState }: StepProps) {
                         if (dupError) setDupError(null);
                       }}
                       placeholder={t('intake.a8.otherSpeakPlaceholder')}
-                      className="flex-1 h-11 px-4 rounded-lg text-[14px] outline-none transition box-border bg-white"
+                      className="flex-1 h-11 px-4 rounded-lg text-[0.875rem] outline-none transition box-border bg-white"
                       style={{
                         border: dupError
                           ? '2px solid var(--brand-alert-red)'
@@ -1549,7 +1616,7 @@ function A8Categories({ state, setState }: StepProps) {
                   {dupError && (
                     <p
                       role="alert"
-                      className="mt-1.5 text-[12px] leading-snug"
+                      className="mt-1.5 text-[0.75rem] leading-snug"
                       style={{ color: 'var(--brand-alert-red)' }}
                     >
                       {dupError}
@@ -1560,7 +1627,7 @@ function A8Categories({ state, setState }: StepProps) {
                     data-testid="intake-medication-add-button"
                     onClick={() => addOther('PATIENT_VOICE', otherText)}
                     disabled={!otherText.trim()}
-                    className="mt-2 px-4 py-1.5 rounded-full text-white text-[12px] font-bold disabled:opacity-50 cursor-pointer"
+                    className="mt-2 px-4 py-1.5 rounded-full text-white text-[0.75rem] font-bold disabled:opacity-50 cursor-pointer"
                     style={{ backgroundColor: 'var(--brand-primary-purple)' }}
                   >
                     {t('intake.a8.otherAdd')}
@@ -1576,7 +1643,7 @@ function A8Categories({ state, setState }: StepProps) {
                 is going to render. Keep the count for the rare case where
                 the list is hidden somehow. */}
             {otherCount > 0 && otherMedHandlers.otherMeds.length === 0 && (
-              <p className="text-[12px] text-center" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.75rem] text-center" style={{ color: 'var(--brand-text-muted)' }}>
                 {(otherCount === 1 ? t('intake.a8.otherCountSingle') : t('intake.a8.otherCountPlural')).replace('{n}', String(otherCount))}
               </p>
             )}
@@ -1610,7 +1677,7 @@ function A8Categories({ state, setState }: StepProps) {
         style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}
       >
         <Shield className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
-        <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+        <p className="text-[0.75rem] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {t('intake.a8.skipHint')}
         </p>
       </div>
@@ -1630,7 +1697,7 @@ function A9Frequency({ state, setState }: StepProps) {
         />
         <div className="rounded-2xl p-6 text-center" style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
           <Pill className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--brand-primary-purple)' }} />
-          <p className="text-[14px]" style={{ color: 'var(--brand-text-secondary)' }}>
+          <p className="text-[0.875rem]" style={{ color: 'var(--brand-text-secondary)' }}>
             {t('intake.a9.emptyBody')}
           </p>
         </div>
@@ -1671,9 +1738,9 @@ function A9Frequency({ state, setState }: StepProps) {
           >
             <div className="flex items-center justify-between mb-3">
               <div>
-                <p className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>{m.drugName}</p>
+                <p className="text-[0.9375rem] font-bold" style={{ color: 'var(--brand-text-primary)' }}>{m.drugName}</p>
                 {m.isCombination && (
-                  <span className="text-[10px] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>
+                  <span className="text-[0.625rem] font-bold" style={{ color: 'var(--brand-accent-teal)' }}>
                     {t('intake.medCard.combo').toUpperCase()}
                   </span>
                 )}
@@ -1689,7 +1756,7 @@ function A9Frequency({ state, setState }: StepProps) {
                     type="button"
                     data-testid={`intake-a9-freq-${i}-${o.value}`}
                     onClick={() => setFreq(i, o.value)}
-                    className="h-11 rounded-full text-[13px] font-bold border-2 transition"
+                    className="h-11 rounded-full text-[0.8125rem] font-bold border-2 transition"
                     style={{
                       backgroundColor: active ? 'var(--brand-primary-purple)' : 'white',
                       borderColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-border)',
@@ -1704,6 +1771,27 @@ function A9Frequency({ state, setState }: StepProps) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// Gap 5 — optional caregiver capture during intake. Reuses the self-contained
+// CaregiversCard (same add/edit/remove + consent the profile page uses); it
+// persists each caregiver immediately via /api/me/caregivers, so the sticky
+// "Continue" button just advances — no special submit wiring needed. Fully
+// optional: the patient can continue without adding anyone.
+function ACGCaregivers(_props: StepProps) {
+  const { t } = useLanguage();
+  return (
+    <div data-testid="intake-step-caregivers">
+      <StepHeader
+        title={t('intake.caregivers.title')}
+        subtitle={t('intake.caregivers.subtitle')}
+        audio={t('intake.caregivers.audio')}
+      />
+      <div className="mt-4">
+        <CaregiversCard />
       </div>
     </div>
   );
@@ -1730,6 +1818,7 @@ function A10Review({ state, goTo }: StepProps) {
   if (state.hasCAD) conditionList.push(t('intake.a10.conditionCad'));
   if (state.hasHCM) conditionList.push(t('intake.a10.conditionHcm'));
   if (state.hasDCM) conditionList.push(t('intake.a10.conditionDcm'));
+  if (state.hasAorticStenosis) conditionList.push(t('intake.a10.conditionAorticStenosis'));
 
   const pregnancyValue = state.isPregnant === true
     ? (state.pregnancyDueDate
@@ -1752,7 +1841,7 @@ function A10Review({ state, goTo }: StepProps) {
         style={{ backgroundColor: 'var(--brand-warning-amber-light)', border: '1.5px solid #FCD34D' }}
       >
         <Shield className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
-        <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+        <p className="text-[0.78125rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
           {t('intake.a10.reviewBanner')}
         </p>
       </div>
@@ -1837,16 +1926,16 @@ function A11Complete({ onDone }: { onDone: () => void }) {
       >
         <Check className="w-14 h-14" style={{ color: 'var(--brand-success-green)' }} strokeWidth={3} />
       </motion.div>
-      <h2 className="text-[28px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+      <h2 className="text-[1.75rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
         {t('intake.a11.title')}
       </h2>
-      <p className="text-[15px] max-w-md mb-8 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+      <p className="text-[0.9375rem] max-w-md mb-8 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
         {t('intake.a11.body')}
       </p>
       <motion.button
         type="button"
         onClick={onDone}
-        className="h-12 px-8 rounded-full text-white font-bold text-[14px] cursor-pointer"
+        className="h-12 px-8 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
         style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.97 }}
@@ -1866,7 +1955,7 @@ function StepHeader({ title, subtitle, audio }: { title: string; subtitle: strin
     <div>
       <div className="flex items-start justify-between gap-3 mb-1">
         <h2
-          className="text-[20px] sm:text-[24px] font-bold tracking-tight min-w-0 flex-1"
+          className="text-[1.25rem] sm:text-[1.5rem] font-bold tracking-tight min-w-0 flex-1"
           style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
         >
           {title}
@@ -1875,7 +1964,7 @@ function StepHeader({ title, subtitle, audio }: { title: string; subtitle: strin
           <AudioButton text={audio} />
         </div>
       </div>
-      <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>{subtitle}</p>
+      <p className="text-[0.875rem]" style={{ color: 'var(--brand-text-muted)' }}>{subtitle}</p>
     </div>
   );
 }
@@ -1884,7 +1973,7 @@ function SectionLabel({ text, audio }: { text: string; audio?: string }) {
   return (
     <div className="flex items-start justify-between gap-2 mb-3">
       <p
-        className="text-[13px] font-semibold min-w-0 flex-1"
+        className="text-[0.8125rem] font-semibold min-w-0 flex-1"
         style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
       >
         {text}
@@ -1902,11 +1991,11 @@ function ReviewSection({ title, onEdit, children }: { title: string; onEdit: () 
   return (
     <div className="rounded-2xl p-4" style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)' }}>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-[14px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>{title}</h3>
+        <h3 className="text-[0.875rem] font-bold" style={{ color: 'var(--brand-text-primary)' }}>{title}</h3>
         <button
           type="button"
           onClick={onEdit}
-          className="flex items-center gap-1 text-[12px] font-bold cursor-pointer"
+          className="flex items-center gap-1 text-[0.75rem] font-bold cursor-pointer"
           style={{ color: 'var(--brand-primary-purple)' }}
         >
           <Pencil className="w-3.5 h-3.5" /> Edit
@@ -1919,7 +2008,7 @@ function ReviewSection({ title, onEdit, children }: { title: string; onEdit: () 
 
 function ReviewRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between text-[13px]">
+    <div className="flex items-center justify-between text-[0.8125rem]">
       {label && <span style={{ color: 'var(--brand-text-muted)' }}>{label}</span>}
       <span className="font-semibold" style={{ color: 'var(--brand-text-primary)' }}>{value}</span>
     </div>
@@ -1976,10 +2065,10 @@ function DedupModal({
         className="bg-white rounded-3xl p-6 max-w-sm w-full"
         style={{ boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}
       >
-        <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <h3 className="text-[1.125rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           {t('intake.a7.title')}
         </h3>
-        <p className="text-[13px] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+        <p className="text-[0.8125rem] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {t('intake.a7.body')
             .replace('{component}', componentSentenceCased)
             .replace('{combo}', conflict.comboBrand)
@@ -1989,7 +2078,7 @@ function DedupModal({
           <button
             type="button"
             onClick={() => onResolve('KEEP_COMBO', conflict)}
-            className="w-full h-11 rounded-xl text-[13.5px] font-bold cursor-pointer"
+            className="w-full h-11 rounded-xl text-[0.84375rem] font-bold cursor-pointer"
             style={{ backgroundColor: 'var(--brand-primary-purple)', color: 'white' }}
           >
             {t('intake.a7.keepCombo').replace('{combo}', conflict.comboBrand)}
@@ -1997,7 +2086,7 @@ function DedupModal({
           <button
             type="button"
             onClick={() => onResolve('KEEP_SINGLE', conflict)}
-            className="w-full h-11 rounded-xl text-[13.5px] font-bold cursor-pointer"
+            className="w-full h-11 rounded-xl text-[0.84375rem] font-bold cursor-pointer"
             style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
           >
             {t('intake.a7.keepSingle').replace('{component}', componentSentenceCased)}
@@ -2005,7 +2094,7 @@ function DedupModal({
           <button
             type="button"
             onClick={() => onResolve('KEEP_BOTH', conflict)}
-            className="w-full h-11 rounded-xl text-[13.5px] font-bold cursor-pointer"
+            className="w-full h-11 rounded-xl text-[0.84375rem] font-bold cursor-pointer"
             style={{ backgroundColor: 'white', color: 'var(--brand-text-secondary)', border: '1.5px solid var(--brand-border)' }}
           >
             {t('intake.a7.keepBoth')}
@@ -2014,7 +2103,7 @@ function DedupModal({
         <button
           type="button"
           onClick={onCancel}
-          className="w-full mt-3 text-[12px] font-semibold cursor-pointer"
+          className="w-full mt-3 text-[0.75rem] font-semibold cursor-pointer"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           {t('intake.a7.goBack')}
@@ -2067,15 +2156,15 @@ function ExitSaveModal({
         >
           <Save className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} />
         </div>
-        <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <h3 className="text-[1.125rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           {title}
         </h3>
-        <p className="text-[13px] mb-4 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+        <p className="text-[0.8125rem] mb-4 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {body}
         </p>
         {error && (
           <p
-            className="text-[12px] mb-4 px-3 py-2 rounded-lg"
+            className="text-[0.75rem] mb-4 px-3 py-2 rounded-lg"
             style={{
               color: 'var(--brand-alert-red-text)',
               backgroundColor: 'var(--brand-alert-red-light)',
@@ -2088,7 +2177,7 @@ function ExitSaveModal({
           type="button"
           onClick={onConfirm}
           disabled={saving}
-          className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full h-11 rounded-full text-white font-bold text-[0.875rem] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
         >
           {saving ? t('intake.exitSave.saving') : cta}
@@ -2098,7 +2187,7 @@ function ExitSaveModal({
             type="button"
             onClick={onDiscard}
             disabled={saving}
-            className="w-full mt-2 h-11 rounded-full font-semibold text-[14px] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            className="w-full mt-2 h-11 rounded-full font-semibold text-[0.875rem] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             style={{
               backgroundColor: 'var(--brand-alert-red-light)',
               color: 'var(--brand-alert-red-text)',
@@ -2111,7 +2200,7 @@ function ExitSaveModal({
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className="w-full mt-2 text-[12px] font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full mt-2 text-[0.75rem] font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ color: 'var(--brand-text-muted)' }}
         >
           {t('intake.exitSave.keepGoing')}
@@ -2232,17 +2321,21 @@ function ClinicalIntakeWizard() {
           // Branch 2 — populate form with existing data so the patient sees
           // their current answers and can edit just what changed.
           const seeded: IntakeFormState = {
+            // F13 — carry the ACE/ARB contraindication flag so the med-add
+            // step can gate re-adds behind the contraindication warning.
+            aceContraindicated: profile.aceContraindicatedAt != null,
             gender: profile.gender ?? undefined,
             heightCm: profile.heightCm ?? undefined,
             dateOfBirth: carriedDob,
             isPregnant: profile.isPregnant ?? undefined,
             pregnancyDueDate: toDateInput(profile.pregnancyDueDate),
-            historyPreeclampsia: profile.historyPreeclampsia ?? false,
+            historyHDP: profile.historyHDP ?? false,
             hasHeartFailure: profile.hasHeartFailure ?? false,
             hasAFib: profile.hasAFib ?? false,
             hasCAD: profile.hasCAD ?? false,
             hasHCM: profile.hasHCM ?? false,
             hasDCM: profile.hasDCM ?? false,
+            hasAorticStenosis: profile.hasAorticStenosis ?? false,
             heartFailureType:
               profile.heartFailureType && profile.heartFailureType !== 'NOT_APPLICABLE'
                 ? profile.heartFailureType
@@ -2431,7 +2524,7 @@ function ClinicalIntakeWizard() {
       if (state.isPregnant !== true && state.isPregnant !== false) {
         return { kind: 'key', key: 'intake.nav.errorPregnancy' };
       }
-      if (state.historyPreeclampsia !== true && state.historyPreeclampsia !== false) {
+      if (state.historyHDP !== true && state.historyHDP !== false) {
         return { kind: 'key', key: 'intake.nav.errorPreeclampsia' };
       }
     }
@@ -2648,14 +2741,14 @@ function ClinicalIntakeWizard() {
         <div className="rounded-full flex items-center justify-center mb-5" style={{ width: 80, height: 80, backgroundColor: 'var(--brand-success-green-light)' }}>
           <Check className="w-10 h-10" style={{ color: 'var(--brand-success-green)' }} strokeWidth={3} />
         </div>
-        <h1 className="text-[22px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('intake.profileExists.title')}</h1>
-        <p className="text-[14px] mb-6 max-w-sm" style={{ color: 'var(--brand-text-secondary)' }}>
+        <h1 className="text-[1.375rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('intake.profileExists.title')}</h1>
+        <p className="text-[0.875rem] mb-6 max-w-sm" style={{ color: 'var(--brand-text-secondary)' }}>
           {t('intake.profileExists.body')}
         </p>
         <button
           type="button"
           onClick={() => router.push('/dashboard')}
-          className="h-11 px-6 rounded-full text-white font-bold text-[14px] cursor-pointer"
+          className="h-11 px-6 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
           style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
         >
           {t('intake.profileExists.cta')}
@@ -2708,7 +2801,7 @@ function ClinicalIntakeWizard() {
             <button
               type="button"
               onClick={goBack}
-              className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold cursor-pointer"
+              className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[0.8125rem] font-semibold cursor-pointer"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
               <ArrowLeft className="w-4 h-4" />
@@ -2718,7 +2811,7 @@ function ClinicalIntakeWizard() {
             <button
               type="button"
               onClick={() => setShowExitSave(true)}
-              className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold cursor-pointer"
+              className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[0.8125rem] font-semibold cursor-pointer"
               style={{ color: 'var(--brand-text-muted)' }}
               aria-label={t('intake.nav.saveAria')}
             >
@@ -2748,7 +2841,7 @@ function ClinicalIntakeWizard() {
               aria-hidden
             />
             <p
-              className="text-[12.5px] leading-snug"
+              className="text-[0.78125rem] leading-snug"
               style={{ color: 'var(--brand-text-primary)' }}
             >
               {t('intake.edit.reverifyBanner')}
@@ -2806,6 +2899,7 @@ function ClinicalIntakeWizard() {
             {step === 'A6' && <A6Combos {...stepProps} />}
             {step === 'A8' && <A8Categories {...stepProps} />}
             {step === 'A9' && <A9Frequency {...stepProps} />}
+            {step === 'ACG' && <ACGCaregivers {...stepProps} />}
             {step === 'A10' && <A10Review {...stepProps} />}
             {step === 'A11' && <A11Complete onDone={() => router.push('/dashboard')} />}
           </motion.div>
@@ -2813,7 +2907,7 @@ function ClinicalIntakeWizard() {
 
         {submitError && (
           <p
-            className="mt-5 text-[13px] text-center font-semibold px-4 py-2 rounded-lg"
+            className="mt-5 text-[0.8125rem] text-center font-semibold px-4 py-2 rounded-lg"
             style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
           >
             {(() => {
@@ -2851,7 +2945,7 @@ function ClinicalIntakeWizard() {
                   data-testid="intake-submit"
                   onClick={goNext}
                   disabled={submitting || exitSaving}
-                  className="flex-1 h-12 rounded-full border-2 font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  className="flex-1 h-12 rounded-full border-2 font-bold text-[0.875rem] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
                   style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
                 >
                   {step === 'A10' ? t('intake.nav.submit') : t('intake.nav.continue')}
@@ -2861,7 +2955,7 @@ function ClinicalIntakeWizard() {
                   data-testid="intake-quick-save"
                   onClick={handleQuickSave}
                   disabled={submitting || exitSaving}
-                  className="flex-1 h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  className="flex-1 h-12 rounded-full text-white font-bold text-[0.875rem] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
                   style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.98 }}
@@ -2876,7 +2970,7 @@ function ClinicalIntakeWizard() {
                 data-testid="intake-submit"
                 onClick={goNext}
                 disabled={submitting}
-                className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                className="w-full h-12 rounded-full text-white font-bold text-[0.875rem] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
                 style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.98 }}

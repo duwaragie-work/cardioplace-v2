@@ -3,6 +3,7 @@
 
 import { RULE_IDS, type ContextMedication, type DrugClassInput } from '@cardioplace/shared'
 import type { RuleFunction } from './types.js'
+import { gestationalAgeWeeksFromProfile } from './pregnancy-thresholds.js'
 
 /**
  * Rule 1 — Pregnancy + ACE/ARB (teratogenic). Fires regardless of BP.
@@ -25,11 +26,21 @@ export const pregnancyAceArbRule: RuleFunction = (session, ctx) => {
   ]
   if (matched.length === 0) return null
 
-  // Dedup by id in case a combo med flagged on both ACE and ARB (rare).
-  const seen = new Set<string>()
+  // Dedup by id in case a combo med flagged on both ACE and ARB (rare), AND
+  // by normalized drugName as a defensive net against duplicate
+  // PatientMedication rows for the same drug. The uq_patientmed_active
+  // partial-unique index prevents new duplicates, but rows pre-dating the
+  // index (and any combo-pill components recorded as separate rows) can
+  // still slip through. Without name-dedup the patient sees
+  // "review Lisinopril, Lisinopril, and Lisinopril" instead of "review Lisinopril".
+  const seenIds = new Set<string>()
+  const seenNames = new Set<string>()
   const unique = matched.filter((m) => {
-    if (seen.has(m.id)) return false
-    seen.add(m.id)
+    if (seenIds.has(m.id)) return false
+    const nameKey = m.drugName.trim().toLowerCase()
+    if (seenNames.has(nameKey)) return false
+    seenIds.add(m.id)
+    seenNames.add(nameKey)
     return true
   })
 
@@ -52,6 +63,13 @@ export const pregnancyAceArbRule: RuleFunction = (session, ctx) => {
       drugClass: unique[0].drugClass,
       drugNames,
       conditionLabel: 'Pregnancy',
+      // Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, conditional
+      // exception) — gestational age threaded through to the physician message
+      // because teratogenic ACE/ARB risk differs by trimester.
+      gestationalAgeWeeks: gestationalAgeWeeksFromProfile(
+        ctx.profile.pregnancyDueDate,
+        session.measuredAt,
+      ),
     },
   }
 }

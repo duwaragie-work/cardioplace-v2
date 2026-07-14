@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   AreaChart,
@@ -12,13 +13,19 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts';
-import { Flame, Clock, ArrowRight, Heart, Bell, Target, ShieldCheck, AlertTriangle, Pill, ArrowUp, ArrowDown } from 'lucide-react';
+import { Flame, Clock, ArrowRight, Heart, Bell, Target, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import { getJournalEntries, getNotifications, getAlerts, getJournalStats, type AlertTier } from '@/lib/services/journal.service';
+import { getAlertPresentation } from '@/components/alerts/alert-presentation';
 import { getMyPatientProfile, getMyMedications, type PatientProfileDto } from '@/lib/services/intake.service';
-import { getMyThreshold, type PatientThresholdDto } from '@/lib/services/threshold.service';
+import {
+  getMyThreshold,
+  getMyEffectiveThreshold,
+  type PatientThresholdDto,
+  type EffectiveThreshold,
+} from '@/lib/services/threshold.service';
 import { loadDraft, hasDraft, stepProgress } from '@/lib/intake/draft';
 import ActionRequiredCard from '@/components/intake/ActionRequiredCard';
 import MonthlyMedReask from '@/components/intake/MonthlyMedReask';
@@ -82,6 +89,12 @@ interface DeviationAlert {
   // V2 fields used by D3 prioritization + Flow C dispatch
   tier?: import('@/lib/services/journal.service').AlertTier | null;
   patientMessage?: string | null;
+  // Rule-aware chrome + admin-parity fields surfaced on the v2 alert DTO.
+  ruleId?: string | null;
+  mode?: string | null;
+  escalated?: boolean;
+  dismissible?: boolean;
+  resolvedBy?: string | null;
   journalEntry?: {
     measuredAt?: string | null;
     systolicBP?: number | null;
@@ -125,6 +138,9 @@ export default function Dashboard() {
   // Flow D state — full profile (for D1 verification badge) + threshold (D2 + D4 colors).
   const [profile, setProfile] = useState<PatientProfileDto | null>(null);
   const [threshold, setThreshold] = useState<PatientThresholdDto | null>(null);
+  // Item C / Bug 24 — the effective alert threshold (pregnancy/HFrEF/CAD
+  // overrides applied) the engine actually uses, for the goal card.
+  const [effectiveThreshold, setEffectiveThreshold] = useState<EffectiveThreshold | null>(null);
   // E4 — track whether the patient has any active medications so we don't
   // pop the monthly re-ask modal for someone who reported zero meds.
   const [hasMeds, setHasMeds] = useState(false);
@@ -138,16 +154,18 @@ export default function Dashboard() {
     let cancelled = false;
     (async () => {
       try {
-        const [p, t, m] = await Promise.all([
+        const [p, t, m, eff] = await Promise.all([
           getMyPatientProfile().catch(() => null),
           getMyThreshold().catch(() => null),
           // Only check meds if profile exists — saves a 404-then-empty round trip
           // for patients who haven't completed clinical intake yet.
           getMyMedications().catch(() => []),
+          getMyEffectiveThreshold().catch(() => null),
         ]);
         if (cancelled) return;
         setProfile(p);
         setThreshold(t);
+        setEffectiveThreshold(eff);
         setHasMeds(Array.isArray(m) && m.some((med) => !med.discontinuedAt));
 
         // Without a server-side completion field, the localStorage draft
@@ -283,13 +301,17 @@ export default function Dashboard() {
       : { backgroundColor: '#F1F5F9', color: 'var(--brand-text-muted)' };
 
 
-  // Patient-actionable open alerts. Excludes TIER_2_DISCREPANCY because
-  // those are admin-facing per the v2 clinical spec — patients can't action
-  // them, the detail page refuses to render them, and showing them as
-  // clickable cards on the dashboard sends the user into a dead-end "not
-  // found" screen.
+  // Patient-actionable open alerts. F32 — Tier 2 medication-discrepancy
+  // alerts are admin-facing per the v2 clinical spec EXCEPT when the rule
+  // engine populated a patient-facing message (e.g. the A5-3 beta-blocker
+  // carve-out: RULE_MEDICATION_MISSED). Those are patient-visible and the
+  // detail page now renders them; the silent ones stay hidden so a tap can't
+  // dead-end on a "care team only" screen.
+  const tier2Hidden = (a: typeof alerts[number]) =>
+    a.tier === 'TIER_2_DISCREPANCY' &&
+    !(typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0);
   const openAlerts = alerts.filter(
-    (a) => a.status === 'OPEN' && a.tier !== 'TIER_2_DISCREPANCY',
+    (a) => a.status === 'OPEN' && !tier2Hidden(a),
   );
 
   // ── Flow D helpers ────────────────────────────────────────────────────────
@@ -315,6 +337,9 @@ export default function Dashboard() {
     if (tier === 'BP_LEVEL_1_HIGH') return 60;
     if (tier === 'BP_LEVEL_1_LOW') return 60;
     if (a.severity === 'HIGH') return 60;
+    // F32 — patient-visible medication-discrepancy ranks below BP L1 but above
+    // pure info, so it surfaces on the banner only when nothing more urgent is open.
+    if (tier === 'TIER_2_DISCREPANCY') return 30;
     if (tier === 'TIER_3_INFO') return 20;
     return 40;
   }
@@ -322,91 +347,34 @@ export default function Dashboard() {
     ? [...openAlerts].sort((x, y) => alertPriority(y) - alertPriority(x))[0]
     : null;
 
-  // Visual variant for the D3 card — mirrors TierAlertView.
-  type AlertVariantKey = 'emergency' | 'tier1' | 'high' | 'low' | 'info';
-  function variantForTopAlert(a: typeof topAlert): {
-    key: AlertVariantKey;
-    accent: string;
-    accentText: string;
-    accentLight: string;
-    icon: React.ReactNode;
-    title: string;
-    body: string;
-  } | null {
+  // Visual variant for the D3 banner — consumes the shared helper so chrome +
+  // ruleId overrides (e.g. RULE_HF_DECOMPENSATION → amber/Heart, Round 2 A1)
+  // stay in lockstep with TierAlertView. The banner derives the body from
+  // patientMessage; the helper's defaultBody is the safe fallback.
+  function variantForTopAlert(a: typeof topAlert) {
     if (!a) return null;
     const sbp = a.journalEntry?.systolicBP ?? 0;
     const dbp = a.journalEntry?.diastolicBP ?? 0;
-    const tier = (a as { tier?: AlertTier | null; patientMessage?: string | null }).tier;
-    const patientMessage = (a as { patientMessage?: string | null }).patientMessage ?? '';
-    const isEmergency =
-      tier === 'BP_LEVEL_2' ||
-      tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE' ||
-      sbp >= 180 ||
-      dbp >= 120;
-    // D3 variant title/body are English clinical fallbacks — same policy as
-    // TierAlertView.variantFor (Flow C). They mirror shared/alert-messages.ts
-    // and stay English (rendered with lang="en") until Dr. Singal per-locale
-    // sign-off lands. `patientMessage` from the backend takes precedence.
-    if (isEmergency) {
-      return {
-        key: 'emergency',
-        accent: 'var(--brand-alert-red)',
-        accentText: 'var(--brand-alert-red-text)',
-        accentLight: 'var(--brand-alert-red-light)',
-        icon: <AlertTriangle className="w-5 h-5" />,
-        title: 'Critical blood pressure reading',
-        body: patientMessage || 'Tap to see what to do next.',
-      };
-    }
-    // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema gets the same red
-    // 'emergency' treatment as BP Level 2 so the dashboard top-card surfaces
-    // it with urgent visual priority. Body comes from the signed-off
-    // patientMessage (RULE_ACE_ANGIOEDEMA / RULE_GENERIC_ANGIOEDEMA); title
-    // stays neutral non-diagnostic — the clinical content is in the body.
-    // Tapping the card routes to /alerts/[id] → EmergencyAlertScreen (the
-    // signed-off full-screen surface).
-    if (tier === 'TIER_1_ANGIOEDEMA') {
-      return {
-        key: 'emergency',
-        accent: 'var(--brand-alert-red)',
-        accentText: 'var(--brand-alert-red-text)',
-        accentLight: 'var(--brand-alert-red-light)',
-        icon: <AlertTriangle className="w-5 h-5" />,
-        title: 'This needs urgent care',
-        body: patientMessage || 'Tap to see what to do next.',
-      };
-    }
-    if (tier === 'TIER_1_CONTRAINDICATION') {
-      return {
-        key: 'tier1',
-        accent: 'var(--brand-alert-red)',
-        accentText: 'var(--brand-alert-red-text)',
-        accentLight: 'var(--brand-alert-red-light)',
-        icon: <Pill className="w-5 h-5" />,
-        title: 'Important medication alert',
-        body: patientMessage || 'Your care team has flagged a medication concern.',
-      };
-    }
-    if (tier === 'BP_LEVEL_1_LOW' || (sbp > 0 && sbp < 90) || (dbp > 0 && dbp < 60)) {
-      return {
-        key: 'low',
-        accent: '#3B82F6',
-        accentText: '#1D4ED8',
-        accentLight: '#DBEAFE',
-        icon: <ArrowDown className="w-5 h-5" />,
-        title: 'Your blood pressure is low',
-        body: patientMessage || 'If you feel dizzy, sit or lie down right away.',
-      };
-    }
-    // Default to "high" — covers BP_LEVEL_1_HIGH, legacy HIGH severity BP, etc.
+    const raw = a as { tier?: AlertTier | null; ruleId?: string | null; patientMessage?: string | null };
+    // Same defensive emergency derivation as TierAlertView's deriveTier:
+    // when the engine hasn't classified yet but the reading is clearly
+    // critical, force BP_LEVEL_2 so the banner gets the red treatment.
+    const effectiveTier: AlertTier | null | undefined =
+      raw.tier ??
+      (sbp >= 180 || dbp >= 120 ? 'BP_LEVEL_2' : undefined);
+    const v = getAlertPresentation({
+      tier: effectiveTier,
+      ruleId: raw.ruleId,
+    });
+    const patientMessage = raw.patientMessage ?? '';
     return {
-      key: 'high',
-      accent: 'var(--brand-warning-amber)',
-      accentText: 'var(--brand-warning-amber-text)',
-      accentLight: 'var(--brand-warning-amber-light)',
-      icon: <ArrowUp className="w-5 h-5" />,
-      title: 'Your blood pressure is elevated',
-      body: patientMessage || 'Sit quietly for 5 minutes and check again.',
+      key: v.key,
+      accent: v.accent,
+      accentText: v.accentText,
+      accentLight: v.accentLight,
+      Icon: v.Icon,
+      title: v.title,
+      body: patientMessage || v.defaultBody,
     };
   }
   const topAlertVariant = variantForTopAlert(topAlert);
@@ -455,11 +423,36 @@ export default function Dashboard() {
     }
   })();
 
-  // D2 threshold display helpers
-  const hasBpThreshold = !!(threshold && (threshold.sbpUpperTarget || threshold.dbpUpperTarget));
-  const thresholdTargetText = threshold
-    ? `${threshold.sbpUpperTarget ?? '—'}/${threshold.dbpUpperTarget ?? '—'}`
+  // D2 threshold display helpers.
+  // Item C / Bug 24 — show the EFFECTIVE goal (pregnancy/HFrEF/CAD override
+  // applied), not the raw custom threshold, so a pregnant patient with a custom
+  // 176/120 sees "Below 140/90" (her real alert point) instead of 176/120 +
+  // "alerts begin at 196". Render the card when she has a custom threshold OR an
+  // override is in force; standard patients with neither stay uncluttered.
+  const hasBpThreshold =
+    !!(threshold && (threshold.sbpUpperTarget || threshold.dbpUpperTarget)) ||
+    effectiveThreshold?.overrideReason != null;
+  const thresholdIsDiastolicOnly = false; // effective threshold always carries both axes
+  const thresholdTargetText = effectiveThreshold
+    ? `${effectiveThreshold.sbpGoal}/${effectiveThreshold.dbpGoal}`
     : null;
+  // The "alerts begin at" caption: override reason (no tolerance) vs the
+  // standard/personalized goal + tolerance band.
+  const goalCaption: string | null = (() => {
+    if (!effectiveThreshold) return null;
+    const { sbpHighAlertThreshold, dbpHighAlertThreshold, sbpGoal, toleranceMmHg, overrideReason } =
+      effectiveThreshold;
+    const both = `${sbpHighAlertThreshold}/${dbpHighAlertThreshold}`;
+    if (overrideReason === 'pregnancy')
+      return t('dashboard.goalOverridePregnancy').replace('{value}', both);
+    if (overrideReason === 'hfref')
+      return t('dashboard.goalOverrideHfref').replace('{value}', both);
+    if (overrideReason === 'cad')
+      return t('dashboard.goalOverrideCad').replace('{value}', both);
+    if (toleranceMmHg > 0)
+      return t('dashboard.goalTolerance').replace('{value}', String(sbpGoal + toleranceMmHg));
+    return null;
+  })();
   const thresholdSetAt = threshold?.setAt
     ? new Date(threshold.setAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : null;
@@ -605,11 +598,11 @@ export default function Dashboard() {
               className="shrink-0 rounded-xl flex items-center justify-center text-white"
               style={{ width: 40, height: 40, backgroundColor: topAlertVariant.accent }}
             >
-              {topAlertVariant.icon}
+              <topAlertVariant.Icon className="w-5 h-5" />
             </div>
             <div className="flex-1 min-w-0">
               <p
-                className="text-[10px] font-bold uppercase tracking-wider mb-0.5"
+                className="text-[0.625rem] font-bold uppercase tracking-wider mb-0.5"
                 style={{ color: topAlertVariant.accentText }}
               >
                 {t('dashboard.activeAlert')}
@@ -617,7 +610,7 @@ export default function Dashboard() {
               {/* lang="en": variant title/body are English clinical fallbacks. */}
               <p
                 lang="en"
-                className="text-[14px] font-bold leading-tight"
+                className="text-[0.875rem] font-bold leading-tight"
                 style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
               >
                 {topAlertVariant.title}
@@ -625,14 +618,14 @@ export default function Dashboard() {
               <p
                 data-testid="active-alert-reading"
                 lang="en"
-                className="text-[12px] mt-0.5 leading-snug"
+                className="text-[0.75rem] mt-0.5 leading-snug"
                 style={{ color: 'var(--brand-text-secondary)', wordBreak: 'break-word' }}
               >
                 {topAlertVariant.body}
               </p>
             </div>
             <div
-              className="shrink-0 hidden sm:flex items-center gap-1 px-3 h-9 rounded-full font-bold text-[12px] text-white"
+              className="shrink-0 hidden sm:flex items-center gap-1 px-3 h-9 rounded-full font-bold text-[0.75rem] text-white"
               style={{ backgroundColor: topAlertVariant.accent }}
               // Known WCAG debt — vibrant amber bg + 12px bold white text is
               // ~2.8:1 (fails AA Normal). Same tracking as the admin avatar.
@@ -649,6 +642,10 @@ export default function Dashboard() {
           </button>
           </div>
         )}
+
+        {/* P2 — the "Recent Alerts" strip was removed (Duwaragie's call): the
+            headline banner + the notifications bell already surface alerts, so
+            a third dashboard surface was redundant noise. */}
 
         {/* D0 — Clinical Intake Action Required (above stats, below D3) */}
         {intakeUi.kind === 'fresh' && <ActionRequiredCard state={{ kind: 'fresh' }} />}
@@ -679,7 +676,9 @@ export default function Dashboard() {
                 is the userName <h2> below (intentional visual hierarchy), so
                 the page-level <h1> is screen-reader-only. */}
             <h1 className="sr-only">Dashboard</h1>
-            <p data-testid="dashboard-greeting" className="text-white/70 text-xs font-medium mb-1">{greeting}</p>
+            {/* A3 (Doc 1) — time-of-day greeting + preferred name. Matches the
+                spoken-summary composition (greeting + ", name" when known). */}
+            <p data-testid="dashboard-greeting" className="text-white text-xs font-medium mb-1">{greeting}{greeting && userName ? `, ${userName}` : ''}</p>
             {loading ? (
               <Bone w={160} h={26} color="rgba(255,255,255,0.3)" />
             ) : (
@@ -687,7 +686,7 @@ export default function Dashboard() {
                 {userName ? userName : t('dashboard.welcomeBack')}
               </h2>
             )}
-            <p className="text-white/70 text-xs mt-1 mb-3">
+            <p className="text-white text-xs mt-1 mb-3">
               {t('dashboard.careTeamMonitoring')}
             </p>
             <div className="flex items-center gap-2 flex-wrap">
@@ -716,7 +715,7 @@ export default function Dashboard() {
               renders below the BP when present on the latest entry. */}
           <div data-testid="latest-bp" className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <div className="flex items-start justify-between gap-2 mb-2">
-              <span className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+              <span className="block text-[0.625rem] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
                 {loading ? <Bone w={60} h={9} r={5} /> : (todayHasEntry ? t('dashboard.todaysBp') : t('dashboard.latestBp'))}
               </span>
             </div>
@@ -725,7 +724,7 @@ export default function Dashboard() {
             ) : (
               <div className="text-2xl font-bold" style={{ color: 'var(--brand-primary-purple)' }}>{latestBP}</div>
             )}
-            <p className="text-[10px] mt-0.5 mb-2 flex items-center gap-2" style={{ color: 'var(--brand-text-muted)' }}>
+            <p className="text-[0.625rem] mt-0.5 mb-2 flex items-center gap-2" style={{ color: 'var(--brand-text-muted)' }}>
               <span>mmHg</span>
               {!loading && latestEntry?.pulse != null && (
                 <span className="inline-flex items-center gap-0.5 font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
@@ -738,7 +737,7 @@ export default function Dashboard() {
             ) : (
               <span
                 data-testid="latest-bp-status"
-                className="inline-flex items-center justify-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-center"
+                className="inline-flex items-center justify-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold text-center"
                 style={{ backgroundColor: bpVsTargetStyle.bg, color: bpVsTargetStyle.fg }}
                 // Known WCAG debt — chip pattern at 10px is below AA Normal
                 // threshold with vibrant tokens. Same accepted tradeoff.
@@ -761,7 +760,7 @@ export default function Dashboard() {
                 {streak} <span className="text-sm font-medium">{t('dashboard.day')}</span>
               </div>
             )}
-            <span className="block text-[10px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+            <span className="block text-[0.625rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
               {loading ? <Bone w={80} h={9} r={5} /> : t('dashboard.medicationStreak')}
             </span>
           </div>
@@ -769,7 +768,7 @@ export default function Dashboard() {
           {/* Total Check-ins Card */}
           <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl relative" style={{ boxShadow: '0 1px 20px rgba(123,0,224,0.07)' }}>
             <div className="flex items-start justify-between gap-2 mb-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.625rem] font-semibold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('dashboard.checkIns')}
               </p>
             </div>
@@ -778,7 +777,7 @@ export default function Dashboard() {
             ) : (
               <div className="text-2xl font-bold" style={{ color: 'var(--brand-accent-teal)' }}>{totalEntries}</div>
             )}
-            <span className="block text-[10px] mt-1" style={{ color: 'var(--brand-text-secondary)' }}>
+            <span className="block text-[0.625rem] mt-1" style={{ color: 'var(--brand-text-secondary)' }}>
               {loading ? <Bone w={56} h={9} r={5} /> : t('dashboard.totalLogged')}
             </span>
           </div>
@@ -802,19 +801,36 @@ export default function Dashboard() {
               <Target className="w-5 h-5" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-accent-teal)' }}>
+              <p className="text-[0.625rem] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-accent-teal)' }}>
                 {t('dashboard.yourGoal')}
               </p>
               <p
-                className="text-[13px] font-semibold leading-tight"
+                className="text-[0.8125rem] font-semibold leading-tight"
                 style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
               >
-                {t('dashboard.belowTarget').replace('{target}', thresholdTargetText ?? '—/—')}
+                {(thresholdIsDiastolicOnly
+                  ? t('dashboard.belowDiastolic')
+                  : t('dashboard.belowTarget')
+                ).replace('{target}', thresholdTargetText ?? '')}
                 <span className="ml-2 font-medium" style={{ color: 'var(--brand-text-muted)' }}>
                   {` ${t('dashboard.setByCareTeam')}`}
                   {thresholdSetAt ? ` · ${thresholdSetAt}` : ''}
                 </span>
               </p>
+              {/* Item C / Bug 24 — "alerts begin at" caption from the EFFECTIVE
+                  threshold: an override (pregnancy/HFrEF/CAD) states the real
+                  alert point with no tolerance; otherwise the goal + tolerance
+                  band so a reading just over the goal doesn't read as a missed
+                  alert. */}
+              {goalCaption && (
+                <p
+                  data-testid="dashboard-goal-tolerance"
+                  className="text-[0.71875rem] mt-0.5"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                >
+                  {goalCaption}
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -832,7 +848,7 @@ export default function Dashboard() {
                 <button
                   type="button"
                   onClick={() => router.push('/readings')}
-                  className="text-[11px] font-semibold cursor-pointer hover:opacity-75 transition"
+                  className="text-[0.6875rem] font-semibold cursor-pointer hover:opacity-75 transition"
                   style={{ color: 'var(--brand-primary-purple)' }}
                 >
                   {t('dashboard.fullHistory')}
@@ -843,7 +859,7 @@ export default function Dashboard() {
                   <button
                     key={range}
                     onClick={() => setChartRange(range)}
-                    className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all"
+                    className="px-2.5 py-1 rounded-md text-[0.6875rem] font-semibold transition-all"
                     style={{
                       backgroundColor: chartRange === range ? 'var(--brand-primary-purple)' : 'transparent',
                       color: chartRange === range ? '#fff' : 'var(--brand-text-muted)',
@@ -945,12 +961,12 @@ export default function Dashboard() {
                   {loading ? (
                     <Bone w={88} h={20} r={99} />
                   ) : todayHasEntry ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.625rem] font-semibold"
                       style={{ backgroundColor: 'var(--brand-success-green-light)', color: 'var(--brand-success-green)' }}>
                       {'✓ ' + t('dashboard.completedToday')}
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.625rem] font-semibold"
                       style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
                       // Known WCAG debt — 10px vibrant amber on amber-100 =
                       // 2.51:1 (fails AA Normal). Same accepted tradeoff as
@@ -961,7 +977,7 @@ export default function Dashboard() {
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] mb-3 text-white">{t('dashboard.takesAbout')}</p>
+                <p className="text-[0.6875rem] mb-3 text-white">{t('dashboard.takesAbout')}</p>
               </div>
 
               <div data-testid="dashboard-cta-checkin">
@@ -975,7 +991,7 @@ export default function Dashboard() {
                     router.push(intakeUi.kind === 'done' ? '/check-in' : '/clinical-intake')
                   }
                   disabled={intakeUi.kind === 'unknown'}
-                  className="w-full h-11 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[13px] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
+                  className="w-full h-11 bg-white flex items-center justify-center gap-1.5 rounded-full text-[#7B00E0] font-bold text-[0.8125rem] transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
                   {loading ? (
                     <Bone w={120} h={12} color="#7B00E0" />
@@ -985,7 +1001,7 @@ export default function Dashboard() {
                     <>{todayHasEntry ? t('dashboard.logAnother') : t('dashboard.startCheckin')} <ArrowRight aria-hidden="true" className="w-4 h-4" /></>
                   )}
                 </button>
-                <span className="block text-[10px] mt-3 text-center text-white">
+                <span className="block text-[0.625rem] mt-3 text-center text-white">
                   {loading ? (
                     <span className="flex justify-center"><Bone w={90} h={8} r={5} /></span>
                   ) : (
@@ -1058,13 +1074,13 @@ export default function Dashboard() {
                             />
                           )}
                           <div className="min-w-0 flex-1">
-                            <p className="text-[11.5px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
+                            <p className="text-[0.71875rem] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
                               {n.title}
                             </p>
-                            <p className="text-[10.5px] mt-0.5 leading-snug line-clamp-2" style={{ color: 'var(--brand-text-secondary)' }}>
+                            <p className="text-[0.65625rem] mt-0.5 leading-snug line-clamp-2" style={{ color: 'var(--brand-text-secondary)' }}>
                               {n.body}
                             </p>
-                            <p className="text-[9.5px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
+                            <p className="text-[0.59375rem] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
                               {formatAlertDate(n.sentAt)}
                             </p>
                           </div>
@@ -1076,7 +1092,7 @@ export default function Dashboard() {
                   {notifs.length > 3 && (
                     <button
                       onClick={() => router.push('/notifications?tab=notifications')}
-                      className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded-full text-[11px] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                      className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded-full text-[0.6875rem] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                       style={{ color: 'var(--brand-warning-amber-text)', backgroundColor: 'var(--brand-warning-amber-light)' }}
                     >
                       {t('dashboard.viewAllNotifications')} <ArrowRight aria-hidden="true" className="w-3 h-3" />
@@ -1103,7 +1119,7 @@ export default function Dashboard() {
         >
           <AudioButton size="sm" text={dashboardOverview} />
           <span
-            className="text-[10px] md:text-[12px] font-semibold whitespace-nowrap"
+            className="text-[0.625rem] md:text-[0.75rem] font-semibold whitespace-nowrap"
             style={{ color: 'var(--brand-text-secondary)' }}
           >
             {t('dashboard.hearSummary')}

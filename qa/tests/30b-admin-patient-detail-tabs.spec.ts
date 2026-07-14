@@ -16,8 +16,9 @@ import { postJournalEntry, setMedActionViaUI } from '../helpers/api.js'
  *     Save is disabled until ALL 4 are set → 30e.4 is a FULL assignment,
  *     not a single-field reassign. Editor renders only for
  *     SUPER_ADMIN/MED_DIR/OPS; PROVIDER sees a read-only summary.
- *   • Medication HOLD rationale is a window.prompt (page.on('dialog'));
- *     REJECT uses MedicationRejectModal; VERIFY is a 1-click toggle.
+ *   • Medication HOLD opens the structured MedicationHoldModal (pick a
+ *     Manisha 5/24 §3 reason → rationale → confirm); REJECT uses
+ *     MedicationRejectModal; VERIFY is a 1-click toggle.
  *   • James is baseline-assigned to primaryProvider — used for the
  *     PROVIDER-scoped read-only check so the detail page loads (≠403).
  *   • tc.seedAlerts → { created, alertIds }.
@@ -51,11 +52,17 @@ test.describe('Phase 3 §E — patient-detail tabs (Readings/CareTeam/Meds/Alert
 
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString()
+    // closeSession commits the reading immediately (buffer fast-fire) instead
+    // of leaving it in the 5-min editable hold, which the provider Readings tab
+    // filters out — so a finished single-reading check-in is what a provider
+    // actually sees. Without it these reads stay held and the tab shows empty.
     await postJournalEntry(api, {
       measuredAt: threeDaysAgo, systolicBP: 120, diastolicBP: 78, pulse: 70,
+      closeSession: true,
     })
     await postJournalEntry(api, {
       measuredAt: new Date().toISOString(), systolicBP: 145, diastolicBP: 92, pulse: 74,
+      closeSession: true,
     })
     await api.dispose()
 

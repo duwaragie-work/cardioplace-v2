@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PassportStrategy } from '@nestjs/passport'
 import type { Request } from 'express'
 import { ExtractJwt, Strategy } from 'passport-jwt'
 import { UserRole } from '../../generated/prisma/enums.js'
+import { PrismaService } from '../../prisma/prisma.service.js'
 import {
   LEGACY_ACCESS_COOKIE,
   cookieName,
@@ -14,6 +15,15 @@ export interface JwtPayload {
   sub: string
   email: string | null
   roles: UserRole[]
+  /** Phase/practice-identity — the practice the session is acting as.
+   *  Signed at issue time (sign-in / select-practice / switch-practice).
+   *  Switching mints a fresh access token so the FE sees the new context
+   *  on its next request without a DB hit on the auth path. */
+  activePracticeId?: string | null
+  /** phase/28 session kill-switch. Rejected when behind User.tokenVersion
+   *  (bumped on deactivate / permanent-close / role removal). Absent on
+   *  legacy tokens minted before this claim existed → treated as 0. */
+  tokenVersion?: number
   iat?: number
   exp?: number
 }
@@ -46,7 +56,10 @@ function fromAccessCookie(req: Request): string | null {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     super({
       // Accept BOTH the Authorization: Bearer header AND the HttpOnly cookie.
       // Bearer takes precedence so existing API clients that send the header
@@ -57,11 +70,105 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
         fromAccessCookie,
       ]),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('JWT_ACCESS_SECRET', 'fallback-secret'),
+      // Fail closed: no fallback default. If JWT_ACCESS_SECRET is unset the
+      // process must refuse to start rather than sign/verify tokens with a
+      // known constant — a hardcoded fallback lets anyone who's read the
+      // source forge valid access tokens (Humaira N4). getOrThrow surfaces a
+      // clear "JWT_ACCESS_SECRET" error at boot.
+      secretOrKey: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
     })
   }
 
-  validate(payload: JwtPayload) {
-    return { id: payload.sub, email: payload.email, roles: payload.roles }
+  /**
+   * Phase/practice-identity (Manisha 2026-06-12 §1, Edge Case 1) — if the
+   * access token carries an `activePracticeId` claim but the user is no
+   * longer a member of that practice (admin removed them after sign-in),
+   * the request must NOT silently succeed under the stale context. Throw
+   * a 401 with a discriminated `errorCode` the FE catches on the
+   * 401-refresh-retry path to bounce the user to /sign-in/select-practice
+   * with a "your practice membership has changed" banner. One indexed
+   * PracticeProvider lookup per request when the claim is set — skipped
+   * entirely for SUPER_ADMIN / HEALPLACE_OPS / PATIENT sessions (their
+   * claim is null).
+   */
+  async validate(payload: JwtPayload) {
+    // phase/28 — session kill-switch + status gate. One PK lookup per request:
+    // reject a token whose version is behind the account's current tokenVersion
+    // (deactivate / close / role-removal bump it), or whose account is no
+    // longer ACTIVE. This is what makes "log out everywhere, now" instant.
+    const account = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { tokenVersion: true, accountStatus: true },
+    })
+    if (!account) {
+      throw new UnauthorizedException('Account no longer exists')
+    }
+    if ((payload.tokenVersion ?? 0) < account.tokenVersion) {
+      throw new UnauthorizedException({
+        message: 'Your session has ended — please sign in again.',
+        errorCode: 'TOKEN_REVOKED',
+      })
+    }
+    if (account.accountStatus !== 'ACTIVE') {
+      throw new UnauthorizedException({
+        message: 'This account is no longer active.',
+        errorCode: 'ACCOUNT_INACTIVE',
+      })
+    }
+
+    const activePracticeId = payload.activePracticeId ?? null
+    if (activePracticeId) {
+      // Membership can live on ANY of three relations depending on role:
+      //   • PROVIDER         → PracticeProvider (compound practiceId_userId)
+      //   • MEDICAL_DIRECTOR → PracticeMedicalDirector (compound practiceId_userId)
+      //   • COORDINATOR      → PracticeCoordinator (1:1 by userId)
+      // Earlier this only checked PracticeProvider (+ later PracticeCoordinator)
+      // — that bounced every MED_DIR / COORDINATOR request with
+      // PRACTICE_MEMBERSHIP_REVOKED because their activePracticeId (resolved in
+      // resolvePracticeContext from PracticeMedicalDirector / PracticeCoordinator)
+      // never matched a PracticeProvider row. PR #90: a MED_DIR heads a practice
+      // via PracticeMedicalDirector, NOT PracticeProvider, so omitting it bounced
+      // every medicalDirector to /sign-in/select-practice?reason=membership-changed
+      // immediately after a successful sign-in. Probe all three: as long as ONE
+      // confirms membership for the active practice, the request is authentic.
+      const [asProvider, asMedDir, asCoordinator] = await Promise.all([
+        this.prisma.practiceProvider.findUnique({
+          where: {
+            practiceId_userId: {
+              practiceId: activePracticeId,
+              userId: payload.sub,
+            },
+          },
+          select: { id: true },
+        }),
+        this.prisma.practiceMedicalDirector.findUnique({
+          where: {
+            practiceId_userId: {
+              practiceId: activePracticeId,
+              userId: payload.sub,
+            },
+          },
+          select: { id: true },
+        }),
+        this.prisma.practiceCoordinator.findUnique({
+          where: { userId: payload.sub },
+          select: { practiceId: true },
+        }),
+      ])
+      const coordinatorMatch =
+        asCoordinator !== null && asCoordinator.practiceId === activePracticeId
+      if (!asProvider && !asMedDir && !coordinatorMatch) {
+        throw new UnauthorizedException({
+          message: 'Your practice membership has changed — please pick a practice again.',
+          errorCode: 'PRACTICE_MEMBERSHIP_REVOKED',
+        })
+      }
+    }
+    return {
+      id: payload.sub,
+      email: payload.email,
+      roles: payload.roles,
+      activePracticeId,
+    }
   }
 }

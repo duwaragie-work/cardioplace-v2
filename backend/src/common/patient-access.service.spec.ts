@@ -9,11 +9,14 @@ import {
 } from './patient-access.service.js'
 
 // May 2026 access-scope decision — see docs/ACCESS_SCOPE.md.
+// June 2026 update (Manisha 2026-06-12 Doc 3 Q2): PROVIDER now sees every
+// patient in their practices (mirrors MEDICAL_DIRECTOR). Assignment still
+// governs alert routing + escalation; only data visibility widened.
 //
 // Coverage matrix for the helper:
 //   • SUPER_ADMIN / HEALPLACE_OPS short-circuit (no scope filter)
 //   • MEDICAL_DIRECTOR scoped via PracticeMedicalDirector membership
-//   • PROVIDER scoped via PatientProviderAssignment primary/backup
+//   • PROVIDER scoped via PracticeProvider membership (practice-wide)
 //   • Deny path → ForbiddenException
 //
 // Pure-unit style: PrismaService is fully mocked, no DB needed.
@@ -44,7 +47,11 @@ describe('PatientAccessService', () => {
         findMany: jest.fn() as jest.Mock<any>,
       },
       practiceProvider: {
+        findUnique: jest.fn() as jest.Mock<any>,
         findMany: jest.fn() as jest.Mock<any>,
+      },
+      practiceCoordinator: {
+        findUnique: jest.fn() as jest.Mock<any>,
       },
     }
     const module: TestingModule = await Test.createTestingModule({
@@ -133,34 +140,55 @@ describe('PatientAccessService', () => {
       ).rejects.toThrow(ForbiddenException)
     })
 
-    it('PROVIDER allowed when they are primary on patient assignment', async () => {
+    it('PROVIDER allowed when they are primary AND a practice member', async () => {
       prisma.patientProviderAssignment.findUnique.mockResolvedValue({
         practiceId: PRACTICE_A,
         primaryProviderId: PROV_ID,
         backupProviderId: 'someone-else',
       })
+      prisma.practiceProvider.findUnique.mockResolvedValue({ id: 'pp-1' })
       await expect(
         service.assertCanAccessPatient(provActor, PATIENT_A),
       ).resolves.toBeUndefined()
     })
 
-    it('PROVIDER allowed when they are backup on patient assignment', async () => {
+    it('PROVIDER allowed when they are backup AND a practice member', async () => {
       prisma.patientProviderAssignment.findUnique.mockResolvedValue({
         practiceId: PRACTICE_A,
         primaryProviderId: 'someone-else',
         backupProviderId: PROV_ID,
       })
+      prisma.practiceProvider.findUnique.mockResolvedValue({ id: 'pp-1' })
       await expect(
         service.assertCanAccessPatient(provActor, PATIENT_A),
       ).resolves.toBeUndefined()
     })
 
-    it('PROVIDER denied when not in panel', async () => {
+    it('PROVIDER allowed when in same practice but NOT primary/backup (Manisha 2026-06-12)', async () => {
       prisma.patientProviderAssignment.findUnique.mockResolvedValue({
         practiceId: PRACTICE_A,
         primaryProviderId: 'someone-else',
         backupProviderId: 'someone-else',
       })
+      prisma.practiceProvider.findUnique.mockResolvedValue({ id: 'pp-1' })
+      await expect(
+        service.assertCanAccessPatient(provActor, PATIENT_A),
+      ).resolves.toBeUndefined()
+      expect(prisma.practiceProvider.findUnique).toHaveBeenCalledWith({
+        where: {
+          practiceId_userId: { practiceId: PRACTICE_A, userId: PROV_ID },
+        },
+        select: { id: true },
+      })
+    })
+
+    it('PROVIDER denied when NOT a member of the patient practice', async () => {
+      prisma.patientProviderAssignment.findUnique.mockResolvedValue({
+        practiceId: PRACTICE_B,
+        primaryProviderId: 'someone-else',
+        backupProviderId: 'someone-else',
+      })
+      prisma.practiceProvider.findUnique.mockResolvedValue(null)
       await expect(
         service.assertCanAccessPatient(provActor, PATIENT_A),
       ).rejects.toThrow(ForbiddenException)
@@ -233,6 +261,74 @@ describe('PatientAccessService', () => {
         service.assertCanModifyPracticeAssignment(provActor, PRACTICE_A),
       ).rejects.toThrow(ForbiddenException)
     })
+
+    // 2026-07-01 walkback (#116) — COORDINATOR no longer assigns care teams.
+    // Care-team assignment is a clinical decision (MED_DIR / OPS / SUPER only).
+    // Denied for every practice, including their own.
+    const coordActor: ActorUser = {
+      id: 'coord-1',
+      roles: [UserRole.COORDINATOR],
+    }
+
+    it('COORDINATOR denied even for their own practice (2026-07-01 walkback)', async () => {
+      prisma.practiceCoordinator.findUnique.mockResolvedValue({
+        practiceId: PRACTICE_A,
+      })
+      await expect(
+        service.assertCanModifyPracticeAssignment(coordActor, PRACTICE_A),
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('COORDINATOR denied for a different practice', async () => {
+      await expect(
+        service.assertCanModifyPracticeAssignment(coordActor, PRACTICE_B),
+      ).rejects.toThrow(ForbiddenException)
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // assertCanManagePractice — practice config / staff-membership write gate
+  // (2026-07-01). OPS/SUPER unscoped; MED_DIR must head the practice.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('assertCanManagePractice', () => {
+    it('OPS bypasses without DB lookup', async () => {
+      await expect(
+        service.assertCanManagePractice(
+          { id: OPS_ID, roles: [UserRole.HEALPLACE_OPS] },
+          PRACTICE_A,
+        ),
+      ).resolves.toBeUndefined()
+      expect(prisma.practiceMedicalDirector.findUnique).not.toHaveBeenCalled()
+    })
+
+    it('MED_DIR allowed for a practice they head', async () => {
+      prisma.practiceMedicalDirector.findUnique.mockResolvedValue({ id: 'pmd-1' })
+      await expect(
+        service.assertCanManagePractice(
+          { id: MED_ID, roles: [UserRole.MEDICAL_DIRECTOR] },
+          PRACTICE_A,
+        ),
+      ).resolves.toBeUndefined()
+    })
+
+    it('MED_DIR denied for a practice they do not head', async () => {
+      prisma.practiceMedicalDirector.findUnique.mockResolvedValue(null)
+      await expect(
+        service.assertCanManagePractice(
+          { id: MED_ID, roles: [UserRole.MEDICAL_DIRECTOR] },
+          PRACTICE_B,
+        ),
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('PROVIDER denied — practice management is not a provider power', async () => {
+      await expect(
+        service.assertCanManagePractice(
+          { id: PROV_ID, roles: [UserRole.PROVIDER] },
+          PRACTICE_A,
+        ),
+      ).rejects.toThrow(ForbiddenException)
+    })
   })
 
   // ────────────────────────────────────────────────────────────────────────
@@ -272,20 +368,45 @@ describe('PatientAccessService', () => {
       })
     })
 
-    it('PROVIDER filter scopes by panel (primary OR backup)', async () => {
+    it('PROVIDER filter scopes by practice membership (Manisha 2026-06-12)', async () => {
+      prisma.practiceProvider.findMany.mockResolvedValue([
+        { practiceId: PRACTICE_A },
+      ])
       const filter = await service.patientScopeFilter({
         id: PROV_ID,
         roles: [UserRole.PROVIDER],
       })
       expect(filter).toEqual({
         providerAssignmentAsPatient: {
-          is: {
-            OR: [
-              { primaryProviderId: PROV_ID },
-              { backupProviderId: PROV_ID },
-            ],
-          },
+          is: { practiceId: { in: [PRACTICE_A] } },
         },
+      })
+    })
+
+    it('PROVIDER sees patients across multiple practices they are a member of', async () => {
+      prisma.practiceProvider.findMany.mockResolvedValue([
+        { practiceId: PRACTICE_A },
+        { practiceId: PRACTICE_B },
+      ])
+      const filter = await service.patientScopeFilter({
+        id: PROV_ID,
+        roles: [UserRole.PROVIDER],
+      })
+      expect(filter).toEqual({
+        providerAssignmentAsPatient: {
+          is: { practiceId: { in: [PRACTICE_A, PRACTICE_B] } },
+        },
+      })
+    })
+
+    it('PROVIDER with zero memberships gets an empty practice list (sees no patients)', async () => {
+      prisma.practiceProvider.findMany.mockResolvedValue([])
+      const filter = await service.patientScopeFilter({
+        id: 'newbie-provider',
+        roles: [UserRole.PROVIDER],
+      })
+      expect(filter).toEqual({
+        providerAssignmentAsPatient: { is: { practiceId: { in: [] } } },
       })
     })
 
@@ -299,6 +420,289 @@ describe('PatientAccessService', () => {
       // we want zero rows, not a 500.
       expect(filter).toEqual({
         providerAssignmentAsPatient: { is: { id: '__never__' } },
+      })
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // alertQueueScopeFilter — the dashboard queue is the provider's caseload,
+  // not the whole practice (Manisha 2026-06 / Humaira HIPAA N14). Only a plain
+  // PROVIDER narrows to assigned patients; every other role delegates to
+  // patientScopeFilter so the two methods never drift.
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('alertQueueScopeFilter', () => {
+    it('returns undefined for SUPER_ADMIN (no filter)', async () => {
+      const filter = await service.alertQueueScopeFilter({
+        id: SUPER_ID,
+        roles: [UserRole.SUPER_ADMIN],
+      })
+      expect(filter).toBeUndefined()
+    })
+
+    it('returns undefined for HEALPLACE_OPS (no filter)', async () => {
+      const filter = await service.alertQueueScopeFilter({
+        id: OPS_ID,
+        roles: [UserRole.HEALPLACE_OPS],
+      })
+      expect(filter).toBeUndefined()
+    })
+
+    it('MED_DIR stays practice-wide (delegates — no primary/backup OR clause)', async () => {
+      prisma.practiceMedicalDirector.findMany.mockResolvedValue([
+        { practiceId: PRACTICE_A },
+      ])
+      const filter = await service.alertQueueScopeFilter({
+        id: MED_ID,
+        roles: [UserRole.MEDICAL_DIRECTOR],
+      })
+      expect(filter).toEqual({
+        providerAssignmentAsPatient: {
+          is: { practiceId: { in: [PRACTICE_A] } },
+        },
+      })
+      expect(
+        (filter?.providerAssignmentAsPatient.is as Record<string, unknown>).OR,
+      ).toBeUndefined()
+    })
+
+    it('PROVIDER narrows to assigned patients only (primary OR backup)', async () => {
+      prisma.practiceProvider.findMany.mockResolvedValue([
+        { practiceId: PRACTICE_A },
+      ])
+      const filter = await service.alertQueueScopeFilter({
+        id: PROV_ID,
+        roles: [UserRole.PROVIDER],
+      })
+      expect(filter).toEqual({
+        providerAssignmentAsPatient: {
+          is: {
+            OR: [
+              { primaryProviderId: PROV_ID },
+              { backupProviderId: PROV_ID },
+            ],
+            practiceId: { in: [PRACTICE_A] },
+          },
+        },
+      })
+    })
+
+    it('a PROVIDER who is ALSO MED_DIR keeps practice-wide (no assigned-only narrowing)', async () => {
+      prisma.practiceMedicalDirector.findMany.mockResolvedValue([
+        { practiceId: PRACTICE_A },
+      ])
+      const filter = await service.alertQueueScopeFilter({
+        id: MED_ID,
+        roles: [UserRole.PROVIDER, UserRole.MEDICAL_DIRECTOR],
+      })
+      expect(
+        (filter?.providerAssignmentAsPatient.is as Record<string, unknown>).OR,
+      ).toBeUndefined()
+    })
+
+    it('PROVIDER queue still respects active practice context (multi-practice)', async () => {
+      prisma.practiceProvider.findMany.mockResolvedValue([
+        { practiceId: PRACTICE_A },
+        { practiceId: PRACTICE_B },
+      ])
+      const filter = await service.alertQueueScopeFilter({
+        id: PROV_ID,
+        roles: [UserRole.PROVIDER],
+        activePracticeId: PRACTICE_B,
+      })
+      const is = filter?.providerAssignmentAsPatient.is as {
+        practiceId: { in: string[] }
+      }
+      expect(is.practiceId.in).toEqual([PRACTICE_B])
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Strict practice-context scoping (PR #90 Bug B, Duwaragie 2026-06-19) —
+  // when the session carries an activePracticeId, patient visibility narrows
+  // to ONLY that practice. Multi-practice providers must explicitly switch.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('strict practice-context scoping', () => {
+    describe('patientScopeFilter', () => {
+      it('multi-practice PROVIDER acting as practiceA sees ONLY practiceA', async () => {
+        prisma.practiceProvider.findMany.mockResolvedValue([
+          { practiceId: PRACTICE_A },
+          { practiceId: PRACTICE_B },
+        ])
+        const filter = await service.patientScopeFilter({
+          id: PROV_ID,
+          roles: [UserRole.PROVIDER],
+          activePracticeId: PRACTICE_A,
+        })
+        expect(filter).toEqual({
+          providerAssignmentAsPatient: {
+            is: { practiceId: { in: [PRACTICE_A] } },
+          },
+        })
+      })
+
+      it('multi-practice PROVIDER acting as practiceB sees ONLY practiceB', async () => {
+        prisma.practiceProvider.findMany.mockResolvedValue([
+          { practiceId: PRACTICE_A },
+          { practiceId: PRACTICE_B },
+        ])
+        const filter = await service.patientScopeFilter({
+          id: PROV_ID,
+          roles: [UserRole.PROVIDER],
+          activePracticeId: PRACTICE_B,
+        })
+        expect(filter).toEqual({
+          providerAssignmentAsPatient: {
+            is: { practiceId: { in: [PRACTICE_B] } },
+          },
+        })
+      })
+
+      it('multi-practice PROVIDER with null active context sees the union (legacy session)', async () => {
+        prisma.practiceProvider.findMany.mockResolvedValue([
+          { practiceId: PRACTICE_A },
+          { practiceId: PRACTICE_B },
+        ])
+        const filter = await service.patientScopeFilter({
+          id: PROV_ID,
+          roles: [UserRole.PROVIDER],
+          activePracticeId: null,
+        })
+        expect(filter).toEqual({
+          providerAssignmentAsPatient: {
+            is: { practiceId: { in: [PRACTICE_A, PRACTICE_B] } },
+          },
+        })
+      })
+
+      it('PROVIDER with a stale active id NOT in memberships narrows to memberships (never widens)', async () => {
+        prisma.practiceProvider.findMany.mockResolvedValue([
+          { practiceId: PRACTICE_A },
+          { practiceId: PRACTICE_B },
+        ])
+        const filter = await service.patientScopeFilter({
+          id: PROV_ID,
+          roles: [UserRole.PROVIDER],
+          activePracticeId: 'practice-not-a-member',
+        })
+        expect(filter).toEqual({
+          providerAssignmentAsPatient: {
+            is: { practiceId: { in: [PRACTICE_A, PRACTICE_B] } },
+          },
+        })
+      })
+
+      it('single-practice PROVIDER acting as their only practice is a no-op narrow', async () => {
+        prisma.practiceProvider.findMany.mockResolvedValue([
+          { practiceId: PRACTICE_A },
+        ])
+        const filter = await service.patientScopeFilter({
+          id: PROV_ID,
+          roles: [UserRole.PROVIDER],
+          activePracticeId: PRACTICE_A,
+        })
+        expect(filter).toEqual({
+          providerAssignmentAsPatient: {
+            is: { practiceId: { in: [PRACTICE_A] } },
+          },
+        })
+      })
+
+      it('MED_DIR acting as practiceA sees ONLY practiceA', async () => {
+        prisma.practiceMedicalDirector.findMany.mockResolvedValue([
+          { practiceId: PRACTICE_A },
+          { practiceId: PRACTICE_B },
+        ])
+        const filter = await service.patientScopeFilter({
+          id: MED_ID,
+          roles: [UserRole.MEDICAL_DIRECTOR],
+          activePracticeId: PRACTICE_A,
+        })
+        expect(filter).toEqual({
+          providerAssignmentAsPatient: {
+            is: { practiceId: { in: [PRACTICE_A] } },
+          },
+        })
+      })
+
+      it('SUPER_ADMIN with active context still gets no filter (narrow is a no-op for org-wide)', async () => {
+        const filter = await service.patientScopeFilter({
+          id: SUPER_ID,
+          roles: [UserRole.SUPER_ADMIN],
+          activePracticeId: PRACTICE_A,
+        })
+        expect(filter).toBeUndefined()
+      })
+
+      it('HEALPLACE_OPS with active context still gets no filter', async () => {
+        const filter = await service.patientScopeFilter({
+          id: OPS_ID,
+          roles: [UserRole.HEALPLACE_OPS],
+          activePracticeId: PRACTICE_A,
+        })
+        expect(filter).toBeUndefined()
+      })
+    })
+
+    describe('assertCanAccessPatient', () => {
+      it('multi-practice PROVIDER acting as practiceA is DENIED a practiceB patient', async () => {
+        prisma.patientProviderAssignment.findUnique.mockResolvedValue({
+          practiceId: PRACTICE_B,
+          primaryProviderId: 'someone-else',
+          backupProviderId: 'someone-else',
+        })
+        prisma.practiceProvider.findUnique.mockResolvedValue({ id: 'pp-1' })
+        await expect(
+          service.assertCanAccessPatient(
+            { id: PROV_ID, roles: [UserRole.PROVIDER], activePracticeId: PRACTICE_A },
+            PATIENT_A,
+          ),
+        ).rejects.toThrow(ForbiddenException)
+      })
+
+      it('multi-practice PROVIDER acting as practiceA is ALLOWED a practiceA patient', async () => {
+        prisma.patientProviderAssignment.findUnique.mockResolvedValue({
+          practiceId: PRACTICE_A,
+          primaryProviderId: 'someone-else',
+          backupProviderId: 'someone-else',
+        })
+        prisma.practiceProvider.findUnique.mockResolvedValue({ id: 'pp-1' })
+        await expect(
+          service.assertCanAccessPatient(
+            { id: PROV_ID, roles: [UserRole.PROVIDER], activePracticeId: PRACTICE_A },
+            PATIENT_A,
+          ),
+        ).resolves.toBeUndefined()
+      })
+
+      it('PROVIDER with null active context falls back to union (legacy session, practiceB patient allowed)', async () => {
+        prisma.patientProviderAssignment.findUnique.mockResolvedValue({
+          practiceId: PRACTICE_B,
+          primaryProviderId: 'someone-else',
+          backupProviderId: 'someone-else',
+        })
+        prisma.practiceProvider.findUnique.mockResolvedValue({ id: 'pp-1' })
+        await expect(
+          service.assertCanAccessPatient(
+            { id: PROV_ID, roles: [UserRole.PROVIDER], activePracticeId: null },
+            PATIENT_A,
+          ),
+        ).resolves.toBeUndefined()
+      })
+
+      it('MED_DIR acting as practiceA is DENIED a practiceB patient (even one they head)', async () => {
+        prisma.patientProviderAssignment.findUnique.mockResolvedValue({
+          practiceId: PRACTICE_B,
+          primaryProviderId: 'someone-else',
+          backupProviderId: 'someone-else',
+        })
+        prisma.practiceMedicalDirector.findUnique.mockResolvedValue({ id: 'pmd-1' })
+        await expect(
+          service.assertCanAccessPatient(
+            { id: MED_ID, roles: [UserRole.MEDICAL_DIRECTOR], activePracticeId: PRACTICE_A },
+            PATIENT_A,
+          ),
+        ).rejects.toThrow(ForbiddenException)
       })
     })
   })

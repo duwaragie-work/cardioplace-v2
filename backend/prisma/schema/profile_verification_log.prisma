@@ -1,5 +1,5 @@
 model ProfileVerificationLog {
-  id              String                  @id @default(uuid())
+  id              String                 @id @default(uuid())
   userId          String
   fieldPath       String
   previousValue   Json?
@@ -7,19 +7,29 @@ model ProfileVerificationLog {
   changedBy       String
   changedByRole   VerifierRole
   changeType      VerificationChangeType
-  discrepancyFlag Boolean                 @default(false)
-  rationale       String?                 @db.Text
-  createdAt       DateTime                @default(now())
+  discrepancyFlag Boolean                @default(false)
+  rationale       String?                @db.Text
+  // June 2026 — practice-context attribution (Manisha 2026-06-12 Access
+  // Control §1, HIPAA 45 CFR §164.312(a)(2)(i)). The activePracticeId on
+  // the actor's AuthSession at the moment of the verification action.
+  // NULL for PATIENT-self-report rows and pre-policy entries.
+  practiceContext String?
+  createdAt       DateTime               @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt(sort: Desc)])
+  @@index([practiceContext, createdAt])
 }
 
 enum VerifierRole {
   PATIENT
   ADMIN
   PROVIDER
+  // Automated cron/engine writer (audit, 2026-07-03). A system principal from
+  // the registry made this clinical-state change, not a human — mirrors the
+  // 'SYSTEM_ACTOR' actorType used in AccessLog / Notification.
+  SYSTEM_ACTOR
 }
 
 enum VerificationChangeType {
@@ -33,4 +43,24 @@ enum VerificationChangeType {
   // backup/MD) create or update.
   ADMIN_THRESHOLD_UPDATE
   ADMIN_ASSIGNMENT_CHANGE
+  // #85 — one-time historical data cleanup (brand/generic dedup merge). Kept
+  // distinct from ADMIN_CORRECT so auditors can tell migration-merged rows
+  // apart from human provider corrections.
+  SYSTEM_MIGRATION
+  // Journal-entry (BP reading) audit trail — HIPAA/JCAHO closure. PATIENT_*
+  // rows are patient-app actions on their own readings; ADMIN_* rows are
+  // care-team actions via /admin/patients/:userId/readings (actor in
+  // changedBy). previousValue/newValue hold serializeForAudit() snapshots.
+  PATIENT_READING_CREATED
+  PATIENT_READING_EDITED
+  PATIENT_READING_DELETED
+  ADMIN_READING_ADDED
+  ADMIN_READING_EDITED
+  ADMIN_READING_DELETED
+  // Cron-driven clinical-state changes (audit, 2026-07-03; Humaira Activity 1
+  // #3). FINALIZE = session-finalize flipped JournalEntry.singleReadingFinalized
+  // after the buffer window; MEDICATION_HOLD_ESCALATION = medication-hold cron
+  // bumped PatientMedication.holdEscalationLevel on the T+N ladder.
+  SYSTEM_CRON_FINALIZE
+  SYSTEM_CRON_MEDICATION_HOLD_ESCALATION
 }

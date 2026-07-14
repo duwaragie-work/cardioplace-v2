@@ -32,6 +32,9 @@ export const T = {
     timezoneSelect: 'onboarding-timezone-select',
     submitBtn: 'onboarding-submit-btn',
     skipBtn: 'onboarding-skip-btn',
+    // Privacy/trust step (V2-E Gap 7) — shown FIRST, before the profile form.
+    agreeTerms: 'onboarding-agree-terms',
+    privacyContinueBtn: 'onboarding-privacy-continue-btn',
   },
 
   // ─── Patient: clinical intake (A1–A9) ───────────────────────────────────
@@ -87,6 +90,9 @@ export const T = {
         | 'SGLT2'
         | 'OTHER',
     ) => `intake-cat-tile-${key}`,
+    catExpanded: (
+      key: 'WATER_PILL' | 'BLOOD_THINNER' | 'CHOLESTEROL' | 'HEART_RHYTHM' | 'SGLT2',
+    ) => `intake-cat-expanded-${key}`,
     otherMedInput: 'intake-other-med-input',
     // A1: gender + height + DOB
     genderRadio: (v: 'MALE' | 'FEMALE' | 'OTHER') => `intake-gender-${v.toLowerCase()}`,
@@ -97,8 +103,8 @@ export const T = {
     // A2: pregnancy / preeclampsia
     isPregnantYes: 'intake-pregnant-yes',
     isPregnantNo: 'intake-pregnant-no',
-    historyPreeclampsiaYes: 'intake-preeclampsia-yes',
-    historyPreeclampsiaNo: 'intake-preeclampsia-no',
+    historyHDPYes: 'intake-preeclampsia-yes',
+    historyHDPNo: 'intake-preeclampsia-no',
     // A3: cardiac conditions
     conditionCheckbox: (
       key:
@@ -106,6 +112,7 @@ export const T = {
         | 'hasCAD'
         | 'hasHCM'
         | 'hasDCM'
+        | 'hasAorticStenosis'
         | 'hasAFib'
         | 'hasTachycardia'
         | 'hasBradycardia'
@@ -136,6 +143,7 @@ export const T = {
     medicationStreak: 'medication-streak',
     totalCheckins: 'total-checkins',
     bpGoal: 'bp-goal',
+    goalTolerance: 'dashboard-goal-tolerance',
     bpChart: 'bp-chart',
     bpChartXTick: 'bp-chart-x-tick',
     bpChartRangeToggle: (range: '7d' | '30d' | '90d') => `bp-chart-range-${range}`,
@@ -202,6 +210,15 @@ export const T = {
     medicationNo: 'check-in-medication-no',
     pendingSecondReading: 'pending-second-reading',
     addSecondReading: 'add-second-reading',
+    // Silent-literacy TTS button (AudioButton). Shared testid; many render per
+    // screen, so target with .first() / scope to a step container.
+    audioButton: 'audio-button',
+    // Cross-visit "add to this session or start new?" prompt.
+    openSessionPrompt: 'checkin-open-session-prompt',
+    openSessionNeedsMore: 'checkin-open-session-needs-more',
+    joinSession: 'checkin-join-session-btn',
+    newSession: 'checkin-new-session-btn',
+    resumePrompt: 'checkin-resume-prompt',
   },
 
   // ─── Patient: readings ──────────────────────────────────────────────────
@@ -215,9 +232,28 @@ export const T = {
     rowBp: 'reading-row-bp',
     rowPulse: 'reading-row-pulse',
     rowEdit: (id: string) => `reading-row-edit-${id}`,
-    rowDelete: (id: string) => `reading-row-delete-${id}`,
+    rowDelete: (id: string) => `readings-delete-button-${id}`,
     rowSpeaker: (id: string) => `reading-row-speaker-${id}`,
     newCheckinCta: 'new-checkin-cta',
+    // Option D AWAITING UX revision (2026-06-16) — a held emergency reading
+    // shows a "you haven't finished yet" status + a recovery CTA instead of
+    // the old "Held" lock badge.
+    rowAwaiting: (id: string) => `reading-awaiting-${id}`,
+    rowContinueConfirmation: (id: string) => `reading-continue-confirmation-${id}`,
+  },
+
+  // ─── Patient: Option D retake-to-confirm (Manisha 2026-06-12 Q2) ─────────
+  optionD: {
+    resumeIntro: 'optiond-resume-intro',
+    retake: 'optiond-retake',
+    decline: 'optiond-decline',
+    systolic: 'optiond-systolic',
+    diastolic: 'optiond-diastolic',
+    pulse: 'optiond-pulse',
+    submitSecond: 'optiond-submit-second',
+    declineB: 'optiond-decline-b',
+    safetyFooter: 'optiond-safety-footer',
+    done: 'optiond-done',
   },
 
   // ─── Patient: notifications ─────────────────────────────────────────────
@@ -403,6 +439,7 @@ export const T = {
     // ThresholdsTab
     thresholdReadonlyBanner: 'admin-threshold-readonly',
     thresholdSbpUpper: 'admin-threshold-sbp-upper',
+    thresholdSbpBandHelper: 'admin-threshold-sbp-band-helper',
     thresholdSbpLower: 'admin-threshold-sbp-lower',
     thresholdDbpUpper: 'admin-threshold-dbp-upper',
     thresholdDbpLower: 'admin-threshold-dbp-lower',
@@ -472,6 +509,8 @@ export const T = {
     alertCard: (id: string) => `admin-alert-card-${id}`,
     alertRow: (id: string) => `admin-alert-row-${id}`,
     alertTierBadge: (id: string) => `admin-alert-tier-badge-${id}`,
+    alertModeBadge: (id: string) => `admin-alert-mode-badge-${id}`,
+    alertGroupHeader: 'admin-alert-group-header',
     alertStatusBadge: (id: string) => `admin-alert-status-badge-${id}`,
     alertAckBtn: (id: string) => `admin-alert-ack-button-${id}`,
     alertResolveBtnFor: (id: string) => `admin-alert-resolve-button-${id}`,
@@ -526,6 +565,203 @@ export const T = {
     // NotificationsScreen (/notifications)
     notificationRow: (notifId: string) => `admin-notification-row-${notifId}`,
     notificationsList: 'admin-notifications-list',
+  },
+
+  // ─── Admin: user management (/users, phase/23) ──────────────────────────
+  //
+  // Rows + per-row action buttons are keyed by the user/invite EMAIL (not an
+  // id) — both a desktop table row (`-row-`) and a mobile card (`-card-`)
+  // render the same record, so action buttons exist in a desktop and a
+  // `-card-` variant. Target the desktop one in specs (default viewport is
+  // desktop) via the non-card testid.
+  adminUsers: {
+    accessDenied: 'admin-users-access-denied',
+    inviteSingle: 'admin-users-invite-single',
+    bulkToggle: 'admin-users-bulk-toggle',
+    csvToggle: 'admin-users-csv-toggle',
+    search: 'admin-users-search-input',
+    clearFilters: 'admin-users-clear-filters',
+    roleFilter: 'admin-users-role-filter-select',
+    statusFilter: 'admin-users-status-filter-select',
+    practiceFilter: 'admin-users-practice-filter-select',
+    coordinatorPractice: 'admin-users-coordinator-practice',
+    row: (email: string) => `admin-users-row-${email}`,
+    card: (email: string) => `admin-users-card-${email}`,
+    resend: (email: string) => `admin-user-resend-${email}`,
+    revoke: (email: string) => `admin-user-revoke-${email}`,
+    deactivate: (email: string) => `admin-user-deactivate-${email}`,
+    reactivate: (email: string) => `admin-user-reactivate-${email}`,
+    // phase/28 — per-row actions now live behind a 3-dots (kebab) menu.
+    // `actionsMenu` opens it; `action(key, email)` is a menu item where key ∈
+    // { deactivate | reactivate | close | reset-mfa | reset-biometric |
+    //   resend | revoke }.
+    actionsMenu: (email: string) => `admin-user-actions-${email}`,
+    action: (key: string, email: string) => `admin-user-action-${key}-${email}`,
+
+    // Single-invite modal (InviteUserModal.tsx)
+    inviteModal: 'admin-invite-user-modal',
+    inviteName: 'admin-invite-name',
+    inviteEmail: 'admin-invite-email',
+    inviteRole: 'admin-invite-role',
+    invitePractice: 'admin-invite-practice',
+    inviteSubmit: 'admin-invite-submit',
+
+    // Bulk inline invite (BulkInviteInline.tsx)
+    bulkPanel: 'admin-bulk-invite-panel',
+    bulkRow: (i: number) => `admin-bulk-row-${i}`,
+    bulkAddRow: 'admin-bulk-add-row',
+    bulkSendAll: 'admin-bulk-send-all',
+
+    // CSV upload (CSVUploadCard.tsx). TEMPLATE_HEADERS = name,email,role,practiceId
+    csvCard: 'admin-csv-upload-card',
+    csvDownloadTemplate: 'admin-csv-download-template',
+    csvFileInput: 'admin-csv-file-input',
+    csvSend: 'admin-csv-send',
+    csvClear: 'admin-csv-clear',
+
+    // Deactivate confirm (DeactivateConfirmModal.tsx)
+    deactivateModal: 'admin-deactivate-modal',
+    deactivateReason: 'admin-deactivate-reason',
+    deactivateConfirm: 'admin-deactivate-confirm',
+  },
+
+  // ─── Admin: monthly reports (/reports, phase/24) ────────────────────────
+  reports: {
+    accessDenied: 'admin-reports-access-denied',
+    monthPicker: 'report-month-picker',
+    practicePicker: 'report-practice-picker',
+    practiceLocked: 'report-practice-locked',
+    recompute: 'report-recompute',
+    downloadCsv: 'report-download-csv',
+    downloadPdf: 'report-download-pdf',
+    cacheBadge: 'report-cache-badge',
+    error: 'report-error',
+    skeleton: 'report-skeleton',
+    refetchOverlay: 'report-refetch-overlay',
+    noPractices: 'report-no-practices',
+  },
+
+  // ─── Admin: reports v2 — quarterly / SLA / cohort / adherence (phase/26) ──
+  //
+  // /reports is a 5-tab surface. The Monthly tab uses the `reports` testids
+  // above (phase/24); the four phase/26 tabs each own a `<kind>-*` namespace
+  // on their panel. Role gate (canViewReports): MEDICAL_DIRECTOR,
+  // HEALPLACE_OPS, SUPER_ADMIN — a plain PROVIDER gets `admin-reports-access-denied`.
+  reportTabs: {
+    monthly: 'report-tab-monthly',
+    quarterly: 'report-tab-quarterly',
+    sla: 'report-tab-sla',
+    cohorts: 'report-tab-cohorts',
+    adherence: 'report-tab-adherence',
+  },
+  sla: {
+    table: 'sla-table',
+    monthPicker: 'sla-month-picker',
+    practicePicker: 'sla-practice-picker',
+    practiceLocked: 'sla-practice-locked',
+    downloadCsv: 'sla-download-csv',
+    downloadPdf: 'sla-download-pdf',
+    error: 'sla-error',
+    skeleton: 'sla-skeleton',
+  },
+  quarterly: {
+    table: 'quarterly-control-table',
+    quarterPicker: 'quarterly-quarter-picker',
+    practicePicker: 'quarterly-practice-picker',
+    practiceLocked: 'quarterly-practice-locked',
+    downloadCsv: 'quarterly-download-csv',
+    downloadPdf: 'quarterly-download-pdf',
+    error: 'quarterly-error',
+    skeleton: 'quarterly-skeleton',
+  },
+  cohort: {
+    table: 'cohort-table',
+    monthPicker: 'cohort-month-picker',
+    practicePicker: 'cohort-practice-picker',
+    practiceLocked: 'cohort-practice-locked',
+    downloadCsv: 'cohort-download-csv',
+    downloadPdf: 'cohort-download-pdf',
+    error: 'cohort-error',
+    skeleton: 'cohort-skeleton',
+  },
+  adherence: {
+    table: 'adherence-patient-table',
+    windowPicker: 'adherence-window-picker',
+    practicePicker: 'adherence-practice-picker',
+    practiceLocked: 'adherence-practice-locked',
+    downloadCsv: 'adherence-download-csv',
+    downloadPdf: 'adherence-download-pdf',
+    error: 'adherence-error',
+    skeleton: 'adherence-skeleton',
+    emptyPatients: 'adherence-empty-patients',
+    noPractices: 'adherence-no-practices',
+  },
+
+  // ─── Invite activation (/activate/[token], patient + admin apps) ────────
+  activate: {
+    confirm: 'activate-confirm',
+  },
+
+  // ─── MFA (phase/27 — Manisha 2026-06-12 Access Control §6) ──────────────
+  //
+  // Admin = TOTP (authenticator app) + recovery codes; patient = WebAuthn
+  // (Face ID / fingerprint) + recovery codes. Testids reconciled against the
+  // real components:
+  //   admin/src/app/sign-in/mfa-enroll/page.tsx
+  //   admin/src/app/sign-in/mfa-challenge/page.tsx
+  //   admin/src/components/settings/SettingsScreen.tsx
+  //   admin/src/components/profile/RecoveryCodesModal.tsx
+  //   frontend/src/app/sign-in/biometric/page.tsx
+  //   frontend/src/components/cardio/RecoveryCodesPanel.tsx
+  mfa: {
+    // Admin TOTP enrollment wizard (/sign-in/mfa-enroll)
+    adminEnrollBegin: 'admin-mfa-begin',
+    adminEnrollCode: 'admin-mfa-enroll-code',
+    adminEnrollVerify: 'admin-mfa-enroll-verify',
+    adminEnrollRecoveryCodes: 'admin-mfa-recovery-codes',
+    adminEnrollSavedAck: 'admin-mfa-saved-ack',
+    adminEnrollFinish: 'admin-mfa-finish',
+
+    // Admin TOTP sign-in challenge (/sign-in/mfa-challenge)
+    adminChallengeCode: 'admin-mfa-code',
+    adminChallengeVerify: 'admin-mfa-verify',
+    adminChallengeRecovery: 'admin-mfa-recovery',
+    adminChallengeRecoveryVerify: 'admin-mfa-recovery-verify',
+
+    // Admin settings (/settings) — security cards + regenerate modal
+    adminSettingsMfaLink: 'admin-settings-mfa-link',
+    adminSettingsRecoveryCodes: 'admin-settings-recovery-codes',
+    adminRecoveryModal: 'admin-recovery-codes-modal',
+    adminRecoveryGenerate: 'admin-recovery-codes-generate',
+    adminRecoveryList: 'admin-recovery-codes-list',
+    adminRecoveryDone: 'admin-recovery-codes-done',
+
+    // Patient WebAuthn biometric challenge (/sign-in/biometric)
+    biometricPromptBtn: 'biometric-prompt-btn',
+    biometricUseRecoveryBtn: 'use-recovery-code-btn',
+    biometricRecoveryInput: 'recovery-code-input',
+    biometricRecoverySubmit: 'recovery-code-submit',
+    biometricSetupHere: 'biometric-setup-here',
+
+    // Patient recovery-codes panel (shown on first biometric setup / regen)
+    recoveryCodesList: 'recovery-codes-list',
+    recoveryCodesAck: 'recovery-codes-ack',
+    recoveryCodesContinue: 'recovery-codes-continue',
+
+    // Patient settings — device management + recovery regen. Device rows have
+    // no per-row testid; rename/remove are reached via their aria-labels
+    // ("Rename device" / "Remove device" / "Save name").
+    settingsEnableBiometric: 'settings-enable-biometric',
+    settingsAddAnotherDevice: 'settings-add-another-device',
+    settingsRenameInput: 'settings-rename-input',
+    settingsRegenerateCodes: 'settings-regenerate-codes',
+  },
+
+  // Patient notification settings (/settings)
+  //   frontend/src/components/cardio/NotificationSettings.tsx
+  notif: {
+    enable: 'settings-notif-enable',
+    disable: 'settings-notif-disable',
   },
 } as const
 

@@ -8,7 +8,6 @@ const fr: Record<TranslationKey, string> = {
   'nav.chat': 'Chat',
   'nav.provider': 'Équipe soignante',
   'nav.patients': 'Patients',
-  'nav.calls': 'Appels',
 
   // ─── Common ────────────────────────────────────────────────────────────────
   'common.save': 'Enregistrer',
@@ -18,6 +17,7 @@ const fr: Record<TranslationKey, string> = {
   'common.submit': 'Soumettre',
   'common.loading': 'Chargement...',
   'common.saving': 'Enregistrement...',
+  'common.refresh': 'Actualiser',
   'common.deleting': 'Suppression...',
   'common.delete': 'Supprimer',
   'common.edit': 'Modifier',
@@ -328,15 +328,11 @@ const fr: Record<TranslationKey, string> = {
   'provider.lastCheckin': 'Dernier Contrôle',
   'provider.alerts': 'Alertes',
   'provider.noPatients': 'Aucun patient trouvé',
-  'provider.scheduledCalls': 'Appels Programmés',
-  'provider.searchCalls': 'Rechercher des appels...',
   'provider.allStatuses': 'Tous les Statuts',
   'provider.upcoming': 'À venir',
   'provider.completed': 'Terminés',
   'provider.missed': 'Manqués',
   'provider.cancelled': 'Annulés',
-  'provider.noCalls': 'Aucun appel programmé trouvé',
-  'provider.scheduleCall': 'Programmer un Appel',
   'provider.reason': 'Motif',
   'provider.scheduledFor': 'Programmé pour',
   'provider.patientDetails': 'Détails du Patient',
@@ -350,7 +346,6 @@ const fr: Record<TranslationKey, string> = {
   'provider.bpTrend': 'Tendance TA',
   'provider.review': 'Examiner',
   'provider.requiresAction': 'Action Requise',
-  'provider.followUpScheduled': 'Suivi Programmé',
   'provider.addPatient': 'Ajouter Patient',
   'provider.careTeamAlert': 'Alerte de l\'Équipe Soignante',
   'provider.followUpRequired': 'Suivi requis dans les 24 heures',
@@ -362,7 +357,6 @@ const fr: Record<TranslationKey, string> = {
   'provider.audioFirstDesc': 'Utilisez la communication verbale et des aides visuelles lors de la prochaine visite. Le patient préfère les instructions orales aux instructions écrites.',
   'provider.sevenDayBpTrend': 'Tendance TA sur 7 Jours',
   'provider.markReviewed': 'Marquer comme Examiné',
-  'provider.scheduleFollowUp': 'Programmer un Appel de Suivi',
   'provider.loadingAlert': 'Chargement des détails de l\'alerte...',
   'provider.callDetails': 'Détails de l\'Appel',
   'provider.markCompleted': 'Marquer comme Terminé',
@@ -384,22 +378,6 @@ const fr: Record<TranslationKey, string> = {
   'provider.email': 'E-mail',
 
   // ─── Schedule Modal ─────────────────────────────────────────────────────────
-  'schedule.title': 'Programmer un Appel de Suivi',
-  'schedule.patient': 'Patient',
-  'schedule.callType': 'Type d\'Appel',
-  'schedule.phoneCall': 'Appel Téléphonique',
-  'schedule.videoCall': 'Appel Vidéo',
-  'schedule.selectDate': 'Sélectionner la Date',
-  'schedule.selectTime': 'Sélectionner l\'Heure',
-  'schedule.notes': 'Notes (optionnel)',
-  'schedule.notesPlaceholder': 'Ex. Discuter de l\'observance médicamenteuse, lectures de TA...',
-  'schedule.cancel': 'Annuler',
-  'schedule.confirm': 'Confirmer le Programme',
-  'schedule.scheduling': 'Programmation...',
-  'schedule.success': 'Suivi Programmé !',
-  'schedule.successMsg': 'Appel programmé. Patient notifié.',
-  'schedule.today': 'Aujourd\'hui',
-  'schedule.tomorrow': 'Demain',
 
   // ─── Provider Dashboard (stats + trend) ────────────────────────────────────
   'provider.dcWards': 'Quartiers 7 et 8, DC',
@@ -491,6 +469,7 @@ const fr: Record<TranslationKey, string> = {
   'register.adminAccessDenied': "Vous n'avez pas la permission d'accéder à l'application d'administration. Veuillez contacter votre administrateur.",
   'register.accountSuspended': "Ce compte a été suspendu. Veuillez contacter l'assistance.",
   'register.accountBlocked': "Ce compte a été bloqué. Veuillez contacter l'assistance.",
+  'register.accountDeactivated': "Ce compte a été désactivé. Veuillez contacter l'assistance pour le réactiver.",
   'register.showOtp': 'Afficher le code',
   'register.hideOtp': 'Masquer le code',
   'register.failedResend': 'Échec du renvoi du code.',
@@ -606,6 +585,12 @@ const fr: Record<TranslationKey, string> = {
   'home.ctaTitle': 'Voici à Quoi Ressemble la Boucle Fermée.',
   'home.ctaDesc': "Développé avec la DC Hospital Association. Déployé dans les communautés les plus à risque de Washington DC. Conçu pour atteindre les patients que la technologie de santé traditionnelle laisse de côté.",
   'home.ctaButton': 'À Propos du Programme',
+  // TODO i18n — placeholder English copy; translate when demo video is finalised.
+  'home.demoEyebrow': 'See it in action',
+  'home.demoTitle': 'A five-minute walkthrough',
+  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
+  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
+  'home.demoCloseLabel': 'Close demo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'NOTRE HISTOIRE',
@@ -694,6 +679,107 @@ const fr: Record<TranslationKey, string> = {
   'about.closingButton': 'En Savoir Plus sur le Programme',
   'about.closingFooter': 'Cardioplace  ·  En partenariat avec la DC Hospital Association  ·  Avril 2026',
 
+  // ─── User Management (phase/23) ────────────────────────────────────────────
+  'userManagement.nav': 'Utilisateurs',
+  'userManagement.headerPatients': 'Patients',
+  'userManagement.headerAll': 'Gestion des utilisateurs',
+  'userManagement.subtitle': 'Invitez, désactivez et gérez les comptes de votre cabinet.',
+  'userManagement.subtitleCoordinator': 'Invitez des patients et gérez leur accès.',
+  'userManagement.inviteSingleCta': '+ Inviter un utilisateur',
+  'userManagement.invitePatientCta': '+ Inviter un patient',
+  'userManagement.addMultipleCta': '+ Ajouter plusieurs',
+  'userManagement.uploadCsvCta': 'Importer un CSV',
+  'userManagement.search.placeholder': 'Rechercher par nom ou e-mail',
+  'userManagement.filter.all': 'Tous',
+  'userManagement.filter.patient': 'Patient',
+  'userManagement.filter.provider': 'Prestataire',
+  'userManagement.filter.medicalDirector': 'Directeur médical',
+  'userManagement.filter.coordinator': 'Coordinateur',
+  'userManagement.filter.ops': 'OPS',
+  'userManagement.filter.superAdmin': 'Super Admin',
+  'userManagement.filter.statusActive': 'Actif',
+  'userManagement.filter.statusPending': 'Invitation en attente',
+  'userManagement.filter.statusDeactivated': 'Désactivé',
+  'userManagement.field.name': 'Nom',
+  'userManagement.field.email': 'E-mail',
+  'userManagement.field.role': 'Rôle',
+  'userManagement.field.practice': 'Cabinet',
+  'userManagement.field.status': 'Statut',
+  'userManagement.field.invitedBy': 'Invité par',
+  'userManagement.field.invitedAt': 'Invité le',
+  'userManagement.field.actions': 'Actions',
+  'userManagement.field.reason': 'Motif (facultatif)',
+  'userManagement.placeholder.name': 'Jeanne Dupont',
+  'userManagement.placeholder.email': 'jeanne@exemple.com',
+  'userManagement.placeholder.practice': 'Sélectionner un cabinet',
+  'userManagement.placeholder.role': 'Sélectionner un rôle',
+  'userManagement.placeholder.reason': 'Note optionnelle conservée dans le journal d’audit.',
+  'userManagement.error.nameRequired': 'Le nom est obligatoire.',
+  'userManagement.error.emailRequired': 'L’e-mail est obligatoire.',
+  'userManagement.error.emailInvalid': 'Saisissez une adresse e-mail valide.',
+  'userManagement.error.roleRequired': 'Choisissez un rôle.',
+  'userManagement.error.practiceRequired': 'Choisissez un cabinet pour ce rôle.',
+  'userManagement.error.tooManyRows': 'Trop de lignes — maximum 500.',
+  'userManagement.error.csvParse': 'Impossible de lire le CSV — vérifiez qu’il s’agit d’un fichier .csv valide.',
+  'userManagement.modal.inviteTitle': 'Inviter un utilisateur',
+  'userManagement.modal.invitePatientTitle': 'Inviter un patient',
+  'userManagement.modal.inviteDescription': 'Un e-mail avec le lien de connexion sera envoyé. L’invitation expire dans 48 heures.',
+  'userManagement.modal.send': 'Envoyer l’invitation',
+  'userManagement.modal.sending': 'Envoi…',
+  'userManagement.modal.cancel': 'Annuler',
+  'userManagement.modal.deactivateTitle': 'Désactiver l’utilisateur ?',
+  'userManagement.modal.deactivateBody': 'L’accès sera révoqué immédiatement. Les données sont conservées et le compte pourra être réactivé. Ce n’est pas une suppression.',
+  'userManagement.modal.deactivateConfirm': 'Désactiver',
+  'userManagement.modal.closeTitle': 'Fermer définitivement {name} ?',
+  'userManagement.modal.closeBody': 'Cette action est irréversible. La personne perd l’accès immédiatement et son profil personnel est supprimé. Les dossiers médicaux sont conservés comme l’exige la loi.',
+  'userManagement.modal.closeConfirm': 'Fermer définitivement',
+  'userManagement.modal.closeGate': 'Saisissez l’ID pour confirmer : {displayId}',
+  'userManagement.modal.closeMismatch': 'L’ID ne correspond pas.',
+  'userManagement.field.confirmDisplayId': 'Confirmer l’ID',
+  'userManagement.action.closePermanently': 'Fermer définitivement',
+  'userManagement.action.menu': 'Actions du compte',
+  'userManagement.bulk.title': 'Inviter plusieurs utilisateurs',
+  'userManagement.bulk.titlePatients': 'Inviter plusieurs patients',
+  'userManagement.bulk.addRow': 'Ajouter une ligne',
+  'userManagement.bulk.removeRow': 'Supprimer la ligne',
+  'userManagement.bulk.sendAll': 'Envoyer toutes',
+  'userManagement.bulk.sendingAll': 'Envoi des invitations…',
+  'userManagement.bulk.collapse': 'Annuler',
+  'userManagement.bulk.atomicNotice': 'Soit toutes les lignes sont envoyées, soit aucune. Corrigez les erreurs et réessayez.',
+  'userManagement.csv.title': 'Invitation en masse via CSV',
+  'userManagement.csv.step1Title': 'Étape 1 · Télécharger le modèle',
+  'userManagement.csv.step1Body': 'Téléchargez le modèle CSV avec les en-têtes attendus.',
+  'userManagement.csv.step1Cta': 'Télécharger le modèle',
+  'userManagement.csv.step2Title': 'Étape 2 · Importer le fichier',
+  'userManagement.csv.step2Body': 'Importez un .csv contenant jusqu’à 500 lignes.',
+  'userManagement.csv.step2Cta': 'Choisir un CSV',
+  'userManagement.csv.step3Title': 'Étape 3 · Vérifier et envoyer',
+  'userManagement.csv.step3Body': 'Chaque ligne est validée avant la création des invitations.',
+  'userManagement.csv.sendN': 'Envoyer {count} invitations',
+  'userManagement.csv.cancel': 'Annuler',
+  'userManagement.csv.reupload': 'Choisir un autre fichier',
+  'userManagement.list.empty': 'Aucun utilisateur ne correspond à ces filtres.',
+  'userManagement.list.emptyCoordinator': 'Aucun patient pour l’instant. Envoyez votre première invitation.',
+  'userManagement.list.previous': 'Précédent',
+  'userManagement.list.next': 'Suivant',
+  'userManagement.list.pageOf': 'Page {page} sur {total}',
+  'userManagement.status.active': 'Actif',
+  'userManagement.status.blocked': 'Bloqué',
+  'userManagement.status.suspended': 'Suspendu',
+  'userManagement.status.deactivated': 'Désactivé',
+  'userManagement.status.invitePending': 'Invitation en attente',
+  'userManagement.action.deactivate': 'Désactiver',
+  'userManagement.action.reactivate': 'Réactiver',
+  'userManagement.action.resend': 'Renvoyer l’invitation',
+  'userManagement.action.revoke': 'Révoquer l’invitation',
+  'userManagement.toast.inviteSent': 'Invitation envoyée à {email}',
+  'userManagement.toast.bulkSent': '{count} invitations envoyées',
+  'userManagement.toast.resent': 'Invitation renvoyée',
+  'userManagement.toast.revoked': 'Invitation révoquée',
+  'userManagement.toast.deactivated': 'Utilisateur désactivé',
+  'userManagement.toast.reactivated': 'Utilisateur réactivé',
+  'userManagement.toast.dismiss': 'Fermer la notification',
+
   // ─── Language Names ────────────────────────────────────────────────────────
   'lang.en': 'English',
   'lang.es': 'Español',
@@ -706,8 +792,30 @@ const fr: Record<TranslationKey, string> = {
   'lang.ar': 'العربية',
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
-
-
+  'timeline.filter.readings': 'Relevés', // EN: Readings
+  'alerts.badge.thresholdPending':
+    'Seuil du patient en attente — définissez le seuil personnalisé et examinez l’alerte', // EN: Patient threshold pending — set personalized threshold and review alert
+  // --- Phase/practice-identity — sign-in selector + top-bar switcher chip ---
+  'signIn.selectPractice.title': 'Au nom de quel cabinet agissez-vous ?', // EN: Which practice are you acting as?
+  'signIn.selectPractice.intro':
+    'Vous êtes membre de plus d’un cabinet. Choisissez celui dans lequel vous travaillerez pour cette session — chaque action sera consignée sous le cabinet choisi. Vous pourrez changer plus tard depuis la barre supérieure.', // EN: You're a member of more than one practice...
+  'signIn.selectPractice.continue': 'Continuer', // EN: Continue
+  'signIn.selectPractice.signingIn': 'Connexion en cours…', // EN: Signing in…
+  'signIn.selectPractice.contactAdmin':
+    'Votre cabinet n’apparaît pas ? Déconnectez-vous et contactez votre administrateur.', // EN: Not seeing the right practice?...
+  'signIn.selectPractice.error': 'Impossible de sélectionner le cabinet', // EN: Unable to select practice
+  'signIn.selectPractice.expired.title': 'Session de connexion expirée', // EN: Sign-in session expired
+  'signIn.selectPractice.expired.body':
+    'Pour votre sécurité, la sélection du cabinet a une fenêtre de 5 minutes. Veuillez vous reconnecter pour continuer.', // EN: For your security...5-minute window.
+  'signIn.selectPractice.expired.back': 'Retour à la connexion', // EN: Back to sign in
+  'signIn.zeroPractice.title': 'Aucun cabinet associé', // EN: No practice membership
+  'signIn.zeroPractice.body':
+    'Vous n’êtes encore membre d’aucun cabinet. Contactez votre administrateur pour être ajouté avant de vous connecter.', // EN: You aren't a member of any practice yet...
+  'topBar.actingAs.label': 'Au nom de', // EN: Acting as
+  'topBar.actingAs.switchTo': 'Changer de cabinet', // EN: Switch practice
+  'topBar.actingAs.switching': 'Changement en cours…', // EN: Switching…
+  'topBar.actingAs.switched': 'Vous agissez désormais au nom de', // EN: Now acting as
+  'topBar.actingAs.current': 'Actuel', // EN: Current
 };
 
 export default fr;

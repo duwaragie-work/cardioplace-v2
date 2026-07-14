@@ -51,6 +51,7 @@ import {
   type PatientMedicationDto,
   type CareTeamDto,
 } from '@/lib/services/intake.service';
+import CaregiversCard from '@/components/cardio/CaregiversCard';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -64,7 +65,7 @@ const REJECTABLE_FIELD_LABELS: Record<string, string> = {
   heightCm: 'Height',
   isPregnant: 'Pregnancy status',
   pregnancyDueDate: 'Pregnancy due date',
-  historyPreeclampsia: 'History of preeclampsia',
+  historyHDP: 'History of preeclampsia',
   hasHeartFailure: 'Heart failure',
   heartFailureType: 'Heart failure type',
   hasAFib: 'Atrial fibrillation',
@@ -141,12 +142,32 @@ type CommPref = 'TEXT_FIRST' | 'AUDIO_FIRST' | null;
 
 interface AuthProfileDto {
   id: string;
+  // Permanent public-facing identifier (CP-PAT-...). Shown on the
+  // account screen so patients can quote it on support calls. See
+  // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+  displayId: string | null;
   email: string | null;
   name: string | null;
   dateOfBirth: string | null;
   timezone: string | null;
   communicationPreference: CommPref;
   preferredLanguage: string | null;
+  // N8 (2026-07-13) — Reminder & Engagement preferences. All "HH:mm" 24-hour
+  // in patient-local wall clock. Backend defaults kick in if the row was
+  // created before N1, so these come back as strings even for pre-existing
+  // patients.
+  reminderTime: string | null;
+  quietHoursStart: string | null;
+  quietHoursEnd: string | null;
+}
+
+/**
+ * Formats a canonical display ID ("CPPATK8M2R4N7") with hyphens
+ * ("CP-PAT-K8M2R4N-7"). Mirrors DisplayIdService.formatForDisplay.
+ */
+function formatDisplayId(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value;
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`;
 }
 
 async function fetchAuthProfile(): Promise<AuthProfileDto | null> {
@@ -159,6 +180,9 @@ async function patchAuthProfile(payload: {
   name?: string | null;
   dateOfBirth?: string | null;
   communicationPreference?: CommPref;
+  reminderTime?: string;
+  quietHoursStart?: string;
+  quietHoursEnd?: string;
 }): Promise<AuthProfileDto> {
   // Backend's PATCH only returns the patched fields (no email, no id), so
   // we re-fetch the full GET after a successful write to keep the UI state
@@ -266,7 +290,7 @@ function SectionCard({
             {icon}
           </div>
           <h2
-            className="text-[15px] font-bold truncate"
+            className="text-[0.9375rem] font-bold truncate"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {title}
@@ -277,7 +301,7 @@ function SectionCard({
           <Link
             href={editHref}
             data-testid={editTestId}
-            className="shrink-0 inline-flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-bold cursor-pointer transition hover:opacity-85"
+            className="shrink-0 inline-flex items-center gap-1 h-8 px-3 rounded-full text-[0.75rem] font-bold cursor-pointer transition hover:opacity-85"
             style={{
               backgroundColor: 'var(--brand-primary-purple-light)',
               color: 'var(--brand-primary-purple)',
@@ -292,7 +316,7 @@ function SectionCard({
             type="button"
             data-testid={editTestId}
             onClick={onEdit}
-            className="shrink-0 inline-flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-bold cursor-pointer transition hover:opacity-85"
+            className="shrink-0 inline-flex items-center gap-1 h-8 px-3 rounded-full text-[0.75rem] font-bold cursor-pointer transition hover:opacity-85"
             style={{
               backgroundColor: 'var(--brand-primary-purple-light)',
               color: 'var(--brand-primary-purple)',
@@ -320,7 +344,7 @@ function VerifiedBadge({ status }: { status?: string | null }) {
   if (status === 'VERIFIED') {
     return (
       <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
         style={{
           backgroundColor: 'var(--brand-success-green-light)',
           color: 'var(--brand-success-green)',
@@ -334,7 +358,7 @@ function VerifiedBadge({ status }: { status?: string | null }) {
   if (status === 'CORRECTED') {
     return (
       <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
         style={{
           backgroundColor: 'var(--brand-accent-teal-light)',
           color: 'var(--brand-accent-teal)',
@@ -347,7 +371,7 @@ function VerifiedBadge({ status }: { status?: string | null }) {
   }
   return (
     <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
       style={{
         backgroundColor: 'var(--brand-warning-amber-light)',
         color: 'var(--brand-warning-amber-text)',
@@ -365,7 +389,7 @@ function MedVerifiedBadge({ status }: { status: PatientMedicationDto['verificati
   if (status === 'REJECTED') {
     return (
       <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
         style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
       >
         <ShieldAlert aria-hidden="true" className="w-3 h-3" />
@@ -376,7 +400,7 @@ function MedVerifiedBadge({ status }: { status: PatientMedicationDto['verificati
   if (status === 'HOLD') {
     return (
       <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
         style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)' }}
       >
         <Clock aria-hidden="true" className="w-3 h-3" />
@@ -390,11 +414,11 @@ function MedVerifiedBadge({ status }: { status: PatientMedicationDto['verificati
 function Row({ label, value, testId }: { label: string; value: React.ReactNode; testId?: string }) {
   return (
     <div data-testid={testId} className="flex items-baseline justify-between gap-3 py-2">
-      <span className="text-[12.5px] shrink-0" style={{ color: 'var(--brand-text-muted)' }}>
+      <span className="text-[0.78125rem] shrink-0" style={{ color: 'var(--brand-text-muted)' }}>
         {label}
       </span>
       <span
-        className="text-[13.5px] font-semibold text-right min-w-0 flex-1"
+        className="text-[0.84375rem] font-semibold text-right min-w-0 flex-1"
         style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
       >
         {value}
@@ -431,6 +455,15 @@ function PersonalInfoModal({
   onSaved: (next: AuthProfileDto) => void;
 }) {
   const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const [name, setName] = useState(current.name ?? '');
   const [commPref, setCommPref] = useState<CommPref>(current.communicationPreference);
   const [saving, setSaving] = useState(false);
@@ -486,7 +519,7 @@ function PersonalInfoModal({
           style={{ borderBottom: '1px solid var(--brand-border)' }}
         >
           <div className="flex items-center gap-2">
-            <h2 id="personal-info-title" className="text-[16px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+            <h2 id="personal-info-title" className="text-[1rem] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
               {t('profile.editPersonalInfo')}
             </h2>
             <AudioButton size="sm" text={t('profile.editPersonalInfo')} />
@@ -504,7 +537,7 @@ function PersonalInfoModal({
 
         <div className="flex-1 overflow-y-auto thin-scrollbar p-5 space-y-4">
           <div>
-            <label htmlFor="profile-edit-name" className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
+            <label htmlFor="profile-edit-name" className="block text-[0.75rem] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
               {t('profile.nameLabel')}
             </label>
             <div className="flex items-center gap-2">
@@ -514,7 +547,7 @@ function PersonalInfoModal({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t('profile.namePlaceholder')}
-                className="flex-1 h-11 px-3 rounded-xl border text-[14px] outline-none"
+                className="flex-1 h-11 px-3 rounded-xl border text-[0.875rem] outline-none"
                 style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
               />
               <MicButton
@@ -525,7 +558,7 @@ function PersonalInfoModal({
           </div>
 
           <div>
-            <label htmlFor="profile-edit-email" className="block text-[12px] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
+            <label htmlFor="profile-edit-email" className="block text-[0.75rem] font-semibold mb-1.5" style={{ color: 'var(--brand-text-secondary)' }}>
               {t('profile.email')} <span className="font-normal" style={{ color: 'var(--brand-text-muted)' }}>{t('profile.emailCannotChange')}</span>
             </label>
             <input
@@ -533,7 +566,7 @@ function PersonalInfoModal({
               type="email"
               value={current.email ?? ''}
               readOnly
-              className="w-full h-11 px-3 rounded-xl border text-[14px] cursor-not-allowed"
+              className="w-full h-11 px-3 rounded-xl border text-[0.875rem] cursor-not-allowed"
               style={{
                 borderColor: 'var(--brand-border)',
                 color: 'var(--brand-text-muted)',
@@ -543,7 +576,7 @@ function PersonalInfoModal({
           </div>
 
           <div>
-            <label className="block text-[12px] font-semibold mb-2" style={{ color: 'var(--brand-text-secondary)' }}>
+            <label className="block text-[0.75rem] font-semibold mb-2" style={{ color: 'var(--brand-text-secondary)' }}>
               {t('profile.commPrefLabel')}
             </label>
             <div className="grid grid-cols-3 gap-2">
@@ -559,7 +592,7 @@ function PersonalInfoModal({
                     type="button"
                     data-testid={`profile-comm-preference-${opt.value ?? 'null'}`}
                     onClick={() => setCommPref(opt.value)}
-                    className="h-10 rounded-xl border-2 text-[12.5px] font-semibold transition cursor-pointer"
+                    className="h-10 rounded-xl border-2 text-[0.78125rem] font-semibold transition cursor-pointer"
                     style={{
                       borderColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-border)',
                       backgroundColor: active ? 'var(--brand-primary-purple-light)' : 'transparent',
@@ -580,7 +613,7 @@ function PersonalInfoModal({
         >
           {error && (
             <p
-              className="text-[12.5px] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
+              className="text-[0.78125rem] font-semibold text-center mb-2 px-3 py-1.5 rounded-lg"
               style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
             >
               {error}
@@ -636,6 +669,269 @@ function ProfileSkeleton() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// N8 (2026-07-13) — Reminder & Engagement modal
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 30-min slot options in patient-local wall-clock. reminderTime is capped
+// at 21:00 per spec §N8 ("6:00 AM – 9:00 PM") — the last slot MUST be 21:00,
+// no 21:30 tail. Quiet-hours pickers span the full day (00:00–23:30) so
+// users can carve any window; `includeHalfAtEnd=true` emits the trailing
+// :30 slot at endHour.
+function halfHourSlots(startHour: number, endHour: number, includeHalfAtEnd = true): string[] {
+  const out: string[] = [];
+  for (let h = startHour; h <= endHour; h++) {
+    out.push(`${String(h).padStart(2, '0')}:00`);
+    if (h < endHour || includeHalfAtEnd) {
+      out.push(`${String(h).padStart(2, '0')}:30`);
+    }
+  }
+  return out;
+}
+// Reminder cap: 06:00 → 21:00 inclusive, NO 21:30 tail (spec §N8).
+const REMINDER_TIME_OPTIONS = halfHourSlots(6, 21, false);
+// Quiet hours: 00:00 → 23:30 inclusive.
+const QUIET_HOURS_OPTIONS = halfHourSlots(0, 23, true);
+
+function formatTimeForDisplay(hhmm: string | null | undefined, fallback: string): string {
+  if (!hhmm) return fallback;
+  return hhmm;
+}
+
+function RemindersModal({
+  current,
+  onClose,
+  onSaved,
+}: {
+  current: AuthProfileDto;
+  onClose: () => void;
+  onSaved: (next: AuthProfileDto) => void;
+}) {
+  const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const [reminderTime, setReminderTime] = useState(current.reminderTime ?? '09:00');
+  const [quietStart, setQuietStart] = useState(current.quietHoursStart ?? '22:00');
+  const [quietEnd, setQuietEnd] = useState(current.quietHoursEnd ?? '07:00');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const dirty =
+    reminderTime !== (current.reminderTime ?? '09:00') ||
+    quietStart !== (current.quietHoursStart ?? '22:00') ||
+    quietEnd !== (current.quietHoursEnd ?? '07:00');
+
+  async function save() {
+    if (!dirty || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      const next = await patchAuthProfile({
+        reminderTime,
+        quietHoursStart: quietStart,
+        quietHoursEnd: quietEnd,
+      });
+      onSaved(next);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('profile.saveError'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}
+    >
+      <div className="absolute inset-0" onClick={onClose} />
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reminders-title"
+        initial={{ y: 60, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 60, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+        className="relative w-full sm:max-w-md bg-white sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"
+        style={{ maxHeight: '90dvh', boxShadow: '0 8px 48px rgba(0,0,0,0.18)' }}
+      >
+        <div
+          className="shrink-0 flex items-center justify-between px-5 py-4"
+          style={{ borderBottom: '1px solid var(--brand-border)' }}
+        >
+          <div className="flex items-center gap-2">
+            <h2
+              id="reminders-title"
+              className="text-[1rem] font-bold"
+              style={{ color: 'var(--brand-text-primary)' }}
+            >
+              {t('profile.reminders.editHeading')}
+            </h2>
+            <AudioButton size="sm" text={t('profile.reminders.editHeading')} />
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-11 h-11 rounded-full flex items-center justify-center cursor-pointer"
+            style={{ backgroundColor: 'var(--brand-background)' }}
+            aria-label={t('accessibility.closeDialog')}
+          >
+            <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto thin-scrollbar p-5 space-y-4">
+          <div>
+            <label
+              htmlFor="reminder-time"
+              className="block text-[0.75rem] font-semibold mb-1.5"
+              style={{ color: 'var(--brand-text-secondary)' }}
+            >
+              {t('profile.reminders.dailyTime')}
+            </label>
+            <select
+              id="reminder-time"
+              data-testid="reminder-time-select"
+              value={reminderTime}
+              onChange={(e) => setReminderTime(e.target.value)}
+              className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none bg-white"
+              style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+            >
+              {REMINDER_TIME_OPTIONS.map((slot) => (
+                <option key={slot} value={slot}>
+                  {slot}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Gap 5 (2026-07-13) — single "Quiet hours…" section header per
+              spec §N8, with two sub-labelled pickers underneath and the
+              emergency disclaimer following the group. */}
+          <div className="space-y-3">
+            <div
+              className="text-[0.75rem] font-semibold"
+              style={{ color: 'var(--brand-text-secondary)' }}
+            >
+              {t('profile.reminders.quietHoursHeading')}
+            </div>
+
+            <div>
+              <label
+                htmlFor="quiet-start"
+                className="block text-[0.75rem] font-medium mb-1.5"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('profile.reminders.startLabel')}
+              </label>
+              <select
+                id="quiet-start"
+                data-testid="quiet-start-select"
+                value={quietStart}
+                onChange={(e) => setQuietStart(e.target.value)}
+                className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none bg-white"
+                style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+              >
+                {QUIET_HOURS_OPTIONS.map((slot) => (
+                  <option key={slot} value={slot}>
+                    {slot}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="quiet-end"
+                className="block text-[0.75rem] font-medium mb-1.5"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('profile.reminders.endLabel')}
+              </label>
+              <select
+                id="quiet-end"
+                data-testid="quiet-end-select"
+                value={quietEnd}
+                onChange={(e) => setQuietEnd(e.target.value)}
+                className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none bg-white"
+                style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+              >
+                {QUIET_HOURS_OPTIONS.map((slot) => (
+                  <option key={slot} value={slot}>
+                    {slot}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Emergency-alerts disclaimer — mandatory per spec §N8. Bold + small
+              so it reads as safety information, not marketing copy. */}
+          <div
+            className="rounded-xl p-3 text-[0.75rem] font-semibold"
+            style={{
+              backgroundColor: 'var(--brand-warning-amber-bg, #FEF3C7)',
+              color: 'var(--brand-warning-amber-text, #92400E)',
+            }}
+          >
+            {t('profile.reminders.emergencyDisclaimer')}
+          </div>
+
+          {error && (
+            <div
+              className="text-[0.75rem] font-semibold"
+              style={{ color: 'var(--brand-error, #DC2626)' }}
+            >
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div
+          className="shrink-0 px-5 py-3 flex items-center justify-end gap-2"
+          style={{ borderTop: '1px solid var(--brand-border)' }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-11 px-4 rounded-xl text-[0.875rem] font-semibold cursor-pointer"
+            style={{ color: 'var(--brand-text-muted)' }}
+          >
+            {t('profile.reminders.cancelButton')}
+          </button>
+          <button
+            type="button"
+            data-testid="reminders-save-button"
+            onClick={save}
+            disabled={!dirty || saving}
+            className="h-11 px-5 rounded-xl text-[0.875rem] font-bold text-white cursor-pointer disabled:cursor-not-allowed"
+            style={{
+              backgroundColor: dirty
+                ? 'var(--brand-primary, #0891B2)'
+                : 'var(--brand-text-muted, #64748B)',
+              opacity: dirty && !saving ? 1 : 0.6,
+            }}
+          >
+            {saving ? t('profile.reminders.savingButton') : t('profile.reminders.saveButton')}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main page
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -650,6 +946,8 @@ export default function ProfilePage() {
   const [authProfile, setAuthProfile] = useState<AuthProfileDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPersonalEdit, setShowPersonalEdit] = useState(false);
+  // N8 (2026-07-13) — Reminder & Engagement preferences modal.
+  const [showRemindersEdit, setShowRemindersEdit] = useState(false);
 
   // Match the right column's height to the left column's natural height.
   // CSS grid alone always sizes the row to the taller side; we want the
@@ -733,7 +1031,7 @@ export default function ProfilePage() {
         <div className="flex items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-3 min-w-0">
             <div
-              className="shrink-0 rounded-2xl flex items-center justify-center text-white font-bold text-[18px] sm:text-[20px]"
+              className="shrink-0 rounded-2xl flex items-center justify-center text-white font-bold text-[1.125rem] sm:text-[1.25rem]"
               style={{
                 width: 56,
                 height: 56,
@@ -748,7 +1046,7 @@ export default function ProfilePage() {
               <div className="flex items-center gap-2">
                 <h1
                   data-testid="profile-name"
-                  className="text-[20px] sm:text-[22px] font-bold leading-tight truncate"
+                  className="text-[1.25rem] sm:text-[1.375rem] font-bold leading-tight truncate"
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
                   {user?.name ?? t('profile.yourProfile')}
@@ -758,14 +1056,14 @@ export default function ProfilePage() {
                   text={`${user?.name ?? t('profile.yourProfile')}. ${user?.email ?? ''}`}
                 />
               </div>
-              <p className="text-[12.5px] truncate" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.78125rem] truncate" style={{ color: 'var(--brand-text-muted)' }}>
                 {user?.email ?? '—'}
               </p>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                 {profile && <VerifiedBadge status={verificationStatus} />}
                 {!profile && (
                   <span
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-bold"
                     style={{
                       backgroundColor: 'var(--brand-warning-amber-light)',
                       color: 'var(--brand-warning-amber-text)',
@@ -783,7 +1081,7 @@ export default function ProfilePage() {
             data-testid="profile-signout"
             type="button"
             onClick={logout}
-            className="shrink-0 inline-flex items-center gap-1.5 h-10 px-3 sm:px-4 rounded-full font-bold text-[12.5px] cursor-pointer transition hover:opacity-85"
+            className="shrink-0 inline-flex items-center gap-1.5 h-10 px-3 sm:px-4 rounded-full font-bold text-[0.78125rem] cursor-pointer transition hover:opacity-85"
             style={{
               backgroundColor: 'var(--brand-alert-red-light)',
               color: 'var(--brand-alert-red-text)',
@@ -804,7 +1102,7 @@ export default function ProfilePage() {
         {!profile && (
           <Link
             href="/clinical-intake"
-            className="block rounded-2xl p-4 text-center text-white font-bold text-[14px]"
+            className="block rounded-2xl p-4 text-center text-white font-bold text-[0.875rem]"
             style={{
               background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
               boxShadow: 'var(--brand-shadow-button)',
@@ -849,7 +1147,7 @@ export default function ProfilePage() {
               />
             </div>
           ) : (
-            <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+            <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>
               {t('profile.noCareTeam')}
             </p>
           )}
@@ -882,11 +1180,53 @@ export default function ProfilePage() {
             >
               <Row label={t('profile.nameLabel')} value={authProfile?.name || t('profile.notSet')} />
               <Row label={t('profile.email')} value={authProfile?.email ?? '—'} />
+              {authProfile?.displayId ? (
+                <Row
+                  label="Cardioplace ID"
+                  value={
+                    <span
+                      className="font-mono tracking-tight select-all"
+                      data-testid="profile-display-id"
+                      title="Quote this on support calls — it's permanent and unique to your account"
+                    >
+                      {formatDisplayId(authProfile.displayId)}
+                    </span>
+                  }
+                />
+              ) : null}
               <Row
                 label={t('profile.commPrefLabel')}
                 value={commPrefLabel(authProfile?.communicationPreference ?? null, t)}
               />
             </SectionCard>
+
+            {/* N8 (2026-07-13) — Reminder & Engagement preferences. */}
+            <SectionCard
+              title={t('profile.reminders.heading')}
+              icon={<Clock className="w-4 h-4" />}
+              onEdit={authProfile ? () => setShowRemindersEdit(true) : undefined}
+              editTestId="profile-reminders-edit-button"
+              audioText={[
+                `${t('profile.reminders.heading')}.`,
+                `${t('profile.reminders.dailyTime')}: ${formatTimeForDisplay(authProfile?.reminderTime, '09:00')}.`,
+                `${t('profile.reminders.quietHoursStart')}: ${formatTimeForDisplay(authProfile?.quietHoursStart, '22:00')}.`,
+                `${t('profile.reminders.quietHoursEnd')}: ${formatTimeForDisplay(authProfile?.quietHoursEnd, '07:00')}.`,
+              ].join(' ')}
+            >
+              <Row
+                label={t('profile.reminders.dailyTime')}
+                value={formatTimeForDisplay(authProfile?.reminderTime, '09:00')}
+              />
+              <Row
+                label={t('profile.reminders.quietHoursStart')}
+                value={formatTimeForDisplay(authProfile?.quietHoursStart, '22:00')}
+              />
+              <Row
+                label={t('profile.reminders.quietHoursEnd')}
+                value={formatTimeForDisplay(authProfile?.quietHoursEnd, '07:00')}
+              />
+            </SectionCard>
+
             <SectionCard
               title={t('profile.aboutYou')}
               icon={<Info className="w-4 h-4" />}
@@ -927,7 +1267,7 @@ export default function ProfilePage() {
                   if (profile?.isPregnant && profile?.pregnancyDueDate) {
                     parts.push(`${t('profile.dueDate')}: ${formatDate(profile.pregnancyDueDate)}.`);
                   }
-                  if (profile?.historyPreeclampsia) {
+                  if (profile?.historyHDP) {
                     parts.push(`${t('intake.a2.preeclampsiaTitle')}: ${t('common.yes')}.`);
                   }
                   return parts.join(' ');
@@ -950,7 +1290,7 @@ export default function ProfilePage() {
                     value={profile?.pregnancyDueDate ? formatDate(profile.pregnancyDueDate) : t('profile.notSet')}
                   />
                 )}
-                {profile?.historyPreeclampsia && (
+                {profile?.historyHDP && (
                   <Row label={t('intake.a2.preeclampsiaTitle')} value={t('common.yes')} />
                 )}
               </SectionCard>
@@ -979,7 +1319,7 @@ export default function ProfilePage() {
               })()}
             >
               {onConditions.length === 0 && !profile?.diagnosedHypertension ? (
-                <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+                <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>
                   {t('profile.noConditions')}
                 </p>
               ) : (
@@ -995,7 +1335,7 @@ export default function ProfilePage() {
                         {c.kind === 'af' && <Activity className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
                         {c.kind === 'cad' && <Stethoscope className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
                         {(c.kind === 'hcm' || c.kind === 'dcm') && <Sparkles className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />}
-                        <span className="text-[13px] font-semibold" style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}>
+                        <span className="text-[0.8125rem] font-semibold" style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}>
                           {c.label}
                         </span>
                       </div>
@@ -1009,7 +1349,7 @@ export default function ProfilePage() {
                   )}
                   {profile?.diagnosedHypertension && (
                     <div className="flex items-center justify-between gap-2 flex-wrap pt-2" style={{ borderTop: '1px solid var(--brand-border)' }}>
-                      <span className="text-[13px] font-semibold min-w-0" style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}>
+                      <span className="text-[0.8125rem] font-semibold min-w-0" style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}>
                         {t('profile.diagnosedHtn')}
                       </span>
                       <div className="shrink-0">
@@ -1066,7 +1406,7 @@ export default function ProfilePage() {
             })()}
           >
             {activeMeds.length === 0 ? (
-              <p className="text-[13px]" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.8125rem]" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('profile.noMedications')}
               </p>
             ) : (
@@ -1097,7 +1437,7 @@ export default function ProfilePage() {
                       {/* Row 1: name (truncates to single line) + verified badge */}
                       <div className="flex items-center justify-between gap-2 min-w-0">
                         <p
-                          className="text-[13.5px] font-bold leading-tight truncate min-w-0 flex-1"
+                          className="text-[0.84375rem] font-bold leading-tight truncate min-w-0 flex-1"
                           style={{ color: 'var(--brand-text-primary)' }}
                           title={m.drugName}
                         >
@@ -1118,7 +1458,7 @@ export default function ProfilePage() {
                           matchToCatalog(m.drugName)?.purpose;
                         return purposeLine ? (
                           <p
-                            className="text-[11.5px] mt-0.5 leading-snug"
+                            className="text-[0.71875rem] mt-0.5 leading-snug"
                             style={{ color: 'var(--brand-text-secondary)' }}
                           >
                             {purposeLine}
@@ -1129,14 +1469,14 @@ export default function ProfilePage() {
                       <div className="mt-1 flex items-center gap-2 flex-wrap">
                         {m.isCombination && (
                           <span
-                            className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider"
+                            className="shrink-0 text-[0.625rem] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider"
                             style={{ backgroundColor: 'var(--brand-accent-teal)', color: 'white' }}
                           >
                             {t('profile.combinationPill')}
                           </span>
                         )}
                         <p
-                          className="text-[12px]"
+                          className="text-[0.75rem]"
                           style={{ color: 'var(--brand-text-muted)' }}
                         >
                           {frequencyLabel(m.frequency, t)}
@@ -1152,6 +1492,9 @@ export default function ProfilePage() {
         </div>
         {/* /grid */}
 
+        {/* Gap 5 — caregiver contacts + consent (full width below the grid) */}
+        <CaregiversCard />
+
         {/* Re-check prompt — when the care team rejected specific fields, name
             them so the patient knows exactly what to update. Falls back to the
             generic "reviewing changes" reminder for a plain-unverified profile. */}
@@ -1165,7 +1508,7 @@ export default function ProfilePage() {
             }}
           >
             <ShieldAlert className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
-            <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+            <p className="text-[0.78125rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
               {t('profile.fieldsNeedRecheck').replace('{fields}', rejectedFieldLabels.join(', '))}
             </p>
           </div>
@@ -1178,7 +1521,7 @@ export default function ProfilePage() {
             }}
           >
             <Clock className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-warning-amber-text)' }} />
-            <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+            <p className="text-[0.78125rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
               {t('profile.reviewingChanges')}
             </p>
           </div>
@@ -1196,6 +1539,14 @@ export default function ProfilePage() {
               // greeting update immediately, without waiting for a reload.
               updateUser({ name: next.name ?? undefined });
             }}
+          />
+        )}
+        {/* N8 (2026-07-13) — Reminder & Engagement preferences modal. */}
+        {showRemindersEdit && authProfile && (
+          <RemindersModal
+            current={authProfile}
+            onClose={() => setShowRemindersEdit(false)}
+            onSaved={(next) => setAuthProfile(next)}
           />
         )}
       </AnimatePresence>

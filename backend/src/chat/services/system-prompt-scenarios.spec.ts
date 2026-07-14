@@ -18,12 +18,15 @@ const DOB = new Date('1980-06-15T00:00:00Z')
 function profile(
   over: Partial<ResolvedContext['profile']> = {},
 ): ResolvedContext['profile'] {
+  // Cast at the end — spreading `over` (Partial) makes every overridable
+  // field appear as `T | undefined` to TS even when an explicit default
+  // precedes the spread. Defaults above guarantee the runtime shape.
   return {
     gender: 'FEMALE',
     heightCm: 165,
     isPregnant: false,
     pregnancyDueDate: null,
-    historyPreeclampsia: false,
+    historyHDP: false,
     hasHeartFailure: false,
     heartFailureType: 'NOT_APPLICABLE',
     resolvedHFType: 'NOT_APPLICABLE',
@@ -33,12 +36,13 @@ function profile(
     hasDCM: false,
     hasTachycardia: false,
     hasBradycardia: false,
+    hasAorticStenosis: false,
     diagnosedHypertension: false,
     verificationStatus: 'VERIFIED',
     verifiedAt: NOW,
     lastEditedAt: NOW,
     ...over,
-  }
+  } as ResolvedContext['profile']
 }
 
 function med(over: Partial<ContextMedication> = {}): ContextMedication {
@@ -80,6 +84,7 @@ function ctx(over: {
     triggerPregnancyContraindicationCheck: over.profile?.isPregnant ?? false,
     enrolledAt: null,
     practiceName: null,
+    patientName: null,
     resolvedAt: NOW,
   }
 }
@@ -141,7 +146,7 @@ describe('SystemPromptService — end-to-end rendering scenarios', () => {
       patientContext({
         patientName: 'Priya Menon',
         resolvedContext: ctx({
-          profile: { isPregnant: true, historyPreeclampsia: true },
+          profile: { isPregnant: true, historyHDP: true },
           contextMeds: [med({ drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR' })],
         }),
         activeAlerts: [
@@ -322,7 +327,7 @@ describe('SystemPromptService — end-to-end rendering scenarios', () => {
     )
     expect(out).toContain('fewer than 7 readings')
     expect(out).toContain('3 total')
-    expect(out).toContain('personalization begins after Day 3')
+    expect(out).toContain('personalization begins after 7 readings')
   })
 
   it('Scenario 8 — Alert cap: 8 alerts provided → renders all (capping is caller-side)', () => {
@@ -372,5 +377,32 @@ describe('SystemPromptService — end-to-end rendering scenarios', () => {
     expect(out).not.toContain('Provider-set')
     // Guardrails still present
     expect(out).toContain('Never suggest starting, stopping')
+  })
+
+  // Bug 58 — recent-entries weight rendering must convert kg → lbs before
+  // appending the "lbs" label. Pre-fix this line emitted the raw kg number
+  // (e.g. 226.8) with a hardcoded " lbs" label — so a patient who saved
+  // 500 lbs (stored as 226.8 kg) saw "Weight: 226.8 lbs" in the chat
+  // context block. The chart + popup display correctly because they
+  // convert; the prompt did not.
+  it('Scenario 11 — Bug 58 — recent-entry weight is converted kg → lbs before the "lbs" label', () => {
+    // 226.8 kg ≈ 500 lbs (patient saved 500 lbs, backend stored 226.8 kg).
+    const out = render(
+      patientContext({
+        recentEntries: [
+          {
+            measuredAt: new Date('2026-06-12T13:00:00Z'),
+            systolicBP: 138,
+            diastolicBP: 85,
+            weight: 226.8,
+            medicationTaken: true,
+            otherSymptoms: [],
+          },
+        ],
+      }),
+    )
+    // Must render 500 lbs (the patient's input), NOT 226.8 lbs (raw kg).
+    expect(out).toMatch(/Weight: 500(\.\d+)? lbs/)
+    expect(out).not.toMatch(/Weight: 226\.8 lbs/)
   })
 })

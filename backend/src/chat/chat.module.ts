@@ -10,9 +10,10 @@ import { PrismaModule } from '../prisma/prisma.module.js'
 import { GeminiModule } from '../gemini/gemini.module.js'
 import { DailyJournalModule } from '../daily_journal/daily_journal.module.js'
 import { OcrModule } from '../ocr/ocr.module.js'
+import { IntakeModule } from '../intake/intake.module.js'
 
 @Module({
-  imports: [PrismaModule, GeminiModule, DailyJournalModule, OcrModule],
+  imports: [PrismaModule, GeminiModule, DailyJournalModule, OcrModule, IntakeModule],
   controllers: [ChatController],
   providers: [
     ChatService,

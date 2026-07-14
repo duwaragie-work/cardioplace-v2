@@ -11,13 +11,16 @@ import {
   Req,
 } from '@nestjs/common'
 import type { Request } from 'express'
+import { ActiveContext } from '../auth/decorators/active-context.decorator.js'
 import { Roles } from '../auth/decorators/roles.decorator.js'
 import { PatientAccessService } from '../common/patient-access.service.js'
 import { UserRole } from '../generated/prisma/enums.js'
 import { UpsertThresholdDto } from './dto/upsert-threshold.dto.js'
 import { ThresholdService } from './threshold.service.js'
 
-type AuthedReq = Request & { user: { id: string; roles: UserRole[] } }
+type AuthedReq = Request & {
+  user: { id: string; roles: UserRole[]; activePracticeId?: string | null }
+}
 
 // Thresholds are a clinical directive per CLINICAL_SPEC.
 //   • READ — open to all four admin roles (HEALPLACE_OPS sees the configured
@@ -47,11 +50,13 @@ export class ThresholdController {
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Body() dto: UpsertThresholdDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.service.create(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
       dto,
+      ctx,
     )
   }
 
@@ -61,7 +66,7 @@ export class ThresholdController {
     @Param('userId') patientUserId: string,
   ) {
     await this.access.assertCanAccessPatient(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
     )
     return this.service.findByPatient(patientUserId)
@@ -73,11 +78,13 @@ export class ThresholdController {
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
     @Body() dto: UpsertThresholdDto,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.service.update(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
       dto,
+      ctx,
     )
   }
 
@@ -89,10 +96,12 @@ export class ThresholdController {
   remove(
     @Req() req: AuthedReq,
     @Param('userId') patientUserId: string,
+    @ActiveContext() ctx: { practiceId: string | null },
   ) {
     return this.service.delete(
-      { id: req.user.id, roles: req.user.roles },
+      { id: req.user.id, roles: req.user.roles, activePracticeId: req.user.activePracticeId },
       patientUserId,
+      ctx,
     )
   }
 }

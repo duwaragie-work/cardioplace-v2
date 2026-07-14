@@ -1,9 +1,10 @@
 # Clinical Specification — Rule-Based BP Alert Logic
 
 **Clinical authority:** Dr. Manisha Singal
-**Status:** v2.2 — reflects engine state through 2026-05-15
-**Last sign-off folded in:** 2026-05-11 (Cluster 7 / Appendix A)
-**Pending decisions:** 3 open clinical questions — see [Part 15](#part-15--open-clinical-questions-pending)
+**Status:** v2.3 — reflects engine state through 2026-06-07
+**Last sign-off folded in:** 2026-06-06 (Open Decisions D1–D6 + Backdating Policy)
+**Pending decisions:** Tracking in [`MANISHA_DECISIONS_LOG.md`](./MANISHA_DECISIONS_LOG.md) → "Pending — Open Decisions Not Yet Sent"
+**Full audit trail:** [`MANISHA_DECISIONS_LOG.md`](./MANISHA_DECISIONS_LOG.md) — every signed-off decision, source artifact (archived under [`clinical-signoffs/`](./clinical-signoffs/)), spec section, and code location.
 
 This document is the canonical source of truth for every alert rule, threshold, symptom trigger, medication contraindication, and escalation tier. When the code disagrees with this document, the code is wrong.
 
@@ -25,7 +26,13 @@ Each entry cites the sign-off round (Dr. Singal date + reference) and the spec s
 | 2026-05-10 | Cluster 6 Q7–Q11 | HR<40 → Tier 1 (was Tier 2). Four new symptom buttons: dizziness, syncope, palpitations, leg swelling. Adherence rolling 2-of-3-day window + β-blocker single-miss carve-out (HFrEF / HCM / AFib). HF decompensation rule (leg swelling OR >2 lbs/24h weight gain). DHP-CCB peripheral edema Tier 3 (suppressed for HF — owned by decompensation rule). | [Part 9](#part-9--cluster-6-additions-symptomatic-rules--session-averaging) |
 | 2026-05-11 | Cluster 7 / Appendix A | Six new side-effect / interaction rules: β-blocker fatigue (Tier 3), β-blocker SOB HF (Tier 2 escalates), β-blocker SOB non-HF (Tier 3), NSAID + antihypertensive interaction (Tier 3), ACE inhibitor cough (Tier 3), HF caregiver ankle edema (Tier 3, caregiver-routed). HCM low BP patient wording revised per Appendix B1.4 (preload-dependent, name the symptoms). Medication HOLD verification status added + patient inbox system message. CAREGIVER recipient role on escalation routing. | [Part 10](#part-10--cluster-7-additions-side-effect--interaction-rules) |
 | 2026-05-13 | Audit + compliance | Auto-resolve sweep removed (`resolveOpenAlerts` deleted). Alerts now stay OPEN until provider explicitly resolves OR patient acks. JCAHO 15-field audit columns enforced as authoritative. `BP_L2_UNABLE_TO_REACH_RETRY` schedules fresh T+4h escalation row with `triggeredByResolution=true`. | [Part 12](#part-12--resolution-actions-catalog) + [Part 13](#part-13--audit-trail--escalation-engine) |
-| 2026-05-15 | Doc refresh | This rewrite. No engine changes. | n/a |
+| 2026-05-15 | Doc refresh | Doc rewrite. No engine changes. | n/a |
+| 2026-05-18 | Cluster 8 ACE Angioedema | New rule `RULE_ACE_ANGIOEDEMA` + compressed ladder (T+0 → T+15m → T+1h → T+4h). Permanent ACE contraindication on resolution (`aceContraindicatedAt`). P0 pilot blocker — Ward 7/8 cohort 5× risk per ALLHAT. Patient T+0 PUSH dispatch. | [Part 8.2](#82-side-effect--interaction-rules-cluster-7-appendix-a-manisha-2026-05-11) + [Part 13](#part-13--audit-trail--escalation-engine) + [Part 14](#part-14--caregiver-dispatch--medication-hold) |
+| 2026-05-24 | Medication Workflow + Clarifications | **A1 — HOLD two-path patient message** (`PROVIDER_DIRECTED_HOLD` names the med + persists; administrative holds don't name med + disappear on resolution; patient-safety: rebound-risk fix). A2 — HOLD reason-code enum. A3 — HOLD escalation ladder 7/14/30/45 days. A4 — angioedema rules audit (no-op confirm). A5 — first-month adherence nudge wording + dedup scope. B1 — DBP ≥ SBP validation tier wording. B2 — narrow PP < 25 → physician-only Tier 3. B3 — pre-Day-3 fires Level 1 with disclaimer (spec to match engine). B4 — angioedema structured resolution sub-fields. B5C — Aortic stenosis interim HCM-equivalent (SBP ≥100). | [Part 14.2](#142-medication-hold-action) + [Part 9](#part-9--cluster-6-additions-symptomatic-rules--session-averaging) + [Part 6](#part-6--pre-day-3-mode) + [Part 4.10](#410-aortic-stenosis) + [Part 12.1](#121-tier-1-contraindication--safety-critical--5-actions-all-require-rationale) |
+| 2026-05-18 | Cluster 8 Q1–Q3 | Q1 brady HR 40–49 (no symptoms) → fire Tier 3 surveillance. Q2 CAD default `sbpUpperTarget` 160 → 140 phased ramp. Q3 single-miss adherence nudge in first 30 days of new med. Unblocks `test.fixme()` for Nora HR 45 / Paul CAD 145 / Aisha adherence. | [Part 4.3](#43-coronary-artery-disease-cad) + [Part 4.6](#46-bradycardia) + [Part 9](#part-9--cluster-6-additions-symptomatic-rules--session-averaging) + [Part 15](#part-15--open-clinical-questions-pending) Q1–Q3 |
+| 2026-06-02 | Manisha Q1–Q7 reply | Q1 A5 nudge hybrid wording. **Q2 P0 safety — revert HFREF_HIGH to single-reading** (session-averaging suppressed clinically meaningful high readings). Q3 no-conditions patients use STANDARD mode. Q4 DHP-CCB + AS → Tier 1 + soft-block (backlog). Q5 Stage 2 axis-specific physician wording. Q6 per-session dedup (backlog). Q7 rename to `historyHDP` phase 1. | [Part 1.2](#12-base-thresholds-for-all-adults-source-2025-ahaacc-guideline) + [Part 4.2](#42-heart-failure--hfref-reduced-ejection-fraction) + [Part 3](#part-3--pregnancy-thresholds) |
+| 2026-06-06 | Open Decisions D1–D6 + Backdating | D1 `TIER_3_INFO` teal → info-blue (admin chrome). D2 CAD physician wording reconciled (engine 140/70 stands). D4 gestational age threaded into pregnancy + ACE/ARB physician messages (conditional exception activated — pilot includes pregnant patients). D5 new `TIER_1_CONTRAINDICATION` patient EMAIL at T+0. D6 re-instate `BP_LEVEL_1_HIGH` patient EMAIL at T+0 (cohort-gated: STANDARD + HIGH only). Backdating: 911 CTA suppression on 1–24h delayed entries; L1 provider-only disclaimer; CMS 99454 accept-but-tag. | [Part 3](#part-3--pregnancy-thresholds) + [Part 4.3](#43-coronary-artery-disease-cad) + [Part 14](#part-14--caregiver-dispatch--medication-hold) + [Part 15 Q2](#q2--cad-patient-default-sbpuppertarget--signed-off) |
+| 2026-06-07 | Audit trail formalised | Created [`MANISHA_DECISIONS_LOG.md`](./MANISHA_DECISIONS_LOG.md) — canonical per-decision ledger. Archived all signed-off source documents to [`docs/clinical-signoffs/`](./clinical-signoffs/) so the audit trail survives local file loss. | n/a — meta change |
 
 ---
 
@@ -37,7 +44,15 @@ Each entry cites the sign-off round (Dr. Singal date + reference) and the spec s
 | v2.0 addendum | 2025-XX | `_MConverter.eu_healplace-cardio-engineering-addendum-v2.md` | Parts V2-A through V2-F |
 | Cluster 6 round 1 (Q1–Q6) | 2026-05-09 | Email + handoff doc `CLAUDE_CODE_CLUSTER_6_MANISHA_DECISIONS.md` | [Part 9](#part-9--cluster-6-additions-symptomatic-rules--session-averaging) |
 | Cluster 6 round 2 (Q7–Q11) | 2026-05-10 | Email | [Part 9](#part-9--cluster-6-additions-symptomatic-rules--session-averaging) |
-| Cluster 7 / Appendix A | 2026-05-11 | "Manisha master guide v3" (Appendix A + B) referenced in `HANDOFF_TO_NIVA_CLUSTER_7.md` | [Part 10](#part-10--cluster-7-additions-side-effect--interaction-rules) |
+| Cluster 7 / Appendix A + B | 2026-05-11 | [`clinical-signoffs/MANISHA_2026_05_11_MASTER_GUIDE_V3.md`](./clinical-signoffs/MANISHA_2026_05_11_MASTER_GUIDE_V3.md) + [`MANISHA_2026_05_11_APPENDIX_B_TRANSLATIONS.md`](./clinical-signoffs/MANISHA_2026_05_11_APPENDIX_B_TRANSLATIONS.md) | [Part 10](#part-10--cluster-7-additions-side-effect--interaction-rules) |
+| Cluster 8 ACE Angioedema | 2026-05-18 | [`clinical-signoffs/MANISHA_2026_05_18_ACE_ANGIOEDEMA_SIGNOFF.md`](./clinical-signoffs/MANISHA_2026_05_18_ACE_ANGIOEDEMA_SIGNOFF.md) | Cross-cutting (Part 8 + Part 13 + Part 14) |
+| Cluster 8 Q1–Q3 (Brady + CAD + Adherence) | 2026-05-18 | [`clinical-signoffs/MANISHA_2026_05_18_FOLLOWUP_SIGNOFF_BRADY_CAD_ADHERENCE.md`](./clinical-signoffs/MANISHA_2026_05_18_FOLLOWUP_SIGNOFF_BRADY_CAD_ADHERENCE.md) | [Part 4.3](#43-coronary-artery-disease-cad) + [Part 4.6](#46-bradycardia) + [Part 9](#part-9--cluster-6-additions-symptomatic-rules--session-averaging) + [Part 15](#part-15--open-clinical-questions-pending) Q1–Q3 |
+| Medication Workflow + Pending Clarifications | 2026-05-24 | **Verbatim source:** [`clinical-signoffs/MANISHA_2026_05_24_MEDICATION_WORKFLOW_SIGNOFF_FULL.md`](./clinical-signoffs/MANISHA_2026_05_24_MEDICATION_WORKFLOW_SIGNOFF_FULL.md). Engineering distillation: [`MANISHA_2026_05_24_MEDICATION_WORKFLOW_AND_CLARIFICATIONS_SIGNOFF.md`](./clinical-signoffs/MANISHA_2026_05_24_MEDICATION_WORKFLOW_AND_CLARIFICATIONS_SIGNOFF.md). Prompts: [`MANISHA_2026_05_22_MEDICATION_WORKFLOW_PROMPT.md`](./clinical-signoffs/MANISHA_2026_05_22_MEDICATION_WORKFLOW_PROMPT.md) + [`MANISHA_2026_05_22_PENDING_CLARIFICATIONS_PROMPT.md`](./clinical-signoffs/MANISHA_2026_05_22_PENDING_CLARIFICATIONS_PROMPT.md). | [Part 14.2](#142-medication-hold-action) + [Part 9](#part-9--cluster-6-additions-symptomatic-rules--session-averaging) + [Part 6](#part-6--pre-day-3-mode) + [Part 4.10](#410-aortic-stenosis) |
+| Caregiver Gap 5 implementation handoff (companion artifact to 2026-05-11 master guide Gap 5) | 2026-05 | [`clinical-signoffs/CAREGIVER_GAP5_IMPLEMENTATION_HANDOFF.md`](./clinical-signoffs/CAREGIVER_GAP5_IMPLEMENTATION_HANDOFF.md). NOT a Manisha sign-off itself — engineering implementation guide for the Gap 5 work signed off 2026-05-11. §1 dispatch-channel decision (Option A/B/C) **still pending Manisha + counsel.** | [Part 14 — Caregiver dispatch](#part-14--caregiver-dispatch--medication-hold) |
+| Manisha Q1–Q7 reply | 2026-06-02 | [`clinical-signoffs/MANISHA_2026_06_02_REPLY_Q1_TO_Q7.md`](./clinical-signoffs/MANISHA_2026_06_02_REPLY_Q1_TO_Q7.md) | Cross-cutting; Q2 P0 safety on [Part 4.2](#42-heart-failure--hfref-reduced-ejection-fraction) |
+| Open Decisions D1–D6 + Backdating | 2026-06-06 | [`clinical-signoffs/MANISHA_2026_06_06_OPEN_DECISIONS_AND_BACKDATING_SIGNOFF.md`](./clinical-signoffs/MANISHA_2026_06_06_OPEN_DECISIONS_AND_BACKDATING_SIGNOFF.md) | [Part 3](#part-3--pregnancy-thresholds) + [Part 4.3](#43-coronary-artery-disease-cad) + [Part 14](#part-14--caregiver-dispatch--medication-hold) + [Part 15 Q2](#q2--cad-patient-default-sbpuppertarget--signed-off) |
+
+> **Full per-decision audit trail:** [`MANISHA_DECISIONS_LOG.md`](./MANISHA_DECISIONS_LOG.md). This table is the high-level index; the log file has the per-decision ledger.
 
 ---
 
@@ -125,11 +140,25 @@ Two distinct clinical problems → two separate alert rows. The engine emits bot
 
 ### Gestational age tracking
 
-**Manual provider flagging**, not automatic gestational-age tracking. Patient self-reports `isPregnant`, provider verifies at onboarding. System does not track weeks.
+**Manual provider flagging** for pregnancy status — patient self-reports `isPregnant` + `pregnancyDueDate` (EDD); provider verifies at onboarding.
+
+**Per Manisha Open-Decisions sign-off 2026-06-06 (Decision 4, conditional exception):** The pilot population includes pregnant patients on ACE/ARB, so **gestational age is now threaded** through the alert engine to the physician-tier message. The engine derives GA from `PatientProfile.pregnancyDueDate` at fire-time using `40 − weeks-until-EDD`, clamps to the 0–45 plausible range, and emits as `metadata.gestationalAgeWeeks` on the rule result. The registry physician messages render it as `(Xw gestation)`. Rules carrying GA:
+
+- `RULE_PREGNANCY_L2` (BP ≥160 / DBP ≥110 in pregnancy)
+- `RULE_PREGNANCY_L1_HIGH` (BP ≥140/90 in pregnancy)
+- `RULE_PREGNANCY_ACE_ARB` (Tier 1 contraindication — most clinically meaningful because teratogenic ACE/ARB risk differs by trimester)
+
+The other Decision-4 placeholders (`[age]` + `[medication list]`) remain backlog per Manisha — she did not exempt them. See [`MANISHA_DECISIONS_LOG.md → 2026-06-06`](./MANISHA_DECISIONS_LOG.md) for the full decision context.
+
+**Engine implementation:**
+- `backend/src/daily_journal/engine/pregnancy-thresholds.ts` — `gestationalAgeWeeksFromProfile(dueDate, now)` shared helper
+- `backend/src/daily_journal/engine/contraindications.ts` — `pregnancyAceArbRule` populates `metadata.gestationalAgeWeeks`
+- `backend/src/daily_journal/services/output-generator.service.ts` — propagates metadata → `AlertContext`
+- `shared/src/alert-messages.ts` — `gestationalAgePhrase(ctx)` helper renders the "(Xw gestation)" suffix
 
 **Safety-net:** pregnancy thresholds + ACE/ARB contraindication activate immediately on patient self-report, before provider verification. UNVERIFIED meds in a pregnant patient's list still fire the contraindication.
 
-**Signed off:** ✅ Pregnancy thresholds (L1 ≥140/90, L2 ≥160/110). ✅ Pregnancy symptom override. ✅ ACE/ARB contraindication non-configurable. ✅ Manual provider flagging for pregnancy status. ✅ Dual-row co-fire on ACE/ARB + SBP ≥160 (Manisha 2026-05-09 Q4).
+**Signed off:** ✅ Pregnancy thresholds (L1 ≥140/90, L2 ≥160/110). ✅ Pregnancy symptom override. ✅ ACE/ARB contraindication non-configurable. ✅ Manual provider flagging for pregnancy status. ✅ Dual-row co-fire on ACE/ARB + SBP ≥160 (Manisha 2026-05-09 Q4). ✅ Gestational-age threading into pregnancy + ACE/ARB physician messages (Manisha 2026-06-06 Decision 4 — conditional exception activated for pilot).
 
 ---
 
@@ -177,16 +206,14 @@ Treatment target: 130/80. **Critical**: coronary perfusion occurs during diastol
 
 | Parameter | Threshold | Notes |
 |---|---|---|
-| Level 1 High | SBP ≥160 (default; provider may set lower) | Standard |
+| Level 1 High | SBP ≥140 (default once Cluster 8 Q2 ramp applies; legacy default 160; provider may override) | Standard |
 | **CRITICAL Lower Bound** | **DBP <70** | **Applies regardless of systolic value** |
 | Level 2 | SBP ≥180 or any emergency symptom | Non-configurable |
 | Annotation (physician) | SBP 140–160 (above CAD goal but below CAD high threshold) | "Consider switching antihypertensive class rather than dose reduction." Rides on `RULE_CAD_DBP_CRITICAL` when both fire. |
 
 Evidence: CLARIFY registry (22,672 hypertensive CAD patients) — J-shaped relationship, lowest risk at DBP 70–79, significantly increased risk DBP <70 (HR 1.50, 95% CI 1.31–1.72). AHA/ACC/ASH: "caution in inducing decreases in DBP to <60 mmHg" in CAD patients, particularly >60 years.
 
-**Open question (Q2 in [Part 15](#part-15--open-clinical-questions-pending)):** the engine's `cadHighRule` falls back to SBP ≥160 when no `PatientThreshold.sbpUpperTarget` is seeded — but CAD treatment target is 130/80. Should the default upper threshold drop to 140 (Stage 2 floor)? Pending Manisha sign-off.
-
-**Signed off:** ✅ DBP <70 alert. ✅ SBP 140–160 physician annotation (phase/26 fix).
+**Signed off:** ✅ DBP <70 alert. ✅ SBP 140–160 physician annotation (phase/26 fix). ✅ Cluster 8 Q2 default `sbpUpperTarget` ramp 160 → 140 (Manisha 2026-05-18, reconfirmed Open-Decisions sign-off 2026-06-06). 130/80 is the AHA/ACC treatment target; 140 is the alert threshold — they are distinct by design (firing at 130 would generate high alert volume since >60% of CAD patients with hypertension sit in the 130–139 range). Engine ramp lives in `condition-branches.ts` (`cadDefaultUpper`); see also Cluster 8 Q2 DBP-high default 80.
 
 ### 4.4 Atrial Fibrillation (AFib)
 
@@ -318,7 +345,7 @@ The engine groups readings into "sessions" by `JournalEntry.sessionId` (5-minute
 | **Level 1 High / Low, Tier 2, Tier 3** | **Minimum 2 readings, ≥1 minute apart** | Session average |
 | Single-reading L1 informational | Single reading + threshold cross | Logged with "single-reading session — confirm with next session" annotation. Provider sees the row; no patient push. |
 | AFib (existing) | ≥3 readings | Unchanged. |
-| Pre-Day-3 mode | 2-reading rule still applies for averaging | Non-emergency suppressed (log only); emergency fires. See [Part 6](#part-6--pre-day-3-mode). |
+| Pre-Day-3 mode | 2-reading rule still applies for averaging | Level 1 fires with the standard-threshold disclaimer; emergency (BP Level 2) fires unchanged (Manisha 2026-05-24 Q3 — supersedes the prior "suppress" behavior). See [Part 6](#part-6--pre-day-3-mode). |
 
 **Single-reading finalization endpoint:** if a patient submits one reading and the 5-minute session window expires without a second reading arriving, the engine **finalizes the session as single-reading** (`JournalEntry.singleReadingFinalized=true`). The reading then evaluates against thresholds with the single-reading-informational annotation. This unblocks patients who legitimately took only one reading from being silently dropped.
 
@@ -334,13 +361,13 @@ Helper exists; not consumed in rule-firing — purely contextual for dashboard c
 
 ## PART 6 — Pre-Day-3 Mode
 
-For any patient with **fewer than 7 readings**, the system does not present personalized output. It applies fixed AHA thresholds and labels the alert: **"standard threshold — personalization begins after Day 3."** Protects first-cohort patients from acting on personalised thresholds the system isn't qualified to compute for their specific baseline.
+For any patient with **fewer than 7 readings**, the system does not present personalized output. It applies fixed AHA thresholds and labels the alert: **"standard threshold — personalization begins after 7 readings."** Protects first-cohort patients from acting on personalised thresholds the system isn't qualified to compute for their specific baseline.
 
 **Note:** the section title's "Day-3" framing is a historical misnomer — the gate is **7 readings**, not 3 days. Engine constant `PRE_DAY_3_MIN_READINGS = 7`.
 
-**Interaction with session averaging:** Pre-Day-3 mode suppresses non-emergency alerts during enrollment days; emergency (BP Level 2) still fires. Pre-Day-3 single-reading-informational rows are still logged for provider visibility.
+**Level 1 behavior (Manisha 2026-05-24 Q3 — option a, supersedes prior "suppress"):** Pre-personalization Level 1 alerts **fire** with the standard-threshold disclaimer rather than being suppressed. The earlier "non-emergency suppressed (log only)" rule is retired — a patient in the baseline window who crosses a Level 1 threshold still gets the alert, clearly labelled as standard-threshold. Emergency (BP Level 2) fires unchanged. The disclaimer wording reads "personalization begins after 7 readings" (not "Day 3"), and the provider alert detail surfaces an "X of 7 baseline readings" progress note.
 
-**Signed off:** ✅ Fixed thresholds + personalization disclaimer for first 7 readings.
+**Signed off:** ✅ Fixed thresholds + personalization disclaimer for first 7 readings. ✅ Level 1 fires with disclaimer (Manisha 2026-05-24 Q3).
 
 ---
 
@@ -714,45 +741,39 @@ CAREGIVER_ROUTED_RULES = { 'RULE_HF_CAREGIVER_EDEMA' }
 
 ---
 
-## PART 15 — Open Clinical Questions (Pending)
+## PART 15 — Clinical Questions Ledger
 
-Source: `Documents/cardioplace-handoffs/MANISHA_FOLLOWUP_2026_05_15.md`. All three questions block test coverage closure but do **not** block pilot launch.
+Historical record of questions that were once pending Manisha sign-off. All three questions in this section have now been signed off (2026-05-18 + 2026-06-06). Kept here as an audit aid — `git blame` + the entries below show when each was answered. New open questions live in [`MANISHA_DECISIONS_LOG.md`](./MANISHA_DECISIONS_LOG.md) → "Pending — Open Decisions Not Yet Sent."
 
-### Q1 — Asymptomatic bradycardia in HR 40–49 (no symptoms reported)
+### Q1 — Asymptomatic bradycardia in HR 40–49 (no symptoms reported) ✅ SIGNED OFF
 
-**Current engine behavior:**
-- HR <40 → `BRADY_ABSOLUTE` (Tier 1, fires regardless of symptoms)
-- HR <50 with any of {alteredMentalStatus, chestPainOrDyspnea, focalNeuroDeficit, dizziness, syncope} → `BRADY_HR_SYMPTOMATIC` (Level 1 Low)
-- HR 40–49 with **no symptoms** → silent
+**Sign-off:** Manisha 2026-05-18 (Cluster 8 Q1, brady portion of the follow-up sign-off doc).
 
-**Question:** Should HR 40–49 with no symptoms fire a Tier 2 or Tier 3 surveillance row?
+**Decision:** Fire a **Tier 3 surveillance row** for HR 40–49 with no symptoms. Rationale (from sign-off doc): the 2018 ACC/AHA/HRS Bradycardia Guideline adopted HR 50 bpm (not 60) as the threshold for clinically relevant bradycardia. In a remote-monitoring platform for cardiovascular patients on rate-controlling medications, sustained HR 40–49 is clinically meaningful — the MESA study found HR <50 bpm was associated with markedly elevated mortality (over 2× the 60–69 reference range) among patients taking HR-modifying drugs.
 
-**Status:** ⏳ Pending Manisha sign-off (asked 2026-05-15). Test `qa/tests/09:800` (Nora HR 45) remains `test.fixme()` until decided.
+**Engine implementation:** `backend/src/daily_journal/engine/hr-branches.ts` — `bradySurveillanceRule` fires when HR 40–49 with no symptom flags and the patient is on an HR-modifying medication OR has `hasBradycardia=true`. Counts consecutive sessions for the brady-surveillance escalation (Cluster 8 Q1).
 
-### Q2 — CAD patient default `sbpUpperTarget`
+**Test status:** `qa/tests/09:800` (Nora HR 45) unblocked.
 
-**Current engine behavior:** `cadHighRule` fires when SBP ≥ `PatientThreshold.sbpUpperTarget`. Default fallback = 160 when no custom threshold is seeded. CLINICAL_SPEC §4.3 names 130/80 as the CAD treatment target.
+### Q2 — CAD patient default `sbpUpperTarget` ✅ SIGNED OFF
 
-**Gap:** CAD patient at SBP 145 sits between the fallback (160) and the treatment target (130). No alert fires today.
+**Sign-off:** Manisha 2026-05-18 (Cluster 8), reconfirmed Open-Decisions sign-off 2026-06-06 (Decision 2).
 
-**Question:** What should the default be — 130 (target, maximum noise), 140 (Stage 2 floor, conservative), 150, or stay at 160 (provider-managed band)?
+**Decision:** Default `sbpUpperTarget` = **140** (Stage 2 HTN floor) once the phased ramp applies. AHA/ACC treatment target 130/80 is preserved as the *treatment goal* surfaced in the physician-tier message, but the *alert threshold* is 140 — firing at 130 would generate high alert volume in a population where >60% of patients already sit in the 130–139 range.
 
-**Ramp consideration:** Changing this affects every enrolled CAD patient — phased rollout starting with one practice if the threshold tightens.
+**Engine implementation:** `backend/src/daily_journal/engine/condition-branches.ts` — `cadDefaultUpper` returns 140 when `cadRampApplies(ctx)` is true (Phase 1 = newly enrolled at/after 2026-05-18; Phase 2 = + Cedar Hill existing patients; Phase 3 = all CAD patients). Provider-set custom `PatientThreshold.sbpUpperTarget` always wins. Companion CAD DBP-high default = 80 ramps with the same gate.
 
-**Status:** ⏳ Pending Manisha sign-off. Test `qa/tests/09:916` (Paul CAD 145) remains `test.fixme()` until decided.
+**Test status:** `qa/tests/09:916` (Paul CAD 145) — unblock + assert the engine fires `RULE_CAD_HIGH` with `thresholdValue = 140` once the ramp applies for this patient.
 
-### Q3 — Single-miss adherence threshold
+### Q3 — Single-miss adherence threshold ✅ SIGNED OFF
 
-**Current engine behavior:** Default trigger is 2-of-3-day rolling-window pattern. β-blocker carve-out fires on a single miss only for HFrEF / HCM / AFib patients. A single one-off miss for any other patient is invisible.
+**Sign-off:** Manisha 2026-05-18 (Cluster 8 Q3, adherence portion of the follow-up sign-off doc).
 
-**Question:** Should the engine fire a Tier 3 educational nudge on a single miss for any patient (especially first-month-on-new-med)?
+**Decision:** Fire `RULE_FIRST_MONTH_ADHERENCE_NUDGE` (Tier 3 educational) on a **single missed dose** within the first 30 days of any new medication. Per-event dedup: fires once per first-missed-dose event in the new-med window, even if multiple same-day missed-med check-ins are submitted (see memory note `reference_first_month_nudge_dedup`). The 2-of-3-day rolling window stays the default for steady-state adherence drift; the new-med window is the carve-out.
 
-**Options:**
-- (a) Fire Tier 3 educational message immediately on single miss
-- (b) Wait for second consecutive miss
-- (c) Stay at 2-of-3-day rolling window (current)
+**Engine implementation:** `backend/src/daily_journal/engine/adherence.ts` — first-month nudge path; β-blocker single-miss carve-out for HFrEF / HCM / AFib (from Cluster 6 round 2) is unchanged.
 
-**Status:** ⏳ Pending Manisha sign-off. Original v1 spec audit had `// TODO(manisha)` at `engine/adherence.ts:11`; Cluster 6 sign-off did not resolve.
+**Test status:** Aisha adherence `test.fixme()` unblocked.
 
 ---
 

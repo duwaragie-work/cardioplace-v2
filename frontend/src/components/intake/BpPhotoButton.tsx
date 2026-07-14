@@ -128,7 +128,7 @@ export default function BpPhotoButton({ onConfirm, className, onError }: Props) 
       {!onError && error && (
         <p
           role="alert"
-          className="mt-2 text-[12px] font-medium"
+          className="mt-2 text-[0.75rem] font-medium"
           style={{ color: 'var(--brand-alert-red)' }}
         >
           {error}

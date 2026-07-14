@@ -8,7 +8,6 @@ const de: Record<TranslationKey, string> = {
   'nav.chat': 'Chat',
   'nav.provider': 'Pflegeteam',
   'nav.patients': 'Patienten',
-  'nav.calls': 'Anrufe',
 
   // ─── Common ────────────────────────────────────────────────────────────────
   'common.save': 'Speichern',
@@ -18,6 +17,7 @@ const de: Record<TranslationKey, string> = {
   'common.submit': 'Absenden',
   'common.loading': 'Wird geladen...',
   'common.saving': 'Wird gespeichert...',
+  'common.refresh': 'Aktualisieren',
   'common.deleting': 'Wird gelöscht...',
   'common.delete': 'Löschen',
   'common.edit': 'Bearbeiten',
@@ -328,15 +328,11 @@ const de: Record<TranslationKey, string> = {
   'provider.lastCheckin': 'Letzte Kontrolle',
   'provider.alerts': 'Warnungen',
   'provider.noPatients': 'Keine Patienten gefunden',
-  'provider.scheduledCalls': 'Geplante Anrufe',
-  'provider.searchCalls': 'Anrufe suchen...',
   'provider.allStatuses': 'Alle Status',
   'provider.upcoming': 'Bevorstehend',
   'provider.completed': 'Abgeschlossen',
   'provider.missed': 'Verpasst',
   'provider.cancelled': 'Abgesagt',
-  'provider.noCalls': 'Keine geplanten Anrufe gefunden',
-  'provider.scheduleCall': 'Anruf Planen',
   'provider.reason': 'Grund',
   'provider.scheduledFor': 'Geplant für',
   'provider.patientDetails': 'Patientendetails',
@@ -350,7 +346,6 @@ const de: Record<TranslationKey, string> = {
   'provider.bpTrend': 'BD-Trend',
   'provider.review': 'Überprüfen',
   'provider.requiresAction': 'Handlung Erforderlich',
-  'provider.followUpScheduled': 'Nachverfolgung Geplant',
   'provider.addPatient': 'Patient Hinzufügen',
   'provider.careTeamAlert': 'Pflegeteam-Warnung',
   'provider.followUpRequired': 'Nachverfolgung innerhalb von 24 Stunden erforderlich',
@@ -362,7 +357,6 @@ const de: Record<TranslationKey, string> = {
   'provider.audioFirstDesc': 'Verwenden Sie verbale Kommunikation und visuelle Hilfsmittel beim nächsten Besuch. Der Patient bevorzugt gesprochene statt geschriebene Anweisungen.',
   'provider.sevenDayBpTrend': '7-Tage-BD-Trend',
   'provider.markReviewed': 'Als Überprüft Markieren',
-  'provider.scheduleFollowUp': 'Nachverfolgungsanruf Planen',
   'provider.loadingAlert': 'Warnungsdetails werden geladen...',
   'provider.callDetails': 'Anrufdetails',
   'provider.markCompleted': 'Als Abgeschlossen Markieren',
@@ -384,22 +378,6 @@ const de: Record<TranslationKey, string> = {
   'provider.email': 'E-Mail',
 
   // ─── Schedule Modal ─────────────────────────────────────────────────────────
-  'schedule.title': 'Nachverfolgungsanruf Planen',
-  'schedule.patient': 'Patient',
-  'schedule.callType': 'Anruftyp',
-  'schedule.phoneCall': 'Telefonanruf',
-  'schedule.videoCall': 'Videoanruf',
-  'schedule.selectDate': 'Datum Auswählen',
-  'schedule.selectTime': 'Uhrzeit Auswählen',
-  'schedule.notes': 'Notizen (optional)',
-  'schedule.notesPlaceholder': 'Z.B. Medikamenten-Einhaltung besprechen, BD-Werte...',
-  'schedule.cancel': 'Abbrechen',
-  'schedule.confirm': 'Termin Bestätigen',
-  'schedule.scheduling': 'Wird geplant...',
-  'schedule.success': 'Nachverfolgung Geplant!',
-  'schedule.successMsg': 'Anruf geplant. Patient benachrichtigt.',
-  'schedule.today': 'Heute',
-  'schedule.tomorrow': 'Morgen',
 
   // ─── Provider Dashboard (stats + trend) ────────────────────────────────────
   'provider.dcWards': 'DC Bezirke 7 & 8',
@@ -491,6 +469,7 @@ const de: Record<TranslationKey, string> = {
   'register.adminAccessDenied': 'Sie haben keine Berechtigung für die Admin-App. Bitte wenden Sie sich an Ihren Administrator.',
   'register.accountSuspended': 'Dieses Konto wurde gesperrt. Bitte wenden Sie sich an den Support.',
   'register.accountBlocked': 'Dieses Konto wurde blockiert. Bitte wenden Sie sich an den Support.',
+  'register.accountDeactivated': 'Dieses Konto wurde deaktiviert. Bitte wenden Sie sich an den Support, um es zu reaktivieren.',
   'register.showOtp': 'Code anzeigen',
   'register.hideOtp': 'Code ausblenden',
   'register.failedResend': 'Erneutes Senden fehlgeschlagen.',
@@ -606,6 +585,12 @@ const de: Record<TranslationKey, string> = {
   'home.ctaTitle': 'So sieht es aus, die Versorgungslücke zu schließen.',
   'home.ctaDesc': 'Entwickelt mit der DC Hospital Association. Eingesetzt in den am stärksten gefährdeten Gemeinschaften Washingtons. Konzipiert, um die Patienten zu erreichen, die herkömmliche Gesundheitstechnologie zurücklässt.',
   'home.ctaButton': 'Über das Programm',
+  // TODO i18n — placeholder English copy; translate when demo video is finalised.
+  'home.demoEyebrow': 'See it in action',
+  'home.demoTitle': 'A five-minute walkthrough',
+  'home.demoDesc': 'The patient experience and the care-team closed loop — end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
+  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
+  'home.demoCloseLabel': 'Close demo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'UNSERE GESCHICHTE',
@@ -694,6 +679,107 @@ const de: Record<TranslationKey, string> = {
   'about.closingButton': 'Mehr über das Programm erfahren',
   'about.closingFooter': 'Cardioplace · In Partnerschaft mit der DC Hospital Association · April 2026',
 
+  // ─── User Management (phase/23) ────────────────────────────────────────────
+  'userManagement.nav': 'Benutzer',
+  'userManagement.headerPatients': 'Patienten',
+  'userManagement.headerAll': 'Benutzerverwaltung',
+  'userManagement.subtitle': 'Konten einladen, deaktivieren und verwalten.',
+  'userManagement.subtitleCoordinator': 'Patienten einladen und Zugang verwalten.',
+  'userManagement.inviteSingleCta': '+ Benutzer einladen',
+  'userManagement.invitePatientCta': '+ Patient einladen',
+  'userManagement.addMultipleCta': '+ Mehrere hinzufügen',
+  'userManagement.uploadCsvCta': 'CSV hochladen',
+  'userManagement.search.placeholder': 'Nach Name oder E-Mail suchen',
+  'userManagement.filter.all': 'Alle',
+  'userManagement.filter.patient': 'Patient',
+  'userManagement.filter.provider': 'Anbieter',
+  'userManagement.filter.medicalDirector': 'Ärztlicher Direktor',
+  'userManagement.filter.coordinator': 'Koordinator',
+  'userManagement.filter.ops': 'OPS',
+  'userManagement.filter.superAdmin': 'Super Admin',
+  'userManagement.filter.statusActive': 'Aktiv',
+  'userManagement.filter.statusPending': 'Einladung ausstehend',
+  'userManagement.filter.statusDeactivated': 'Deaktiviert',
+  'userManagement.field.name': 'Name',
+  'userManagement.field.email': 'E-Mail',
+  'userManagement.field.role': 'Rolle',
+  'userManagement.field.practice': 'Praxis',
+  'userManagement.field.status': 'Status',
+  'userManagement.field.invitedBy': 'Eingeladen von',
+  'userManagement.field.invitedAt': 'Eingeladen',
+  'userManagement.field.actions': 'Aktionen',
+  'userManagement.field.reason': 'Grund (optional)',
+  'userManagement.placeholder.name': 'Erika Musterfrau',
+  'userManagement.placeholder.email': 'erika@beispiel.de',
+  'userManagement.placeholder.practice': 'Praxis wählen',
+  'userManagement.placeholder.role': 'Rolle wählen',
+  'userManagement.placeholder.reason': 'Optionale Notiz im Audit-Log.',
+  'userManagement.error.nameRequired': 'Name ist erforderlich.',
+  'userManagement.error.emailRequired': 'E-Mail ist erforderlich.',
+  'userManagement.error.emailInvalid': 'Gültige E-Mail-Adresse eingeben.',
+  'userManagement.error.roleRequired': 'Rolle auswählen.',
+  'userManagement.error.practiceRequired': 'Praxis für diese Rolle wählen.',
+  'userManagement.error.tooManyRows': 'Zu viele Zeilen — maximal 500.',
+  'userManagement.error.csvParse': 'CSV konnte nicht gelesen werden — bitte gültige .csv-Datei verwenden.',
+  'userManagement.modal.inviteTitle': 'Benutzer einladen',
+  'userManagement.modal.invitePatientTitle': 'Patient einladen',
+  'userManagement.modal.inviteDescription': 'Sie erhalten eine E-Mail mit einem Anmeldelink. Die Einladung läuft in 48 Stunden ab.',
+  'userManagement.modal.send': 'Einladung senden',
+  'userManagement.modal.sending': 'Senden…',
+  'userManagement.modal.cancel': 'Abbrechen',
+  'userManagement.modal.deactivateTitle': 'Benutzer deaktivieren?',
+  'userManagement.modal.deactivateBody': 'Der Zugang wird sofort entzogen. Die Daten bleiben erhalten und können später reaktiviert werden. Dies ist keine Löschung.',
+  'userManagement.modal.deactivateConfirm': 'Deaktivieren',
+  'userManagement.modal.closeTitle': '{name} dauerhaft schließen?',
+  'userManagement.modal.closeBody': 'Dies kann nicht rückgängig gemacht werden. Der Zugang geht sofort verloren und das persönliche Profil wird entfernt. Medizinische Daten werden gesetzlich vorgeschrieben aufbewahrt.',
+  'userManagement.modal.closeConfirm': 'Dauerhaft schließen',
+  'userManagement.modal.closeGate': 'Geben Sie zur Bestätigung die Display-ID ein: {displayId}',
+  'userManagement.modal.closeMismatch': 'Die Display-ID stimmt nicht überein.',
+  'userManagement.field.confirmDisplayId': 'Display-ID bestätigen',
+  'userManagement.action.closePermanently': 'Dauerhaft schließen',
+  'userManagement.action.menu': 'Kontoaktionen',
+  'userManagement.bulk.title': 'Mehrere Benutzer einladen',
+  'userManagement.bulk.titlePatients': 'Mehrere Patienten einladen',
+  'userManagement.bulk.addRow': 'Zeile hinzufügen',
+  'userManagement.bulk.removeRow': 'Zeile entfernen',
+  'userManagement.bulk.sendAll': 'Alle senden',
+  'userManagement.bulk.sendingAll': 'Einladungen werden gesendet…',
+  'userManagement.bulk.collapse': 'Abbrechen',
+  'userManagement.bulk.atomicNotice': 'Entweder werden alle Zeilen gesendet oder keine. Bitte Fehler beheben und erneut senden.',
+  'userManagement.csv.title': 'Massen-Einladung per CSV',
+  'userManagement.csv.step1Title': 'Schritt 1 · Vorlage herunterladen',
+  'userManagement.csv.step1Body': 'CSV-Vorlage mit den erforderlichen Spalten herunterladen.',
+  'userManagement.csv.step1Cta': 'Vorlage herunterladen',
+  'userManagement.csv.step2Title': 'Schritt 2 · Datei hochladen',
+  'userManagement.csv.step2Body': 'Wähle eine .csv-Datei mit bis zu 500 Zeilen.',
+  'userManagement.csv.step2Cta': 'CSV auswählen',
+  'userManagement.csv.step3Title': 'Schritt 3 · Prüfen und senden',
+  'userManagement.csv.step3Body': 'Jede Zeile wird vor dem Versand validiert.',
+  'userManagement.csv.sendN': '{count} Einladungen senden',
+  'userManagement.csv.cancel': 'Abbrechen',
+  'userManagement.csv.reupload': 'Andere Datei wählen',
+  'userManagement.list.empty': 'Kein Benutzer passt zu diesen Filtern.',
+  'userManagement.list.emptyCoordinator': 'Noch keine Patienten. Senden Sie Ihre erste Einladung.',
+  'userManagement.list.previous': 'Zurück',
+  'userManagement.list.next': 'Weiter',
+  'userManagement.list.pageOf': 'Seite {page} von {total}',
+  'userManagement.status.active': 'Aktiv',
+  'userManagement.status.blocked': 'Gesperrt',
+  'userManagement.status.suspended': 'Ausgesetzt',
+  'userManagement.status.deactivated': 'Deaktiviert',
+  'userManagement.status.invitePending': 'Einladung ausstehend',
+  'userManagement.action.deactivate': 'Deaktivieren',
+  'userManagement.action.reactivate': 'Reaktivieren',
+  'userManagement.action.resend': 'Einladung erneut senden',
+  'userManagement.action.revoke': 'Einladung widerrufen',
+  'userManagement.toast.inviteSent': 'Einladung an {email} gesendet',
+  'userManagement.toast.bulkSent': '{count} Einladungen gesendet',
+  'userManagement.toast.resent': 'Einladung erneut gesendet',
+  'userManagement.toast.revoked': 'Einladung widerrufen',
+  'userManagement.toast.deactivated': 'Benutzer deaktiviert',
+  'userManagement.toast.reactivated': 'Benutzer reaktiviert',
+  'userManagement.toast.dismiss': 'Benachrichtigung schließen',
+
   // ─── Language Names ────────────────────────────────────────────────────────
   'lang.en': 'English',
   'lang.es': 'Español',
@@ -706,8 +792,30 @@ const de: Record<TranslationKey, string> = {
   'lang.ar': 'العربية',
   'lang.ko': '한국어',
   'lang.ht': 'Kreyòl Ayisyen',
-
-
+  'timeline.filter.readings': 'Messwerte', // EN: Readings
+  'alerts.badge.thresholdPending':
+    'Patientenschwelle ausstehend — personalisierten Schwellenwert festlegen und Warnung prüfen', // EN: Patient threshold pending — set personalized threshold and review alert
+  // --- Phase/practice-identity — sign-in selector + top-bar switcher chip ---
+  'signIn.selectPractice.title': 'Als welche Praxis handeln Sie?', // EN: Which practice are you acting as?
+  'signIn.selectPractice.intro':
+    'Sie sind Mitglied in mehr als einer Praxis. Wählen Sie die Praxis, in der Sie für diese Sitzung arbeiten — jede Aktion wird unter der gewählten Praxis protokolliert. Sie können später über die obere Leiste wechseln.', // EN: You're a member of more than one practice...
+  'signIn.selectPractice.continue': 'Weiter', // EN: Continue
+  'signIn.selectPractice.signingIn': 'Anmeldung läuft…', // EN: Signing in…
+  'signIn.selectPractice.contactAdmin':
+    'Ihre Praxis fehlt? Melden Sie sich ab und wenden Sie sich an Ihre Administration.', // EN: Not seeing the right practice?...
+  'signIn.selectPractice.error': 'Praxis konnte nicht ausgewählt werden', // EN: Unable to select practice
+  'signIn.selectPractice.expired.title': 'Anmeldesitzung abgelaufen', // EN: Sign-in session expired
+  'signIn.selectPractice.expired.body':
+    'Aus Sicherheitsgründen hat die Praxisauswahl ein 5-Minuten-Fenster. Bitte melden Sie sich erneut an.', // EN: For your security...5-minute window.
+  'signIn.selectPractice.expired.back': 'Zurück zur Anmeldung', // EN: Back to sign in
+  'signIn.zeroPractice.title': 'Keine Praxis-Mitgliedschaft', // EN: No practice membership
+  'signIn.zeroPractice.body':
+    'Sie sind noch keiner Praxis zugeordnet. Wenden Sie sich an Ihre Administration, um hinzugefügt zu werden, bevor Sie sich anmelden.', // EN: You aren't a member of any practice yet...
+  'topBar.actingAs.label': 'Handeln als', // EN: Acting as
+  'topBar.actingAs.switchTo': 'Praxis wechseln', // EN: Switch practice
+  'topBar.actingAs.switching': 'Wechseln…', // EN: Switching…
+  'topBar.actingAs.switched': 'Jetzt handeln als', // EN: Now acting as
+  'topBar.actingAs.current': 'Aktuell', // EN: Current
 };
 
 export default de;

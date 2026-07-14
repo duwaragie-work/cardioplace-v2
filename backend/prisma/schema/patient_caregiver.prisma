@@ -1,0 +1,60 @@
+// Gap 5 — caregiver relationship + delivery.
+//
+// A caregiver is a CONTACT attached to a patient (name + email/phone), NOT
+// necessarily a logged-in User. The signed-off `caregiverMessage` tier
+// (shared/src/alert-messages.ts) is delivered to consented caregivers when a
+// caregiver-routed rule fires (RULE_HF_CAREGIVER_EDEMA, RULE_ACE_ANGIOEDEMA,
+// RULE_GENERIC_ANGIOEDEMA). Email is the pilot channel (Resend EmailService);
+// SMS is gated behind a swappable SmsService (no provider wired yet).
+//
+// HIPAA: dispatch is hard-gated on `consentGivenAt` — the patient must consent
+// to sharing PHI with this caregiver. Only the Minimum-Necessary
+// caregiverMessage is transmitted (no readings, no other conditions).
+model PatientCaregiver {
+  id              String                 @id @default(uuid())
+  patientUserId   String
+  name            String
+  relationship    String?
+  phone           String?
+  email           String?
+  notifyChannel   CaregiverNotifyChannel @default(NONE)
+  // HIPAA consent gate — null = captured but NOT yet authorised for dispatch.
+  consentGivenAt  DateTime?
+  consentGivenBy  String?
+  // Option A (account-based caregiver). Null for contact-only (Option B, pilot).
+  caregiverUserId String?
+  // Soft-disable instead of hard delete (audit trail of who could receive PHI).
+  active          Boolean                @default(true)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  patient User @relation("PatientCaregivers", fields: [patientUserId], references: [id], onDelete: Cascade)
+
+  dispatchLogs CaregiverDispatchLog[]
+
+  @@index([patientUserId])
+}
+
+enum CaregiverNotifyChannel {
+  NONE // captured but not yet notified (pre-consent or opted out)
+  DASHBOARD // Option A — caregiver is a User with an inbox
+  SMS // Option B — no provider wired yet (NoopSmsService)
+  EMAIL // Option B — Resend EmailService
+}
+
+// Idempotency for non-Notification channels (email/SMS write no Notification
+// row because the caregiver may not be a User). One row per
+// (alert, caregiver, channel) so a re-fired alert doesn't double-dispatch.
+model CaregiverDispatchLog {
+  id          String                 @id @default(uuid())
+  alertId     String
+  caregiverId String
+  channel     CaregiverNotifyChannel
+  sentAt      DateTime               @default(now())
+
+  alert     DeviationAlert   @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  caregiver PatientCaregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+
+  @@unique([alertId, caregiverId, channel])
+  @@index([caregiverId])
+}

@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
 import { PatientAccessService } from '../common/patient-access.service.js'
@@ -24,6 +25,7 @@ describe('IntakeService.listMedications filter scoping', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: DrugEnrichmentService, useValue: {} },
         { provide: PatientAccessService, useValue: {} },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()
 
@@ -31,7 +33,7 @@ describe('IntakeService.listMedications filter scoping', () => {
   })
 
   function whereOf(callIndex = 0) {
-    return findMany.mock.calls[callIndex][0].where
+    return (findMany.mock.calls[callIndex][0] as { where: unknown }).where
   }
 
   it('default: excludes both discontinued and REJECTED', async () => {
@@ -57,6 +59,32 @@ describe('IntakeService.listMedications filter scoping', () => {
     await service.listMedications('u1', true, true)
     expect(whereOf()).toEqual({ userId: 'u1' })
   })
+
+  it('F17: HOLD meds survive the default filter and keep holdReason for the check-in', async () => {
+    findMany.mockResolvedValueOnce([
+      {
+        id: 'm1',
+        userId: 'u1',
+        drugName: 'Cozaar',
+        drugClass: 'ARB',
+        verificationStatus: 'HOLD',
+        holdReason: 'PROVIDER_DIRECTED_HOLD',
+        frequency: 'ONCE_DAILY',
+        source: 'PATIENT_SELF_REPORT',
+        reportedAt: new Date('2026-05-01T00:00:00Z'),
+        verifiedAt: null,
+        discontinuedAt: null,
+      },
+    ])
+    const res = await service.listMedications('u1')
+    // The default filter only carves out REJECTED — HOLD is NOT excluded.
+    expect((whereOf() as { verificationStatus: unknown }).verificationStatus).toEqual({ not: 'REJECTED' })
+    expect(res.data).toHaveLength(1)
+    expect(res.data[0]).toMatchObject({
+      verificationStatus: 'HOLD',
+      holdReason: 'PROVIDER_DIRECTED_HOLD',
+    })
+  })
 })
 
 // Profile fixture with the Date fields serializeProfile() needs.
@@ -68,7 +96,7 @@ function makeProfile(overrides: Record<string, unknown> = {}) {
     heightCm: 165,
     isPregnant: false,
     pregnancyDueDate: null,
-    historyPreeclampsia: false,
+    historyHDP: false,
     hasHeartFailure: false,
     heartFailureType: 'NOT_APPLICABLE',
     hasAFib: false,
@@ -97,6 +125,7 @@ async function makeService(prisma: unknown): Promise<IntakeService> {
       { provide: PrismaService, useValue: prisma },
       { provide: DrugEnrichmentService, useValue: {} },
       { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+      { provide: EventEmitter2, useValue: { emit: jest.fn() } },
     ],
   }).compile()
   return module.get<IntakeService>(IntakeService)
@@ -211,6 +240,7 @@ describe('IntakeService.rejectProfileField idempotency (IVR-16)', () => {
     expect(arg.userId).toBe('p1') // the patient, not the admin actor
     expect(arg.channel).toBe('PUSH') // lands in the patient Notifications tab
     expect(arg.body).toMatch(/bradycardia history/i) // names the rejected field
+    expect(arg.dispatchTrigger).toBe('PROFILE_REJECTED') // action → visible in the bell
   })
 
   it('does not notify the patient on an idempotent no-op reject', async () => {
@@ -266,5 +296,612 @@ describe('IntakeService.verifyProfile reject hard-gate', () => {
     const res = await service.verifyProfile(ADMIN, 'p1', {} as never)
     expect(prisma.$transaction).toHaveBeenCalledTimes(1)
     expect(res.message).toMatch(/profile verified/i)
+  })
+})
+
+// Manual-test round 2 Group A4 — caregiver name resolution. Caregiver-scoped
+// logs use fieldPath `caregiver:${id}`; the listVerificationLogs endpoint
+// batch-fetches PatientCaregiver and injects caregiverName + relationship so
+// the admin TimelineTab renders "Caregiver Jane Doe (daughter)" instead of
+// "caregiver:9a0446d9-…".
+describe('IntakeService.listVerificationLogs caregiver resolution (Round 2 A4)', () => {
+  let service: IntakeService
+  let prisma: any
+
+  beforeEach(async () => {
+    prisma = {
+      profileVerificationLog: { findMany: jest.fn() },
+      patientCaregiver: { findMany: jest.fn() },
+      user: { findMany: (jest.fn() as any).mockResolvedValue([]) },
+    }
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntakeService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: DrugEnrichmentService, useValue: {} },
+        { provide: PatientAccessService, useValue: {} },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    service = module.get<IntakeService>(IntakeService)
+  })
+
+  it('resolves caregiverName + caregiverRelationship for caregiver:-scoped logs', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      {
+        id: 'l1',
+        fieldPath: 'caregiver:cg-1',
+        changedBy: 'admin-1',
+        changedByRole: 'ADMIN',
+        changeType: 'ADMIN_CORRECT',
+        createdAt: new Date(),
+      },
+      {
+        id: 'l2',
+        fieldPath: 'profile.gender',
+        changedBy: 'admin-1',
+        changedByRole: 'ADMIN',
+        changeType: 'ADMIN_VERIFY',
+        createdAt: new Date(),
+      },
+    ])
+    prisma.patientCaregiver.findMany.mockResolvedValue([
+      { id: 'cg-1', name: 'Jane Doe', relationship: 'daughter' },
+    ])
+
+    const out = await service.listVerificationLogs('p1')
+    expect(prisma.patientCaregiver.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['cg-1'] } },
+      select: { id: true, name: true, relationship: true },
+    })
+    const rows = out.data as Array<any>
+    const caregiverRow = rows.find((r) => r.id === 'l1')
+    const profileRow = rows.find((r) => r.id === 'l2')
+    expect(caregiverRow.caregiverName).toBe('Jane Doe')
+    expect(caregiverRow.caregiverRelationship).toBe('daughter')
+    expect(profileRow.caregiverName).toBeNull()
+    expect(profileRow.caregiverRelationship).toBeNull()
+  })
+
+  it('handles a deleted caregiver — caregiverName falls back to null', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      {
+        id: 'l1',
+        fieldPath: 'caregiver:cg-gone',
+        changedBy: 'admin-1',
+        changedByRole: 'ADMIN',
+        changeType: 'ADMIN_CORRECT',
+        createdAt: new Date(),
+      },
+    ])
+    prisma.patientCaregiver.findMany.mockResolvedValue([])
+
+    const out = await service.listVerificationLogs('p1')
+    const rows = out.data as Array<any>
+    expect(rows[0].caregiverName).toBeNull()
+    expect(rows[0].caregiverRelationship).toBeNull()
+  })
+
+  it('skips the caregiver batch fetch when no logs are caregiver-scoped', async () => {
+    prisma.profileVerificationLog.findMany.mockResolvedValue([
+      {
+        id: 'l1',
+        fieldPath: 'profile.hasHCM',
+        changedBy: 'patient-1',
+        changedByRole: 'PATIENT',
+        changeType: 'PATIENT_REPORT',
+        createdAt: new Date(),
+      },
+    ])
+    await service.listVerificationLogs('p1')
+    expect(prisma.patientCaregiver.findMany).not.toHaveBeenCalled()
+  })
+})
+
+// F13 — ACE/ARB contraindication is load-bearing on med re-add. When the
+// provider has set PatientProfile.aceContraindicatedAt (post-angioedema), a
+// re-added ACE inhibitor / ARB must be HELD for provider review and the care
+// team notified — never silently trusted.
+describe('IntakeService.createMedications — F13 ACE/ARB contraindication', () => {
+  let service: IntakeService
+  let prisma: any
+
+  function buildPrisma(aceContraindicatedAt: Date | null, primaryProviderId: string | null = 'prov-1') {
+    let createdId = 0
+    return {
+      patientProfile: {
+        findUnique: (jest.fn() as any).mockResolvedValue({
+          aceContraindicatedAt,
+          profileVerificationStatus: 'VERIFIED',
+        }),
+        update: (jest.fn() as any).mockResolvedValue({}),
+      },
+      patientMedication: {
+        findMany: (jest.fn() as any).mockResolvedValue([]),
+        create: (jest.fn() as any).mockImplementation((args: any) =>
+          Promise.resolve({ id: `med-${++createdId}`, reportedAt: new Date(), discontinuedAt: null, ...args.data }),
+        ),
+      },
+      profileVerificationLog: { createMany: (jest.fn() as any).mockResolvedValue({}) },
+      patientProviderAssignment: {
+        findUnique: (jest.fn() as any).mockResolvedValue(
+          primaryProviderId ? { primaryProviderId } : null,
+        ),
+      },
+      notification: { create: (jest.fn() as any).mockResolvedValue({}) },
+      $transaction: (fn: any) => Promise.resolve(fn(prismaRef())),
+    }
+  }
+  let _prisma: any
+  const prismaRef = () => _prisma
+
+  async function makeService(p: any) {
+    _prisma = p
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntakeService,
+        { provide: PrismaService, useValue: p },
+        { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
+        { provide: PatientAccessService, useValue: {} },
+        // Bug 11 — IntakeService emits intake.updated; sibling test helpers
+        // (lines 28 / 128 / 322 / 632) already include this mock.
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    return module.get<IntakeService>(IntakeService)
+  }
+
+  const aceDto = {
+    medications: [
+      { drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR', frequency: 'ONCE_DAILY', source: 'PATIENT_SELF_REPORT' },
+    ],
+  } as any
+
+  it('contraindicated patient re-adding an ACE inhibitor → held AWAITING_PROVIDER + provider notified', async () => {
+    prisma = buildPrisma(new Date('2026-05-01T00:00:00Z'))
+    service = await makeService(prisma)
+
+    const res: any = await service.createMedications('p1', aceDto)
+
+    const createArg = prisma.patientMedication.create.mock.calls[0][0]
+    expect(createArg.data.verificationStatus).toBe('AWAITING_PROVIDER')
+    expect(prisma.notification.create).toHaveBeenCalledTimes(1)
+    const notif = prisma.notification.create.mock.calls[0][0].data
+    expect(notif.userId).toBe('prov-1')
+    expect(notif.body).toContain('Lisinopril')
+    expect(res.data ?? res.result?.data).toBeDefined()
+    expect((res.contraindicatedReadd ?? res.result?.contraindicatedReadd)).toContain('Lisinopril')
+  })
+
+  it('NON-contraindicated patient re-adding an ACE inhibitor → UNVERIFIED, no provider notice', async () => {
+    prisma = buildPrisma(null)
+    service = await makeService(prisma)
+
+    const res: any = await service.createMedications('p1', aceDto)
+
+    const createArg = prisma.patientMedication.create.mock.calls[0][0]
+    expect(createArg.data.verificationStatus).toBe('UNVERIFIED')
+    expect(prisma.notification.create).not.toHaveBeenCalled()
+    expect((res.contraindicatedReadd ?? res.result?.contraindicatedReadd) ?? []).toHaveLength(0)
+  })
+})
+
+// F16 — administrative medication holds consolidate to ONE patient bell row
+// per Manisha A1 "Display once". Provider-directed holds name a specific med,
+// so each keeps its own row.
+describe('IntakeService.verifyMedication — F16 administrative hold dedup', () => {
+  let service: IntakeService
+  let prisma: any
+  let notifications: any[]
+
+  function buildPrisma() {
+    notifications = []
+    let nid = 0
+    return {
+      patientMedication: {
+        findUnique: (jest.fn() as any).mockImplementation(({ where }: any) =>
+          Promise.resolve({
+            id: where.id,
+            userId: 'patient-1',
+            drugName: 'Lisinopril 10mg',
+            verificationStatus: 'UNVERIFIED',
+          }),
+        ),
+        update: (jest.fn() as any).mockImplementation((args: any) =>
+          Promise.resolve({
+            id: args.where.id,
+            reportedAt: new Date(),
+            verifiedAt: new Date(),
+            discontinuedAt: null,
+            ...args.data,
+          }),
+        ),
+      },
+      profileVerificationLog: { create: (jest.fn() as any).mockResolvedValue({}) },
+      notification: {
+        findFirst: (jest.fn() as any).mockImplementation(({ where }: any) =>
+          Promise.resolve(
+            notifications.find(
+              (n) =>
+                n.userId === where.userId &&
+                n.channel === where.channel &&
+                n.title === where.title &&
+                n.readAt === null,
+            ) ?? null,
+          ),
+        ),
+        create: (jest.fn() as any).mockImplementation((args: any) => {
+          const row = { id: `notif-${++nid}`, readAt: null, ...args.data }
+          notifications.push(row)
+          return Promise.resolve(row)
+        }),
+        update: (jest.fn() as any).mockImplementation((args: any) => {
+          const row = notifications.find((n) => n.id === args.where.id)
+          Object.assign(row, args.data)
+          return Promise.resolve(row)
+        }),
+      },
+      $transaction: (ops: any[]) => Promise.all(ops),
+    }
+  }
+
+  async function makeService(p: any) {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntakeService,
+        { provide: PrismaService, useValue: p },
+        { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
+        { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+        // Bug 11 — IntakeService emits intake.updated; sibling test helpers
+        // (lines 28 / 128 / 322 / 632) already include this mock.
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    return module.get<IntakeService>(IntakeService)
+  }
+
+  const actor = { id: 'admin-1', roles: ['MEDICAL_DIRECTOR'] } as any
+
+  it('3 administrative holds → exactly 1 unread "Medicine list review" row', async () => {
+    prisma = buildPrisma()
+    service = await makeService(prisma)
+
+    for (const medId of ['med-1', 'med-2', 'med-3']) {
+      await service.verifyMedication(actor, medId, {
+        status: 'HOLD',
+        holdReason: 'AWAITING_RECORDS',
+      } as any)
+    }
+
+    const reviews = notifications.filter(
+      (n) => n.title === 'Medicine list review' && n.readAt === null,
+    )
+    expect(reviews).toHaveLength(1)
+    // Only the first created; the next two bumped its timestamp.
+    expect(prisma.notification.create).toHaveBeenCalledTimes(1)
+    expect(prisma.notification.update).toHaveBeenCalledTimes(2)
+  })
+
+  it('provider-directed holds are NOT consolidated — each names its own med', async () => {
+    prisma = buildPrisma()
+    service = await makeService(prisma)
+
+    for (const medId of ['med-1', 'med-2']) {
+      await service.verifyMedication(actor, medId, {
+        status: 'HOLD',
+        holdReason: 'PROVIDER_DIRECTED_HOLD',
+      } as any)
+    }
+
+    const pauses = notifications.filter((n) => n.title === 'Please pause a medication')
+    expect(pauses).toHaveLength(2)
+    expect(prisma.notification.findFirst).not.toHaveBeenCalled()
+  })
+})
+
+// #92 — admin add medication: ACE/ARB safety gate, provenance, canonical 409.
+describe('IntakeService.adminAddMedication (#92)', () => {
+  let _prisma: any
+  const prismaRef = () => _prisma
+
+  function buildPrisma(opts: {
+    aceContraindicatedAt?: Date | null
+    activeDup?: any
+    nameDup?: any
+  }) {
+    return {
+      patientProfile: {
+        findUnique: (jest.fn() as any).mockResolvedValue({
+          aceContraindicatedAt: opts.aceContraindicatedAt ?? null,
+        }),
+      },
+      patientMedication: {
+        // Two distinct dedup queries: the canonical check keys on
+        // `canonicalDrugId`, the defensive fallback keys on `drugName`. Route by
+        // the where-clause shape so call order/count doesn't matter.
+        findFirst: (jest.fn() as any).mockImplementation((args: any) => {
+          if (args?.where?.canonicalDrugId !== undefined) {
+            return Promise.resolve(opts.activeDup ?? null)
+          }
+          if (args?.where?.drugName !== undefined) {
+            return Promise.resolve(opts.nameDup ?? null)
+          }
+          return Promise.resolve(null)
+        }),
+        create: (jest.fn() as any).mockImplementation((args: any) =>
+          Promise.resolve({
+            id: 'med-new',
+            reportedAt: new Date(),
+            discontinuedAt: null,
+            verifiedAt: null,
+            holdSetAt: null,
+            holdEscalationLevel: 0,
+            combinationComponents: [],
+            ...args.data,
+          }),
+        ),
+      },
+      profileVerificationLog: { create: (jest.fn() as any).mockResolvedValue({}) },
+      $transaction: (fn: any) => Promise.resolve(fn(prismaRef())),
+    }
+  }
+
+  async function makeService(p: any) {
+    _prisma = p
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntakeService,
+        { provide: PrismaService, useValue: p },
+        { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
+        { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+        // Bug 11 — IntakeService emits intake.updated via EventEmitter2 so
+        // ChatService / VoiceService can invalidate their context caches and
+        // push live "intake complete" notices into ongoing voice sessions.
+        // Match the sibling test helpers at lines 28 / 128 / 322.
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    return module.get<IntakeService>(IntakeService)
+  }
+
+  const actor = { id: 'admin-1', roles: ['SUPER_ADMIN'] as any }
+
+  it('non-contraindicated add → VERIFIED with admin provenance', async () => {
+    const prisma = buildPrisma({})
+    const service = await makeService(prisma)
+    const res: any = await service.adminAddMedication(actor, 'p1', {
+      drugName: 'Amlodipine', drugClass: 'DHP_CCB', frequency: 'ONCE_DAILY',
+    } as any)
+
+    const data = prisma.patientMedication.create.mock.calls[0][0].data
+    expect(data.verificationStatus).toBe('VERIFIED')
+    expect(data.verifiedByAdminId).toBe('admin-1')
+    expect(data.source).toBe('PROVIDER_ENTERED')
+    expect(data.addedByUserId).toBe('admin-1')
+    expect(data.addedByRole).toBe('ADMIN')
+    expect(data.canonicalDrugId).toBe('amlodipine')
+    expect(res.requiresAcknowledgement).toBe(false)
+  })
+
+  it('ACE/ARB on angioedema patient → auto PROVIDER_DIRECTED_HOLD + requiresAcknowledgement', async () => {
+    const prisma = buildPrisma({ aceContraindicatedAt: new Date('2026-05-01') })
+    const service = await makeService(prisma)
+    const res: any = await service.adminAddMedication(actor, 'p1', {
+      drugName: 'Lisinopril', drugClass: 'ACE_INHIBITOR', frequency: 'ONCE_DAILY',
+    } as any)
+
+    const data = prisma.patientMedication.create.mock.calls[0][0].data
+    expect(data.verificationStatus).toBe('HOLD')
+    expect(data.holdReason).toBe('PROVIDER_DIRECTED_HOLD')
+    expect(data.verifiedByAdminId).toBeNull()
+    expect(res.requiresAcknowledgement).toBe(true)
+    // Audit row flags the discrepancy.
+    expect(prisma.profileVerificationLog.create.mock.calls[0][0].data.discrepancyFlag).toBe(true)
+  })
+
+  it('canonical duplicate (Losartan when Cozaar active) → 409 with existing record', async () => {
+    const prisma = buildPrisma({
+      activeDup: { id: 'existing-cozaar', drugName: 'Cozaar', verificationStatus: 'HOLD', holdReason: 'PROVIDER_DIRECTED_HOLD' },
+    })
+    const service = await makeService(prisma)
+    await expect(
+      service.adminAddMedication(actor, 'p1', {
+        drugName: 'Losartan', drugClass: 'ARB', frequency: 'ONCE_DAILY',
+      } as any),
+    ).rejects.toMatchObject({
+      response: { error: 'DUPLICATE_CANONICAL_DRUG', existing: { id: 'existing-cozaar' } },
+    })
+    expect(prisma.patientMedication.create).not.toHaveBeenCalled()
+  })
+
+  it('catalog wins on class: provider mis-picks OTHER_UNVERIFIED for Metoprolol → saved as BETA_BLOCKER', async () => {
+    const prisma = buildPrisma({})
+    const service = await makeService(prisma)
+    await service.adminAddMedication(actor, 'p1', {
+      drugName: 'Metoprolol', drugClass: 'OTHER_UNVERIFIED', frequency: 'ONCE_DAILY',
+    } as any)
+
+    const data = prisma.patientMedication.create.mock.calls[0][0].data
+    expect(data.drugClass).toBe('BETA_BLOCKER') // catalog overrides the bad pick
+    expect(data.canonicalDrugId).toBe('metoprolol')
+    // Audit log records the effective (corrected) class, not the raw pick.
+    expect(prisma.profileVerificationLog.create.mock.calls[0][0].data.newValue.drugClass).toBe(
+      'BETA_BLOCKER',
+    )
+  })
+
+  it('off-catalog drug keeps the provider-supplied class (no catalog match)', async () => {
+    const prisma = buildPrisma({})
+    const service = await makeService(prisma)
+    await service.adminAddMedication(actor, 'p1', {
+      drugName: 'SomeCustomHerbalThing', drugClass: 'OTHER_UNVERIFIED', frequency: 'ONCE_DAILY',
+    } as any)
+
+    const data = prisma.patientMedication.create.mock.calls[0][0].data
+    expect(data.drugClass).toBe('OTHER_UNVERIFIED')
+    expect(data.canonicalDrugId).toBeNull()
+  })
+
+  it('defensive fallback: existing active row with same drugName but NULL canonicalDrugId → 409', async () => {
+    // Simulates a pre-fix seed / import row: same name, canonicalDrugId never set.
+    // The canonical check misses it (canonicalDrugId query returns null); the
+    // drugName fallback catches it.
+    const prisma = buildPrisma({
+      activeDup: null,
+      nameDup: {
+        id: 'legacy-metoprolol',
+        drugName: 'Metoprolol',
+        canonicalDrugId: null,
+        verificationStatus: 'VERIFIED',
+        holdReason: null,
+      },
+    })
+    const service = await makeService(prisma)
+    await expect(
+      service.adminAddMedication(actor, 'p1', {
+        drugName: 'Metoprolol', drugClass: 'BETA_BLOCKER', frequency: 'ONCE_DAILY',
+      } as any),
+    ).rejects.toMatchObject({
+      response: { error: 'DUPLICATE_CANONICAL_DRUG', existing: { id: 'legacy-metoprolol' } },
+    })
+    expect(prisma.patientMedication.create).not.toHaveBeenCalled()
+  })
+})
+
+// ─── N5 — extended before/after value capture on admin medication edits ─────
+//
+// The admin-edit audit path previously snapshotted only 3 fields
+// (drugName / drugClass / frequency). Reconstructing an alteration to dose,
+// notes, verificationStatus, holdReason, holdEscalationLevel, or
+// discontinuedAt was impossible from the audit trail alone — the row said
+// "some admin edited this med" but not "from X to Y" for the clinically
+// significant fields. HIPAA §164.312(c) integrity (Humaira Activity 4 item 2)
+// requires reconstructability. N5 (2026-07-09) mirrors the create audit path
+// so previousValue + newValue now carry the FULL serialised medication.
+describe('IntakeService.adminEditMedication (N5 audit snapshot)', () => {
+  let _prisma: any
+  const prismaRef = () => _prisma
+
+  function buildPrisma(existing: any) {
+    return {
+      patientProfile: {
+        findUnique: (jest.fn() as any).mockResolvedValue({
+          aceContraindicatedAt: null,
+        }),
+      },
+      patientMedication: {
+        findUnique: (jest.fn() as any).mockResolvedValue(existing),
+        findFirst: (jest.fn() as any).mockResolvedValue(null),
+        update: (jest.fn() as any).mockImplementation((args: any) =>
+          Promise.resolve({ ...existing, ...args.data }),
+        ),
+      },
+      profileVerificationLog: { create: (jest.fn() as any).mockResolvedValue({}) },
+      $transaction: (fn: any) => Promise.resolve(fn(prismaRef())),
+    }
+  }
+
+  async function makeService(p: any) {
+    _prisma = p
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntakeService,
+        { provide: PrismaService, useValue: p },
+        { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
+        { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile()
+    return module.get<IntakeService>(IntakeService)
+  }
+
+  const actor = { id: 'admin-1', roles: ['SUPER_ADMIN'] as any }
+  const now = new Date('2026-07-01T00:00:00Z')
+
+  const existingMedFull = {
+    id: 'med-1',
+    userId: 'patient-1',
+    drugName: 'Losartan',
+    drugClass: 'ARB',
+    canonicalDrugId: 'losartan',
+    frequency: 'ONCE_DAILY',
+    isCombination: false,
+    combinationComponents: [],
+    source: 'PATIENT_SELF_REPORT',
+    rawInputText: null,
+    notes: 'take with breakfast',
+    verificationStatus: 'VERIFIED',
+    verifiedByAdminId: 'admin-old',
+    verifiedAt: now,
+    holdReason: null,
+    holdSetAt: null,
+    holdEscalationLevel: 0,
+    discontinuedAt: null,
+    reportedAt: now,
+    pillImageUrl: null,
+    plainLanguageDescription: null,
+  }
+
+  it('captures the FULL medication snapshot as previousValue + newValue (not just 3 fields)', async () => {
+    const prisma = buildPrisma(existingMedFull)
+    const service = await makeService(prisma)
+
+    // Edit only the notes field to a new value. The audit snapshot must still
+    // carry every clinical field so an auditor can reconstruct the row.
+    await service.adminEditMedication(actor, 'med-1', {
+      notes: 'take with dinner instead',
+    } as any)
+
+    const auditCall = prisma.profileVerificationLog.create.mock.calls[0][0].data
+    // previousValue carries the full pre-edit shape — dose/notes/status/hold.
+    expect(auditCall.previousValue).toMatchObject({
+      drugName: 'Losartan',
+      drugClass: 'ARB',
+      frequency: 'ONCE_DAILY',
+      notes: 'take with breakfast',
+      verificationStatus: 'VERIFIED',
+      holdEscalationLevel: 0,
+      discontinuedAt: null,
+    })
+    // newValue carries the full post-edit shape — critically, includes the
+    // changed field (notes) even though the pre-N5 code only tracked
+    // drugName/drugClass/frequency and would have missed this change entirely.
+    expect(auditCall.newValue).toEqual(
+      expect.objectContaining({
+        drugName: 'Losartan',
+        drugClass: 'ARB',
+        frequency: 'ONCE_DAILY',
+      }),
+    )
+    // The notes edit is now visible in the audit trail (was invisible pre-N5).
+    expect((auditCall.newValue as any).notes).toContain('dinner')
+  })
+
+  it('captures verificationStatus changes in the newValue snapshot', async () => {
+    // Simulate an admin edit that also triggers the angioedema auto-hold
+    // (drugClass changed to ACE on a contraindicated patient — different flow).
+    const prisma = buildPrisma({
+      ...existingMedFull,
+      drugName: 'Losartan',
+      drugClass: 'ARB',
+    })
+    // Flip the patient to angioedema-contraindicated so the class swap triggers HOLD.
+    prisma.patientProfile.findUnique = (jest.fn() as any).mockResolvedValue({
+      aceContraindicatedAt: new Date('2026-05-01'),
+    })
+    const service = await makeService(prisma)
+
+    await service.adminEditMedication(actor, 'med-1', {
+      drugName: 'Lisinopril',
+      drugClass: 'ACE_INHIBITOR',
+    } as any)
+
+    const auditCall = prisma.profileVerificationLog.create.mock.calls[0][0].data
+    // Pre-edit was VERIFIED …
+    expect((auditCall.previousValue as any).verificationStatus).toBe('VERIFIED')
+    // … post-edit was auto-flipped to HOLD, and the audit trail captures both.
+    expect((auditCall.newValue as any).verificationStatus).toBe('HOLD')
+    expect((auditCall.newValue as any).holdReason).toBe('PROVIDER_DIRECTED_HOLD')
+    expect(auditCall.discrepancyFlag).toBe(true)
   })
 })

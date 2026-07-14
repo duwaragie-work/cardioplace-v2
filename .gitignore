@@ -14,14 +14,21 @@ backend/src/generated/
 # Frontend
 frontend/.next/
 frontend/dist/
+frontend/.env
 frontend/.env.local
 frontend/.env.production
 
 # Admin
 admin/.next/
 admin/dist/
+admin/.env
 admin/.env.local
 admin/.env.production
+
+# QA (Playwright suite reads its own env for the test stack)
+qa/.env
+qa/.env.local
+qa/.env.production
 
 # Shared
 shared/dist/
@@ -50,9 +57,15 @@ yarn-error.log*
 # Tests
 coverage/
 .nyc_output/
+# Playwright artifacts
+qa/test-results/
+qa/playwright-report/
+qa/reports/
 
 # Temp
 .temp
 .tmp
 
 .claude
+
+cardioplace-vertex-sa.json

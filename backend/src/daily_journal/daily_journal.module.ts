@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { DailyJournalController } from './daily_journal.controller.js'
 import { DailyJournalService } from './daily_journal.service.js'
 import { AlertResolutionController } from './controllers/alert-resolution.controller.js'
+import { LoggedConfirmationListener } from './listeners/logged-confirmation.listener.js'
 import { AlertEngineService } from './services/alert-engine.service.js'
 import { AlertResolutionService } from './services/alert-resolution.service.js'
 import { EscalationService } from './services/escalation.service.js'
@@ -24,6 +25,8 @@ import { SessionAveragerService } from './services/session-averager.service.js'
     OutputGeneratorService,
     ProfileResolverService,
     SessionAveragerService,
+    // N7 (2026-07-13) — logged-confirmation push after every JournalEntry save.
+    LoggedConfirmationListener,
   ],
   exports: [
     DailyJournalService,

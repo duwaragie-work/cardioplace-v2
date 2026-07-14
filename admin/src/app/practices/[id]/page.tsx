@@ -34,7 +34,7 @@ import {
   type Clinician,
 } from '@/lib/services/practice.service';
 import { useAuth } from '@/lib/auth-context';
-import { canManagePractices } from '@/lib/roleGates';
+import { canEditThisPractice } from '@/lib/roleGates';
 
 interface FormState {
   name: string;
@@ -58,9 +58,6 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
   const { id } = use(params);
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
-  // Editable form (inputs + Save button) only for SUPER_ADMIN, MED_DIR,
-  // OPS. PROVIDER sees a clean read-only summary of the same fields.
-  const canManage = canManagePractices(user);
 
   const [practice, setPractice] = useState<Practice | null>(null);
   const [staff, setStaff] = useState<PracticeStaff[]>([]);
@@ -103,6 +100,12 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
   }, [authLoading, user, refresh]);
+
+  // Editable form (inputs + Save + staff add/remove) only when the caller can
+  // edit THIS practice: SUPER / OPS (any) or a MED_DIR who heads it (runtime
+  // check against practice.medicalDirectorIds — mirrors the backend
+  // assertCanManagePractice scope). PROVIDER / other MED_DIRs get read-only.
+  const canManage = canEditThisPractice(user, practice);
 
   const dirty = practice && form
     ? JSON.stringify(form) !== JSON.stringify(toForm(practice))
@@ -197,7 +200,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="h-full" style={{ backgroundColor: 'var(--brand-background)' }}>
-      <main className="p-4 md:p-8 max-w-[1200px] mx-auto space-y-5">
+      <div className="p-4 md:p-8 max-w-[1200px] mx-auto space-y-5">
         {/* Back link */}
         <button
           type="button"
@@ -451,6 +454,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
                   <div className="flex items-center gap-2 flex-wrap">
                     <select
                       data-testid="admin-practice-staff-picker"
+                      aria-label={pickerRole === 'PROVIDER' ? 'Select provider' : 'Select medical director'}
                       value={pickerUserId}
                       onChange={(e) => setPickerUserId(e.target.value)}
                       disabled={pickerLoading}
@@ -561,7 +565,7 @@ export default function PracticeDetailPage({ params }: { params: Promise<{ id: s
             </div>
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

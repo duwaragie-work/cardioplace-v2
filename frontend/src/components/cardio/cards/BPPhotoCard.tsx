@@ -47,13 +47,13 @@ export default function BPPhotoCard({
           <AlertCircle className="w-5 h-5 shrink-0" style={{ color: "var(--brand-alert-red)" }} aria-hidden="true" />
           <div className="flex-1">
             <p
-              className="font-bold text-[15px]"
+              className="font-bold text-[0.9375rem]"
               style={{ color: 'var(--brand-text-primary)' }}
             >
               {t('chat.card.photoFailed')}
             </p>
             <p
-              className="text-[13px] mt-1 leading-relaxed"
+              className="text-[0.8125rem] mt-1 leading-relaxed"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
               {summary.message}
@@ -66,7 +66,7 @@ export default function BPPhotoCard({
         >
           <button
             onClick={onRetake}
-            className="flex-1 h-11 rounded-xl font-semibold text-[13px] transition hover:opacity-90"
+            className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] transition hover:opacity-90"
             style={{
               backgroundColor: 'var(--brand-primary-purple-light)',
               color: 'var(--brand-primary-purple)',
@@ -76,7 +76,7 @@ export default function BPPhotoCard({
           </button>
           <button
             onClick={onEdit}
-            className="flex-1 h-11 rounded-xl font-semibold text-[13px] text-white transition hover:opacity-90"
+            className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] text-white transition hover:opacity-90"
             style={{
               background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
             }}
@@ -113,7 +113,7 @@ export default function BPPhotoCard({
             aria-hidden="true"
           />
           <p
-            className="font-bold text-[15px]"
+            className="font-bold text-[0.9375rem]"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {t('chat.card.photoConfirmTitle')}
@@ -135,7 +135,7 @@ export default function BPPhotoCard({
         <div className="flex-1 min-w-0">
           <p
             lang="en"
-            className="text-[36px] font-bold leading-none"
+            className="text-[2.25rem] font-bold leading-none"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {summary.sbp} / {summary.dbp}
@@ -143,7 +143,7 @@ export default function BPPhotoCard({
           {summary.pulse != null && (
             <p
               lang="en"
-              className="mt-1 text-[14px] font-semibold"
+              className="mt-1 text-[0.875rem] font-semibold"
               style={{ color: 'var(--brand-text-muted)' }}
             >
               pulse {summary.pulse}
@@ -151,7 +151,7 @@ export default function BPPhotoCard({
           )}
           {summary.confidence != null && (
             <p
-              className="mt-1 text-[10px]"
+              className="mt-1 text-[0.625rem]"
               style={{
                 color: lowConfidence
                   ? 'var(--brand-warning-amber)'
@@ -166,7 +166,7 @@ export default function BPPhotoCard({
       </div>
 
       <p
-        className="px-5 pb-3 text-[13px] leading-relaxed"
+        className="px-5 pb-3 text-[0.8125rem] leading-relaxed"
         style={{ color: 'var(--brand-text-secondary)' }}
       >
         {t('chat.card.photoConfirmHelp')}
@@ -179,7 +179,7 @@ export default function BPPhotoCard({
         <button
           onClick={onConfirm}
           disabled={lowConfidence}
-          className="flex-1 h-11 rounded-xl font-bold text-[13px] text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex-1 h-11 rounded-xl font-bold text-[0.8125rem] text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           style={{
             background: 'linear-gradient(135deg, #7B00E0, #9333EA)',
             boxShadow: lowConfidence ? 'none' : '0 4px 14px rgba(123,0,224,0.28)',
@@ -189,7 +189,7 @@ export default function BPPhotoCard({
         </button>
         <button
           onClick={onEdit}
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] transition hover:opacity-90"
+          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] transition hover:opacity-90"
           style={{
             backgroundColor: 'var(--brand-background)',
             color: 'var(--brand-text-primary)',
@@ -199,7 +199,7 @@ export default function BPPhotoCard({
         </button>
         <button
           onClick={onRetake}
-          className="flex-1 h-11 rounded-xl font-semibold text-[13px] transition hover:opacity-90"
+          className="flex-1 h-11 rounded-xl font-semibold text-[0.8125rem] transition hover:opacity-90"
           style={{
             backgroundColor: 'var(--brand-primary-purple-light)',
             color: 'var(--brand-primary-purple)',

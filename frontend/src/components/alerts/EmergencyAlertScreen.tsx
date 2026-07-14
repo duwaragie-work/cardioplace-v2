@@ -23,6 +23,9 @@ import { applyFriendlyVoice } from '@/lib/tts-voice';
 interface Props {
   alert: DeviationAlertDto;
   onAcknowledge: () => Promise<void> | void;
+  /** F27 — true when the patient is not yet ENROLLED, so dispatch is deferred
+   *  and the "care team has been notified" reassurance would be false. */
+  isPreEnrollment?: boolean;
 }
 
 // Clinical patient copy for BP Level 2 — intentionally NOT i18n'd. This
@@ -32,9 +35,29 @@ const MESSAGE_TITLE = 'Your blood pressure is very high.';
 const MESSAGE_BODY =
   'If you have chest pain, severe headache, difficulty breathing, or vision changes, call 911 now.';
 const REASSURANCE = 'Your care team has been notified.';
+// F27 — pre-enrollment: dispatch is deferred, so the care team has NOT been
+// notified. Replace the reassurance with truthful self-escalation guidance.
+const PRE_ENROLLMENT_REASSURANCE =
+  'Your enrollment is pending — your care team has not been notified yet. If symptoms continue, call 911 or go to the ER now.';
 const FULL_AUDIO = `${MESSAGE_TITLE} ${MESSAGE_BODY} ${REASSURANCE}`;
 const FOLLOWUP_AUDIO =
   "Have you called 911 yet? Tap Yes if you have, or Not yet if you haven't.";
+
+// #13 — the follow-up prompt used to hardcode "Two hours have passed", which
+// is wrong when a patient opens an alert created hours or days earlier.
+// Compute the elapsed time from the alert's createdAt at render time (dynamic,
+// never cached). Under 30 min we omit the elapsed clause entirely so the copy
+// doesn't read "Less than a minute has passed". English elapsed units for the
+// US pilot — flagged for translation. No date-fns dep (not installed).
+function followUpElapsed(createdAtIso: string): { show: boolean; text: string } {
+  const ms = Date.now() - new Date(createdAtIso).getTime();
+  const minutes = Math.floor(ms / 60_000);
+  if (!Number.isFinite(minutes) || minutes < 30) return { show: false, text: '' };
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return { show: true, text: `${hours} hour${hours === 1 ? '' : 's'}` };
+  const days = Math.round(hours / 24);
+  return { show: true, text: `${days} day${days === 1 ? '' : 's'}` };
+}
 
 // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema. NEUTRAL non-diagnostic
 // title; the clinical content lives in the SIGNED-OFF registry body
@@ -93,9 +116,15 @@ function clearUnderstood(alertId: string) {
   }
 }
 
-export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
+export default function EmergencyAlertScreen({ alert, onAcknowledge, isPreEnrollment = false }: Props) {
   const router = useRouter();
   const { t, locale } = useLanguage();
+  // F27 — swap the "care team notified" reassurance for truthful pre-enrollment
+  // guidance. The 911 CTA above it is unchanged; only the false claim is fixed.
+  const effectiveReassurance = isPreEnrollment ? PRE_ENROLLMENT_REASSURANCE : REASSURANCE;
+  const effectiveAngioedemaReassurance = isPreEnrollment
+    ? PRE_ENROLLMENT_REASSURANCE
+    : ANGIOEDEMA_REASSURANCE;
   type Mode = 'urgent' | 'followup' | 'closed';
   const [mode, setMode] = useState<Mode>('urgent');
   const [audioBlocked, setAudioBlocked] = useState(false);
@@ -122,9 +151,10 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
   const angioedemaBodyLang = isAngioedema && angioedemaKey ? locale : 'en';
   // TTS reads the same signed-off body the patient sees — no invented copy.
   const ANGIOEDEMA_AUDIO = isAngioedema
-    ? `${ANGIOEDEMA_TITLE} ${angioedemaBody} ${ANGIOEDEMA_REASSURANCE}`
+    ? `${ANGIOEDEMA_TITLE} ${angioedemaBody} ${effectiveAngioedemaReassurance}`
     : '';
-  const urgentAudio = isAngioedema ? ANGIOEDEMA_AUDIO : FULL_AUDIO;
+  const bpUrgentAudio = `${MESSAGE_TITLE} ${MESSAGE_BODY} ${effectiveReassurance}`;
+  const urgentAudio = isAngioedema ? ANGIOEDEMA_AUDIO : bpUrgentAudio;
 
   // Decide initial mode on mount: if previously dismissed + T+2h elapsed
   // + alert still open → C2. Otherwise → C1. If the backend has marked
@@ -230,7 +260,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
             initial={{ y: -20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: -20, opacity: 0 }}
-            className="mx-4 mt-3 sm:mx-auto sm:mt-4 sm:max-w-md py-2 rounded-full text-[12.5px] font-bold cursor-pointer"
+            className="mx-4 mt-3 sm:mx-auto sm:mt-4 sm:max-w-md py-2 rounded-full text-[0.78125rem] font-bold cursor-pointer"
             style={{ backgroundColor: 'rgba(0,0,0,0.18)', color: 'white' }}
           >
             {t('alerts.emergency.audioHint')}
@@ -265,7 +295,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
             <>
               <h1
                 lang="en"
-                className="text-[26px] sm:text-[32px] font-extrabold leading-tight mb-4"
+                className="text-[1.625rem] sm:text-[2rem] font-extrabold leading-tight mb-4"
                 style={{ wordBreak: 'break-word' }}
               >
                 {ANGIOEDEMA_TITLE}
@@ -273,12 +303,12 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
               <p
                 data-testid="emergency-screen-message"
                 lang={angioedemaBodyLang}
-                className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95"
+                className="text-[1rem] sm:text-[1.125rem] leading-relaxed mb-3 opacity-95"
               >
                 {angioedemaBody}
               </p>
-              <p lang="en" className="text-[13px] sm:text-[14px] opacity-90">
-                {ANGIOEDEMA_REASSURANCE}
+              <p lang="en" className="text-[0.8125rem] sm:text-[0.875rem] opacity-90" data-testid="emergency-screen-reassurance">
+                {effectiveAngioedemaReassurance}
               </p>
             </>
           ) : (
@@ -287,27 +317,32 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
             <>
               <h1
                 lang="en"
-                className="text-[26px] sm:text-[32px] font-extrabold leading-tight mb-4"
+                className="text-[1.625rem] sm:text-[2rem] font-extrabold leading-tight mb-4"
                 style={{ wordBreak: 'break-word' }}
               >
                 {MESSAGE_TITLE}
               </h1>
-              <p data-testid="emergency-screen-message" lang="en" className="text-[16px] sm:text-[18px] leading-relaxed mb-3 opacity-95">
+              <p data-testid="emergency-screen-message" lang="en" className="text-[1rem] sm:text-[1.125rem] leading-relaxed mb-3 opacity-95">
                 If you have <b>chest pain</b>, <b>severe headache</b>, <b>difficulty breathing</b>, or <b>vision changes</b>, call 911 now.
               </p>
-              <p lang="en" className="text-[13px] sm:text-[14px] opacity-90">{REASSURANCE}</p>
+              <p lang="en" className="text-[0.8125rem] sm:text-[0.875rem] opacity-90" data-testid="emergency-screen-reassurance">{effectiveReassurance}</p>
             </>
           )
         ) : (
           <>
             <h1
-              className="text-[26px] sm:text-[32px] font-extrabold leading-tight mb-3"
+              className="text-[1.625rem] sm:text-[2rem] font-extrabold leading-tight mb-3"
               style={{ wordBreak: 'break-word' }}
             >
               {t('alerts.emergency.followupTitle')}
             </h1>
-            <p className="text-[14px] sm:text-[15px] opacity-95">
-              {t('alerts.emergency.followupBody')}
+            <p className="text-[0.875rem] sm:text-[0.9375rem] opacity-95">
+              {(() => {
+                const e = followUpElapsed(alert.createdAt);
+                return e.show
+                  ? t('alerts.emergency.followupBodyElapsed').replace('{elapsed}', e.text)
+                  : t('alerts.emergency.followupBody');
+              })()}
             </p>
           </>
         )}
@@ -323,7 +358,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
             <a
               href="tel:911"
               data-testid="emergency-call-911-button"
-              className="block w-full text-center rounded-full py-4 sm:py-5 font-extrabold text-[20px] sm:text-[22px] active:scale-[0.98] transition"
+              className="block w-full text-center rounded-full py-4 sm:py-5 font-extrabold text-[1.25rem] sm:text-[1.375rem] active:scale-[0.98] transition"
               style={{
                 backgroundColor: 'white',
                 color: 'var(--brand-alert-red)',
@@ -340,7 +375,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
               type="button"
               data-testid="alert-acknowledge-button"
               onClick={handleUnderstand}
-              className="w-full rounded-full py-3 font-bold text-[14px] cursor-pointer transition"
+              className="w-full rounded-full py-3 font-bold text-[0.875rem] cursor-pointer transition"
               style={{
                 backgroundColor: 'rgba(0,0,0,0.18)',
                 color: 'white',
@@ -354,7 +389,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
             <button
               type="button"
               onClick={handleFollowupYes}
-              className="rounded-full py-4 font-extrabold text-[16px] flex items-center justify-center gap-2 cursor-pointer transition active:scale-[0.98]"
+              className="rounded-full py-4 font-extrabold text-[1rem] flex items-center justify-center gap-2 cursor-pointer transition active:scale-[0.98]"
               style={{
                 backgroundColor: 'white',
                 color: 'var(--brand-alert-red)',
@@ -366,7 +401,7 @@ export default function EmergencyAlertScreen({ alert, onAcknowledge }: Props) {
             <button
               type="button"
               onClick={handleFollowupNotYet}
-              className="rounded-full py-4 font-extrabold text-[16px] flex items-center justify-center gap-2 cursor-pointer transition"
+              className="rounded-full py-4 font-extrabold text-[1rem] flex items-center justify-center gap-2 cursor-pointer transition"
               style={{
                 backgroundColor: 'rgba(0,0,0,0.22)',
                 color: 'white',

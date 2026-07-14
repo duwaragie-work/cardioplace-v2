@@ -20,29 +20,53 @@ import type { AdherenceWindow } from './adherence-window.js'
 const RECENT_MISS_THRESHOLD = 2
 const EXTENDED_MISS_THRESHOLD = 3
 
+/**
+ * Carve-out predicate: a SINGLE missed beta-blocker dose in an HFrEF / HCM /
+ * AFib patient (rebound tachycardia + hypertensive risk). Shared by the Tier-2
+ * adherence rule (which fires on it) and the first-month nudge (which skips it —
+ * those patients get the Tier-2 alert, not the gentle educational nudge).
+ */
+function betaBlockerSingleMissCarveOut(
+  window: AdherenceWindow,
+  profile: { hasHeartFailure: boolean; hasHCM: boolean; hasAFib: boolean },
+): boolean {
+  return (
+    (profile.hasHeartFailure || profile.hasHCM || profile.hasAFib) &&
+    (window.missesByDrugClass.get('BETA_BLOCKER') ?? 0) >= 1
+  )
+}
+
 export function medicationMissedRuleWithWindow(
   recentMisses: AdherenceWindow,
 ): RuleFunction {
   return (session, ctx) => {
-    const { daysWithMiss, daysWithMissOver7d, missesByDrugClass, missedMedications } = recentMisses
+    const { daysWithMiss, daysWithMissOver7d, missedMedications } = recentMisses
 
     // Carve-out: single beta-blocker miss for HFrEF / HCM / AFib patients.
-    const isBetaBlockerCarveOut =
-      (ctx.profile.hasHeartFailure || ctx.profile.hasHCM || ctx.profile.hasAFib) &&
-      (missesByDrugClass.get('BETA_BLOCKER') ?? 0) >= 1
+    const isBetaBlockerCarveOut = betaBlockerSingleMissCarveOut(recentMisses, ctx.profile)
 
     if (!isBetaBlockerCarveOut && daysWithMiss < RECENT_MISS_THRESHOLD) {
       return null
     }
 
-    // Escalate to provider push when the pattern persists over 7 days.
-    // EscalationService's standard Tier 2 ladder honours this annotation.
+    // #escalate-3-of-7 (2026-06-03, mirror of #93) — clinical prose, not an
+    // internal path tag. Surfaces to the physician WHY the adherence alert
+    // escalated: a 3-of-7-day missed-dose trend. Display-only — rendered via
+    // physSuffix into physicianMessage; escalation routing keys off the
+    // daysWithMissOver7d count, not this string (pre-flight verified).
     const annotations: string[] = []
     if (daysWithMissOver7d >= EXTENDED_MISS_THRESHOLD) {
-      annotations.push('escalate-3-of-7')
+      annotations.push(
+        'Tier 2 dispatched on 3-of-7 missed-dose pattern per adherence-trending escalation policy.',
+      )
     }
     if (isBetaBlockerCarveOut) {
-      annotations.push('beta-blocker-carve-out')
+      // #93 (2026-06-03) — clinical prose, not an internal path tag. Explains
+      // to the provider WHY a single missed dose escalated to Tier 2 (the
+      // HFrEF/HCM/AFib β-blocker safety carve-out). Rendered via physSuffix.
+      annotations.push(
+        'Tier 2 dispatched on single missed dose per HFrEF / HCM / AFib β-blocker safety policy.',
+      )
     }
 
     return {
@@ -85,6 +109,11 @@ export function firstMonthAdherenceNudge(
     if (ctx.enrolledAt == null) return null
     const ageMs = ctx.resolvedAt.getTime() - ctx.enrolledAt.getTime()
     if (ageMs < 0 || ageMs > FIRST_MONTH_DAYS * 24 * 60 * 60 * 1000) return null
+
+    // Manisha 5/24 Med §5 — patients who qualify for the beta-blocker single-
+    // miss carve-out get the Tier-2 adherence alert, NOT this gentle first-month
+    // nudge. Suppress the nudge so the safety-critical alert isn't softened.
+    if (betaBlockerSingleMissCarveOut(window, ctx.profile)) return null
 
     // Any miss reported in the rolling window (3- or 7-day) counts as the
     // patient's "first missed dose" — the engine's one-time guard ensures

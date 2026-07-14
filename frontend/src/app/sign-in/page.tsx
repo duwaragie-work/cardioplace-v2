@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Mail, KeyRound, Eye, EyeOff } from "lucide-react";
+import { CheckCircle2, Mail, KeyRound, Eye, EyeOff, Lock } from "lucide-react";
 import { useAuth, type OtpVerifyResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { getOrCreateDeviceId } from "@/lib/device";
@@ -10,6 +10,8 @@ import type { TranslationKey } from "@/i18n";
 import { shouldShowOnboardingForUser } from "@/lib/onboarding";
 import LandingHeader from "@/components/cardio/LandingHeader";
 import LandingFooter from "@/components/cardio/LandingFooter";
+import SessionExpiredBanner from "@/components/auth/SessionExpiredBanner";
+import { WEBAUTHN_CHALLENGE_STORAGE_KEY } from "@/lib/services/webauthn.service";
 
 const OTP_LENGTH = 6;
 
@@ -37,6 +39,8 @@ const BACKEND_MSG_KEY_MAP: Record<string, TranslationKey> = {
   'Verification failed': 'register.verificationFailed',
   'Account is suspended': 'register.accountSuspended',
   'Account is blocked': 'register.accountBlocked',
+  'Account is deactivated': 'register.accountDeactivated',
+  'Account is closed': 'register.accountClosed',
 };
 
 function backendMsgToKey(msg: string | undefined): TranslationKey | null {
@@ -275,6 +279,21 @@ export default function RegisterPage() {
         window.location.href = `${adminUrl}/auth/magic-link?${params.toString()}`;
         return;
       }
+      // Patient biometric second factor — a patient with a registered device
+      // gets a WebAuthn challenge instead of tokens. Stash the token and route
+      // to the biometric page (mirrors the admin TOTP-challenge handoff).
+      if (data && data.status === 'WEBAUTHN_REQUIRED') {
+        try {
+          sessionStorage.setItem(
+            WEBAUTHN_CHALLENGE_STORAGE_KEY,
+            JSON.stringify({ challengeToken: data.challengeToken }),
+          );
+        } catch {
+          // sessionStorage unavailable — the biometric page reads URL params too.
+        }
+        router.push('/sign-in/biometric');
+        return;
+      }
       login(data as OtpVerifyResponse);
       const userIdForSkip = data.userId !== undefined ? String(data.userId) : '';
       if (data.onboarding_required && shouldShowOnboardingForUser({ userId: userIdForSkip })) {
@@ -293,21 +312,22 @@ export default function RegisterPage() {
     <Suspense>
     <div className="bg-white">
       <LandingHeader activeLink="" />
-      <main id="main" className="min-h-[100dvh] pt-24 pb-10 flex items-center-safe justify-center px-4 sm:px-6 lg:px-12">
+      <main id="main" className="min-h-[100dvh] pt-24 pb-10 flex flex-col items-center-safe justify-center px-4 sm:px-6 lg:px-12">
+      <SessionExpiredBanner />
       <div className="w-full max-w-300 mx-auto">
         <div className="flex flex-col items-center md:items-center md:flex-row gap-8 lg:gap-20">
           {/* Left side - Form */}
           <div className="flex-1 w-full max-w-[400px] md:max-w-105 lg:max-w-130">
             {/* Heading */}
             <div className="mb-5 md:mb-8 flex flex-col items-center md:items-start gap-3">
-              <h2 className="font-bold leading-[1.2] text-[#170c1d] text-[22px] sm:text-[26px] lg:text-[33px] tracking-[-0.4px] text-center md:text-left">
+              <h2 className="font-bold leading-[1.2] text-[#170c1d] text-[1.375rem] sm:text-[1.625rem] lg:text-[2.0625rem] tracking-[-0.4px] text-center md:text-left">
                 {t('register.signIn')}
               </h2>
             </div>
 
             {!otpSent && !magicLinkSent && (
               <div className="mb-6 md:mb-10 w-full">
-                <p className="font-normal leading-relaxed text-[#4b5563] text-sm sm:text-base lg:text-[18px] text-center md:text-left">
+                <p className="font-normal leading-relaxed text-[#4b5563] text-sm sm:text-base lg:text-[1.125rem] text-center md:text-left">
                   {t('register.enterEmail')}
                 </p>
               </div>
@@ -376,7 +396,7 @@ export default function RegisterPage() {
                 {/* Inline email format error — quiet until user has typed */}
                 {showEmailError && (
                   <p
-                    className="mt-1.5 text-[11px] lg:text-xs"
+                    className="mt-1.5 text-[0.6875rem] lg:text-xs"
                     style={{ color: 'var(--brand-alert-red)' }}
                   >
                     {t('register.invalidEmail')}
@@ -448,7 +468,7 @@ export default function RegisterPage() {
                         </div>
                         {/* OTP-length hint: only while user is mid-typing */}
                         {showOtpLengthHint && (
-                          <p className="text-[11px] lg:text-xs text-[#a16207] mb-2">
+                          <p className="text-[0.6875rem] lg:text-xs text-[#a16207] mb-2">
                             {t('register.otpLengthHint').replace('{n}', String(otp.length))}
                           </p>
                         )}
@@ -512,7 +532,7 @@ export default function RegisterPage() {
               {/* Terms — passive notice below the buttons (consent itself is
                   collected once on the onboarding privacy step for new users). */}
               <div className="w-full max-w-105">
-                <p className="text-[#737373] text-[11px] lg:text-xs leading-relaxed text-center">
+                <p className="text-[#737373] text-[0.6875rem] lg:text-xs leading-relaxed text-center">
                   {t('register.terms')}{" "}
                   <a href="/terms" className="font-medium text-[#7B00E0] hover:underline">
                     {t('register.termsOfService')}
@@ -523,6 +543,37 @@ export default function RegisterPage() {
                   </a>
                   .
                 </p>
+                {/* Locked out — public support form (no auth required). */}
+                <p className="text-center mt-3">
+                  <a
+                    href={`/support/locked-out${emailTrimmed ? `?email=${encodeURIComponent(emailTrimmed)}` : ''}`}
+                    data-testid="signin-need-help"
+                    className="text-[0.6875rem] lg:text-xs font-medium text-[#7B00E0] hover:underline"
+                  >
+                    Need help signing in?
+                  </a>
+                </p>
+                {/* A2 — privacy assurance + A1 — medical disclaimer.
+                    Mobile-only here: on md+ the right info panel is visible and
+                    carries these two notices instead. When that panel collapses
+                    (below md) they stay in their original place below the form. */}
+                {/* Grouped into one tidy tinted card with consistent left
+                    alignment + even spacing — mirrors the right panel so the
+                    notices read clean instead of messy on small screens.
+                    i18n keys: register.privacyAssurance / register.medicalDisclaimer.
+                    Medical disclaimer is MVP US-only — 911 hardcoded in the
+                    string per CROSS_HANDOFF_ADDENDUM_2026_06_03.md. */}
+                <div className="md:hidden mt-4 rounded-2xl bg-[#faf6fe] border border-[#f0e6fa] p-4 space-y-3 text-left">
+                  <div className="flex items-start gap-2.5">
+                    <Lock aria-hidden="true" className="w-4 h-4 text-[#7B00E0] shrink-0 mt-0.5" strokeWidth={2.5} />
+                    <p className="text-[#4b3b55] text-xs leading-relaxed">
+                      {t('register.privacyAssurance')}
+                    </p>
+                  </div>
+                  <p className="text-[#6b5b75] text-[0.6875rem] leading-relaxed border-t border-[#f0e6fa] pt-3">
+                    {t('register.medicalDisclaimer')}
+                  </p>
+                </div>
               </div>
 
             </div>
@@ -571,6 +622,21 @@ export default function RegisterPage() {
                   <CheckCircle2 aria-hidden="true" className="w-4 h-4 text-[#7B00E0] shrink-0" strokeWidth={2.5} />
                   <p className="text-[#4b3b55] text-xs lg:text-sm">
                     {t('register.noPassword')}
+                  </p>
+                </div>
+
+                {/* Privacy assurance + medical disclaimer — desktop home for
+                    these notices. The mobile copy (md:hidden) lives below the
+                    form so the wording never disappears when this panel does. */}
+                <div className="border-t border-white/50 pt-4 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <Lock aria-hidden="true" className="w-4 h-4 text-[#7B00E0] shrink-0 mt-0.5" strokeWidth={2.5} />
+                    <p className="text-[#4b3b55] text-xs lg:text-sm leading-relaxed">
+                      {t('register.privacyAssurance')}
+                    </p>
+                  </div>
+                  <p className="text-[#6b5b75] text-[0.6875rem] lg:text-xs leading-relaxed pl-6">
+                    {t('register.medicalDisclaimer')}
                   </p>
                 </div>
               </div>

@@ -1,10 +1,23 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
 import { EmbeddingService } from '../../common/embedding.service.js'
 
+/**
+ * How many of the most-recent turns getConversationHistory pulls verbatim
+ * (the `LIMIT 12` chronological window). Shared with getSessionSummary so
+ * the rolling-summary slice excludes the same turns that are already going
+ * to Gemini raw — avoids the model seeing the same exchange twice (once in
+ * the system-prompt summary + once in the contents array).
+ *
+ * Bump in lock-step with the LIMIT 12 in the raw-history queries below.
+ */
+const RAW_RECENT_TURNS = 12
+
 @Injectable()
 export class ConversationHistoryService {
+  private readonly logger = new Logger(ConversationHistoryService.name)
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly geminiService: GeminiService,
@@ -16,24 +29,50 @@ export class ConversationHistoryService {
   /**
    * Retrieve the most relevant past messages for a session using vector
    * similarity. Works for both text and voice rows since all have embeddings.
+   *
+   * Multi-tenant safety: the raw SQL below joins on Session so the userId is
+   * enforced inside the query itself — even if a caller someday forgets to
+   * validate sessionId upstream, no cross-patient rows can leak. A foreign
+   * sessionId returns an empty result + a `[SECURITY] cross_tenant_attempt`
+   * log line for ops alerting.
    */
   async getConversationHistory(
+    userId: string,
     sessionId: string,
     query: string,
   ): Promise<[string, string][]> {
     try {
-      if (!sessionId) return []
+      if (!userId || !sessionId) return []
+
+      // Defense-in-depth: confirm the session actually belongs to this user
+      // BEFORE running the embedding similarity query (which is the expensive
+      // step). Mismatch → log + bail out, no DB rows returned.
+      const session = await this.prisma.session.findFirst({
+        where: { id: sessionId, userId },
+        select: { id: true },
+      })
+      if (!session) {
+        this.logger.warn(
+          `[SECURITY] cross_tenant_attempt service=conversation_history userId=${userId} sessionId=${sessionId}`,
+        )
+        return []
+      }
 
       type RawRow = { userMessage: string; aiSummary: string; timestamp: Date }
 
-      // 1. Always get the last 12 turns chronologically (ensures recent context)
+      // 1. Always get the last 12 turns chronologically (ensures recent context).
+      // The Session join keeps the userId predicate inside the SQL so any
+      // future schema migration (or accidental sessionId-only call site) can't
+      // bypass tenant isolation at the raw-SQL layer.
       const recentRows: RawRow[] = await (this.prisma as any).$queryRawUnsafe(
-        `SELECT "userMessage", "aiSummary", timestamp
-         FROM "Conversation"
-         WHERE "sessionId" = $1
-         ORDER BY timestamp DESC
+        `SELECT c."userMessage", c."aiSummary", c.timestamp
+         FROM "Conversation" c
+         JOIN "Session" s ON s.id = c."sessionId"
+         WHERE c."sessionId" = $1 AND s."userId" = $2
+         ORDER BY c.timestamp DESC
          LIMIT 12`,
         sessionId,
+        userId,
       )
 
       // 2. If query is provided, also get similar turns via vector search
@@ -45,12 +84,14 @@ export class ConversationHistoryService {
           if (queryEmbedding && queryEmbedding.length > 0) {
             const embeddingString = `[${queryEmbedding.join(',')}]`
             similarRows = await (this.prisma as any).$queryRawUnsafe(
-              `SELECT "userMessage", "aiSummary", timestamp
-               FROM "Conversation"
-               WHERE "sessionId" = $1 AND embedding IS NOT NULL
-               ORDER BY embedding <-> $2::vector
+              `SELECT c."userMessage", c."aiSummary", c.timestamp
+               FROM "Conversation" c
+               JOIN "Session" s ON s.id = c."sessionId"
+               WHERE c."sessionId" = $1 AND s."userId" = $2 AND c.embedding IS NOT NULL
+               ORDER BY c.embedding <-> $3::vector
                LIMIT 6`,
               sessionId,
+              userId,
               embeddingString,
             )
           }
@@ -90,16 +131,78 @@ export class ConversationHistoryService {
   }
 
   /**
-   * Read the rolling session summary. One DB read, no LLM call.
+   * Read the rolling session summary for the LLM system prompt. One DB read,
+   * no LLM call.
+   *
+   * The stored `Session.summary` is a hybrid of LLM-compressed bullets (at
+   * the top, written by updateRollingSummary every 10 messages) plus a tail
+   * of per-turn append lines in the format `- [Text|Voice] Patient: … → AI: …`
+   * (one line per turn since the last compression).
+   *
+   * The most-recent RAW_RECENT_TURNS append lines correspond to the same
+   * turns getConversationHistory ships raw in the Gemini `contents` array.
+   * Returning the WHOLE summary here would duplicate those exchanges (once
+   * verbatim in contents + once as an append line in the prompt) — wasted
+   * tokens AND a known echo-bias trigger in long-context models. We strip
+   * those tail appends here so the prompt-side summary is genuinely the
+   * "older history" tier of the hybrid memory.
    */
-  async getSessionSummary(sessionId: string): Promise<string> {
-    if (!sessionId) return ''
+  async getSessionSummary(userId: string, sessionId: string): Promise<string> {
+    if (!userId || !sessionId) return ''
     try {
-      const session = await this.prisma.session.findUnique({
-        where: { id: sessionId },
+      // Bug 9 fix — match the userId-scope guard on the sibling
+      // getConversationHistory call. Without it, a user passing another
+      // user's sessionId would receive the foreign session's rolling
+      // summary in their system prompt while getConversationHistory
+      // correctly returned []. Cross-tenant leak via the LLM context.
+      const session = await this.prisma.session.findFirst({
+        where: { id: sessionId, userId },
         select: { summary: true },
       })
-      return session?.summary ?? ''
+      if (!session) {
+        this.logger.warn(
+          `[SECURITY] cross_tenant_attempt service=conversation_history.summary userId=${userId} sessionId=${sessionId}`,
+        )
+        return ''
+      }
+      return sliceSummaryForPrompt(session.summary ?? '', RAW_RECENT_TURNS)
+    } catch {
+      return ''
+    }
+  }
+
+  /**
+   * Bug 17 — read the rolling session summary for voice's Gemini Live system
+   * instruction. Unlike text chat (which slices off the last 12 append lines
+   * because they're already shipped verbatim in the Gemini `contents` array),
+   * VOICE has no `contents` array — the system instruction is the ONLY way
+   * to seed Gemini Live with the prior conversation at session open. So we
+   * return the WHOLE summary (compressed bullets + ALL append lines) without
+   * slicing.
+   *
+   * Same userId-scope + `[SECURITY] cross_tenant_attempt` guard as the text
+   * sibling above. The summary includes both `[Text]` and `[Voice]` tagged
+   * turns thanks to `updateRollingSummary`'s label, so when voice joins a
+   * conversation that already has text turns (or vice versa), Gemini Live
+   * gets the full picture across modalities.
+   */
+  async getSessionSummaryForVoice(
+    userId: string,
+    sessionId: string,
+  ): Promise<string> {
+    if (!userId || !sessionId) return ''
+    try {
+      const session = await this.prisma.session.findFirst({
+        where: { id: sessionId, userId },
+        select: { summary: true },
+      })
+      if (!session) {
+        this.logger.warn(
+          `[SECURITY] cross_tenant_attempt service=conversation_history.summary_for_voice userId=${userId} sessionId=${sessionId}`,
+        )
+        return ''
+      }
+      return session.summary ?? ''
     } catch {
       return ''
     }
@@ -366,8 +469,19 @@ export class ConversationHistoryService {
 
       let updatedSummary: string
 
-      // Every 10 messages, use LLM to compress the summary
-      if (newCount % 10 === 0 && currentSummary.length > 500) {
+      // Compression triggers:
+      //   • count-based (every 10 messages once the summary is non-trivial)
+      //     — keeps long sessions periodically distilled even when turns are
+      //       short and never breach the byte budget.
+      //   • budget-based (whenever appending the new line would push the
+      //     summary past SUMMARY_SOFT_BUDGET chars) — fires BEFORE the simple-
+      //     append fallback below starts dropping the oldest lines, so
+      //     middle-of-session turns survive instead of being silently
+      //     truncated on a chatty patient.
+      const SUMMARY_SOFT_BUDGET = 1500
+      const shouldCompressByCount = newCount % 10 === 0 && currentSummary.length > 500
+      const shouldCompressByBudget = (currentSummary + '\n' + newLine).length > SUMMARY_SOFT_BUDGET
+      if (shouldCompressByCount || shouldCompressByBudget) {
         try {
           const result = await this.geminiService.getChatCompletion([
             {
@@ -408,13 +522,43 @@ export class ConversationHistoryService {
 
   // ── Private helpers ─────────────────────────────────────────────────────────
 
-  /**
-   * Truncate a long text to a reasonable size for storage.
-   * No LLM call — just keeps the first ~300 chars to save API quota.
-   */
   private summariseText(text: string): string {
-    if (!text) return text
-    if (text.length <= 500) return text
-    return text.slice(0, 497) + '...'
+    return text ?? ''
   }
+}
+
+// ── Module-level helpers ─────────────────────────────────────────────────────
+
+/** Lines in `Session.summary` that correspond to a single un-compressed turn
+ *  use the literal `- [Text] Patient: …` / `- [Voice] Patient: …` template
+ *  written by updateRollingSummary. LLM-compressed bullets don't match this
+ *  pattern (the medical-scribe prompt returns "•" or "-" bullets WITHOUT
+ *  the `[Text]/[Voice]` tag). The boundary lets us cleanly separate the
+ *  compressed-old block from the appended-recent block.
+ */
+const APPEND_LINE_PATTERN = /^-\s*\[(?:Text|Voice)\]\s/
+
+/**
+ * Return the rolling summary with the most-recent `excludeRecent` append
+ * lines removed — those exchanges are about to be sent raw in Gemini's
+ * `contents` array, so duplicating them in the system prompt is pure waste.
+ *
+ * Compressed bullets (above the first append line) are always kept — they
+ * cover history older than the raw window and have no exchange-for-exchange
+ * overlap with what `getConversationHistory` returns.
+ *
+ * If there are no append lines at all (we're between compressions and the
+ * summary is pure bullets), this is a no-op — the full bullet summary
+ * ships, since none of it can possibly overlap with raw recent turns.
+ */
+export function sliceSummaryForPrompt(summary: string, excludeRecent: number): string {
+  if (!summary) return ''
+  if (excludeRecent <= 0) return summary
+  const lines = summary.split('\n')
+  const firstAppendIdx = lines.findIndex((l) => APPEND_LINE_PATTERN.test(l))
+  if (firstAppendIdx === -1) return summary
+  const compressed = lines.slice(0, firstAppendIdx)
+  const appends = lines.slice(firstAppendIdx)
+  const olderAppends = appends.slice(0, Math.max(0, appends.length - excludeRecent))
+  return [...compressed, ...olderAppends].join('\n').trim()
 }

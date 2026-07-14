@@ -54,3 +54,43 @@ export async function refreshAccessToken() {
   }
   return res.json()
 }
+
+// ─── Account lifecycle — patient self-service (phase/28) ──────────────────────
+
+/** Deactivate your own account (reversible). Ends every session immediately. */
+export async function selfDeactivateAccount() {
+  const res = await fetchWithAuth(`${API}/api/v2/auth/account/deactivate`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+/** Request permanent closure — emails a 1-hour confirmation link. */
+export async function requestSelfClose() {
+  const res = await fetchWithAuth(
+    `${API}/api/v2/auth/account/permanent-close/request`,
+    { method: 'POST' },
+  )
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+/** Confirm permanent closure with the emailed token (irreversible). */
+export async function confirmSelfClose(confirmationToken: string) {
+  const res = await fetchWithAuth(
+    `${API}/api/v2/auth/account/permanent-close/confirm`,
+    { method: 'POST', body: JSON.stringify({ confirmationToken }) },
+  )
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  return res.json()
+}

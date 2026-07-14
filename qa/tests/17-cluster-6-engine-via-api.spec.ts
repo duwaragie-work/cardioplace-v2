@@ -28,6 +28,22 @@ async function seedHistoryToClearPreDay3(tc: TestControl, userId: string): Promi
 }
 
 /**
+ * Normalize Aisha to her seed "control" baseline (pure HTN, no HF). resetUser
+ * wipes journal/alert state but NOT PatientProfile, so a sibling test in the
+ * same shard that flips Aisha to HFrEF (e.g. via setUserCondition) leaks into
+ * here. The Q2 single-reading HOLD assertions assume STANDARD_L1_HIGH, but
+ * RULE_HFREF_HIGH is intentionally exempt from the single-reading gate
+ * (Manisha 2026-06-02) and would fire immediately — defeating the "held" check.
+ * Clearing the HF-family conditions forces the standard (gated) path. Matches
+ * the defensive normalization already done in specs 33/34.
+ */
+async function normalizeAishaControl(tc: TestControl, userId: string): Promise<void> {
+  await tc.setUserCondition(userId, 'hasHeartFailure', false, 'NOT_APPLICABLE')
+  await tc.setUserCondition(userId, 'hasDCM', false)
+  await tc.setUserCondition(userId, 'hasHCM', false)
+}
+
+/**
  * Cluster 6 engine coverage via the API (Manisha 5/9 sign-off).
  *
  * Drives the rule engine through the public daily-journal endpoints + the
@@ -114,6 +130,7 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
+    await normalizeAishaControl(tc, u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
@@ -151,6 +168,7 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
+    await normalizeAishaControl(tc, u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
@@ -203,6 +221,7 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
+    await normalizeAishaControl(tc, u.id)
     await seedHistoryToClearPreDay3(tc, u.id)
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     try {
@@ -589,7 +608,7 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
     }
   })
 
-  test('5/10 — bradycardia + AMS co-fires HR-axis brady AND emergency axis symptom override', async () => {
+  test('5/10 — bradycardia + AMS → emergency override is EXCLUSIVE (F20); HR-axis brady suppressed', async () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const u = await tc.findUser(PATIENTS.aisha.email)
     await tc.resetUser(u.id)
@@ -600,8 +619,9 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
       const sessionId = randomUUID()
       const t0 = Date.now()
       // Two HR-45 + AMS readings in the same session → bypasses Q2 gate via
-      // averaging. Expected co-fire: bradySymptomaticRule on HR axis (Stage C)
-      // AND symptomOverrideGeneralRule on emergency axis (Stage A pre-gate).
+      // averaging. F20 (bf838ff): the AMS symptom-override claims the
+      // 'emergency' axis (Stage A) and short-circuits, so the HR-axis
+      // bradySymptomaticRule (Stage C) is SUPPRESSED — only the override fires.
       for (const offset of [0, 60_000]) {
         const res = await api.post('daily-journal', {
           data: {
@@ -617,20 +637,16 @@ test.describe('Cluster 6 — engine via API (Manisha 5/9)', () => {
         expect(res.status()).toBe(202)
       }
 
-      const alerts = await waitForAlerts(tc, u.id, (xs) => {
-        const open = xs.filter((a) => a.status === 'OPEN').map((a) => a.ruleId)
-        return (
-          open.includes('RULE_BRADY_HR_SYMPTOMATIC') &&
-          open.includes('RULE_SYMPTOM_OVERRIDE_GENERAL')
-        )
-      })
+      const alerts = await waitForAlerts(tc, u.id, (xs) =>
+        xs.some((a) => a.status === 'OPEN' && a.ruleId === 'RULE_SYMPTOM_OVERRIDE_GENERAL'),
+      )
       const openRuleIds = alerts.filter((a) => a.status === 'OPEN').map((a) => a.ruleId)
+      // Emergency-exclusive: the override fires; the HR-axis brady is suppressed.
       expect(
         openRuleIds,
-        `expected RULE_BRADY_HR_SYMPTOMATIC + RULE_SYMPTOM_OVERRIDE_GENERAL co-fire (got: [${openRuleIds.join(', ')}])`,
-      ).toEqual(
-        expect.arrayContaining(['RULE_BRADY_HR_SYMPTOMATIC', 'RULE_SYMPTOM_OVERRIDE_GENERAL']),
-      )
+        `expected emergency-exclusive override; got: [${openRuleIds.join(', ')}]`,
+      ).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
+      expect(openRuleIds).not.toContain('RULE_BRADY_HR_SYMPTOMATIC')
     } finally {
       await tc.setUserCondition(u.id, 'hasBradycardia', false)
       await api.dispose()

@@ -19,19 +19,26 @@ function mockPrisma() {
       update: jest.fn() as AnyFn,
     },
     journalEntry: { create: jest.fn() as AnyFn },
-    deviationAlert: { create: jest.fn() as AnyFn },
-    notification: { create: jest.fn() as AnyFn },
+    deviationAlert: { create: jest.fn() as AnyFn, deleteMany: jest.fn() as AnyFn },
+    notification: { create: jest.fn() as AnyFn, deleteMany: jest.fn() as AnyFn },
+    escalationEvent: { deleteMany: jest.fn() as AnyFn },
     profileVerificationLog: { create: jest.fn() as AnyFn },
     patientProviderAssignment: { findUnique: jest.fn() as AnyFn },
     patientThreshold: { upsert: jest.fn() as AnyFn },
+    $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)) as AnyFn,
   }
 }
 
 function makeService(prisma: ReturnType<typeof mockPrisma>) {
   // Only `prisma` is exercised by the §H methods — cron/escalation deps are
-  // unused, so empty stubs are sufficient for a unit spec.
+  // unused, so empty stubs are sufficient for a unit spec. The sixth arg
+  // is `auditExceptionReport` (added by N7); the fifth is
+  // `medicationHoldEscalation` — same empty-stub pattern for every non-prisma
+  // dep the tested methods don't touch.
   return new TestControlService(
     prisma as never,
+    {} as never,
+    {} as never,
     {} as never,
     {} as never,
     {} as never,
@@ -115,6 +122,30 @@ describe('TestControlService — §H seed helpers', () => {
         data: Record<string, unknown>
       }
       expect(arg.data).toMatchObject({ status: 'OPEN', ruleId: 'TEST_SEED' })
+    })
+  })
+
+  describe('deleteAlertsForUser', () => {
+    it('deletes escalations + alert-linked notifications + alerts (children first) and returns the alert count', async () => {
+      const prisma = mockPrisma()
+      prisma.escalationEvent.deleteMany.mockResolvedValue({ count: 5 })
+      prisma.notification.deleteMany.mockResolvedValue({ count: 3 })
+      prisma.deviationAlert.deleteMany.mockResolvedValue({ count: 9 })
+      const svc = makeService(prisma)
+
+      const res = await svc.deleteAlertsForUser('u1')
+
+      // Ordered children-first so the alert delete can't be blocked by an FK.
+      expect(prisma.escalationEvent.deleteMany).toHaveBeenCalledWith({
+        where: { alert: { userId: 'u1' } },
+      })
+      expect(prisma.notification.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', alertId: { not: null } },
+      })
+      expect(prisma.deviationAlert.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u1' },
+      })
+      expect(res).toEqual({ rowsDeleted: 9 })
     })
   })
 

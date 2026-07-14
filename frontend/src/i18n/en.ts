@@ -7,6 +7,7 @@ const en = {
   'nav.provider': 'Provider',
   'nav.patients': 'Patients',
   'nav.calls': 'Calls',
+  'nav.support': 'My Support',
 
   // ─── Common ────────────────────────────────────────────────────────────────
   'common.save': 'Save',
@@ -37,7 +38,7 @@ const en = {
   'dashboard.careTeamMonitoring': 'Your care team is monitoring your progress',
   'dashboard.cedarHillConnected': 'Cedar Hill Connected',
   'dashboard.todaysBp': "Today's BP",
-  'dashboard.latestBp': 'Latest BP',
+  'dashboard.latestBp': 'Your last reading', // A5 (Doc 1), was 'Latest BP'
   'dashboard.withinTarget': 'Within Target',
   'dashboard.elevated': 'Elevated',
   'dashboard.noData': 'No Data',
@@ -63,7 +64,7 @@ const en = {
   'dashboard.today': 'Today',
   'dashboard.yesterday': 'Yesterday',
   'dashboard.activeAlerts': 'Active Alerts',
-  'dashboard.noActiveAlerts': 'No active alerts — looking good!',
+  'dashboard.noActiveAlerts': 'No active alerts, looking good!',
   'dashboard.completedToday': 'Completed today',
   'dashboard.dueToday': 'Due today',
   'dashboard.takesAbout': 'Takes about 3 minutes',
@@ -73,8 +74,8 @@ const en = {
   'dashboard.open': 'Open',
   'dashboard.careTeamNotified': 'Care team notified',
   'dashboard.keepItUp': 'Keep it up!',
-  'dashboard.noAlertsGreat': 'No active alerts — keep up the great work!',
-  'dashboard.noReadingsYet': 'No readings yet — complete a check-in',
+  'dashboard.noAlertsGreat': 'No active alerts, keep up the great work!',
+  'dashboard.noReadingsYet': 'No readings yet, complete a check-in',
   'dashboard.medStreak': 'day medication streak',
 
   // ─── Dashboard v2 (Flow D) ─────────────────────────────────────────────────
@@ -86,12 +87,24 @@ const en = {
   'dashboard.critical': 'Critical',
   'dashboard.low': 'Low',
   'dashboard.activeAlert': 'Active alert',
+  // Round 2 J — recent-alerts strip on the dashboard (label key 'dashboard.recentAlerts' already defined above).
+  'dashboard.recentAlerts.open': 'Open',
+  'dashboard.recentAlerts.all': 'All',
+  'dashboard.recentAlerts.noneOpen': 'No open alerts right now.',
+  'dashboard.recentAlerts.none': 'No alerts yet.',
+  'dashboard.recentAlerts.seeAll': 'See all alerts',
   'dashboard.viewDetails': 'View details',
-  'dashboard.viewDetailsAria': '{title} — view details',
+  'dashboard.viewDetailsAria': '{title}, view details',
   'dashboard.awaitingVerification': 'Awaiting provider verification',
   'dashboard.hearSummary': 'Hear summary',
   'dashboard.yourGoal': 'Your goal',
   'dashboard.belowTarget': 'Below {target} mmHg',
+  // #89 — diastolic-only goal: clarify the axis so the number isn't read as systolic.
+  'dashboard.belowDiastolic': 'Below {target} mmHg (diastolic)',
+  'dashboard.goalTolerance': 'High alerts begin at {value}, your goal plus a small tolerance.',
+  'dashboard.goalOverridePregnancy': 'Alerts begin at {value} during pregnancy.',
+  'dashboard.goalOverrideHfref': 'Alerts begin at {value} for your heart-failure care.',
+  'dashboard.goalOverrideCad': 'Alerts begin at {value} for your heart condition.',
   'dashboard.setByCareTeam': '· set by your care team',
   'dashboard.chartDateAxis': 'Date',
   'dashboard.chartAt': 'at',
@@ -111,6 +124,11 @@ const en = {
   'checkin.resume.body': "You started a check-in but didn't finish it. Pick up where you left off, or start a new one.",
   'checkin.resume.resume': 'Resume check-in',
   'checkin.resume.startNew': 'Start a new check-in',
+  'checkin.openSession.title': 'Reading session in progress',
+  'checkin.openSession.body': 'You started a reading session {min} min ago ({count} reading(s) so far). Add this reading to it, or start a new session?',
+  'checkin.openSession.needsMore': 'This session needs more readings to evaluate · {count} so far.',
+  'checkin.openSession.join': 'Add to this session',
+  'checkin.openSession.startNew': 'Start a new session',
   'checkin.saveExit.title': 'Save and finish later?',
   'checkin.saveExit.body': "Your check-in is saved on this device. You can pick up right where you left off next time.",
   'checkin.saveExit.confirm': 'Save and exit',
@@ -126,7 +144,7 @@ const en = {
   'checkin.b1.itemPosture': 'Back supported, feet flat, arm at heart level',
   'checkin.b1.itemNotTalking': 'Not talking during the measurement',
   'checkin.b1.itemCuff': 'Cuff is on bare upper arm (not over clothing)',
-  'checkin.b1.allSet': 'All set — your reading will be the most accurate.',
+  'checkin.b1.allSet': 'All set, your reading will be the most accurate.',
   'checkin.b1.progress': '{n} of 8 confirmed.',
   'checkin.b1.selectAll': 'Select all',
   'checkin.b1.unselectAll': 'Unselect all',
@@ -139,6 +157,20 @@ const en = {
   'checkin.b2.whenLabel': 'When was this taken?',
   'checkin.b2.dateAria': 'Date',
   'checkin.b2.timeAria': 'Time',
+  // Chunk C — backdated-readings time-picker affordances.
+  'checkin.b2.takenNow': 'Taken just now',
+  'checkin.b2.changeTime': 'Change',
+  // PENDING-MANISHA-WORDING 2026-06-09 — subject to confirmation in a follow-on
+  // sign-off doc (bundled with the Chunk B DELAYED_ENTRY wordings). Drops the 911
+  // urgency for a stale reading per Manisha 2026-06-06 backdated-readings sign-off.
+  'checkin.delay.title': 'Just checking the time',
+  'checkin.delay.body': "Heads up, this is from a few hours ago. We'll save it and your care team will see it, but the system won't act on it as an active emergency.",
+  'checkin.delay.confirm': 'Save anyway',
+  'checkin.delay.back': 'Change time',
+  // PENDING-MANISHA-WORDING 2026-06-09 — HISTORICAL_ENTRY (>24h) informational note.
+  'checkin.historical.note': "Got it, saved. This reading is from more than a day ago, so we won't trigger any real-time alerts on it. Your care team will still see it in your history.",
+  // PENDING-MANISHA-WORDING 2026-06-09 — quieter DELAYED_ENTRY post-save note.
+  'checkin.delayed.note': 'Recorded, your care team will see this.',
   'checkin.b2.positionLabel': 'How were you positioned?',
   'checkin.b2.positionAudio': 'How were you positioned? Sitting, standing, or lying down.',
   'checkin.b2.positionSitting': 'Sitting',
@@ -148,8 +180,8 @@ const en = {
   'checkin.b2.bpAudio': 'Enter your blood pressure. The top number is systolic, the bottom number is diastolic.',
   'checkin.b2.bpTopLabel': 'Top (systolic)',
   'checkin.b2.bpBottomLabel': 'Bottom (diastolic)',
-  'checkin.b2.bpStatusCritical': 'Very high — your care team will be notified',
-  'checkin.b2.bpStatusElevated': 'Elevated — above target range',
+  'checkin.b2.bpStatusCritical': 'Very high, your care team will be notified',
+  'checkin.b2.bpStatusElevated': 'Elevated, above target range',
   'checkin.b2.bpStatusNormal': 'Within normal range',
   'checkin.b2.pulseLabel': 'Pulse (beats per minute)',
   'checkin.b2.pulseAudio': 'Pulse. Beats per minute, usually shown on the cuff.',
@@ -160,7 +192,7 @@ const en = {
   'checkin.weight.audio': "Weight, optional. Skip this if you didn't weigh yourself today.",
   'checkin.weight.unitLabel': 'Unit',
   'checkin.weight.weightLabel': 'Weight ({unit})',
-  'checkin.weight.fluidHint': 'Sudden gain (3+ lbs in 24 hours) can signal fluid retention — your care team watches for this.',
+  'checkin.weight.fluidHint': 'Sudden gain (3+ lbs in 24 hours) can signal fluid retention, your care team watches for this.',
 
   // Medication adherence step
   'checkin.med.title': 'Medication today',
@@ -208,7 +240,41 @@ const en = {
   // Cluster 6 Q2 (Manisha 5/9/26) — single-reading session prompt.
   'checkin.confirm.takeSecondReading': 'Take a second reading in about 1 minute',
   'checkin.confirm.takeSecondReadingHint':
-    "One reading on its own can be off — a second one helps your care team get the full picture. We'll wait a few minutes for you to take it.",
+    "One reading on its own can be off, a second one helps your care team get the full picture. We'll wait a few minutes for you to take it.",
+  // Option D — retake-to-confirm (Manisha 2026-06-12 Q2). PLACEHOLDER wording
+  // (Manisha-drafted, pending formal CONFIRM) — swap here on her redline.
+  'checkin.optionD.screenA.title': 'That reading is very high',
+  'checkin.optionD.screenA.body': 'Your reading of {bp} is very high. Please sit calmly for 1 minute, then take a second reading to confirm.',
+  'checkin.optionD.screenA.retake': 'Take a second reading',
+  'checkin.optionD.screenA.cantNow': "I can't right now",
+  'checkin.optionD.screenB.title': 'Take your second reading',
+  'checkin.optionD.screenB.body': 'When you have rested for about a minute, enter your second reading below.',
+  'checkin.optionD.screenB.submit': 'Submit second reading',
+  'checkin.optionD.screenB.cantNow': "I'm done for now",
+  'checkin.optionD.screenB.bothNumbers': 'Please enter both the top and bottom numbers.',
+  'checkin.optionD.screenC.title': 'Your reading was recorded',
+  'checkin.optionD.screenC.body': 'We saved your reading and let your care team know they should check in with you.',
+  'checkin.optionD.screenC.safetyFooter': "If you're feeling unwell right now, please call your doctor or 911.",
+  'checkin.optionD.screenC.done': 'Back to dashboard',
+  // Bug 26 — confirmed-normal Screen C variant (PLACEHOLDER pending Manisha CONFIRM).
+  'checkin.optionD.confirmedNormal.title': 'Your second reading looks better',
+  'checkin.optionD.confirmedNormal.body': 'Your follow-up reading is in a safer range. We saved both readings and let your care team know — they may still reach out to check in.',
+  // Resume intro — shown above Screen A when the patient returns to an
+  // unfinished held emergency (auto-resume). PLACEHOLDER (pending Manisha).
+  'checkin.optionD.resumeIntro': "Let's finish your reading from a moment ago",
+  // Part 1 — FE buffer review screen (non-emergency readings held on-device for
+  // the 5-min window). PLACEHOLDER wording (pending Manisha sign-off).
+  'checkin.buffer.title': 'Review before sending',
+  'checkin.buffer.subtitle': "This hasn't been sent yet. Take a moment to check it, or add another reading.",
+  'checkin.buffer.reading': 'Reading {n}',
+  'checkin.buffer.countdown': 'Sends automatically in {time}',
+  'checkin.buffer.imGood': "I'm good, send to my care team",
+  'checkin.buffer.takeAnother': 'Take another reading',
+  'checkin.buffer.takeAnotherAfib': 'Your care team asks for 3 readings, take another',
+  'checkin.buffer.edit': 'Edit',
+  'checkin.buffer.remove': 'Remove',
+  'checkin.buffer.sending': 'Sending…',
+  'checkin.buffer.bpm': 'bpm',
   'checkin.b3.otherLabel': 'Anything else? (optional)',
   'checkin.b3.otherPlaceholder': 'In your own words…',
   'checkin.b3.otherSymptomsLabel': 'Any other symptoms? (optional)',
@@ -221,6 +287,13 @@ const en = {
   'checkin.b4.subtitle': 'Tap each one to tell us if you took it.',
   'checkin.b4.audio': 'Medications today. Tap each one to tell us if you took it.',
   'checkin.b4.noMeds': "We don't have any medications on file for you yet. Add your medications in settings for better follow-up.",
+  // Bug 17 — bulk medication shortcuts.
+  'checkin.b4.markAllTaken': 'Mark all taken',
+  'checkin.b4.markAllNotTaken': 'Mark all not taken',
+  'checkin.b4.bulkTally': '{taken} taken · {missed} not taken',
+  'checkin.b4.onHoldBadge': 'On hold',
+  'checkin.b4.onHoldDoNotTake': 'ON HOLD, your care team has paused this medication. Do not take it unless they tell you to.',
+  'checkin.b4.onHoldUnderReview': 'Your care team is reviewing this medication. Keep taking it as usual unless they tell you otherwise.',
   // Drug-class labels — patient-facing descriptive terms shown under the
   // drug name. Clinical abbreviations (ARB, MRA, SGLT2, ARNI) stay as-is.
   'checkin.b4.classAceInhibitor': 'ace inhibitor',
@@ -243,15 +316,30 @@ const en = {
   'checkin.confirm.title': 'Reading sent',
   'checkin.confirm.titleMulti': 'Reading {n} sent',
   'checkin.confirm.subtitle': 'Your care team gets it right away.',
+  // #88 — un-enrolled patients: no care team yet, engine didn't run.
+  'checkin.confirm.subtitleUnenrolled': "We're setting up your care team. They'll start reviewing your readings once your enrollment is complete.",
+  'checkin.confirm.nonAfibUnenrolled': 'Thanks for getting started.',
   'checkin.confirm.thisReading': 'This reading',
   'checkin.confirm.readingAudio': 'Reading {sys} over {dia}',
   'checkin.confirm.readingAudioPulse': 'Reading {sys} over {dia}, pulse {pulse}',
   'checkin.confirm.unit': 'mmHg',
-  'checkin.confirm.afibSatisfied': '{n} readings — enough to average accurately.',
+  'checkin.confirm.afibSatisfied': '{n} readings, enough to average accurately.',
   'checkin.confirm.afibNeeded': 'AFib needs 3 readings · {n} of 3 done.',
   'checkin.confirm.nonAfib': 'Your care team will review and reach out only if something looks off.',
   'checkin.confirm.addAnother': 'Add another reading',
   'checkin.confirm.backToDashboard': 'Back to dashboard',
+  // #90 — AFib check-in state machine (plain language, no "AFib"/"averaging"
+  // jargon; "irregular heartbeat" is the lay translation).
+  'checkin.afib.state1.heading': 'Two more readings',
+  'checkin.afib.state1.body': "Take another reading in about a minute, while you're still seated. Three readings in a row helps us understand your blood pressure with an irregular heartbeat.",
+  'checkin.afib.state2.heading': 'One more reading',
+  'checkin.afib.state2.body': "One more and you're done. Take it now, while you're still seated.",
+  'checkin.afib.state3.heading': 'All three readings done',
+  'checkin.afib.state3.body': 'Your care team has what they need. Great job taking the time to get an accurate read.',
+  'checkin.afib.modal.heading': 'Take your other readings?',
+  'checkin.afib.modal.body': "You've taken {n} of 3 readings. For an accurate read with your heart rhythm, your care team needs three readings taken close together. Going to the dashboard ends this session, you can come back later for a fresh set of three.",
+  'checkin.afib.modal.stay': 'Stay and add another',
+  'checkin.afib.modal.leave': 'End this session',
 
   // Wizard chrome + session banner
   'checkin.nav.back': 'Back',
@@ -277,6 +365,8 @@ const en = {
   'checkin.err.pulse': 'Pulse should be between 30 and 220.',
   'checkin.err.weight': 'Weight should be between {min} and {max} {unit}.',
   'checkin.err.submit': 'Could not send reading. Try again.',
+  'checkin.err.implausible': "That reading doesn't look right, the bottom number should be lower than the top number. Please check your cuff and try again.",
+  'checkin.err.implausibleRepeat': 'If your monitor keeps showing unusual numbers, try repositioning the cuff and sitting quietly for 2 minutes before trying again. If the problem continues, contact your care team.',
 
 
   // ─── Symptoms ──────────────────────────────────────────────────────────────
@@ -293,6 +383,7 @@ const en = {
   // ─── Chat ──────────────────────────────────────────────────────────────────
   'chat.title': 'Health Assistant',
   'chat.placeholder': 'Type a message...',
+  'chat.voiceEndToType': 'End voice call to type…',
   'chat.newConversation': 'New Conversation',
   'chat.conversations': 'Conversations',
   'chat.noConversations': 'No conversations yet',
@@ -335,7 +426,7 @@ const en = {
   'chat.card.medFailed': 'Could not log medication',
   'chat.card.symptomLogged': 'Symptom logged',
   'chat.card.symptomFailed': 'Could not log symptom',
-  'chat.card.symptomCareTeamNotified': 'Your care team has been notified — they will review this shortly.',
+  'chat.card.symptomCareTeamNotified': 'Your care team has been notified, they will review this shortly.',
   'chat.card.photoConfirmTitle': 'Is this right?',
   'chat.card.photoConfirmHelp': 'I read these numbers from your photo. Confirm only if they match your cuff.',
   'chat.card.photoConfirm': 'Yes, save it',
@@ -347,6 +438,9 @@ const en = {
   'chat.card.viewAlerts': 'View alerts',
   'chat.card.dismiss': 'Dismiss',
   'chat.card.done': 'Done',
+  'chat.card.editableWindow': 'Editable for {time} — not sent to your care team yet',
+  'chat.card.imGood': "I'm good",
+  'chat.card.sending': 'Sending…',
 
   // ─── Notifications ─────────────────────────────────────────────────────────
   'notifications.title': 'Notifications',
@@ -372,7 +466,7 @@ const en = {
   'notifications.hideTips': 'Hide tips',
   'notifications.careTip': 'care tip',
   'notifications.careTips': 'care tips',
-  'notifications.acknowledge': "Acknowledge — I've seen this",
+  'notifications.acknowledge': "Acknowledge, I've seen this",
   'notifications.acknowledging': 'Acknowledging…',
   'notifications.escalated': 'Escalated',
   'notifications.pastAlerts': 'Past Alerts',
@@ -385,9 +479,10 @@ const en = {
   'notifications.time.minsAgo': '{mins}m ago',
   'notifications.time.hrsAgo': '{hrs}h ago',
   'notifications.time.daysAgo': '{days}d ago',
-  'notifications.bucket.emergency': 'Emergency — call 911 if symptoms',
+  'notifications.bucket.emergency': 'Emergency, call 911 if symptoms',
   'notifications.bucket.tier1': 'Important medication alerts',
   'notifications.bucket.high': 'Elevated blood pressure',
+  'notifications.bucket.heartFailure': 'Heart failure',
   'notifications.bucket.low': 'Low blood pressure',
   'notifications.bucket.info': 'For your information',
   'notifications.bucket.other': 'Other alerts',
@@ -456,6 +551,78 @@ const en = {
   // intake keys where the strings match.
   'profile.yourProfile': 'Your profile',
   'profile.signOut': 'Sign out',
+  'settings.title': 'Settings',
+  'settings.subtitle': 'Manage how you sign in and keep your account secure.',
+  'settings.security': 'Sign-in & security',
+  'settings.email.title': 'Email one-time code',
+  'settings.email.desc': 'A 6-digit code (or magic link) is sent to your email each time you sign in.',
+  'settings.email.sentTo': 'Codes are sent to',
+  'settings.email.cantChange': "Can't be changed here",
+  'settings.badge.alwaysOn': 'Always on',
+  'settings.badge.on': 'On',
+  'settings.badge.recommended': 'Recommended',
+  'settings.notif.title': 'Notifications',
+  'settings.notif.desc': 'Get alerts about your readings and reminders on this device — even when the app is closed.',
+  'settings.notif.badgeBlocked': 'Blocked',
+  'settings.notif.badgeOff': 'Off',
+  'settings.notif.turnOn': 'Turn on notifications',
+  'settings.notif.turnOff': 'Turn off notifications',
+  'settings.notif.turnedOn': 'Notifications are on for this device.',
+  'settings.notif.turnedOff': 'Notifications are off for this device.',
+  'settings.notif.blockedHelp': 'Notifications are blocked in your browser. Allow them for this site in your browser settings, then try again.',
+  'settings.notif.unsupported': "This browser or device doesn't support notifications. On iPhone or iPad, add Cardioplace to your Home Screen first, then turn them on.",
+  'settings.notif.error': 'Something went wrong. Please try again.',
+  'settings.notif.working': 'Working…',
+  'settings.bio.title': 'Face ID / fingerprint',
+  'settings.bio.desc': "After your email code, confirm with Face ID or your fingerprint. Keep your recovery codes safe — they're the only way in if you can't use biometric.",
+  'settings.bio.deviceName': 'Device name',
+  'settings.bio.registeredDevice': 'Registered device',
+  'settings.bio.added': 'Added',
+  'settings.bio.lastUsed': 'last used',
+  'settings.bio.renameAria': 'Rename device',
+  'settings.bio.removeAria': 'Remove device',
+  'settings.bio.saveNameAria': 'Save name',
+  'settings.bio.nudgeTitle': 'Add your phone too.',
+  'settings.bio.nudgeBody': 'A computer passkey only works on that computer. On a phone, tap “Set up” below; or from this computer, choose “use a phone” and scan the QR with your phone.',
+  'settings.bio.maxReached': "You've reached the maximum of {count} devices. Remove one above to add another.",
+  'settings.bio.setupThis': 'Set up this device',
+  'settings.bio.setupFirst': 'Set up Face ID / fingerprint',
+  'settings.bio.settingUp': 'Setting up…',
+  'settings.bio.notSupported': "Face ID or fingerprint isn't available on this device — but you can still add a phone or tablet below.",
+  'settings.bio.waitingOther': 'Waiting for the other device…',
+  'settings.bio.addAnother': 'Add another device (phone / tablet)',
+  'settings.bio.bluetoothTitle': 'Turn Bluetooth ON on both devices first.',
+  'settings.bio.bluetoothBody': 'Then on the next screen choose “use a phone or tablet”, scan the QR with that device, and confirm with its Face ID / fingerprint.',
+  'settings.bio.noticeOn': 'Biometric sign-in is on for this device.',
+  'settings.bio.noticeAdded': 'Your other device was added.',
+  'settings.bio.deviceRemoved': 'Device removed.',
+  'settings.recovery.title': 'Recovery codes',
+  'settings.recovery.runningLow': 'Running low',
+  'settings.recovery.fallback': 'Fallback',
+  'settings.recovery.desc': "Use one to sign in if you can't use Face ID / fingerprint.",
+  'settings.recovery.remaining': '{count} of 10 left.',
+  'settings.recovery.generate': 'Generate new codes',
+  'settings.recovery.generating': 'Generating…',
+  'settings.recovery.replaceNote': 'Generating new codes replaces your old ones.',
+  'settings.recovery.done': 'Done',
+  'settings.danger.title': 'Danger zone',
+  'settings.danger.deactivate.title': 'Deactivate my account',
+  'settings.danger.deactivate.desc': "Temporarily turn off your account. You'll be signed out on every device. Your care team can reactivate it later.",
+  'settings.danger.deactivate.button': 'Deactivate',
+  'settings.danger.deactivate.confirm': "Deactivate your account? You'll be signed out everywhere.",
+  'settings.danger.close.title': 'Close my account permanently',
+  'settings.danger.close.desc': 'Permanently close your account. This cannot be undone. Your medical records are kept as the law requires, but your personal profile is removed.',
+  'settings.danger.close.button': 'Close permanently',
+  'settings.danger.close.confirm': 'Permanently close your account? This cannot be undone.',
+  'settings.danger.close.requested': 'Check your email. We sent a link to confirm closing your account. It expires in 1 hour.',
+  'settings.danger.processing': 'Processing…',
+  'settings.danger.error': 'Something went wrong. Please try again.',
+  'settings.close.pageTitle': 'Confirm account closure',
+  'settings.close.pageDesc': 'Click below to permanently close your Cardioplace account. This cannot be undone.',
+  'settings.close.confirmButton': 'Permanently close my account',
+  'settings.close.success': 'Your account has been permanently closed.',
+  'settings.close.invalidToken': 'This link is invalid or has expired. Request a new one from Settings.',
+  'settings.close.signIn': 'Back to sign in',
   'profile.completeHealthProfile': 'Complete your health profile →',
   'profile.notStarted': 'Health profile not started',
   'profile.correctedByTeam': 'Corrected by your team',
@@ -510,6 +677,23 @@ const en = {
   'profile.combinationPill': '2-in-1',
   'profile.reviewingChanges': 'Your care team is reviewing your latest changes. This usually takes 48 to 72 hours.',
   'profile.fieldsNeedRecheck': 'Your care team asked you to re-check: {fields}. Please tap Edit on that section to confirm or update it.',
+  // ─── Reminders (N8/N10, 2026-07-13) ────────────────────────────────────────
+  // Reading-level ≤5th grade. "Engages, does not pressure." Never blames.
+  'profile.reminders.heading': 'Reminders',
+  'profile.reminders.editHeading': 'Edit reminders',
+  'profile.reminders.dailyTime': 'Daily reminder time',
+  'profile.reminders.quietHoursStart': 'Quiet hours start',
+  'profile.reminders.quietHoursEnd': 'Quiet hours end',
+  // Gap 5 (2026-07-13) — single-header layout keys for the RemindersModal +
+  // Onboarding step. `quietHoursStart`/`Ended` above stay in use for the
+  // read-only Row list in the Profile SectionCard.
+  'profile.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
+  'profile.reminders.startLabel': 'Start',
+  'profile.reminders.endLabel': 'End',
+  'profile.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
+  'profile.reminders.saveButton': 'Save',
+  'profile.reminders.savingButton': 'Saving…',
+  'profile.reminders.cancelButton': 'Cancel',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'My Readings',
@@ -545,6 +729,18 @@ const en = {
   'readings.detailTitle': 'Reading details',
   'readings.viewDetails': 'View reading details',
   'readings.noBpRecorded': 'No BP recorded',
+  'readings.symptomLog': 'Symptom log',
+  // Option D + edit window (Manisha 2026-06-12 Q1+Q4) — shown while a reading is
+  // still within its 5-min grace period (not yet committed to the engine).
+  'readings.editableWindow': 'Editable for a few more minutes',
+  // Bug 10+11 — held Option D emergency reading (AWAITING confirmation) is read-only.
+  'readings.held': 'Held',
+  'readings.heldAwaitingConfirmation':
+    "This reading is being confirmed. Finish the steps on your check-in to complete it, you can't change it here.",
+  // Option D AWAITING UX revision (2026-06-16) — action-oriented status + CTA
+  // that replace the old "Held" lock badge. PLACEHOLDER (pending Manisha).
+  'readings.awaitingSecondReading': 'Awaiting your second reading',
+  'readings.continueConfirmation': 'Continue confirmation',
   'readings.meds': 'Meds',
   'readings.taken': 'Taken',
   'readings.missed': 'Missed',
@@ -555,9 +751,11 @@ const en = {
   // Validation errors that overlap with check-in reuse checkin.err.* keys
   // directly (one source of truth per locale). bpBoth's "(or clear both)"
   // variant and weightRange are edit-only and stay here.
-  'readings.validate.bpBoth': 'Enter both blood pressure numbers (or clear both).',
+  'readings.validate.bpBoth': 'Enter both blood pressure numbers.',
   'readings.validate.weightRange': 'Weight should be between 20 and 600.',
   'readings.validate.missedReason': 'Please pick a reason for each medication you missed.',
+  'readings.validate.timeCollision': 'You already have a reading at this exact time. Change the time or edit the existing reading.',
+  'readings.edit.secondsNote': 'You can set the seconds too — handy when two readings fall in the same minute.',
   'readings.sameMinute': 'same minute',
   'readings.sessionReadings': 'Session · {count} readings',
   'readings.readingsCount': '{count} readings',
@@ -591,15 +789,11 @@ const en = {
   'provider.lastCheckin': 'Last Check-in',
   'provider.alerts': 'Alerts',
   'provider.noPatients': 'No patients found',
-  'provider.scheduledCalls': 'Scheduled Calls',
-  'provider.searchCalls': 'Search calls...',
   'provider.allStatuses': 'All Statuses',
   'provider.upcoming': 'Upcoming',
   'provider.completed': 'Completed',
   'provider.missed': 'Missed',
   'provider.cancelled': 'Cancelled',
-  'provider.noCalls': 'No scheduled calls found',
-  'provider.scheduleCall': 'Schedule Call',
   'provider.reason': 'Reason',
   'provider.scheduledFor': 'Scheduled for',
   'provider.patientDetails': 'Patient Details',
@@ -613,7 +807,6 @@ const en = {
   'provider.bpTrend': 'BP Trend',
   'provider.review': 'Review',
   'provider.requiresAction': 'Requires Action',
-  'provider.followUpScheduled': 'Follow-up Scheduled',
   'provider.addPatient': 'Add Patient',
   'provider.careTeamAlert': 'Care Team Alert',
   'provider.followUpRequired': 'Follow up required within 24 hours',
@@ -625,7 +818,6 @@ const en = {
   'provider.audioFirstDesc': 'Use verbal communication and visual aids at next visit. Patient prefers spoken over written instructions.',
   'provider.sevenDayBpTrend': '7-Day BP Trend',
   'provider.markReviewed': 'Mark as Reviewed',
-  'provider.scheduleFollowUp': 'Schedule Follow-up Call',
   'provider.loadingAlert': 'Loading alert details...',
   'provider.callDetails': 'Call Details',
   'provider.markCompleted': 'Mark as Completed',
@@ -647,22 +839,6 @@ const en = {
   'provider.email': 'Email',
 
   // ─── Schedule Modal ─────────────────────────────────────────────────────────
-  'schedule.title': 'Schedule Follow-up Call',
-  'schedule.patient': 'Patient',
-  'schedule.callType': 'Call Type',
-  'schedule.phoneCall': 'Phone Call',
-  'schedule.videoCall': 'Video Call',
-  'schedule.selectDate': 'Select Date',
-  'schedule.selectTime': 'Select Time',
-  'schedule.notes': 'Notes (optional)',
-  'schedule.notesPlaceholder': 'E.g. Discuss medication adherence, BP readings...',
-  'schedule.cancel': 'Cancel',
-  'schedule.confirm': 'Confirm Schedule',
-  'schedule.scheduling': 'Scheduling...',
-  'schedule.success': 'Follow-up Scheduled!',
-  'schedule.successMsg': 'Call scheduled. Patient notified.',
-  'schedule.today': 'Today',
-  'schedule.tomorrow': 'Tomorrow',
 
   // ─── Provider Dashboard (stats + trend) ────────────────────────────────────
   'provider.dcWards': 'DC Wards 7 & 8',
@@ -770,6 +946,8 @@ const en = {
   'register.failedMagicLink': 'Failed to send magic link.',
   'register.accountSuspended': 'Your account has been suspended. Please contact support.',
   'register.accountBlocked': 'Your account has been blocked. Please contact support.',
+  'register.accountDeactivated': 'This account has been deactivated. Contact your care team to reactivate it.',
+  'register.accountClosed': 'This account has been permanently closed and cannot be reopened.',
   'register.checkEmail': 'Check your email!',
   'register.magicLinkDesc': 'We sent a sign-in link. Tap it to log in.',
   'register.sendAnother': 'Send another link',
@@ -778,6 +956,38 @@ const en = {
   'register.magicLinkInfo': 'We email you a secure link. Tap it from your email and you are signed in, no codes to type.',
   'register.otpTitle': 'OTP Code',
   'register.otpInfo': 'We email you a 6-digit code. Type it here to sign in.',
+  // Support — public "locked out / can’t sign in" page (Fix 12).
+  'support.locked.title': 'Need help signing in?',
+  'support.locked.subtitle': 'Tell us what’s happening and our team will contact you to verify your identity before making any account changes.',
+  'support.locked.statusBanner': 'You can also check the status of an existing request by clicking the link in your confirmation email.',
+  'support.locked.email': 'Your account email',
+  'support.locked.description': 'What’s happening? (e.g. I lost my authenticator app and recovery codes)',
+  'support.locked.phone': 'Callback phone (optional)',
+  'support.locked.submit': 'Request help',
+  'support.locked.submitting': 'Submitting…',
+  'support.locked.successLead': 'Thanks — your request',
+  'support.locked.successTail': 'is in. Our team will reach out to verify your identity before any changes are made.',
+  'support.locked.error': 'Could not submit your request.',
+  'support.locked.backToSignIn': 'Back to sign in',
+  // Support — patient "My support requests" history page (Fix 9).
+  'support.mytickets.back': 'Back to settings',
+  'support.mytickets.title': 'My support requests',
+  'support.mytickets.subtitle': 'Track the status of requests you’ve sent our team.',
+  'support.mytickets.loading': 'Loading…',
+  'support.mytickets.empty': 'You haven’t sent any requests yet.',
+  'support.mytickets.error': 'Could not load your requests.',
+  'support.mytickets.statusOpen': 'Open',
+  'support.mytickets.statusInProgress': 'In progress',
+  'support.mytickets.statusResolved': 'Resolved',
+  'support.mytickets.replies': 'replies',
+  'support.mytickets.support': 'Support',
+  'support.mytickets.you': 'You',
+  'support.mytickets.resolvedNote': 'This request was resolved.',
+  // Handoff 4 A1 — medical disclaimer (Manisha Doc 1). MVP US-only: 911 stays
+  // hardcoded per CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
+  'register.medicalDisclaimer': 'Cardioplace helps you track your health and stay connected to your care team. It is not a substitute for medical advice, diagnosis, or treatment. In an emergency, call 911.',
+  // Handoff 4 A2 — privacy assurance panel (Manisha Doc 1).
+  'register.privacyAssurance': 'Your information is private and secure. Only your care team can see your health data.',
 
   // ─── Onboarding Page ──────────────────────────────────────────────────────
   'onboarding.title': 'Tell Us About Your Health',
@@ -789,6 +999,13 @@ const en = {
   'onboarding.selectPref': 'Select your preference',
   'onboarding.textFirst': 'Text First',
   'onboarding.audioFirst': 'Audio First',
+  // ─── Reminders (N8/N10, 2026-07-13) ───────────────────────────────────────
+  'onboarding.reminders.timeLabel': 'When would you like your daily reminder?',
+  'onboarding.reminders.timeAudio': 'What time of day works best for your reminder?',
+  'onboarding.reminders.quietStartLabel': 'Quiet hours start',
+  'onboarding.reminders.quietEndLabel': 'Quiet hours end',
+  'onboarding.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
+  'onboarding.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
   'onboarding.invalidDob': 'Please enter a valid date of birth.',
   'onboarding.continue': 'Continue',
   'onboarding.skip': 'Skip for now',
@@ -805,7 +1022,7 @@ const en = {
   'onboarding.privacy.point2': 'Not shared with your employer or landlord',
   'onboarding.privacy.point3': 'Only your care team can see it',
   'onboarding.privacy.reassure': 'Your information is stored securely and is never sold or shared.',
-  'onboarding.privacy.continue': 'I understand — continue',
+  'onboarding.privacy.continue': 'I understand, continue',
   'onboarding.privacy.audio': 'Your information is private. Your health information stays between you and your care team. It is not shared with the government or immigration. It is not shared with your employer or landlord. Only your care team can see it. Your information is stored securely and is never sold or shared.',
 
   // ─── Landing Header / Footer ────────────────────────────────────────────────
@@ -886,6 +1103,11 @@ const en = {
   'home.ctaTitle': 'This Is What Closing the Loop Looks Like.',
   'home.ctaDesc': "Developed with the DC Hospital Association. Deployed in Washington DC's highest-risk communities. Designed to reach the patients traditional health technology leaves behind.",
   'home.ctaButton': 'About the Program',
+  'home.demoEyebrow': 'See it in action',
+  'home.demoTitle': 'A five-minute walkthrough',
+  'home.demoDesc': 'The patient experience and the care-team closed loop, end to end, in real time. Watch how an alert is generated, escalated, and resolved with full clinical accountability.',
+  'home.demoPlayLabel': 'Play the Cardioplace 5-minute demo',
+  'home.demoCloseLabel': 'Close demo',
 
   // ─── About Page ───────────────────────────────────────────────────────────
   'about.visionBadge': 'OUR STORY',
@@ -1026,21 +1248,29 @@ const en = {
   'intake.a2.naAudio': 'Not applicable',
   'intake.a2.dueDateLabel': 'When is the baby due? (optional)',
   'intake.a2.dueDateAudio': 'When is the baby due? This is optional.',
-  'intake.a2.preeclampsiaTitle': 'History of preeclampsia',
+  // Q7 (Manisha 2026-06-02) — the field is now the combined "history of
+  // hypertensive disorder of pregnancy (HDP)" (preeclampsia + gestational HTN
+  // + HELLP). Patient-facing copy uses plain "high blood pressure during a
+  // pregnancy" with the clinical terms named parenthetically, so a patient who
+  // had gestational HTN (not preeclampsia) still answers correctly.
+  // i18n: English updated here; es/fr/de/am still carry the narrow
+  // preeclampsia-only wording — flagged in I18N_TRANSLATION_FLAGS for Niva's
+  // 5-language pass.
+  'intake.a2.preeclampsiaTitle': 'High blood pressure during pregnancy',
   'intake.a2.preeclampsiaDesc': 'In a previous pregnancy',
-  'intake.a2.preeclampsiaAudio': 'History of preeclampsia in a previous pregnancy',
+  'intake.a2.preeclampsiaAudio': 'History of high blood pressure during a previous pregnancy',
   // Phase/26 — split A2 into two independent questions. The pregnancy
-  // question gates current-pregnancy alert rules; the preeclampsia
-  // question is a long-term marker per CLINICAL_SPEC §3 that applies
-  // even outside an active pregnancy.
+  // question gates current-pregnancy alert rules; the HDP-history question
+  // is a long-term marker per CLINICAL_SPEC §3 that applies even outside an
+  // active pregnancy.
   'intake.a2.currentlyPregnantQuestion': 'Are you currently pregnant?',
   'intake.a2.currentlyPregnantAudio': 'Are you currently pregnant?',
-  'intake.a2.preeclampsiaQuestion': 'Have you ever had preeclampsia?',
-  'intake.a2.preeclampsiaQuestionAudio': 'Have you ever had preeclampsia in a past pregnancy?',
+  'intake.a2.preeclampsiaQuestion': 'Have you ever had high blood pressure during a pregnancy? This includes preeclampsia, gestational hypertension, or HELLP syndrome.',
+  'intake.a2.preeclampsiaQuestionAudio': 'Have you ever had high blood pressure during a pregnancy? This includes preeclampsia, gestational hypertension, or HELLP syndrome.',
   'intake.a2.preeclampsiaYesDesc': 'Yes, in a past pregnancy',
-  'intake.a2.preeclampsiaYesAudio': 'Yes, I had preeclampsia in a past pregnancy.',
-  'intake.a2.preeclampsiaNoDesc': "I've never had preeclampsia",
-  'intake.a2.preeclampsiaNoAudio': "No, I've never had preeclampsia.",
+  'intake.a2.preeclampsiaYesAudio': 'Yes, in a past pregnancy.',
+  'intake.a2.preeclampsiaNoDesc': 'No, never',
+  'intake.a2.preeclampsiaNoAudio': 'No, never.',
 
   // A3 — heart conditions
   'intake.a3.title': 'Heart conditions',
@@ -1056,11 +1286,14 @@ const en = {
   'intake.a3.cadDesc': 'Blocked or narrow heart arteries',
   'intake.a3.cadAudio': 'Coronary artery disease. Blocked or narrow heart arteries.',
   'intake.a3.hcmTitle': 'Hypertrophic cardiomyopathy',
-  'intake.a3.hcmDesc': 'HCM — thick heart muscle',
+  'intake.a3.hcmDesc': 'HCM, thick heart muscle',
   'intake.a3.hcmAudio': 'Hypertrophic cardiomyopathy. Thick heart muscle.',
   'intake.a3.dcmTitle': 'Dilated cardiomyopathy',
-  'intake.a3.dcmDesc': 'DCM — enlarged heart',
+  'intake.a3.dcmDesc': 'DCM, enlarged heart',
   'intake.a3.dcmAudio': 'Dilated cardiomyopathy. Enlarged heart.',
+  'intake.a3.aorticStenosisTitle': 'Aortic stenosis',
+  'intake.a3.aorticStenosisDesc': 'Narrowed aortic heart valve',
+  'intake.a3.aorticStenosisAudio': 'Aortic stenosis. A narrowed aortic heart valve.',
   'intake.a3.noneTitle': 'None of these',
   'intake.a3.noneDesc': 'No heart conditions',
   'intake.a3.noneAudio': 'None of these. No heart conditions.',
@@ -1071,10 +1304,10 @@ const en = {
   'intake.a4.subtitle': 'Your doctor may have used one of these terms.',
   'intake.a4.audio': 'Type of heart failure. Your doctor may have used one of these terms.',
   'intake.a4.hfrefTitle': 'HFrEF',
-  'intake.a4.hfrefDesc': "Reduced ejection fraction — sometimes called 'weak heart'",
+  'intake.a4.hfrefDesc': "Reduced ejection fraction, sometimes called 'weak heart'",
   'intake.a4.hfrefAudio': 'HFrEF. Reduced ejection fraction. Sometimes called weak heart.',
   'intake.a4.hfpefTitle': 'HFpEF',
-  'intake.a4.hfpefDesc': 'Preserved ejection fraction — heart is stiff but still pumps',
+  'intake.a4.hfpefDesc': 'Preserved ejection fraction, heart is stiff but still pumps',
   'intake.a4.hfpefAudio': 'HFpEF. Preserved ejection fraction. Heart is stiff but still pumps.',
   'intake.a4.unknownTitle': 'Not sure',
   'intake.a4.unknownDesc': 'Your care team will check during your next visit',
@@ -1085,7 +1318,7 @@ const en = {
   'intake.reAddRejectedConfirm': 'Your care team previously rejected {drug}. Re-add it anyway? They will review it again.',
   'intake.reAddRejectedTitle': 'Re-add this medication?',
   'intake.reAddRejectedConfirmBtn': 'Re-add',
-  'intake.a5.subtitle': "Tap each pill you take. Don't worry about dose — just whether you take it.",
+  'intake.a5.subtitle': "Tap each pill you take. Don't worry about dose, just whether you take it.",
   'intake.a5.audio': 'Your medications. Tap each pill you take. Do not worry about dose, just whether you take it.',
   'intake.a5.groupAce': 'Blood pressure pills (ACE inhibitors)',
   'intake.a5.groupArb': 'Blood pressure pills (ARBs)',
@@ -1104,7 +1337,7 @@ const en = {
   'intake.a5.otherMedSave': 'Save',
   'intake.a5.otherMedCancel': 'Cancel',
   'intake.a5.otherMedDupError': '{name} is already on your list. Pick a different name.',
-  'intake.a5.otherMedCatalogHint': '{name} is in the catalog — tap that tile instead so it benefits from verified contraindication checks.',
+  'intake.a5.otherMedCatalogHint': '{name} is in the catalog, tap that tile instead so it benefits from verified contraindication checks.',
 
   // A6 — combination pills
   'intake.a6.title': 'Combination pills',
@@ -1115,9 +1348,9 @@ const en = {
 
   // A7 — dedup modal
   'intake.a7.title': 'Are these the same pill?',
-  'intake.a7.body': 'You picked {component} and also {combo} — which contains {componentLower}.',
-  'intake.a7.keepCombo': "They're the same — keep {combo} only",
-  'intake.a7.keepSingle': "They're the same — keep {component} only",
+  'intake.a7.body': 'You picked {component} and also {combo}, which contains {componentLower}.',
+  'intake.a7.keepCombo': "They're the same, keep {combo} only",
+  'intake.a7.keepSingle': "They're the same, keep {component} only",
   'intake.a7.keepBoth': 'I take both',
   'intake.a7.goBack': 'Go back and re-check',
 
@@ -1138,18 +1371,18 @@ const en = {
   'intake.a8.otherAdd': 'Add',
   'intake.a8.otherPhotoLabel': 'Or describe what the bottle says',
   'intake.a8.otherPhotoPlaceholder': 'What is printed on the label?',
-  'intake.a8.otherCountSingle': '{n} other medicine added — your care team will confirm the details.',
-  'intake.a8.otherCountPlural': '{n} other medicines added — your care team will confirm the details.',
+  'intake.a8.otherCountSingle': '{n} other medicine added, your care team will confirm the details.',
+  'intake.a8.otherCountPlural': '{n} other medicines added, your care team will confirm the details.',
   'intake.a8.skipHint': 'You can skip this if nothing applies. Your care team will check what you take when they review your profile.',
 
   // A9 — frequency
   'intake.a9.emptyTitle': 'How often?',
-  'intake.a9.emptySubtitle': 'No medicines added yet — you can skip ahead.',
+  'intake.a9.emptySubtitle': 'No medicines added yet, you can skip ahead.',
   'intake.a9.emptyAudio': 'No medicines added yet. You can skip ahead.',
   'intake.a9.emptyBody': "You haven't added any medications. Tap Back if you missed any, or Continue to review.",
   'intake.a9.title': 'How often each day?',
-  'intake.a9.subtitle': 'Just the count — your care team will fill in the dose.',
-  'intake.a9.audio': 'How often do you take each one each day? Just the count — your care team will fill in the dose.',
+  'intake.a9.subtitle': 'Just the count, your care team will fill in the dose.',
+  'intake.a9.audio': 'How often do you take each one each day? Just the count, your care team will fill in the dose.',
   'intake.a9.freqOnce': '1 Time',
   'intake.a9.freqTwice': '2 Times',
   'intake.a9.freqThree': '3 Times',
@@ -1181,6 +1414,7 @@ const en = {
   'intake.a10.conditionCad': 'Coronary artery disease',
   'intake.a10.conditionHcm': 'HCM',
   'intake.a10.conditionDcm': 'DCM',
+  'intake.a10.conditionAorticStenosis': 'Aortic stenosis',
   'intake.a10.comboBadge': '(2-in-1)',
   'intake.a10.genderMale': 'Male',
   'intake.a10.genderFemale': 'Female',
@@ -1198,12 +1432,43 @@ const en = {
   'intake.exitSave.cta': 'Back to dashboard',
   'intake.exitSave.keepGoing': 'Keep going',
   'intake.exitSave.leaveWithoutSaving': 'Leave without saving',
-  'intake.exitSave.editTitle': 'Save your changes?',
-  'intake.exitSave.editBody': "We'll update your profile and medications with the changes on this page, then take you back to the dashboard.",
+  // A7 (Doc 1, edit mode) — Manisha verbatim "unsaved changes" prompt.
+  'intake.exitSave.editTitle': 'You have unsaved changes',
+  'intake.exitSave.editBody': 'Would you like to save before leaving?',
   'intake.exitSave.editCta': 'Save and exit',
   'intake.exitSave.saving': 'Saving…',
   'intake.exitSave.errorFallback': "We couldn't save your changes. Please try again.",
   'intake.edit.reverifyBanner': 'Editing this information will require your care team to re-verify. Your verified status will reset until they confirm the changes.',
+
+  // ─── Caregivers card (Handoff 4 / Doc 1 + Addendum Decision 2: email-only,
+  //     no SMS, no caregiver app access) ──────────────────────────────────────
+  'caregiver.title': 'Caregivers',
+  'caregiver.add': 'Add',
+  'caregiver.description': 'A caregiver is someone you trust, a family member or friend, who can be emailed if a serious health alert comes up. They’re only contacted for the alerts your care team has approved, and only after you give consent.',
+  'caregiver.loading': 'Loading…',
+  'caregiver.empty': 'No caregivers added yet.',
+  'caregiver.channelEmail': 'Email',
+  'caregiver.channelNone': 'Do not notify',
+  'caregiver.consentGiven': 'Consent given',
+  'caregiver.consentNone': 'No consent, won’t be notified',
+  'caregiver.revoke': 'Revoke',
+  'caregiver.allow': 'Allow alerts',
+  'caregiver.namePlaceholder': 'Caregiver’s name',
+  'caregiver.relationshipPlaceholder': 'Relationship (e.g. daughter), optional',
+  'caregiver.emailPlaceholder': 'Email address',
+  'caregiver.optionEmail': 'Notify by email',
+  'caregiver.optionNone': 'Don’t notify yet',
+  'caregiver.consentLabel': 'I agree Cardioplace may share my health alerts with this person.',
+  'caregiver.save': 'Save caregiver',
+  'caregiver.saving': 'Saving…',
+  'caregiver.cancel': 'Cancel',
+  'caregiver.removeAria': 'Remove {name}',
+  'caregiver.errNameRequired': 'Please enter the caregiver’s name.',
+  'caregiver.errEmailRequired': 'Email is required to notify by email.',
+  'caregiver.errLoad': 'Could not load caregivers',
+  'caregiver.errAdd': 'Could not add caregiver.',
+  'caregiver.errConsent': 'Could not update consent.',
+  'caregiver.errRemove': 'Could not remove caregiver.',
 
   // "Already on file" page
   'intake.profileExists.title': "You're all set",
@@ -1222,8 +1487,8 @@ const en = {
   'intake.nav.errorDob': 'Please enter your date of birth.',
   'intake.nav.errorHeight': 'Please enter a realistic height (about 3 ft 4 in to 8 ft 2 in).',
   'intake.nav.errorPregnancy': 'Please pick Yes or No.',
-  'intake.nav.errorPreeclampsia': 'Please pick Yes or No for preeclampsia history.',
-  'intake.nav.errorHfType': 'Please pick one — Not sure is OK.',
+  'intake.nav.errorPreeclampsia': 'Please pick Yes or No for high blood pressure during pregnancy.',
+  'intake.nav.errorHfType': 'Please pick one, Not sure is OK.',
   'intake.nav.errorFreq': 'Pick how often you take {name}.',
   'intake.nav.errorSubmit': 'Something went wrong submitting your profile.',
 
@@ -1266,7 +1531,7 @@ const en = {
   'alerts.notFound.title': 'Alert not found',
   'alerts.notFound.body': "We couldn't find that alert. It may have been resolved or removed.",
   'alerts.notFound.backToDashboard': 'Back to dashboard',
-  'alerts.notFound.tier2': 'This alert is reviewed by your care team only — no action is needed from you.',
+  'alerts.notFound.tier2': 'This alert is reviewed by your care team only, no action is needed from you.',
   'alerts.notFound.unavailable': 'This alert is no longer available.',
   'alerts.notFound.loadError': 'Could not load this alert.',
   'alerts.notFound.ackError': 'Could not save your acknowledgment.',
@@ -1276,7 +1541,10 @@ const en = {
   'alerts.emergency.callAria': 'Call 911 now',
   'alerts.emergency.understand': 'I understand',
   'alerts.emergency.followupTitle': 'Have you called 911?',
-  'alerts.emergency.followupBody': "Two hours have passed. We want to make sure you're safe.",
+  // #13 — dynamic elapsed time. followupBody is the <30-min short form;
+  // followupBodyElapsed carries the {elapsed} interpolation for older alerts.
+  'alerts.emergency.followupBody': "We want to make sure you're safe.",
+  'alerts.emergency.followupBodyElapsed': "It has been about {elapsed} since this alert. We want to make sure you're safe.",
   'alerts.emergency.followupYes': 'Yes',
   'alerts.emergency.followupNotYet': 'Not yet',
   'alerts.tier.back': 'Back',
@@ -1327,7 +1595,7 @@ const en = {
   'ocr.med.uploading': 'Reading your photo…',
   'ocr.med.confirmTitle': 'Is this your medication list?',
   'ocr.med.helpText': 'I read {count} medications from your photo. Tap each to verify before adding.',
-  'ocr.med.lowConfidenceWarning': 'Some letters were hard to read — please check each name.',
+  'ocr.med.lowConfidenceWarning': 'Some letters were hard to read, please check each name.',
   'ocr.med.rowDrugNameLabel': 'Medication name',
   'ocr.med.rowFrequencyLabel': 'How often',
   'ocr.med.badgeInCatalog': 'In catalog',
@@ -1356,6 +1624,21 @@ const en = {
   'ocr.med.errRateLimited': 'Too many photo attempts today. Please add medications manually.',
   'ocr.med.errNetwork': 'Connection problem. Please add medications manually.',
   'ocr.med.errTooLarge': 'Photo is too big. Try a smaller picture.',
+
+  // i18n backfill — caregiver intake step + voice-chat text input
+  'intake.caregivers.title': 'Add a caregiver (optional)',
+  'intake.caregivers.subtitle': 'A family member or friend we can notify if a serious health alert comes up. They’re only contacted for care-team-approved alerts, and only after you give consent. You can skip this and add someone later from your profile.',
+  'intake.caregivers.audio': 'Optionally add a caregiver, a family member or friend we can notify if a serious health alert comes up. They are only contacted after you give consent. You can skip this and add someone later from your profile.',
+  'chat.orTypePlaceholder': 'Or type a message...',
+
+  // ─── Auth — idle/session banners (patient app only; admin is EN-only) ───────
+  'auth.sessionExpired.title': 'Notice you were signed out',
+  'auth.sessionExpired.body':
+    'Your session ended because there was no activity for a while. Please sign in again to continue.',
+  'auth.idleWarning.title': 'Warning signing out soon',
+  'auth.idleWarning.body':
+    'You will be signed out in about 60 seconds because of inactivity. Move the mouse or press any key to stay signed in.',
+  'auth.idleWarning.stay': 'Stay signed in',
 } as const;
 
 export type TranslationKey = keyof typeof en;

@@ -44,6 +44,7 @@ import {
   BatteryLow,
   Baby,
   Pill,
+  PauseCircle,
   Scale,
   Save,
   CalendarClock,
@@ -56,7 +57,24 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
-import { ClinicalIntakeRequiredError, createJournalEntry, finalizeSingleReadingSession } from '@/lib/services/journal.service';
+import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, declineEmergencyConfirmation, getActiveSession, getAwaitingEmergency, getAlerts, type ActiveSessionDto, type AlertTier, type JournalEntryPayload } from '@/lib/services/journal.service';
+import { OptionDFlow, type OptionDSecondReading } from '@/components/cardio/OptionDFlow';
+import { BufferReviewScreen } from '@/components/cardio/BufferReviewScreen';
+import { isNowish, resolveMeasuredAtIso } from '@/lib/measuredAt';
+import { applyBulkMedicationStatus } from '@/lib/medicationBulk';
+import {
+  createDraft,
+  addReading,
+  removeReading,
+  commitPayloads,
+  loadDraft as loadBufferDraft,
+  saveDraft as saveBufferDraft,
+  clearDraft as clearBufferDraft,
+  type JournalDraft,
+  type BufferedReading,
+} from '@/lib/journalDraft';
+import { delayBandFor, showsSuppressedBanner, type DelayBand } from '@/lib/delayBand';
+import { selectReadingPrompt } from '@/lib/sessionPrompt';
 import { getMyPatientProfile, type PatientProfileDto } from '@/lib/services/intake.service';
 import { hasDraft, loadDraft } from '@/lib/intake/draft';
 import {
@@ -69,7 +87,7 @@ import {
   listMyMedications,
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
-import { getBMI, JOURNAL_NOTE_MAX_LENGTH } from '@cardioplace/shared';
+import { getBMI, JOURNAL_NOTE_MAX_LENGTH, SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared';
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
 import BpPhotoButton from '@/components/intake/BpPhotoButton';
@@ -167,6 +185,13 @@ interface SessionReading {
    *  to compute BMI for the confirmation screen — patients never enter BMI
    *  themselves per Niva's spec sign-off. */
   weightKg?: number;
+  /** Chunk C — measurement-lag band from the POST response (server truth).
+   *  Drives the HISTORICAL_ENTRY / DELAYED_ENTRY note on the success screen. */
+  delayBand?: DelayBand;
+  /** Chunk B fix-up — Gate A ("is new latest?") suppression signal from the
+   *  POST response. 'GATE_A' renders the same banner as HISTORICAL_ENTRY:
+   *  recorded, but no real-time alerts. */
+  alertsSuppressedReason?: 'GATE_A' | 'HISTORICAL_ENTRY' | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,12 +333,12 @@ function StepHeader({
   const { t } = useLanguage();
   return (
     <div>
-      <p className="text-[12px] font-semibold mb-1" style={{ color: 'var(--brand-text-muted)' }}>
+      <p className="text-[0.75rem] font-semibold mb-1" style={{ color: 'var(--brand-text-muted)' }}>
         {t('checkin.nav.stepOf').replace('{current}', String(step)).replace('{total}', String(total))}
       </p>
       <div className="flex items-start justify-between gap-3 mb-1">
         <h2
-          className="text-[20px] sm:text-[24px] font-bold tracking-tight min-w-0 flex-1"
+          className="text-[1.25rem] sm:text-[1.5rem] font-bold tracking-tight min-w-0 flex-1"
           style={{ color: 'var(--brand-text-primary)', wordBreak: 'break-word' }}
         >
           {title}
@@ -322,7 +347,7 @@ function StepHeader({
           <AudioButton text={audio} />
         </div>
       </div>
-      <p className="text-[14px]" style={{ color: 'var(--brand-text-muted)' }}>{subtitle}</p>
+      <p className="text-[0.875rem]" style={{ color: 'var(--brand-text-muted)' }}>{subtitle}</p>
     </div>
   );
 }
@@ -381,7 +406,7 @@ function ChecklistRow({
       >
         {icon}
       </div>
-      <p className="flex-1 text-[13.5px]" style={{ color: 'var(--brand-text-primary)' }}>
+      <p className="flex-1 text-[0.84375rem]" style={{ color: 'var(--brand-text-primary)' }}>
         {text}
       </p>
       {audioText && (
@@ -446,7 +471,7 @@ function B1Checklist({ form, setField }: StepProps) {
           phones; on very small screens the whole row wraps cleanly. */}
       <div className="flex items-center justify-between gap-2 flex-wrap rounded-xl p-3"
         style={{ backgroundColor: 'var(--brand-primary-purple-light)' }}>
-        <p className="text-[12.5px] min-w-0 flex-1 truncate" style={{ color: 'var(--brand-text-secondary)' }}>
+        <p className="text-[0.78125rem] min-w-0 flex-1 truncate" style={{ color: 'var(--brand-text-secondary)' }}>
           {allChecked
             ? t('checkin.b1.allSet')
             : t('checkin.b1.progress').replace('{n}', String(checkedCount))}
@@ -457,7 +482,7 @@ function B1Checklist({ form, setField }: StepProps) {
             data-testid="checkin-b1-toggle-all"
             onClick={toggleAll}
             aria-pressed={allChecked}
-            className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-2.5 py-1 rounded-full transition-all cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary-purple)]"
+            className="inline-flex items-center gap-1.5 text-[0.71875rem] font-semibold px-2.5 py-1 rounded-full transition-all cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary-purple)]"
             style={{
               backgroundColor: 'white',
               color: 'var(--brand-primary-purple)',
@@ -468,7 +493,7 @@ function B1Checklist({ form, setField }: StepProps) {
             {allChecked ? t('checkin.b1.unselectAll') : t('checkin.b1.selectAll')}
           </button>
           <span
-            className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+            className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full"
             style={{
               backgroundColor: allChecked ? 'var(--brand-success-green)' : 'white',
               color: allChecked ? 'white' : 'var(--brand-primary-purple)',
@@ -493,7 +518,7 @@ function B1Checklist({ form, setField }: StepProps) {
         ))}
       </div>
 
-      <p className="text-[12px] text-center" style={{ color: 'var(--brand-text-muted)' }}>
+      <p className="text-[0.75rem] text-center" style={{ color: 'var(--brand-text-muted)' }}>
         {t('checkin.b1.footer')}
       </p>
     </div>
@@ -506,6 +531,15 @@ function B2Reading({ form, setField }: StepProps) {
   // full-width below the button (above the reading inputs) instead of being
   // squeezed in beside the camera icon inside the label row.
   const [bpPhotoError, setBpPhotoError] = useState<string | null>(null);
+  // Chunk C — collapse the date/time behind a disclosure so the real-time 95%
+  // path is one tap. Auto-expanded when the stored time isn't ~now.
+  const [editingTime, setEditingTime] = useState(() => !isNowish(form.measuredDate, form.measuredTime));
+  const measuredIsNow = isNowish(form.measuredDate, form.measuredTime);
+  const whenSummary = measuredIsNow
+    ? t('checkin.b2.takenNow')
+    : new Date(`${form.measuredDate}T${form.measuredTime}`).toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      });
 
   return (
     <div data-testid="checkin-step-2" className="space-y-6">
@@ -520,17 +554,34 @@ function B2Reading({ form, setField }: StepProps) {
       {/* Date + Time — split into two pickers (cleaner than datetime-local on
           small screens where the native picker eats horizontal space). */}
       <div>
-        <label className="flex items-center gap-2 text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <label className="flex items-center gap-2 text-[0.8125rem] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           <CalendarClock className="w-4 h-4" />
           {t('checkin.b2.whenLabel')}
         </label>
+        {!editingTime ? (
+          <button
+            type="button"
+            data-testid="checkin-when-summary"
+            onClick={() => setEditingTime(true)}
+            className="w-full h-12 px-3 rounded-xl flex items-center justify-between gap-2 text-[14px] cursor-pointer"
+            style={{ border: '2px solid var(--brand-border)', backgroundColor: 'white', color: 'var(--brand-text-primary)' }}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <CalendarClock className="w-4 h-4 shrink-0" style={{ color: 'var(--brand-text-muted)' }} />
+              <span className="truncate">{whenSummary}</span>
+            </span>
+            <span className="text-[13px] font-semibold shrink-0" style={{ color: 'var(--brand-primary-purple)' }}>
+              {t('checkin.b2.changeTime')}
+            </span>
+          </button>
+        ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           <input
             type="date"
             aria-label={t('checkin.b2.dateAria')}
             value={form.measuredDate}
             onChange={(e) => setField('measuredDate', e.target.value)}
-            className="h-12 px-3 rounded-xl text-[15px] outline-none transition box-border min-w-0 w-full"
+            className="h-12 px-3 rounded-xl text-[0.9375rem] outline-none transition box-border min-w-0 w-full"
             style={{
               border: '2px solid var(--brand-border)',
               color: 'var(--brand-text-primary)',
@@ -545,7 +596,7 @@ function B2Reading({ form, setField }: StepProps) {
             aria-label={t('checkin.b2.timeAria')}
             value={form.measuredTime}
             onChange={(e) => setField('measuredTime', e.target.value)}
-            className="h-12 px-3 rounded-xl text-[15px] outline-none transition box-border min-w-0 w-full"
+            className="h-12 px-3 rounded-xl text-[0.9375rem] outline-none transition box-border min-w-0 w-full"
             style={{
               border: '2px solid var(--brand-border)',
               color: 'var(--brand-text-primary)',
@@ -556,11 +607,12 @@ function B2Reading({ form, setField }: StepProps) {
             onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--brand-border)'; }}
           />
         </div>
+        )}
       </div>
 
       {/* Position */}
       <div>
-        <label className="flex items-center justify-between text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+        <label className="flex items-center justify-between text-[0.8125rem] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
           <span>{t('checkin.b2.positionLabel')}</span>
           <AudioButton text={t('checkin.b2.positionAudio')} size="sm" />
         </label>
@@ -597,7 +649,7 @@ function B2Reading({ form, setField }: StepProps) {
 
       {/* BP */}
       <div>
-        <label htmlFor="checkin-systolic" className="flex items-center justify-between gap-2 text-[13px] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
+        <label htmlFor="checkin-systolic" className="flex items-center justify-between gap-2 text-[0.8125rem] font-semibold mb-3" style={{ color: 'var(--brand-text-primary)' }}>
           <span className="min-w-0">{t('checkin.b2.bpLabel')}</span>
           <span className="flex items-center gap-2 shrink-0">
             {/* Phase/27 BP photo OCR — patient snaps cuff display, confirms numbers
@@ -617,7 +669,7 @@ function B2Reading({ form, setField }: StepProps) {
         {bpPhotoError && (
           <p
             role="alert"
-            className="-mt-1 mb-3 text-[12px] leading-snug font-medium"
+            className="-mt-1 mb-3 text-[0.75rem] leading-snug font-medium"
             style={{ color: 'var(--brand-alert-red)' }}
           >
             {bpPhotoError}
@@ -640,13 +692,13 @@ function B2Reading({ form, setField }: StepProps) {
                 height: 76,
                 borderRadius: 'var(--brand-radius-input)',
                 border: '2px solid var(--brand-border)',
-                fontSize: 32,
+                fontSize: '2rem',
                 color: form.systolicBP ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
                 backgroundColor: 'white',
               }}
             />
             <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-              <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpTopLabel')}</p>
+              <p className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpTopLabel')}</p>
               <MicButton
                 inputId="checkin-systolic"
                 numeric
@@ -654,7 +706,7 @@ function B2Reading({ form, setField }: StepProps) {
               />
             </div>
           </div>
-          <div className="pb-7 text-[28px] sm:text-[32px] font-light shrink-0" style={{ color: 'var(--brand-text-muted)' }}>/</div>
+          <div className="pb-7 text-[1.75rem] sm:text-[2rem] font-light shrink-0" style={{ color: 'var(--brand-text-muted)' }}>/</div>
           <div data-testid="check-in-diastolic" className="flex-1 min-w-0">
             <input
               data-testid="checkin-diastolic"
@@ -671,13 +723,13 @@ function B2Reading({ form, setField }: StepProps) {
                 height: 76,
                 borderRadius: 'var(--brand-radius-input)',
                 border: '2px solid var(--brand-border)',
-                fontSize: 32,
+                fontSize: '2rem',
                 color: form.diastolicBP ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
                 backgroundColor: 'white',
               }}
             />
             <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-              <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpBottomLabel')}</p>
+              <p className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.b2.bpBottomLabel')}</p>
               <MicButton
                 inputId="checkin-diastolic"
                 numeric
@@ -691,7 +743,7 @@ function B2Reading({ form, setField }: StepProps) {
 
       {/* Pulse */}
       <div>
-        <label htmlFor="checkin-pulse" className="flex items-center justify-between text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <label htmlFor="checkin-pulse" className="flex items-center justify-between text-[0.8125rem] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           <span className="flex items-center gap-2"><Heart className="w-4 h-4" /> {t('checkin.b2.pulseLabel')}</span>
           <AudioButton text={t('checkin.b2.pulseAudio')} size="sm" />
         </label>
@@ -711,7 +763,7 @@ function B2Reading({ form, setField }: StepProps) {
               border: '2px solid var(--brand-border)',
               color: form.pulse ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
               backgroundColor: 'white',
-              fontSize: 18,
+              fontSize: '1.125rem',
             }}
           />
           <MicButton
@@ -776,7 +828,7 @@ function StepWeight({ form, setField }: StepProps) {
       />
 
       <div>
-        <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('checkin.weight.unitLabel')}</label>
+        <label className="block text-[0.8125rem] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>{t('checkin.weight.unitLabel')}</label>
         <div
           className="inline-flex rounded-full p-1 gap-1"
           style={{ backgroundColor: 'var(--brand-background)', border: '1px solid var(--brand-border)' }}
@@ -799,7 +851,7 @@ function StepWeight({ form, setField }: StepProps) {
       </div>
 
       <div>
-        <label htmlFor="checkin-weight" className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+        <label htmlFor="checkin-weight" className="block text-[0.8125rem] font-semibold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
           {t('checkin.weight.weightLabel').replace('{unit}', form.weightUnit)}
         </label>
         <div className="flex items-center gap-2">
@@ -818,12 +870,12 @@ function StepWeight({ form, setField }: StepProps) {
                 height: 72,
                 borderRadius: 'var(--brand-radius-input)',
                 border: '2px solid var(--brand-border)',
-                fontSize: 32,
+                fontSize: '2rem',
                 color: form.weight ? 'var(--brand-text-primary)' : 'var(--brand-text-muted)',
                 backgroundColor: 'white',
               }}
             />
-            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[16px]" style={{ color: 'var(--brand-text-muted)' }}>
+            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[1rem]" style={{ color: 'var(--brand-text-muted)' }}>
               {form.weightUnit}
             </span>
           </div>
@@ -837,7 +889,7 @@ function StepWeight({ form, setField }: StepProps) {
 
       <div className="rounded-xl p-3.5 flex gap-3" style={{ backgroundColor: 'var(--brand-accent-teal-light)' }}>
         <Scale className="w-5 h-5 mt-0.5 shrink-0" style={{ color: 'var(--brand-accent-teal)' }} />
-        <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+        <p className="text-[0.75rem] leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {t('checkin.weight.fluidHint')}
         </p>
       </div>
@@ -847,6 +899,13 @@ function StepWeight({ form, setField }: StepProps) {
 
 interface MedicationStepProps extends StepProps {
   medications: Array<{ id: string; drugName: string; drugClass: string }>;
+  // F17 — meds on HOLD, shown as non-actionable informational rows.
+  heldMeds: Array<{
+    id: string;
+    drugName: string;
+    drugClass: string;
+    holdReason?: string | null;
+  }>;
   medsLoading: boolean;
 }
 
@@ -880,7 +939,7 @@ const DRUG_CLASS_LABEL_KEYS: Record<string, TranslationKey> = {
   OTHER_UNVERIFIED: 'checkin.b4.classOtherUnverified',
 };
 
-function StepMedication({ form, setField, medications, medsLoading }: MedicationStepProps) {
+function StepMedication({ form, setField, medications, heldMeds, medsLoading }: MedicationStepProps) {
   const { t } = useLanguage();
   // Resolve a drug-class label, falling back to the prisma value humanised
   // (e.g. UNKNOWN_NEW_CLASS → "unknown new class") so a freshly-added enum
@@ -915,6 +974,29 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
     });
   };
 
+  // Bug 17 / Bug 21b — absolute setter: bulk-answer EVERY med to `value` (FE-only;
+  // no backend round-trip), regardless of current state, so "Mark all not taken"
+  // works after "Mark all taken". The patient can still flip any individual med.
+  const bulkSet = (value: 'yes' | 'no') => {
+    setField(
+      'medicationStatus',
+      applyBulkMedicationStatus(
+        form.medicationStatus,
+        medications.map((m) => m.id),
+        value,
+        (prev, v): MedicationEntry =>
+          v === 'no'
+            ? { ...(prev ?? DEFAULT_MED_ENTRY), taken: 'no' }
+            : { taken: 'yes', reason: null, missedDoses: 1 },
+      ),
+    );
+  };
+
+  // Live tally so the patient sees a bulk action landed.
+  const takenCount = medications.filter((m) => getEntry(m.id).taken === 'yes').length;
+  const missedCount = medications.filter((m) => getEntry(m.id).taken === 'no').length;
+  const answeredCount = medications.filter((m) => getEntry(m.id).taken != null).length;
+
   return (
     <div data-testid="checkin-step-4" className="space-y-6">
       <StepHeader
@@ -924,6 +1006,50 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
         step={4}
         total={5}
       />
+
+      {/* Bug 17 / Bug 21a — bulk shortcuts for patients with several meds, styled
+          as one segmented control (tertiary, above the list). Only shown when
+          there's more than one med. Each button is an absolute setter (Bug 21b).
+          44px tall (a11y C3); smaller than the primary CTA (48px). */}
+      {!medsLoading && medications.length > 1 && (
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div
+            className="inline-flex rounded-full overflow-hidden"
+            style={{ border: '1.5px solid var(--brand-border)' }}
+          >
+            <button
+              type="button"
+              data-testid="checkin-meds-mark-all-taken"
+              onClick={() => bulkSet('yes')}
+              className="h-11 px-4 text-[0.8125rem] font-semibold cursor-pointer transition hover:bg-[#f5f3ff]"
+              style={{ color: 'var(--brand-primary-purple)' }}
+            >
+              {t('checkin.b4.markAllTaken')}
+            </button>
+            <button
+              type="button"
+              data-testid="checkin-meds-mark-all-not-taken"
+              onClick={() => bulkSet('no')}
+              className="h-11 px-4 text-[0.8125rem] font-semibold cursor-pointer transition hover:bg-[#f5f3ff]"
+              style={{ color: 'var(--brand-primary-purple)', borderLeft: '1.5px solid var(--brand-border)' }}
+            >
+              {t('checkin.b4.markAllNotTaken')}
+            </button>
+          </div>
+          {answeredCount > 0 && (
+            <span
+              data-testid="checkin-meds-tally"
+              aria-live="polite"
+              className="text-[0.75rem] font-medium"
+              style={{ color: 'var(--brand-text-muted)' }}
+            >
+              {t('checkin.b4.bulkTally')
+                .replace('{taken}', String(takenCount))
+                .replace('{missed}', String(missedCount))}
+            </span>
+          )}
+        </div>
+      )}
 
       {medsLoading && (
         <div className="space-y-3 animate-pulse">
@@ -940,12 +1066,12 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
         </div>
       )}
 
-      {!medsLoading && medications.length === 0 && (
+      {!medsLoading && medications.length === 0 && heldMeds.length === 0 && (
         // Defensive fallback — parent flow should have skipped this step when
         // the patient has no meds on file. Kept so a stale render doesn't
         // crash the wizard.
         <div
-          className="rounded-xl p-3 text-[13px] leading-relaxed"
+          className="rounded-xl p-3 text-[0.8125rem] leading-relaxed"
           style={{ backgroundColor: 'var(--brand-warning-amber-light)', color: 'var(--brand-text-primary)' }}
         >
           {t('checkin.b4.noMeds')}
@@ -979,13 +1105,13 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                   <Pill className="w-4 h-4 shrink-0" style={{ color: 'var(--brand-primary-purple)' }} />
                   <div className="flex-1 min-w-0">
                     <p
-                      className="text-[14px] font-semibold truncate"
+                      className="text-[0.875rem] font-semibold truncate"
                       style={{ color: 'var(--brand-text-primary)' }}
                     >
                       {med.drugName}
                     </p>
                     <p
-                      className="text-[11px]"
+                      className="text-[0.6875rem]"
                       style={{ color: 'var(--brand-text-muted)' }}
                     >
                       {drugClassLabel(med.drugClass)}
@@ -1031,7 +1157,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                               : undefined
                         }
                         onClick={() => setTaken(med.id, opt.value)}
-                        className="h-11 rounded-xl text-[12px] font-semibold border-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="h-11 rounded-xl text-[0.75rem] font-semibold border-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                         style={{
                           backgroundColor: active ? opt.accent : 'white',
                           borderColor: active ? opt.accent : 'var(--brand-border)',
@@ -1053,7 +1179,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                   <div className="pt-3">
                     <label
                       htmlFor={`reason-${med.id}`}
-                      className="text-[11px] font-semibold uppercase tracking-wide"
+                      className="text-[0.6875rem] font-semibold uppercase tracking-wide"
                       style={{ color: 'var(--brand-text-muted)' }}
                     >
                       {t('readings.whyMissed')}
@@ -1066,7 +1192,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                           reason: (e.target.value || null) as MedicationEntry['reason'],
                         })
                       }
-                      className="mt-1 w-full px-3 py-2 rounded-lg border text-[14px] bg-white"
+                      className="mt-1 w-full px-3 py-2 rounded-lg border text-[0.875rem] bg-white"
                       style={{
                         borderColor: 'var(--brand-border)',
                         color: 'var(--brand-text-primary)',
@@ -1084,7 +1210,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
 
                   <fieldset className="border-0 p-0 m-0">
                     <legend
-                      className="text-[11px] font-semibold uppercase tracking-wide"
+                      className="text-[0.6875rem] font-semibold uppercase tracking-wide"
                       style={{ color: 'var(--brand-text-muted)' }}
                     >
                       {t('readings.howManyDoses')}
@@ -1107,7 +1233,7 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                         −
                       </button>
                       <span
-                        className="text-[16px] font-bold w-6 text-center"
+                        className="text-[1rem] font-bold w-6 text-center"
                         style={{ color: 'var(--brand-text-primary)' }}
                       >
                         {entry.missedDoses}
@@ -1132,6 +1258,53 @@ function StepMedication({ form, setField, medications, medsLoading }: Medication
                   </fieldset>
                 </div>
               )}
+            </div>
+          );
+        })}
+
+      {/* F17 — meds the care team has placed on HOLD. Informational only: no
+          Took/Missed buttons, excluded from the adherence rollup. Copy branches
+          on holdReason — PROVIDER_DIRECTED_HOLD is a clinical "stop taking it";
+          the administrative reasons mean "keep taking it, we're reviewing". */}
+      {!medsLoading &&
+        heldMeds.map((med) => {
+          const isProviderDirected = med.holdReason === 'PROVIDER_DIRECTED_HOLD';
+          return (
+            <div
+              key={med.id}
+              data-testid="checkin-held-med"
+              data-hold-reason={med.holdReason ?? ''}
+              className="rounded-xl p-4 opacity-80"
+              style={{ backgroundColor: 'var(--brand-background)', border: '1.5px dashed var(--brand-border)' }}
+            >
+              <div className="flex items-start gap-3">
+                <PauseCircle
+                  className="w-5 h-5 mt-0.5 shrink-0"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                  aria-hidden="true"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[0.9375rem] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+                      {med.drugName}
+                    </span>
+                    <span
+                      className="text-[0.625rem] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                    >
+                      {t('checkin.b4.onHoldBadge')}
+                    </span>
+                  </div>
+                  <p className="text-[0.75rem] mt-0.5" style={{ color: 'var(--brand-text-muted)' }}>
+                    {drugClassLabel(med.drugClass)}
+                  </p>
+                  <p className="text-[0.8125rem] mt-1.5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+                    {isProviderDirected
+                      ? t('checkin.b4.onHoldDoNotTake')
+                      : t('checkin.b4.onHoldUnderReview')}
+                  </p>
+                </div>
+              </div>
             </div>
           );
         })}
@@ -1418,7 +1591,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
       <div className="rounded-xl p-3 flex items-start gap-3"
         style={{ backgroundColor: 'var(--brand-alert-red-light)' }}>
         <Heart className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--brand-alert-red-text)' }} />
-        <p className="text-[12px] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
+        <p className="text-[0.75rem] leading-relaxed" style={{ color: 'var(--brand-text-primary)' }}>
           {t('checkin.b3.alertBanner')}
         </p>
       </div>
@@ -1447,7 +1620,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
           >
             <div className="flex items-center gap-2 mt-3">
               <Baby className="w-4 h-4" style={{ color: 'var(--brand-primary-purple)' }} />
-              <p className="text-[12.5px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-primary-purple)' }}>
+              <p className="text-[0.78125rem] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-primary-purple)' }}>
                 {t('checkin.b3.pregnancyHeader')}
               </p>
             </div>
@@ -1484,7 +1657,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
           voice dictation + a live character counter. */}
       <div>
         <div className="flex items-center justify-between gap-2 mb-2">
-          <label htmlFor="checkin-other-symptoms" className="block text-[13px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+          <label htmlFor="checkin-other-symptoms" className="block text-[0.8125rem] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
             {t('checkin.b3.notesLabel')}
           </label>
           <MicButton
@@ -1506,7 +1679,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
           onChange={(e) => setField('notes', e.target.value.slice(0, NOTE_MAX))}
           placeholder={t('readings.notesPlaceholder')}
           aria-describedby="checkin-notes-count"
-          className="w-full rounded-xl px-4 py-3 text-[13px] resize-none outline-none transition"
+          className="w-full rounded-xl px-4 py-3 text-[0.8125rem] resize-none outline-none transition"
           style={{
             border: '2px solid var(--brand-border)',
             color: 'var(--brand-text-primary)',
@@ -1515,7 +1688,7 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
         />
         <p
           id="checkin-notes-count"
-          className="mt-1 text-[11px] text-right tabular-nums"
+          className="mt-1 text-[0.6875rem] text-right tabular-nums"
           style={{
             color:
               form.notes.length >= NOTE_MAX
@@ -1536,17 +1709,29 @@ function B3Symptoms({ form, setField, isPregnant }: SymptomsStepProps) {
 
 function ConfirmationScreen({
   lastReading,
-  sessionReadings,
+  sessionTotal,
   hasAFib,
   heightCm,
   missedMedNames,
+  isEnrolled,
+  isEmergency,
   onAddAnother,
   onDone,
   pendingFinalizeEntryId,
   onFinalized,
 }: {
   lastReading: SessionReading;
-  sessionReadings: SessionReading[];
+  /** Bug 8 — the just-submitted reading triggered an emergency-class rule.
+   *  Suppresses the Q3 / AFib reading-prompt (show the emergency CTA instead). */
+  isEmergency: boolean;
+  /** #88 — true once the patient is ENROLLED (clinical dispatch gate). When
+   *  false, the engine never ran and no care team was notified, so the
+   *  post-submit copy must not claim otherwise. */
+  isEnrolled: boolean;
+  /** True count of readings in the session — includes readings carried over
+   *  from a joined (cross-visit) session, not just those logged this visit.
+   *  Drives the "logged N readings" copy + the AFib ≥3 satisfied indicator. */
+  sessionTotal: number;
   hasAFib: boolean;
   /** From PatientProfile.heightCm — fixed at intake. Used to compute BMI
    *  when the patient logged a weight. */
@@ -1564,8 +1749,25 @@ function ConfirmationScreen({
   onFinalized: () => void;
 }) {
   const { t } = useLanguage();
-  const total = sessionReadings.length;
-  const aFibSatisfied = !hasAFib || total >= 3;
+  const total = sessionTotal;
+  // Q3 hybrid prompt-selection (Manisha 2026-06-12 Q3 — Option C). Single
+  // source of truth for the AFib 3-reading variant vs the non-AFib
+  // single→second-reading nudge, extracted to a pure helper so the branch is
+  // unit-tested (lib/sessionPrompt.test.ts) and the two cohorts can't cross.
+  // #90 — AFib check-in state machine. AFib patients need three readings taken
+  // close together (5-min session) for the engine's beat-to-beat averaging.
+  // The copy teaches that without clinical jargon, and tapping "Back to
+  // dashboard" before the 3rd reading prompts a confirm (going to the
+  // dashboard ends the session).
+  const readingPrompt = selectReadingPrompt({ hasAFib, sessionTotal: total, pendingFinalizeEntryId, isEmergency });
+  const aFibSatisfied = readingPrompt.kind === 'afib' ? readingPrompt.satisfied : true;
+  const afibStateKey = readingPrompt.kind === 'afib' ? readingPrompt.stateKey : 'state1';
+  const needsMoreReadings = readingPrompt.kind === 'afib' ? readingPrompt.needsMoreReadings : false;
+  const [showLeaveAfibModal, setShowLeaveAfibModal] = useState(false);
+  const handleBackToDashboard = () => {
+    if (needsMoreReadings) setShowLeaveAfibModal(true);
+    else onDone();
+  };
 
   // Cluster 6 Q2 (Manisha 5/9/26) — 5-min finalize timer. Arms when the
   // backend hint says this is a first-in-session non-AFib non-preDay3
@@ -1577,7 +1779,6 @@ function ConfirmationScreen({
   useEffect(() => {
     if (!pendingFinalizeEntryId) return;
     const entryId = pendingFinalizeEntryId;
-    const FIVE_MIN_MS = 5 * 60 * 1000;
     const handle = setTimeout(() => {
       finalizeSingleReadingSession(entryId)
         .catch(() => {
@@ -1588,7 +1789,7 @@ function ConfirmationScreen({
         .finally(() => {
           onFinalized();
         });
-    }, FIVE_MIN_MS);
+    }, SINGLE_READING_FINALIZE_MS);
     return () => {
       clearTimeout(handle);
     };
@@ -1654,13 +1855,15 @@ function ConfirmationScreen({
       </motion.div>
 
       <div className="flex items-center gap-2">
-        <h2 className="text-[20px] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
+        <h2 className="text-[1.25rem] font-bold leading-tight" style={{ color: 'var(--brand-text-primary)' }}>
           {total > 1 ? t('checkin.confirm.titleMulti').replace('{n}', String(total)) : t('checkin.confirm.title')}
         </h2>
         <AudioButton text={overviewAudio} size="sm" />
       </div>
-      <p className="text-[13px] mt-0.5 mb-4" style={{ color: 'var(--brand-text-muted)' }}>
-        {t('checkin.confirm.subtitle')}
+      <p className="text-[0.8125rem] mt-0.5 mb-4" style={{ color: 'var(--brand-text-muted)' }}>
+        {/* #88 — un-enrolled patients have no care team yet; the engine didn't
+            run. Don't claim "gets it right away". */}
+        {t(isEnrolled ? 'checkin.confirm.subtitle' : 'checkin.confirm.subtitleUnenrolled')}
       </p>
 
       {/* Reading summary card */}
@@ -1669,17 +1872,17 @@ function ConfirmationScreen({
         style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)', boxShadow: 'var(--brand-shadow-card)' }}
       >
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
+          <span className="text-[0.625rem] font-bold uppercase tracking-wider" style={{ color: 'var(--brand-text-muted)' }}>
             {t('checkin.confirm.thisReading')}
           </span>
         </div>
         <div className="flex items-baseline gap-2 justify-center">
-          <span className="text-[30px] font-bold leading-none" style={{ color: 'var(--brand-primary-purple)' }}>
+          <span className="text-[1.875rem] font-bold leading-none" style={{ color: 'var(--brand-primary-purple)' }}>
             {lastReading.systolicBP ?? '--'}/{lastReading.diastolicBP ?? '--'}
           </span>
-          <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.confirm.unit')}</span>
+          <span className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>{t('checkin.confirm.unit')}</span>
           {lastReading.pulse != null && (
-            <span className="text-[12px] font-semibold ml-2 flex items-center gap-1" style={{ color: 'var(--brand-text-secondary)' }}>
+            <span className="text-[0.75rem] font-semibold ml-2 flex items-center gap-1" style={{ color: 'var(--brand-text-secondary)' }}>
               <Heart className="w-3.5 h-3.5" /> {lastReading.pulse}
             </span>
           )}
@@ -1693,26 +1896,57 @@ function ConfirmationScreen({
             style={{ borderTop: '1px solid var(--brand-border)' }}
           >
             <Scale className="w-3.5 h-3.5" style={{ color: 'var(--brand-text-muted)' }} />
-            <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+            <span className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>
               Weight {Math.round((lastReading.weightKg ?? 0) * 10) / 10} kg
             </span>
-            <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>·</span>
-            <span className="text-[11px] font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
+            <span className="text-[0.6875rem]" style={{ color: 'var(--brand-text-muted)' }}>·</span>
+            <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--brand-text-secondary)' }}>
               BMI {bmi.toFixed(1)}
             </span>
           </div>
         )}
       </div>
 
+      {/* Chunk C — backdated-readings post-save note. HISTORICAL_ENTRY (>24h)
+          gets the "won't trigger real-time alerts" note; DELAYED_ENTRY (1-24h)
+          gets a quieter "recorded" confirmation. Server-truth band from the POST
+          response. PENDING-MANISHA-WORDING 2026-06-09. */}
+      {showsSuppressedBanner(lastReading?.delayBand, lastReading?.alertsSuppressedReason) && (
+        <div
+          data-testid="checkin-historical-note"
+          className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
+          style={{ backgroundColor: 'var(--brand-info-bg, #EEF2FF)' }}
+        >
+          <CalendarClock className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-primary-purple)' }} />
+          <p className="text-[12px] leading-snug" style={{ color: 'var(--brand-text-primary)' }}>
+            {t('checkin.historical.note')}
+          </p>
+        </div>
+      )}
+      {lastReading?.delayBand === 'DELAYED_ENTRY' && (
+        <div
+          data-testid="checkin-delayed-note"
+          className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
+          style={{ backgroundColor: 'var(--brand-info-bg, #EEF2FF)' }}
+        >
+          <CalendarClock className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-text-muted)' }} />
+          <p className="text-[12px] leading-snug" style={{ color: 'var(--brand-text-secondary)' }}>
+            {t('checkin.delayed.note')}
+          </p>
+        </div>
+      )}
       {/* Missed-medication acknowledgement — visible confirmation so the
-          patient knows their answer was captured and will reach the care team. */}
-      {missedMedNames.length > 0 && (
+          patient knows their answer was captured and will reach the care team.
+          #88 — only when ENROLLED: an un-enrolled patient's miss fires no alert
+          and reaches no care team, so the "your care team will see this" line
+          would be misleading. */}
+      {isEnrolled && missedMedNames.length > 0 && (
         <div
           className="w-full rounded-xl px-3 py-2 mb-3 flex items-start gap-2.5 text-left"
           style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
         >
           <Pill className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--brand-warning-amber-text)' }} />
-          <p className="text-[12px] leading-snug" style={{ color: 'var(--brand-text-primary)' }}>
+          <p className="text-[0.75rem] leading-snug" style={{ color: 'var(--brand-text-primary)' }}>
             We noted you missed{' '}
             <span className="font-bold">{missedMedNames.join(', ')}</span>
             {' '}today — your care team will see this.
@@ -1729,21 +1963,24 @@ function ConfirmationScreen({
           }}
         >
           <Activity
-            className="w-4 h-4 shrink-0"
+            className="w-4 h-4 shrink-0 mt-0.5"
             style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-warning-amber-text)' }}
           />
-          <p
-            className="text-[12px] leading-snug"
-            style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-text-primary)' }}
-          >
-            {aFibSatisfied
-              ? t('checkin.confirm.afibSatisfied').replace('{n}', String(total))
-              : t('checkin.confirm.afibNeeded').replace('{n}', String(total))}
-          </p>
+          <div className="text-left">
+            <p
+              className="text-[0.75rem] font-semibold leading-snug"
+              style={{ color: aFibSatisfied ? 'var(--brand-success-green)' : 'var(--brand-text-primary)' }}
+            >
+              {t(`checkin.afib.${afibStateKey}.heading`)}
+            </p>
+            <p className="text-[0.71875rem] leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
+              {t(`checkin.afib.${afibStateKey}.body`)}
+            </p>
+          </div>
         </div>
       ) : (
-        <p className="text-[12px] mb-3 leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
-          {t('checkin.confirm.nonAfib')}
+        <p className="text-[0.75rem] mb-3 leading-snug" style={{ color: 'var(--brand-text-muted)' }}>
+          {t(isEnrolled ? 'checkin.confirm.nonAfib' : 'checkin.confirm.nonAfibUnenrolled')}
         </p>
       )}
 
@@ -1752,10 +1989,10 @@ function ConfirmationScreen({
          them to take a second one. Helps the engine fire on an averaged
          BP instead of a one-off. 5-min timer (above) finalizes the
          session as single-reading if they don't. */}
-      {pendingFinalizeEntryId && (
+      {readingPrompt.kind === 'takeSecond' && (
         <div
           data-testid="pending-second-reading"
-          className="w-full mb-3 rounded-2xl border-2 px-4 py-3 text-[13px] leading-snug"
+          className="w-full mb-3 rounded-2xl border-2 px-4 py-3 text-[0.8125rem] leading-snug"
           style={{
             backgroundColor: 'var(--brand-info-bg, #EEF2FF)',
             borderColor: 'var(--brand-primary-purple)',
@@ -1777,7 +2014,7 @@ function ConfirmationScreen({
           type="button"
           data-testid="add-second-reading"
           onClick={onAddAnother}
-          className="w-full h-11 rounded-full font-bold text-white text-[13.5px] flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full h-11 rounded-full font-bold text-white text-[0.84375rem] flex items-center justify-center gap-2 cursor-pointer"
           style={{
             backgroundColor: hasAFib && !aFibSatisfied ? 'var(--brand-warning-amber)' : 'var(--brand-primary-purple)',
             boxShadow: 'var(--brand-shadow-button)',
@@ -1789,8 +2026,8 @@ function ConfirmationScreen({
         </motion.button>
         <motion.button
           type="button"
-          onClick={onDone}
-          className="w-full h-11 rounded-full font-bold text-[13.5px] flex items-center justify-center gap-2 cursor-pointer"
+          onClick={handleBackToDashboard}
+          className="w-full h-11 rounded-full font-bold text-[0.84375rem] flex items-center justify-center gap-2 cursor-pointer"
           style={{
             backgroundColor: 'white',
             border: '1.5px solid var(--brand-border)',
@@ -1802,6 +2039,49 @@ function ConfirmationScreen({
           {t('checkin.confirm.backToDashboard')}
         </motion.button>
       </div>
+
+      {/* #90 — leaving before the 3rd AFib reading ends the session. Confirm,
+          framed as "stay and finish" vs "end and start fresh later" (never
+          "you failed"). */}
+      {showLeaveAfibModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="afib-leave-modal-title"
+          data-testid="afib-leave-session-modal"
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center" style={{ boxShadow: 'var(--brand-shadow-button)' }}>
+            <h3 id="afib-leave-modal-title" className="text-[1.0625rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+              {t('checkin.afib.modal.heading')}
+            </h3>
+            <p className="text-[0.8125rem] mb-4 leading-snug" style={{ color: 'var(--brand-text-secondary)' }}>
+              {t('checkin.afib.modal.body').replace('{n}', String(total))}
+            </p>
+            <div className="space-y-2">
+              <button
+                type="button"
+                data-testid="afib-modal-stay"
+                onClick={() => { setShowLeaveAfibModal(false); onAddAnother(); }}
+                className="w-full h-11 rounded-full font-bold text-white text-[0.84375rem] cursor-pointer"
+                style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+              >
+                {t('checkin.afib.modal.stay')}
+              </button>
+              <button
+                type="button"
+                data-testid="afib-modal-leave"
+                onClick={() => { setShowLeaveAfibModal(false); onDone(); }}
+                className="w-full h-11 rounded-full font-bold text-[0.84375rem] cursor-pointer"
+                style={{ border: '1.5px solid var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+              >
+                {t('checkin.afib.modal.leave')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1836,6 +2116,10 @@ export default function CheckIn() {
     setIntakeIncomplete(!!draft?.currentStep && draft.currentStep !== 'A11');
   }, [user?.id]);
   const [medications, setMedications] = useState<PatientMedication[]>([]);
+  // F17 — meds on PROVIDER/admin HOLD. Rendered in the MEDICATION step as
+  // informational, non-actionable rows so the patient knows the care team has
+  // paused them; excluded from the Took/Missed adherence rollup + validation.
+  const [heldMeds, setHeldMeds] = useState<PatientMedication[]>([]);
   const [medsLoading, setMedsLoading] = useState(true);
 
   const [form, setForm] = useState<FormData>(emptyForm);
@@ -1849,16 +2133,72 @@ export default function CheckIn() {
   // Save-and-exit confirmation (header Save button) — mirrors the intake form.
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
 
-  // Session state — sessionId is generated once via lazy init so we don't
-  // need a setState-in-effect to bootstrap it (Next 16 lint).
-  const [sessionId] = useState<string>(() => uuid());
+  // Manisha 5/24 Q1 — consecutive physiologically-impossible (DBP ≥ SBP)
+  // submissions. The 2nd in a row escalates the re-take copy to "reposition the
+  // cuff / contact your care team". Reset on any successful save.
+  const [implausibleCount, setImplausibleCount] = useState(0);
+
+  // Session state — sessionId starts as a fresh uuid (lazy init avoids a
+  // setState-in-effect on mount, Next 16 lint). It becomes a server session's
+  // id only via the "add to this session" handler (a click, not an effect).
+  const [sessionId, setSessionId] = useState<string | null>(() => uuid());
   const [sessionReadings, setSessionReadings] = useState<SessionReading[]>([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  // Chunk C — DELAYED_ENTRY soft-warning modal gate (shown at submit when 1-24h old).
+  const [showDelayWarning, setShowDelayWarning] = useState(false);
   const [readingNumber, setReadingNumber] = useState(0); // count of submitted readings in session
   // Cluster 6 Q2 — set to the entry id of a first-in-session non-AFib
   // non-preDay3 reading. Drives the "Take a second reading" prompt + 5-min
   // finalize timer in <ConfirmationScreen>. Null otherwise.
   const [pendingFinalizeEntryId, setPendingFinalizeEntryId] = useState<string | null>(null);
+  // Option D (Manisha 2026-06-12 Q2) — when a BP-only emergency (≥180/120, no
+  // symptoms) is submitted, the first reading is persisted held (AWAITING) and
+  // this activates the retake-to-confirm flow (<OptionDFlow>).
+  const [optionDActive, setOptionDActive] = useState(false);
+  const [optionDFirstId, setOptionDFirstId] = useState<string | null>(null);
+  const [optionDFirstBp, setOptionDFirstBp] = useState<{ sys: number; dia: number } | null>(null);
+  // Option D AWAITING UX revision (2026-06-16) — true when Screen A was
+  // auto-resumed on mount (the patient returned to an unfinished held
+  // emergency) rather than reached by submitting a fresh reading. Drives the
+  // "Let's finish your reading from a moment ago" resume intro.
+  const [optionDResumed, setOptionDResumed] = useState(false);
+  // Bug 16 — when the Option D confirmatory reading was ALSO emergency-range we
+  // route the patient to the full-screen 911 alert; this stops OptionDFlow's
+  // onDone from then bouncing them to the dashboard over that screen.
+  const optionDRoutedToEmergencyRef = useRef(false);
+
+  // Part 1 — FE buffer (CTO 2026-06-09 + Manisha Q1). A non-emergency reading is
+  // held on-device for the 5-min window; the backend only sees it on "I'm good"
+  // or expiry. The buffer holds the whole 1–3 reading sitting (Q3).
+  const [bufferDraft, setBufferDraft] = useState<JournalDraft | null>(null);
+  // True when the review screen should take over (vs. the wizard re-opened to
+  // add / edit a reading inside the buffer).
+  const [bufferReviewing, setBufferReviewing] = useState(false);
+  // True between clearing an emptied buffer and the /dashboard navigation landing,
+  // so the render shows the skeleton instead of flashing the wizard's step 1.
+  const [navigatingAway, setNavigatingAway] = useState(false);
+  // Set while editing a buffered reading — on submit we replace it in place.
+  const [editingBufferLocalId, setEditingBufferLocalId] = useState<string | null>(null);
+  const [committingBuffer, setCommittingBuffer] = useState(false);
+  // Bug 8 — true when the just-submitted reading triggered an emergency-class
+  // rule; suppresses the Q3 / AFib reading-prompt on the confirmation screen.
+  const [confirmationIsEmergency, setConfirmationIsEmergency] = useState(false);
+  // Bug 20a (live-test 2026-06-17) — the confirmation screen's "We're setting up
+  // your care team" copy is for NOT_ENROLLED patients ONLY. Read the enrollment
+  // field DIRECTLY and show it only when explicitly NOT_ENROLLED. Defaulting to
+  // "enrolled" for any other value (incl. undefined while `user` is loading or
+  // momentarily re-renders without it) fixes both Bug 20 (an enrolled patient
+  // like Iris saw the message) AND the old Bug 3 flicker — no snapshot needed.
+  const isEnrolled = user?.enrollmentStatus !== 'NOT_ENROLLED';
+
+  // Cross-visit session continuity — the patient's currently OPEN session (if
+  // any) fetched on mount. While set + unresolved + not expired, the "add to
+  // this session or start new?" prompt shows before the wizard.
+  const [activeSession, setActiveSession] = useState<ActiveSessionDto | null>(null);
+  const [activeSessionLoading, setActiveSessionLoading] = useState(true);
+  const [sessionPromptResolved, setSessionPromptResolved] = useState(false);
+  // Bumped by a 30s interval so a prompt left open past the window auto-expires.
+  const [nowTick, setNowTick] = useState(0);
 
   // Resume: on mount, surface any saved unfinished check-in so the patient can
   // pick up where they left off (refresh / navigated away). Read in an effect
@@ -1907,14 +2247,96 @@ export default function CheckIn() {
     if (isLoading || !isAuthenticated) return;
     let cancelled = false;
     (async () => {
-      const meds = await listMyMedications().catch(() => [] as PatientMedication[]);
+      const meds = await listMyMedications({ includeHeld: true }).catch(
+        () => [] as PatientMedication[],
+      );
       if (!cancelled) {
-        setMedications(meds.filter((m) => m.frequency !== 'AS_NEEDED'));
+        const scheduled = meds.filter((m) => m.frequency !== 'AS_NEEDED');
+        setMedications(scheduled.filter((m) => m.verificationStatus !== 'HOLD'));
+        setHeldMeds(scheduled.filter((m) => m.verificationStatus === 'HOLD'));
         setMedsLoading(false);
       }
     })();
     return () => { cancelled = true; };
   }, [isAuthenticated, isLoading]);
+
+  // Fetch any OPEN reading session so we can offer to add this reading to it.
+  // Server-side so it catches sessions opened by voice/chat too, not just the
+  // form. Failure degrades gracefully to "no prompt".
+  useEffect(() => {
+    if (isLoading || !isAuthenticated) return;
+    let cancelled = false;
+    (async () => {
+      const [s, awaiting] = await Promise.all([
+        getActiveSession().catch(() => null),
+        getAwaitingEmergency().catch(() => null),
+      ]);
+      if (cancelled) return;
+      // Option D AWAITING UX revision (2026-06-16) — a held emergency awaiting
+      // its confirmatory reading auto-resumes Screen A so the patient lands back
+      // where they left off, whether they tapped the /readings "Continue
+      // confirmation" CTA or navigated to /check-in directly. The held reading
+      // is excluded from getActiveSession, so this takes precedence cleanly.
+      if (awaiting && awaiting.systolicBP != null && awaiting.diastolicBP != null) {
+        setOptionDFirstId(awaiting.id);
+        setOptionDFirstBp({ sys: awaiting.systolicBP, dia: awaiting.diastolicBP });
+        // Reuse the held first-of-pair's session so the resumed confirmatory
+        // reading pairs into the same session card.
+        setSessionId(awaiting.sessionId);
+        setOptionDResumed(true);
+        setOptionDActive(true);
+      }
+      setActiveSession(s);
+      setActiveSessionLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [isAuthenticated, isLoading]);
+
+  // Whether the open session has expired (last reading + window elapsed).
+  // Prefer the server-authoritative expiresAt; fall back to client math.
+  // nowTick forces re-evaluation so a prompt left open auto-expires.
+  const sessionExpired = useMemo(() => {
+    void nowTick;
+    if (!activeSession) return true;
+    const expiry = activeSession.expiresAt
+      ? new Date(activeSession.expiresAt).getTime()
+      : new Date(activeSession.lastReadingAt).getTime() + SESSION_WINDOW_MS;
+    return Date.now() >= expiry;
+  }, [activeSession, nowTick]);
+
+  // Re-check expiry every 30s while the prompt is up and unresolved.
+  useEffect(() => {
+    if (!activeSession || sessionPromptResolved) return;
+    const id = setInterval(() => setNowTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [activeSession, sessionPromptResolved]);
+
+  // Bug 6 (live-test 2026-06-15) — an open session that has aged past the 5-min
+  // window must not keep showing the "Reading session in progress" resume
+  // prompt. The 30s nowTick above flips `sessionExpired`; the moment it does,
+  // drop the stale session so the wizard silently continues with its own fresh
+  // sessionId (CLINICAL_SPEC §5.2 — sessions expire at 5 min). Without this the
+  // prompt could linger on a stale mount-time fetch until a full page reload.
+  useEffect(() => {
+    if (activeSession && sessionExpired && !sessionPromptResolved) {
+      setActiveSession(null);
+      setSessionPromptResolved(true);
+    }
+  }, [activeSession, sessionExpired, sessionPromptResolved]);
+
+  // Part 1 — rehydrate a buffered draft on mount (tab refresh, or navigating to
+  // /check-in while a sitting is still in review). sessionStorage survives a
+  // refresh but not a tab close. An already-expired draft renders the review
+  // screen briefly, whose countdown is at 0 and fires onExpire → auto-commit.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || !user?.id) return;
+    const existing = loadBufferDraft(user.id);
+    if (existing) {
+      setBufferDraft(existing);
+      setBufferReviewing(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, isLoading, user?.id]);
 
   // Snap the page to the top whenever the wizard advances (or goes back) to
   // a different step — otherwise the user lands wherever the previous step's
@@ -1934,9 +2356,11 @@ export default function CheckIn() {
   // doesn't accidentally shortcut the flow.
   const flow = useMemo(() => {
     const base = readingNumber === 0 ? STEP_FLOW : SECOND_READING_FLOW;
-    if (medsLoading || medications.length > 0) return base;
+    // F17 — keep the MEDICATION step when the only meds on file are on HOLD, so
+    // the patient still sees the non-actionable "ON HOLD" notice.
+    if (medsLoading || medications.length > 0 || heldMeds.length > 0) return base;
     return base.filter((s) => s !== 'MEDICATION');
-  }, [readingNumber, medications.length, medsLoading]);
+  }, [readingNumber, medications.length, heldMeds.length, medsLoading]);
   const stepIndex = flow.indexOf(step);
   const visibleTotal = flow.length;
   const visibleIndex = stepIndex + 1;
@@ -2001,9 +2425,19 @@ export default function CheckIn() {
     return null;
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(confirmedDelayed = false) {
     if (submitting) return;
     setError('');
+
+    // Chunk C — DELAYED_ENTRY (1-24h) soft pre-submit warning. The reading still
+    // saves + the care team still sees it, but the engine won't treat stale data
+    // as an active emergency (Manisha 2026-06-06 backdated-readings sign-off).
+    // PENDING-MANISHA-WORDING 2026-06-09 (copy in i18n: checkin.delay.*).
+    const measuredMs = new Date(`${form.measuredDate}T${form.measuredTime}`).getTime();
+    if (!confirmedDelayed && delayBandFor(measuredMs, Date.now()) === 'DELAYED_ENTRY') {
+      setShowDelayWarning(true);
+      return;
+    }
 
     // Build payload
     const measurementConditions = {
@@ -2017,7 +2451,10 @@ export default function CheckIn() {
       cuffOnBareArm: form.cuffOnBareArm,
     };
 
-    const measuredAtIso = new Date(`${form.measuredDate}T${form.measuredTime}`).toISOString();
+    // Bug 15 — for a "just now" submission use real now() (full ms) so two
+    // same-minute resubmits can't collide on the DB unique(userId, measuredAt);
+    // a backdated time keeps the minute-precision the patient chose.
+    const measuredAtIso = resolveMeasuredAtIso(form.measuredDate, form.measuredTime);
     const sys = form.systolicBP ? parseInt(form.systolicBP, 10) : undefined;
     const dia = form.diastolicBP ? parseInt(form.diastolicBP, 10) : undefined;
     const pul = form.pulse ? parseInt(form.pulse, 10) : undefined;
@@ -2075,16 +2512,16 @@ export default function CheckIn() {
         ...(e.state.taken === 'no' ? { missedDoses: e.state.missedDoses } : {}),
       }));
 
-    setSubmitting(true);
-    try {
-      const created = await createJournalEntry({
+    const basePayload: JournalEntryPayload = {
         measuredAt: measuredAtIso,
         systolicBP: sys,
         diastolicBP: dia,
         pulse: pul,
         weight: weightKg ? Number(weightKg.toFixed(2)) : undefined,
         position: form.position ?? undefined,
-        sessionId,
+        // null when joining a time-window (un-tagged) session — backend groups
+        // by the measuredAt window in that case.
+        sessionId: sessionId ?? undefined,
         measurementConditions,
         medicationTaken,
         medicationScheduledLater: medicationScheduledLater ? true : undefined,
@@ -2114,11 +2551,102 @@ export default function CheckIn() {
         // Patient-typed custom symptom chips → otherSymptoms; free-text → notes.
         otherSymptoms: form.otherSymptomsList.length ? form.otherSymptomsList : undefined,
         notes: form.notes.trim() ? form.notes.trim() : undefined,
-      });
+    };
+
+    // Option D (Manisha 2026-06-12 Q2) — a BP-only emergency (≥180/120) with NO
+    // co-occurring symptoms enters the retake-to-confirm flow rather than firing
+    // immediately. ANY reported symptom (target-organ-damage or otherwise) is a
+    // co-occurring symptom → fall through to immediate submit (Option A), so a
+    // symptomatic emergency is never asked to "sit calmly and retake". Backdated
+    // readings (DELAYED/HISTORICAL) skip Option D — the engine's own suppression
+    // gates handle stale data; only current/near-real-time readings retake.
+    const optionDBand = delayBandFor(
+      new Date(`${form.measuredDate}T${form.measuredTime}`).getTime(),
+      Date.now(),
+    );
+    const isEmergencyBP = (sys != null && sys >= 180) || (dia != null && dia >= 120);
+    const hasAnySymptom =
+      form.severeHeadache || form.visualChanges || form.alteredMentalStatus ||
+      form.chestPainOrDyspnea || form.focalNeuroDeficit || form.severeEpigastricPain ||
+      form.newOnsetHeadache || form.ruqPain || form.edema ||
+      form.dizziness || form.syncope || form.palpitations || form.legSwelling ||
+      form.fatigue || form.shortnessOfBreath || form.dryCough ||
+      form.faceSwelling || form.throatTightness ||
+      form.otherSymptomsList.length > 0;
+    const optionDEligible =
+      isEmergencyBP &&
+      !hasAnySymptom &&
+      (optionDBand === 'REAL_TIME' || optionDBand === 'NEAR_REAL_TIME');
+
+    setSubmitting(true);
+    try {
+      if (optionDEligible && sys != null && dia != null) {
+        // Persist the first reading HELD (AWAITING) so the server-side safety
+        // net (cron) can flag it UNCONFIRMED if the patient abandons the flow;
+        // no alert pages anyone until the patient confirms or declines.
+        const held = await createJournalEntry({ ...basePayload, beginEmergencyConfirmation: true });
+        if (user?.id) clearCheckInDraft(user.id);
+        setImplausibleCount(0);
+        setOptionDFirstId(held.entry.id);
+        setOptionDFirstBp({ sys, dia });
+        setOptionDActive(true);
+        return;
+      }
+
+      // Part 1 — non-emergency readings BUFFER on-device (no backend POST) for
+      // the 5-min review window. Emergencies bypass: Option D handled above; any
+      // emergency-range BP or emergency-class symptom (target-organ-damage /
+      // airway) posts immediately so the engine can page right away.
+      const hasEmergencySymptom =
+        form.severeHeadache || form.visualChanges || form.alteredMentalStatus ||
+        form.chestPainOrDyspnea || form.focalNeuroDeficit || form.severeEpigastricPain ||
+        form.faceSwelling || form.throatTightness;
+      if (!isEmergencyBP && !hasEmergencySymptom) {
+        const localId = editingBufferLocalId ?? uuid();
+        const buffered: BufferedReading = { localId, payload: basePayload, form };
+        let nextDraft: JournalDraft;
+        if (bufferDraft && editingBufferLocalId) {
+          // Replace the edited reading in place (payload + form snapshot).
+          nextDraft = {
+            ...bufferDraft,
+            readings: bufferDraft.readings.map((r) =>
+              r.localId === editingBufferLocalId ? buffered : r,
+            ),
+          };
+        } else if (bufferDraft) {
+          nextDraft = addReading(bufferDraft, buffered);
+        } else {
+          // First reading anchors the session + the countdown.
+          nextDraft = createDraft(sessionId ?? uuid(), Date.now(), buffered);
+        }
+        setBufferDraft(nextDraft);
+        if (user?.id) {
+          saveBufferDraft(user.id, nextDraft);
+          clearCheckInDraft(user.id); // drop the wizard auto-save resume draft
+        }
+        setImplausibleCount(0);
+        setEditingBufferLocalId(null);
+        setBufferReviewing(true);
+        return; // do NOT post — finally still resets submitting
+      }
+
+      const submitStartedAt = Date.now();
+      const created = await createJournalEntry(basePayload);
 
       // Reading saved — drop the draft so the patient isn't prompted to resume
-      // a check-in they already submitted.
+      // a check-in they already submitted. Also reset the impossible-reading
+      // streak (the 2× escalation only counts CONSECUTIVE rejections).
       if (user?.id) clearCheckInDraft(user.id);
+      setImplausibleCount(0);
+
+      // Bug 16 — a symptom-override emergency (e.g. 195/120 + chest pain) must
+      // take the patient straight to the full-screen "CALL 911" alert instead of
+      // the generic "Reading sent" confirmation. Only poll on emergency-shaped
+      // submits so ordinary readings pay no cost.
+      if (isEmergencyBP || hasAnySymptom) {
+        const routed = await routeToFiredEmergencyAlert(created.entry.id, submitStartedAt);
+        if (routed) return;
+      }
 
       const reading: SessionReading = {
         measuredAt: measuredAtIso,
@@ -2126,17 +2654,28 @@ export default function CheckIn() {
         diastolicBP: dia,
         pulse: pul,
         weightKg,
+        // Chunk C — server-truth band from the POST response (Chunk A serializeEntry).
+        delayBand: created.entry.delayBand,
+        // Chunk B fix-up — Gate A suppression signal (POST-response-only).
+        alertsSuppressedReason: created.entry.alertsSuppressedReason,
       };
       setSessionReadings((prev) => [...prev, reading]);
       setReadingNumber((n) => n + 1);
       setShowConfirmation(true);
+      // Bug 8 (live-test 2026-06-15) — this non-Option-D path is reached by
+      // symptom-bearing emergencies (e.g. 195/120 + chest pain → immediate
+      // symptom-override). On an emergency, the confirmation screen must show
+      // the emergency CTA, NOT the Q3 "take a second reading" / AFib nudge.
+      const submittedEmergency = isEmergencyBP || hasAnySymptom;
+      setConfirmationIsEmergency(submittedEmergency);
       // Cluster 6 Q2 (Manisha 5/9/26) — backend tells us this is a first-
       // in-session non-AFib non-preDay3 reading. Frontend shows "Take a
       // second reading in about 1 minute" prompt + arms a 5-min timer
       // that POSTs the finalize endpoint when it elapses without a 2nd
       // reading. The actual UI lives in <ConfirmationScreen>; pass the
-      // entryId + flag down so it can manage the timer.
-      if (created.pendingSecondReading) {
+      // entryId + flag down so it can manage the timer. Suppressed on an
+      // emergency (Bug 8).
+      if (created.pendingSecondReading && !submittedEmergency) {
         setPendingFinalizeEntryId(created.entry.id);
       } else {
         setPendingFinalizeEntryId(null);
@@ -2148,10 +2687,83 @@ export default function CheckIn() {
         router.push('/clinical-intake?reason=check-in');
         return;
       }
+      // Manisha 5/24 Q1 — physiologically-impossible reading (DBP ≥ SBP). The
+      // reading wasn't saved; prompt a re-take. On the 2nd impossible entry in
+      // a row, escalate to the cuff-repositioning / contact-care-team message.
+      if (e instanceof ImplausibleReadingError) {
+        const next = implausibleCount + 1;
+        setImplausibleCount(next);
+        setError(next >= 2 ? t('checkin.err.implausibleRepeat') : t('checkin.err.implausible'));
+        return;
+      }
       setError(e instanceof Error ? e.message : t('checkin.err.submit'));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Bug 16 — a just-committed emergency-class reading must land the patient on
+  // the full-screen "CALL 911" alert, not the generic "Reading sent" screen. The
+  // rule engine fires asynchronously after create, so poll the patient alerts
+  // briefly for a patient-facing emergency tier tied to this reading (or freshly
+  // created), then deep-link to /alerts/[id]. Returns true if it routed.
+  const EMERGENCY_ALERT_TIERS = new Set<AlertTier>([
+    'BP_LEVEL_2',
+    'BP_LEVEL_2_SYMPTOM_OVERRIDE',
+    'TIER_1_ANGIOEDEMA',
+  ]);
+  async function routeToFiredEmergencyAlert(
+    entryId: string,
+    sinceMs: number,
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const alerts = await getAlerts().catch(() => []);
+      const emergency = alerts.find(
+        (a) =>
+          a.status === 'OPEN' &&
+          a.tier != null &&
+          EMERGENCY_ALERT_TIERS.has(a.tier) &&
+          (a.journalEntryId === entryId ||
+            new Date(a.createdAt).getTime() >= sinceMs - 2000),
+      );
+      if (emergency) {
+        router.push(`/alerts/${emergency.id}`);
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return false;
+  }
+
+  // Option D (Manisha 2026-06-12 Q2) — the confirmatory second reading. Same
+  // session, linked to the held first-of-pair via confirmsEntryId; the engine
+  // resolves ABSOLUTE_EMERGENCY (still ≥180/120) vs EMERGENCY_RANGE_CONFIRMED_NORMAL.
+  async function submitOptionDSecond(reading: OptionDSecondReading) {
+    const startedAt = Date.now();
+    const created = await createJournalEntry({
+      measuredAt: new Date().toISOString(),
+      systolicBP: reading.systolicBP,
+      diastolicBP: reading.diastolicBP,
+      pulse: reading.pulse,
+      position: form.position ?? undefined,
+      sessionId: sessionId ?? undefined,
+      confirmsEntryId: optionDFirstId ?? undefined,
+      // Bug 19 — the confirmatory reading closes the Option D session.
+      closeSession: true,
+    });
+    // Bug 16 — if the confirmatory reading was itself emergency-range, the engine
+    // fires RULE_ABSOLUTE_EMERGENCY (BP Level 2); route to the 911 screen rather
+    // than letting onDone bounce to the dashboard.
+    if (reading.systolicBP >= 180 || reading.diastolicBP >= 120) {
+      const routed = await routeToFiredEmergencyAlert(created.entry.id, startedAt);
+      if (routed) optionDRoutedToEmergencyRef.current = true;
+    }
+  }
+
+  // Option D — patient declined / couldn't retake. Flag the held first-of-pair
+  // UNCONFIRMED (Tier 1 provider-only). Best-effort: the cron is the backstop.
+  async function handleOptionDDecline() {
+    if (optionDFirstId) await declineEmergencyConfirmation(optionDFirstId);
   }
 
   // Resume prompt — load the saved draft into the wizard. Merge over a fresh
@@ -2171,6 +2783,25 @@ export default function CheckIn() {
   function startNewCheckin() {
     if (user?.id) clearCheckInDraft(user.id);
     setResumeDraft(null);
+  }
+
+  // Open-session prompt — add this reading to the existing session. Reuse the
+  // server session's id (may be null for a time-window session) so the engine
+  // averages this reading with the others, and skip B1 (the checklist was done
+  // on the first reading) by bumping readingNumber → SECOND_READING_FLOW.
+  function joinActiveSession() {
+    if (!activeSession) return;
+    setSessionId(activeSession.sessionId);
+    setReadingNumber(activeSession.readingCount);
+    setStep('B2');
+    setDirection(1);
+    setSessionPromptResolved(true);
+  }
+
+  // Open-session prompt — ignore the server session and start a fresh one.
+  function startNewSession() {
+    setSessionId(uuid());
+    setSessionPromptResolved(true);
   }
 
   // Header "Save" — persist the in-progress reading to localStorage and leave
@@ -2234,10 +2865,123 @@ export default function CheckIn() {
     setDirection(1);
   }
 
+  // ── Part 1 — FE buffer handlers ──────────────────────────────────────────
+  // Commit the whole buffered sitting in one shot. Every reading carries the
+  // draft's shared sessionId so the engine groups + averages them as one
+  // session. Triggered by "I'm good" or the countdown expiring.
+  async function commitBuffer() {
+    if (!bufferDraft || committingBuffer) return;
+    const draft = bufferDraft;
+    setCommittingBuffer(true);
+    try {
+      const created = [] as Awaited<ReturnType<typeof createJournalEntry>>[];
+      const payloads = commitPayloads(draft);
+      for (let i = 0; i < payloads.length; i++) {
+        // Bug 19 — "I'm good" is an explicit session boundary; close it so the
+        // active-session prompt won't re-offer this sitting on the next check-in.
+        // Bug 23 — closeSession ALSO triggers the backend buffer fast-fire (skip
+        // the post-commit single-reading hold). Send it ONLY on the LAST reading
+        // so a multi-reading sitting still session-averages: the earlier readings
+        // stay held until this final one closes the session, then the engine
+        // fires once on the averaged result. The backend's sessionClosedAt +
+        // finalize updateMany covers every reading in the shared session, so one
+        // closeSession on the last reading still closes the whole sitting.
+        const isLast = i === payloads.length - 1;
+        created.push(
+          await createJournalEntry({ ...payloads[i], closeSession: isLast }),
+        );
+      }
+      if (user?.id) {
+        clearBufferDraft(user.id);
+        clearCheckInDraft(user.id);
+      }
+      // Feed the confirmation screen from the committed readings.
+      const readings: SessionReading[] = draft.readings.map((r, i) => ({
+        measuredAt: r.payload.measuredAt,
+        systolicBP: r.payload.systolicBP,
+        diastolicBP: r.payload.diastolicBP,
+        pulse: r.payload.pulse,
+        weightKg: r.payload.weight,
+        delayBand: created[i]?.entry.delayBand,
+        alertsSuppressedReason: created[i]?.entry.alertsSuppressedReason,
+      }));
+      setSessionReadings(readings);
+      setReadingNumber(readings.length);
+      setBufferDraft(null);
+      setBufferReviewing(false);
+      setEditingBufferLocalId(null);
+      // The second-reading opportunity already passed in the buffer (Q3 lived on
+      // the review screen), so don't arm the post-submit single-reading prompt.
+      setPendingFinalizeEntryId(null);
+      setConfirmationIsEmergency(false);
+      setShowConfirmation(true);
+    } catch (e) {
+      // Keep the buffer intact so the patient can retry.
+      setError(e instanceof Error ? e.message : t('checkin.err.submit'));
+    } finally {
+      setCommittingBuffer(false);
+    }
+  }
+
+  // "Take another reading" from the review screen — re-enter the wizard for a
+  // FRESH reading (it lands back in the buffer on submit, Q3). The countdown is
+  // NOT reset (draft.createdAt is untouched).
+  function takeAnotherFromBuffer() {
+    setEditingBufferLocalId(null);
+    setForm((prev) => ({
+      ...emptyForm(),
+      measuredDate: nowDate(),
+      measuredTime: nowTime(),
+      noCaffeine: prev.noCaffeine,
+      noSmoking: prev.noSmoking,
+      noExercise: prev.noExercise,
+      bladderEmpty: prev.bladderEmpty,
+      seatedQuietly: prev.seatedQuietly,
+      posturalSupport: prev.posturalSupport,
+      notTalking: prev.notTalking,
+      cuffOnBareArm: prev.cuffOnBareArm,
+      weightUnit: prev.weightUnit,
+    }));
+    setBufferReviewing(false);
+    setStep('B2');
+    setDirection(1);
+  }
+
+  // Edit a buffered reading — re-open the wizard pre-filled from its form
+  // snapshot; on submit it replaces that reading in place.
+  function editBufferReading(localId: string) {
+    if (!bufferDraft) return;
+    const r = bufferDraft.readings.find((x) => x.localId === localId);
+    if (!r) return;
+    setEditingBufferLocalId(localId);
+    if (r.form) setForm({ ...emptyForm(), ...(r.form as FormData) });
+    setBufferReviewing(false);
+    setStep('B2');
+    setDirection(1);
+  }
+
+  // Remove a buffered reading; if it was the last, discard the buffer entirely.
+  function deleteBufferReading(localId: string) {
+    if (!bufferDraft) return;
+    const next = removeReading(bufferDraft, localId);
+    if (next.readings.length === 0) {
+      if (user?.id) clearBufferDraft(user.id);
+      // Render the skeleton (not the wizard) until /dashboard takes over —
+      // without this the cleared buffer briefly falls through to step 1.
+      setNavigatingAway(true);
+      setBufferDraft(null);
+      setBufferReviewing(false);
+      router.push('/dashboard');
+      return;
+    }
+    setBufferDraft(next);
+    if (user?.id) saveBufferDraft(user.id, next);
+  }
+
   // Authed loading state — skeleton mirroring the wizard chrome (top bar +
   // step header + a few content rows + sticky CTA placeholder) so the page
   // doesn't flash a generic spinner before the first step renders.
-  if (isLoading || !isAuthenticated || profileLoading) {
+  if (isLoading || !isAuthenticated || profileLoading || activeSessionLoading || navigatingAway) {
     return <CheckInSkeleton />;
   }
 
@@ -2335,7 +3079,7 @@ export default function CheckIn() {
             {/* Progress of the unfinished check-in */}
             <div className="flex flex-col items-center gap-2 mb-6">
               <StepDots current={resumeStepNum} total={resumeTotal} />
-              <p className="text-[12px] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
+              <p className="text-[0.75rem] font-semibold" style={{ color: 'var(--brand-text-muted)' }}>
                 {t('checkin.nav.stepOf')
                   .replace('{current}', String(resumeStepNum))
                   .replace('{total}', String(resumeTotal))}
@@ -2367,7 +3111,118 @@ export default function CheckIn() {
     );
   }
 
+  // Part 1 — FE buffer review screen. Takes over whenever a non-emergency sitting
+  // is buffered and we're not currently in the wizard adding/editing a reading.
+  // Tab refresh / re-navigation rehydrates here too (the mount effect above).
+  if (bufferDraft && bufferReviewing) {
+    return (
+      <BufferReviewScreen
+        draft={bufferDraft}
+        hasAFib={hasAFib}
+        committing={committingBuffer}
+        onTakeAnother={takeAnotherFromBuffer}
+        onCommit={commitBuffer}
+        onExpire={commitBuffer}
+        onEditReading={editBufferReading}
+        onDeleteReading={deleteBufferReading}
+      />
+    );
+  }
+
+  // Open-session prompt — a non-expired session is in progress and the patient
+  // hasn't decided yet. Shown AFTER the resume gate (resumeDraft is null here),
+  // so in the rare both-exist case resume is decided first, then this.
+  if (activeSession && !sessionPromptResolved && !sessionExpired) {
+    const startedMinAgo = Math.max(
+      1,
+      Math.round((Date.now() - new Date(activeSession.openedAt).getTime()) / 60000),
+    );
+    return (
+      <div
+        className="h-[calc(100dvh-4rem)] flex flex-col overflow-hidden"
+        style={{ backgroundColor: 'var(--brand-background)' }}
+      >
+        <main id="main" className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-8">
+          <div
+            data-testid="checkin-open-session-prompt"
+            className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 text-center"
+            style={{ boxShadow: '0 4px 24px rgba(123,0,224,0.08)' }}
+          >
+            <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5"
+              style={{ background: 'linear-gradient(135deg, #7B00E0, #9333EA)' }}
+              aria-hidden
+            >
+              <CalendarClock className="w-8 h-8 text-white" strokeWidth={2.25} />
+            </div>
+            <h1 className="text-xl sm:text-2xl font-bold text-[#170c1d] mb-3">
+              {t('checkin.openSession.title')}
+            </h1>
+            <p className="text-[#4b5563] text-sm sm:text-base leading-relaxed mb-5">
+              {t('checkin.openSession.body')
+                .replace('{min}', String(startedMinAgo))
+                .replace('{count}', String(activeSession.readingCount))}
+            </p>
+
+            {activeSession.requiresMoreReadings && (
+              <p
+                data-testid="checkin-open-session-needs-more"
+                className="text-[0.75rem] font-semibold mb-5"
+                style={{ color: 'var(--brand-warning-amber)' }}
+              >
+                {t('checkin.openSession.needsMore').replace(
+                  '{count}',
+                  String(activeSession.readingCount),
+                )}
+              </p>
+            )}
+
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                data-testid="checkin-join-session-btn"
+                onClick={joinActiveSession}
+                className="w-full h-12 sm:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm sm:text-base hover:bg-[#6600BC] transition-colors cursor-pointer inline-flex items-center justify-center gap-2"
+              >
+                {t('checkin.openSession.join')}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                data-testid="checkin-new-session-btn"
+                onClick={startNewSession}
+                className="w-full h-11 sm:h-12 rounded-full font-semibold text-[#7B00E0] text-sm sm:text-base hover:bg-[#f5f3ff] transition-colors cursor-pointer"
+              >
+                {t('checkin.openSession.startNew')}
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   // Confirmation overlays the whole flow
+  // Option D (Manisha 2026-06-12 Q2) — retake-to-confirm takes over the screen
+  // once a BP-only emergency reading has been held.
+  if (optionDActive && optionDFirstId && optionDFirstBp) {
+    return (
+      <OptionDFlow
+        firstSystolic={optionDFirstBp.sys}
+        firstDiastolic={optionDFirstBp.dia}
+        resumed={optionDResumed}
+        onSubmitSecond={submitOptionDSecond}
+        onDecline={handleOptionDDecline}
+        onDone={() => {
+          // Bug 16 — if the confirmatory was emergency-range we already routed to
+          // the 911 alert; don't bounce over it to the dashboard.
+          if (optionDRoutedToEmergencyRef.current) return;
+          router.push('/dashboard');
+        }}
+      />
+    );
+  }
+
   if (showConfirmation) {
     const last = sessionReadings[sessionReadings.length - 1];
     return (
@@ -2378,8 +3233,10 @@ export default function CheckIn() {
         <main id="main" className="flex-1 flex items-center justify-center w-full max-w-3xl mx-auto px-4 sm:px-6 py-4">
           <ConfirmationScreen
             lastReading={last}
-            sessionReadings={sessionReadings}
+            sessionTotal={readingNumber}
             hasAFib={hasAFib}
+            isEnrolled={isEnrolled}
+            isEmergency={confirmationIsEmergency}
             heightCm={profile?.heightCm ?? null}
             missedMedNames={medications
               .filter((m) => form.medicationStatus[m.id]?.taken === 'no')
@@ -2404,7 +3261,7 @@ export default function CheckIn() {
           <button
             type="button"
             onClick={goBack}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold cursor-pointer"
+            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[0.8125rem] font-semibold cursor-pointer"
             style={{ color: 'var(--brand-text-secondary)' }}
           >
             <ArrowLeft className="w-4 h-4" />
@@ -2415,7 +3272,7 @@ export default function CheckIn() {
             type="button"
             data-testid="checkin-save-exit-btn"
             onClick={() => setShowSaveConfirm(true)}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-semibold cursor-pointer"
+            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-[0.8125rem] font-semibold cursor-pointer"
             style={{ color: 'var(--brand-text-muted)' }}
             aria-label={t('checkin.nav.saveAria')}
           >
@@ -2425,7 +3282,7 @@ export default function CheckIn() {
         </div>
         {readingNumber > 0 && (
           <div
-            className="px-4 sm:px-6 py-2 flex items-center justify-center gap-2 text-[12px] font-semibold"
+            className="px-4 sm:px-6 py-2 flex items-center justify-center gap-2 text-[0.75rem] font-semibold"
             style={{ backgroundColor: 'var(--brand-primary-purple-light)', color: 'var(--brand-primary-purple)' }}
           >
             <Volume2 className="w-3.5 h-3.5" />
@@ -2457,6 +3314,7 @@ export default function CheckIn() {
               <StepMedication
                 {...stepProps}
                 medications={medications}
+                heldMeds={heldMeds}
                 medsLoading={medsLoading}
               />
             )}
@@ -2466,7 +3324,7 @@ export default function CheckIn() {
 
         {error && (
           <p
-            className="mt-5 text-[13px] text-center font-semibold px-4 py-2 rounded-lg"
+            className="mt-5 text-[0.8125rem] text-center font-semibold px-4 py-2 rounded-lg"
             style={{ color: 'var(--brand-alert-red-text)', backgroundColor: 'var(--brand-alert-red-light)' }}
           >
             {error}
@@ -2489,7 +3347,7 @@ export default function CheckIn() {
             data-testid={step === 'B3' ? 'checkin-submit-btn' : 'checkin-next-btn'}
             onClick={goNext}
             disabled={submitting}
-            className="w-full h-12 rounded-full text-white font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+            className="w-full h-12 rounded-full text-white font-bold text-[0.875rem] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
             style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
             whileTap={{ scale: 0.98 }}
           >
@@ -2508,6 +3366,59 @@ export default function CheckIn() {
           modal. The reading is already auto-saved to this device; this just
           confirms leaving for the dashboard. */}
       <AnimatePresence>
+        {showDelayWarning && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}
+          >
+            <div className="absolute inset-0" onClick={() => setShowDelayWarning(false)} aria-hidden />
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              data-testid="checkin-delay-warning"
+              initial={{ scale: 0.92, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.92, y: 12 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 26 }}
+              className="relative bg-white rounded-3xl p-6 max-w-sm w-full text-center"
+              style={{ boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}
+            >
+              <div
+                className="rounded-full mx-auto mb-4 flex items-center justify-center"
+                style={{ width: 64, height: 64, backgroundColor: 'var(--brand-warning-amber-light)' }}
+              >
+                <CalendarClock className="w-7 h-7" style={{ color: 'var(--brand-warning-amber-text)' }} />
+              </div>
+              <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+                {t('checkin.delay.title')}
+              </h3>
+              <p className="text-[13px] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+                {t('checkin.delay.body')}
+              </p>
+              <button
+                type="button"
+                data-testid="checkin-delay-confirm"
+                onClick={() => { setShowDelayWarning(false); void handleSubmit(true); }}
+                className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer"
+                style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
+              >
+                {t('checkin.delay.confirm')}
+              </button>
+              <button
+                type="button"
+                data-testid="checkin-delay-back"
+                onClick={() => { setShowDelayWarning(false); setDirection(-1); setStep('B2'); }}
+                className="w-full mt-2 text-[12px] font-semibold cursor-pointer"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('checkin.delay.back')}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
         {showSaveConfirm && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -2524,6 +3435,7 @@ export default function CheckIn() {
             <motion.div
               role="dialog"
               aria-modal="true"
+              aria-labelledby="checkin-save-confirm-title"
               data-testid="checkin-save-confirm"
               initial={{ scale: 0.92, y: 12 }}
               animate={{ scale: 1, y: 0 }}
@@ -2538,17 +3450,17 @@ export default function CheckIn() {
               >
                 <Save className="w-7 h-7" style={{ color: 'var(--brand-primary-purple)' }} />
               </div>
-              <h3 className="text-[18px] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+              <h3 id="checkin-save-confirm-title" className="text-[1.125rem] font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
                 {t('checkin.saveExit.title')}
               </h3>
-              <p className="text-[13px] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
+              <p className="text-[0.8125rem] mb-5 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
                 {t('checkin.saveExit.body')}
               </p>
               <button
                 type="button"
                 data-testid="checkin-save-confirm-btn"
                 onClick={handleSaveExit}
-                className="w-full h-11 rounded-full text-white font-bold text-[14px] cursor-pointer"
+                className="w-full h-11 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
                 style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
               >
                 {t('checkin.saveExit.confirm')}
@@ -2556,7 +3468,7 @@ export default function CheckIn() {
               <button
                 type="button"
                 onClick={() => setShowSaveConfirm(false)}
-                className="w-full mt-2 text-[12px] font-semibold cursor-pointer"
+                className="w-full mt-2 text-[0.75rem] font-semibold cursor-pointer"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 {t('checkin.saveExit.keepGoing')}

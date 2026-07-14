@@ -6,6 +6,7 @@ import request from 'supertest'
 import type { App } from 'supertest/types.js'
 import { AppModule } from '../src/app.module.js'
 import { PrismaService } from '../src/prisma/prisma.service.js'
+import { generateTestDisplayId } from './helpers/generate-test-display-id.js'
 
 // Phase/3 — patient intake + admin verification API.
 //
@@ -75,6 +76,7 @@ describe('Intake API (e2e)', () => {
         roles: ['PATIENT'],
         isVerified: true,
         onboardingStatus: 'COMPLETED',
+        displayId: generateTestDisplayId(['PATIENT']),
       },
     })
     const admin = await prisma.user.create({
@@ -84,6 +86,7 @@ describe('Intake API (e2e)', () => {
         roles: ['SUPER_ADMIN', 'PROVIDER'],
         isVerified: true,
         onboardingStatus: 'COMPLETED',
+        displayId: generateTestDisplayId(['SUPER_ADMIN', 'PROVIDER']),
       },
     })
     patientId = patient.id
@@ -338,6 +341,7 @@ describe('Intake API (e2e)', () => {
           roles: ['PATIENT'],
           isVerified: true,
           onboardingStatus: 'COMPLETED',
+          displayId: generateTestDisplayId(['PATIENT']),
         },
       })
       dedupId = patient.id
@@ -573,6 +577,7 @@ describe('Intake API (e2e)', () => {
           roles: ['PATIENT'],
           isVerified: true,
           onboardingStatus: 'COMPLETED',
+          displayId: generateTestDisplayId(['PATIENT']),
         },
       })
       replaceId = patient.id
@@ -760,12 +765,12 @@ describe('Intake API (e2e)', () => {
         .send({
           isPregnant: true,
           pregnancyDueDate: '2026-11-01T00:00:00.000Z',
-          historyPreeclampsia: true,
+          historyHDP: true,
         })
         .expect(200)
 
       expect(res.body.data.isPregnant).toBe(true)
-      expect(res.body.data.historyPreeclampsia).toBe(true)
+      expect(res.body.data.historyHDP).toBe(true)
       expect(res.body.data.pregnancyDueDate).toBe(
         '2026-11-01T00:00:00.000Z',
       )

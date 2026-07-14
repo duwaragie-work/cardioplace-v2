@@ -46,8 +46,14 @@ import AlertResolutionModal, { type ResolvableAlert } from './AlertResolutionMod
 // AlertCard accepts a PatientAlert structurally — this superset is still
 // assignable.
 type ProviderAlert = PatientAlert & {
-  patient: { id: string; name: string | null } | null;
-  followUpScheduledAt: string | null;
+  patient: {
+    id: string;
+    name: string | null;
+    // Permanent public-facing identifier (CP-PAT-...). Surfaced on the
+    // alert row alongside the patient name. See
+    // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+    displayId: string | null;
+  } | null;
 };
 
 type TierFilter = 'ALL' | 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
@@ -102,7 +108,8 @@ function bucketChrome(b: TierFilter): {
     case 'BP_L1':
       return { label: 'BP L1', accent: 'var(--brand-warning-amber)', light: 'var(--brand-warning-amber-light)', icon: <Activity className="w-3 h-3" /> };
     case 'TIER_3':
-      return { label: 'Tier 3', accent: 'var(--brand-accent-teal)', light: 'var(--brand-accent-teal-light)', icon: <Activity className="w-3 h-3" /> };
+      // Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3 = info-blue.
+      return { label: 'Tier 3', accent: 'var(--brand-info-blue)', light: 'var(--brand-info-blue-light)', icon: <Activity className="w-3 h-3" /> };
     default:
       return { label: 'Other', accent: 'var(--brand-text-muted)', light: 'var(--brand-background)', icon: <Bell className="w-3 h-3" /> };
   }
@@ -446,6 +453,7 @@ export default function NotificationsScreen() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by patient, tier, or reading"
+                  aria-label="Search by patient, tier, or reading"
                   className="flex-1 text-[12px] outline-none bg-transparent min-w-0"
                   style={{ color: 'var(--brand-text-primary)' }}
                 />
@@ -541,7 +549,7 @@ export default function NotificationsScreen() {
                         onAcknowledge={() => void handleAcknowledge(a.id)}
                         ackInFlight={acking.has(a.id)}
                         patientName={a.patient?.name ?? 'Unknown'}
-                        followUpScheduledAt={a.followUpScheduledAt}
+                        patientDisplayId={a.patient?.displayId ?? null}
                       />
                     </div>
                   );

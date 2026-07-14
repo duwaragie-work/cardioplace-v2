@@ -12,9 +12,12 @@ import {
 import { PrismaService } from '../../prisma/prisma.service.js'
 import {
   RESOLUTION_CATALOG,
+  angioedemaPatientDeclinedEd,
+  missingRequiredSubFields,
   type ResolutionAction,
 } from '../escalation/resolution-actions.js'
 import { EscalationService } from './escalation.service.js'
+import { Prisma } from '../../generated/prisma/client.js'
 import { patientLabelForResolutionAction } from '@cardioplace/shared'
 
 /**
@@ -46,7 +49,11 @@ export class AlertResolutionService {
     private readonly access: PatientAccessService,
   ) {}
 
-  async acknowledge(alertId: string, actor: ActorUser): Promise<{ acknowledgedAt: Date }> {
+  async acknowledge(
+    alertId: string,
+    actor: ActorUser,
+    ctx?: { practiceId: string | null },
+  ): Promise<{ acknowledgedAt: Date }> {
     const alert = await this.loadAlertOrThrow(alertId)
     // Role-scope check uses the alert's patient — same as every other
     // patient-detail mutation. PROVIDER must be in panel; MED_DIR must
@@ -59,6 +66,7 @@ export class AlertResolutionService {
       return { acknowledgedAt: alert.acknowledgedAt }
     }
     const now = new Date()
+    const actorPracticeContext = ctx?.practiceId ?? null
     await this.prisma.deviationAlert.update({
       where: { id: alertId },
       data: {
@@ -68,12 +76,16 @@ export class AlertResolutionService {
         // /provider/alerts/:id/acknowledge path); was omitted so the audit
         // footer showed "Acknowledged" with no name.
         acknowledgedByUserId: actor.id,
+        // Phase/practice-identity (Manisha 2026-06-12 §1, HIPAA 45 CFR
+        // §164.312(a)(2)(i)) — capture WHICH practice the actor was
+        // acting under at ack time.
+        actorPracticeContext,
       },
     })
     // Mark open escalation events acknowledged so the cron skips them.
     await this.prisma.escalationEvent.updateMany({
       where: { alertId, acknowledgedAt: null, resolvedAt: null },
-      data: { acknowledgedAt: now, acknowledgedBy: actor.id },
+      data: { acknowledgedAt: now, acknowledgedBy: actor.id, actorPracticeContext },
     })
     this.logger.log(`Alert ${alertId} acknowledged by ${actor.id}`)
     return { acknowledgedAt: now }
@@ -82,8 +94,15 @@ export class AlertResolutionService {
   async resolve(
     alertId: string,
     actor: ActorUser,
-    dto: { resolutionAction: ResolutionAction; resolutionRationale?: string },
+    dto: {
+      resolutionAction: ResolutionAction
+      resolutionRationale?: string
+      resolutionDetails?: Record<string, unknown>
+    },
+    ctx?: { practiceId: string | null },
   ): Promise<{ status: string; resolvedAt: Date | null; retryScheduledFor?: Date }> {
+    const actorPracticeContext = ctx?.practiceId ?? null
+    void actorPracticeContext // referenced inside the write blocks below
     const alert = await this.loadAlertOrThrow(alertId)
     await this.access.assertCanAccessPatient(actor, alert.userId)
     const actionDef = RESOLUTION_CATALOG[dto.resolutionAction]
@@ -106,7 +125,28 @@ export class AlertResolutionService {
       }
     }
 
+    // 2b. Sub-field validation — angioedema actions (Manisha 5/24 Q4) require
+    // their conditional sub-fields (willGo, facility, replacementOrdered,
+    // outcome, actualCause) before they can resolve.
+    const missing = missingRequiredSubFields(
+      dto.resolutionAction,
+      dto.resolutionDetails,
+    )
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Missing required sub-fields for ${dto.resolutionAction}: ${missing.join(', ')}`,
+      )
+    }
+    const resolutionDetails = dto.resolutionDetails ?? null
+
     const now = new Date()
+
+    // 3a. Angioedema special handling (Manisha 5/24 Q4) — runs before the
+    // generic terminal-resolve path because several actions either keep the
+    // alert OPEN or carry transactional side-effects.
+    if (allowed === 'TIER_1_ANGIOEDEMA') {
+      return this.resolveAngioedema(alert, actor, dto, actionDef, resolutionDetails, now, actorPracticeContext)
+    }
 
     // 3. Special case — BP L2 #6 retry: leave alert OPEN, schedule a T+4h
     // fresh EscalationEvent. Alert keeps escalating.
@@ -128,6 +168,7 @@ export class AlertResolutionService {
           resolutionAction: dto.resolutionAction,
           resolutionRationale: dto.resolutionRationale ?? null,
           resolvedBy: actor.id,
+          actorPracticeContext,
         },
       })
       const retryScheduledFor = new Date(
@@ -157,11 +198,15 @@ export class AlertResolutionService {
         resolutionAction: dto.resolutionAction,
         resolutionRationale: dto.resolutionRationale ?? null,
         resolvedBy: actor.id,
+        actorPracticeContext,
+        ...(resolutionDetails
+          ? { resolutionDetails: resolutionDetails as Prisma.InputJsonValue }
+          : {}),
       },
     })
     await this.prisma.escalationEvent.updateMany({
       where: { alertId, resolvedAt: null },
-      data: { resolvedAt: now, resolvedBy: actor.id },
+      data: { resolvedAt: now, resolvedBy: actor.id, actorPracticeContext },
     })
 
     // 5. Patient notification — let the patient know an action was taken so
@@ -182,6 +227,10 @@ export class AlertResolutionService {
             title: 'Care team update',
             body,
             tips: [],
+            // Action notice ("your care team acted"), not the alert itself —
+            // it belongs in the bell, so it is CARE_TEAM_UPDATE (visible), NOT
+            // an ALERT_* trigger. The old alertId-based filter wrongly hid it.
+            dispatchTrigger: 'CARE_TEAM_UPDATE',
           },
         })
         .catch((err: unknown) => {
@@ -196,6 +245,175 @@ export class AlertResolutionService {
       `Alert ${alertId} resolved by ${actor.id} via ${dto.resolutionAction}`,
     )
     return { status: 'RESOLVED', resolvedAt: now }
+  }
+
+  /**
+   * Manisha 5/24 Q4 — bespoke angioedema resolution. Six actions, three with
+   * special behavior:
+   *  - ANGIO_UNABLE_TO_REACH (leavesAlertOpen): record action, keep OPEN so the
+   *    existing compressed angioedema ladder (T0/T15M/T1H/T4H) keeps escalating.
+   *  - ANGIO_ADVISED_ED with willGo=NO: airway emergency + patient refusing the
+   *    ED → keep OPEN and fire an immediate Medical Director escalation.
+   *  - ANGIO_ACE_DISCONTINUED: transactional — resolve the alert AND discontinue
+   *    every active ACE_INHIBITOR/ARB med AND stamp the permanent
+   *    PatientProfile.aceContraindicatedAt flag.
+   * All other actions (CONFIRMED_ED, SEEN_IN_OFFICE, FALSE_ALARM) resolve
+   * terminally with no side-effects (false alarm deliberately sets NO flag).
+   */
+  private async resolveAngioedema(
+    alert: { id: string; userId: string; tier: string | null },
+    actor: ActorUser,
+    dto: {
+      resolutionAction: ResolutionAction
+      resolutionRationale?: string
+      resolutionDetails?: Record<string, unknown>
+    },
+    actionDef: (typeof RESOLUTION_CATALOG)[ResolutionAction],
+    resolutionDetails: Record<string, unknown> | null,
+    now: Date,
+    actorPracticeContext: string | null = null,
+  ): Promise<{ status: string; resolvedAt: Date | null }> {
+    const detailsData = resolutionDetails
+      ? { resolutionDetails: resolutionDetails as Prisma.InputJsonValue }
+      : {}
+
+    // Case A — leave OPEN so the compressed ladder keeps running, OR the patient
+    // declined the ED and we escalate the Medical Director immediately.
+    const declinedEd = angioedemaPatientDeclinedEd(
+      dto.resolutionAction,
+      resolutionDetails,
+    )
+    if (actionDef.leavesAlertOpen || declinedEd) {
+      await this.prisma.deviationAlert.update({
+        where: { id: alert.id },
+        data: {
+          resolutionAction: dto.resolutionAction,
+          resolutionRationale: dto.resolutionRationale ?? null,
+          resolvedBy: actor.id,
+          actorPracticeContext,
+          ...detailsData,
+        },
+      })
+      if (declinedEd) {
+        await this.escalation.scheduleRetry({
+          alertId: alert.id,
+          userId: alert.userId,
+          ladderStep: 'T0',
+          offsetMs: 0,
+          recipientRoles: ['MEDICAL_DIRECTOR'],
+          channels: ['PUSH', 'DASHBOARD'],
+          now,
+          reason: 'Angioedema — patient declined ED; immediate Medical Director escalation',
+          escalationLevel: 'LEVEL_2',
+        })
+        this.logger.warn(
+          `Angioedema alert ${alert.id}: patient declined ED — MD escalated by ${actor.id}`,
+        )
+      } else {
+        this.logger.log(
+          `Angioedema alert ${alert.id} left OPEN (unable to reach) by ${actor.id}`,
+        )
+      }
+      return { status: 'OPEN', resolvedAt: null }
+    }
+
+    // Case B — ACE/ARB discontinued: transactional resolve + med discontinue +
+    // permanent contraindication flag.
+    if (actionDef.discontinuesAceArb) {
+      await this.prisma.$transaction([
+        this.prisma.deviationAlert.update({
+          where: { id: alert.id },
+          data: {
+            status: 'RESOLVED',
+            resolvedAt: now,
+            resolutionAction: dto.resolutionAction,
+            resolutionRationale: dto.resolutionRationale ?? null,
+            resolvedBy: actor.id,
+            ...detailsData,
+          },
+        }),
+        this.prisma.escalationEvent.updateMany({
+          where: { alertId: alert.id, resolvedAt: null },
+          data: { resolvedAt: now, resolvedBy: actor.id, actorPracticeContext },
+        }),
+        // #84 — discontinuing every live ACE/ARB here is a STRONGER outcome
+        // than the PROVIDER_DIRECTED_HOLD retro-upgrade (discontinued meds drop
+        // off the patient's med surfaces entirely), so this path already
+        // satisfies the "no benign hold left behind" guarantee. The reusable
+        // retroUpgradeAceArbHoldsForContraindication helper covers the paths
+        // that set the flag WITHOUT discontinuing.
+        this.prisma.patientMedication.updateMany({
+          where: {
+            userId: alert.userId,
+            drugClass: { in: ['ACE_INHIBITOR', 'ARB'] },
+            discontinuedAt: null,
+          },
+          data: { discontinuedAt: now },
+        }),
+        this.prisma.patientProfile.updateMany({
+          where: { userId: alert.userId },
+          data: {
+            aceContraindicatedAt: now,
+            aceContraindicationReason: `Angioedema (alert ${alert.id})`,
+          },
+        }),
+      ])
+      this.logger.warn(
+        `Angioedema alert ${alert.id}: ACE/ARB discontinued + permanent contraindication flag set by ${actor.id}`,
+      )
+      await this.notifyAngioedemaPatient(alert, dto.resolutionAction)
+      return { status: 'RESOLVED', resolvedAt: now }
+    }
+
+    // Case C — terminal resolve, no side-effects (CONFIRMED_ED, SEEN_IN_OFFICE,
+    // FALSE_ALARM). False alarm deliberately sets NO contraindication flag.
+    await this.prisma.deviationAlert.update({
+      where: { id: alert.id },
+      data: {
+        status: 'RESOLVED',
+        resolvedAt: now,
+        resolutionAction: dto.resolutionAction,
+        resolutionRationale: dto.resolutionRationale ?? null,
+        resolvedBy: actor.id,
+        ...detailsData,
+      },
+    })
+    await this.prisma.escalationEvent.updateMany({
+      where: { alertId: alert.id, resolvedAt: null },
+      data: { resolvedAt: now, resolvedBy: actor.id, actorPracticeContext },
+    })
+    this.logger.log(
+      `Angioedema alert ${alert.id} resolved by ${actor.id} via ${dto.resolutionAction}`,
+    )
+    await this.notifyAngioedemaPatient(alert, dto.resolutionAction)
+    return { status: 'RESOLVED', resolvedAt: now }
+  }
+
+  /** Patient notification for a resolved angioedema alert (idempotent). */
+  private async notifyAngioedemaPatient(
+    alert: { id: string; userId: string },
+    action: ResolutionAction,
+  ): Promise<void> {
+    const actionLabel =
+      patientLabelForResolutionAction(action) ?? 'Action taken by your care team.'
+    await this.prisma.notification
+      .create({
+        data: {
+          userId: alert.userId,
+          alertId: alert.id,
+          channel: 'PUSH',
+          title: 'Care team update',
+          body: `Angioedema alert reviewed: ${actionLabel}`,
+          tips: [],
+          // Action notice, not the alert — visible in the bell. See sibling
+          // resolution notification above.
+          dispatchTrigger: 'CARE_TEAM_UPDATE',
+        },
+      })
+      .catch((err: unknown) => {
+        const code = (err as { code?: string })?.code
+        if (code !== 'P2002') throw err
+      })
   }
 
   private shouldNotifyPatient(tier: string | null): boolean {
@@ -312,13 +530,15 @@ export class AlertResolutionService {
 
   private allowedGroupFor(
     tier: string | null,
-  ): 'TIER_1' | 'TIER_2' | 'BP_LEVEL_2' | null {
+  ): 'TIER_1' | 'TIER_2' | 'BP_LEVEL_2' | 'TIER_1_ANGIOEDEMA' | null {
     switch (tier) {
       case 'TIER_1_CONTRAINDICATION':
-      // Cluster 8 — angioedema resolves via the Tier 1 action group
-      // (rationale-required, 15-field audit) like every Tier 1 alert.
-      case 'TIER_1_ANGIOEDEMA':
         return 'TIER_1'
+      // Manisha 5/24 Q4 — angioedema now has its own bespoke 6-option catalog
+      // (auto-discontinue ACE/ARB, permanent contraindication flag, targeted
+      // MD escalation, compressed re-escalation), no longer the generic Tier 1.
+      case 'TIER_1_ANGIOEDEMA':
+        return 'TIER_1_ANGIOEDEMA'
       case 'TIER_2_DISCREPANCY':
         return 'TIER_2'
       case 'BP_LEVEL_2':

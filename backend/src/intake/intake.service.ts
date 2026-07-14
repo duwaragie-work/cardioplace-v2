@@ -1,23 +1,33 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { EventEmitter2 } from '@nestjs/event-emitter'
 import {
   ActorUser,
   PatientAccessService,
 } from '../common/patient-access.service.js'
 import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
+import { INTAKE_EVENTS } from './intake-events.js'
 import {
   DrugClass,
   EnrollmentStatus,
+  MedicationHoldReason,
   MedicationVerificationStatus,
   NotificationChannel,
   Prisma,
   ProfileVerificationStatus,
+  UserRole,
   VerificationChangeType,
   VerifierRole,
 } from '../generated/prisma/client.js'
 import { canCompleteEnrollment } from '../practice/enrollment-gate.js'
+import { resolveCanonicalDrugId, resolveCanonicalDrugClass } from './medication-dedup.js'
+import type {
+  AdminAddMedicationDto,
+  AdminEditMedicationDto,
+} from './dto/admin-medication.dto.js'
 import {
   systemMsgMedicationHold,
   systemMsgProfileFieldRejected,
+  isProviderDirectedHold,
 } from '@cardioplace/shared'
 import type {
   PatientMedication,
@@ -62,13 +72,14 @@ const VERIFIABLE_PROFILE_FIELDS = [
   'heightCm',
   'isPregnant',
   'pregnancyDueDate',
-  'historyPreeclampsia',
+  'historyHDP',
   'hasHeartFailure',
   'heartFailureType',
   'hasAFib',
   'hasCAD',
   'hasHCM',
   'hasDCM',
+  'hasAorticStenosis',
   'hasTachycardia',
   'hasBradycardia',
   'diagnosedHypertension',
@@ -83,6 +94,7 @@ const SERIOUS_CONDITION_LABELS: Partial<Record<VerifiableField, string>> = {
   heartFailureType: 'heart failure type',
   hasHCM: 'HCM',
   hasDCM: 'DCM',
+  hasAorticStenosis: 'aortic stenosis',
 }
 
 // Patient-facing labels used in the "please re-check your {field}" inbox notice
@@ -93,16 +105,28 @@ const PROFILE_FIELD_LABELS: Record<VerifiableField, string> = {
   heightCm: 'height',
   isPregnant: 'pregnancy status',
   pregnancyDueDate: 'pregnancy due date',
-  historyPreeclampsia: 'history of preeclampsia',
+  historyHDP: 'history of hypertensive disorder of pregnancy (HDP)',
   hasHeartFailure: 'heart failure history',
   heartFailureType: 'heart failure type',
   hasAFib: 'atrial fibrillation history',
   hasCAD: 'coronary artery disease history',
   hasHCM: 'hypertrophic cardiomyopathy history',
   hasDCM: 'dilated cardiomyopathy history',
+  hasAorticStenosis: 'aortic stenosis history',
   hasTachycardia: 'tachycardia history',
   hasBradycardia: 'bradycardia history',
   diagnosedHypertension: 'high blood pressure diagnosis',
+}
+
+/**
+ * Round 2 A4 — extract the caregiver id from a verification-log fieldPath.
+ * Mirrors the write site `caregiver.service.ts:writeAudit` which uses
+ * `fieldPath: caregiver:${id}`. Returns null for non-caregiver logs.
+ */
+function caregiverIdFromFieldPath(fieldPath: string | null | undefined): string | null {
+  if (!fieldPath || !fieldPath.startsWith('caregiver:')) return null
+  const id = fieldPath.slice('caregiver:'.length).trim()
+  return id.length > 0 ? id : null
 }
 
 @Injectable()
@@ -113,7 +137,20 @@ export class IntakeService {
     private readonly prisma: PrismaService,
     private readonly drugEnrichment: DrugEnrichmentService,
     private readonly access: PatientAccessService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Notify subscribers that a patient's intake or medication list changed so
+   * downstream caches (ChatService.contextCache, VoiceService.contextCache)
+   * drop the stale entry. Decoupled via @nestjs/event-emitter to avoid a
+   * ChatModule ↔ IntakeModule circular import. Listener lives in
+   * ChatService.onIntakeUpdated (and VoiceService equivalent).
+   */
+  private emitIntakeUpdated(userId: string): void {
+    if (!userId) return
+    this.eventEmitter.emit(INTAKE_EVENTS.UPDATED, { userId })
+  }
 
   /**
    * Background-enrich freeform medications (drugClass = OTHER_UNVERIFIED) by
@@ -252,6 +289,9 @@ export class IntakeService {
     } else if (conditionReviewLabels.length) {
       await this.notifyCareTeamConditionReview(userId, conditionReviewLabels)
     }
+    // Drop any stale chat/voice patient-context cache — the next prompt build
+    // must see the new profile so the INTAKE STATUS block flips immediately.
+    this.emitIntakeUpdated(userId)
     return result
   }
 
@@ -262,8 +302,8 @@ export class IntakeService {
       isPregnant: dto.isPregnant,
       pregnancyDueDate: dto.pregnancyDueDate ?? null,
     }
-    if (dto.historyPreeclampsia !== undefined) {
-      patch.historyPreeclampsia = dto.historyPreeclampsia
+    if (dto.historyHDP !== undefined) {
+      patch.historyHDP = dto.historyHDP
     }
     // Clearing pregnancy also clears the due date by contract.
     if (!dto.isPregnant) {
@@ -276,6 +316,20 @@ export class IntakeService {
 
   async createMedications(userId: string, dto: IntakeMedicationsDto) {
     return this.prisma.$transaction(async (tx) => {
+      // F13 — load-bearing ACE/ARB contraindication. After a B4 angioedema
+      // resolution the provider sets PatientProfile.aceContraindicatedAt. From
+      // then on, an ACE inhibitor or ARB the patient re-adds must NOT be
+      // trusted-then-verified like a normal self-report: it is forced into
+      // AWAITING_PROVIDER (never auto-fires alerts) and the care team is
+      // notified so they can review before the drug goes live.
+      const profile = await tx.patientProfile.findUnique({
+        where: { userId },
+        select: { aceContraindicatedAt: true },
+      })
+      const aceContraindicated = profile?.aceContraindicatedAt != null
+      const isContraindicatedReadd = (drugClass: DrugClass): boolean =>
+        aceContraindicated &&
+        (drugClass === DrugClass.ACE_INHIBITOR || drugClass === DrugClass.ARB)
       // Dedup against the patient's currently-active medications using the
       // same canonical key as PUT /me/medications (see medicationKey). Any
       // incoming item whose key matches an active row is silently dropped —
@@ -326,6 +380,9 @@ export class IntakeService {
               userId,
               drugName: item.drugName,
               drugClass: item.drugClass,
+              // #85 — canonical identity for brand/generic dedup (null when
+              // off-catalog; dedup is skipped for null canonicals).
+              canonicalDrugId: resolveCanonicalDrugId(item.drugName),
               frequency: item.frequency,
               isCombination: item.isCombination ?? false,
               combinationComponents: item.combinationComponents ?? [],
@@ -334,14 +391,23 @@ export class IntakeService {
               notes: item.notes,
               // Patient self-report starts unverified; voice/photo cannot
               // fire automated alerts until a provider verifies (see
-              // BUILD_PLAN §3.4 safety-net table).
+              // BUILD_PLAN §3.4 safety-net table). F13 — a re-added ACE/ARB on
+              // a contraindicated patient is also held for provider review.
               verificationStatus:
-                item.source === 'PATIENT_VOICE' || item.source === 'PATIENT_PHOTO'
+                isContraindicatedReadd(item.drugClass) ||
+                item.source === 'PATIENT_VOICE' ||
+                item.source === 'PATIENT_PHOTO'
                   ? MedicationVerificationStatus.AWAITING_PROVIDER
                   : MedicationVerificationStatus.UNVERIFIED,
             },
           }),
         ),
+      )
+
+      // F13 — collect contraindicated ACE/ARB re-adds so we can alert the care
+      // team and tell the patient app the add needs provider review.
+      const contraindicatedReadd = created.filter((m) =>
+        isContraindicatedReadd(m.drugClass),
       )
 
       if (created.length) {
@@ -363,6 +429,38 @@ export class IntakeService {
         await this.flipProfileToUnverified(tx, userId)
       }
 
+      // F13 — fire a Tier-2-style admin notice to the patient's primary
+      // provider for each contraindicated ACE/ARB re-add, so the care team
+      // reviews before the held medication is ever trusted.
+      if (contraindicatedReadd.length) {
+        const assignment = await tx.patientProviderAssignment.findUnique({
+          where: { userId },
+          select: { primaryProviderId: true },
+        })
+        const providerId = assignment?.primaryProviderId
+        if (providerId) {
+          const drugList = contraindicatedReadd
+            .map((m) => m.drugName)
+            .join(', ')
+          await tx.notification.create({
+            data: {
+              userId: providerId,
+              channel: 'DASHBOARD',
+              title: 'Contraindicated medication re-added',
+              body: `Patient re-added a medication flagged as contraindicated (prior angioedema): ${drugList}. It is held for your review before it can be trusted.`,
+              tips: [],
+              dispatchTrigger: 'MEDICATION_CONTRAINDICATION',
+            },
+          })
+        } else {
+          this.logger.warn(
+            `F13 — contraindicated ACE/ARB re-add for user ${userId} but no primary provider to notify (${contraindicatedReadd
+              .map((m) => m.drugName)
+              .join(', ')})`,
+          )
+        }
+      }
+
       const responseRows = [...created, ...skippedExisting]
       const message = skippedExisting.length
         ? `${created.length} medication(s) recorded, ${skippedExisting.length} duplicate(s) skipped`
@@ -373,11 +471,16 @@ export class IntakeService {
           statusCode: 201,
           message,
           data: responseRows.map((m) => this.serializeMedication(m)),
+          // F13 — names of any ACE/ARB the patient re-added while
+          // contraindicated. The patient app uses this to confirm the
+          // "needs provider review" outcome after an acknowledged add.
+          contraindicatedReadd: contraindicatedReadd.map((m) => m.drugName),
         },
         created,
       }
     }, TX_OPTIONS).then(({ result, created }) => {
       this.kickOffMedicationEnrichment(created)
+      this.emitIntakeUpdated(userId)
       return result
     })
   }
@@ -544,6 +647,8 @@ export class IntakeService {
             userId,
             drugName: item.drugName,
             drugClass: item.drugClass,
+            // #85 — canonical identity for brand/generic dedup.
+            canonicalDrugId: resolveCanonicalDrugId(item.drugName),
             frequency: item.frequency,
             isCombination: item.isCombination ?? false,
             combinationComponents: item.combinationComponents ?? [],
@@ -602,6 +707,7 @@ export class IntakeService {
       }
     }, TX_OPTIONS).then(({ result, created }) => {
       this.kickOffMedicationEnrichment(created)
+      this.emitIntakeUpdated(userId)
       return result
     })
   }
@@ -612,6 +718,7 @@ export class IntakeService {
     actor: ActorUser,
     patientUserId: string,
     dto: VerifyProfileDto,
+    ctx?: { practiceId: string | null },
   ) {
     await this.access.assertCanAccessPatient(actor, patientUserId)
     const profile = await this.prisma.patientProfile.findUnique({
@@ -660,6 +767,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_VERIFY,
           rationale: dto.rationale,
+          practiceContext: ctx?.practiceId ?? null,
         },
       }),
     ])
@@ -685,6 +793,7 @@ export class IntakeService {
     actor: ActorUser,
     patientUserId: string,
     dto: { fields: string[]; rationale?: string },
+    ctx?: { practiceId: string | null },
   ) {
     await this.access.assertCanAccessPatient(actor, patientUserId)
     const profile = await this.prisma.patientProfile.findUnique({
@@ -718,6 +827,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_VERIFY,
           rationale: dto.rationale,
+          practiceContext: ctx?.practiceId ?? null,
         })),
       })
     }
@@ -736,14 +846,17 @@ export class IntakeService {
     actor: ActorUser,
     patientUserId: string,
     dto: { field: string; rationale?: string },
+    ctx?: { practiceId: string | null },
   ) {
     if (!dto.field || typeof dto.field !== 'string') {
       throw new BadRequestException('field is required')
     }
-    return this.confirmProfileFields(actor, patientUserId, {
-      fields: [dto.field],
-      rationale: dto.rationale,
-    })
+    return this.confirmProfileFields(
+      actor,
+      patientUserId,
+      { fields: [dto.field], rationale: dto.rationale },
+      ctx,
+    )
   }
 
   // Returns the most recent changeType per `profile.{field}` fieldPath for the
@@ -774,6 +887,7 @@ export class IntakeService {
     actor: ActorUser,
     patientUserId: string,
     dto: { field: string; rationale?: string },
+    ctx?: { practiceId: string | null },
   ) {
     await this.access.assertCanAccessPatient(actor, patientUserId)
     const profile = await this.prisma.patientProfile.findUnique({
@@ -830,6 +944,7 @@ export class IntakeService {
           changeType: VerificationChangeType.ADMIN_REJECT,
           rationale: dto.rationale,
           discrepancyFlag: true,
+          practiceContext: ctx?.practiceId ?? null,
         },
       }),
       // Also write a status-flip log so the timeline shows why the profile
@@ -844,6 +959,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_REJECT,
           rationale: `Reverted to unverified — ${dto.field} rejected`,
+          practiceContext: ctx?.practiceId ?? null,
         },
       }),
     ])
@@ -862,6 +978,7 @@ export class IntakeService {
           channel: NotificationChannel.PUSH,
           title: 'Please re-check a profile detail',
           body: systemMsgProfileFieldRejected(label),
+          dispatchTrigger: 'PROFILE_REJECTED',
         },
       })
     } catch (err) {
@@ -884,6 +1001,7 @@ export class IntakeService {
     actor: ActorUser,
     patientUserId: string,
     dto: CorrectProfileDto,
+    ctx?: { practiceId: string | null },
   ) {
     await this.access.assertCanAccessPatient(actor, patientUserId)
     return this.prisma.$transaction(async (tx) => {
@@ -953,6 +1071,7 @@ export class IntakeService {
         changeType: VerificationChangeType.ADMIN_CORRECT,
         discrepancyFlag: true,
         rationale: dto.rationale,
+        practiceContext: ctx?.practiceId ?? null,
       })
 
       // Joint Commission NPSG.03.06.01 audit trail — DOB corrections need
@@ -975,6 +1094,7 @@ export class IntakeService {
             changeType: VerificationChangeType.ADMIN_CORRECT,
             discrepancyFlag: true,
             rationale: dto.rationale,
+            practiceContext: ctx?.practiceId ?? null,
           },
         })
       }
@@ -1008,6 +1128,7 @@ export class IntakeService {
     actor: ActorUser,
     medicationId: string,
     dto: VerifyMedicationDto,
+    ctx?: { practiceId: string | null },
   ) {
     const med = await this.prisma.patientMedication.findUnique({
       where: { id: medicationId },
@@ -1028,12 +1149,19 @@ export class IntakeService {
     if (changeType === VerificationChangeType.ADMIN_REJECT && !dto.rationale) {
       throw new BadRequestException('Rationale is required to reject a medication')
     }
-    // Cluster 7 A.7 — Hold also requires a rationale so the audit log
-    // captures the admin's reason for pausing the medication.
-    if (nextStatus === MedicationVerificationStatus.HOLD && !dto.rationale) {
-      throw new BadRequestException('Rationale is required to place a medication on hold')
+    // Cluster 7 A.7 + Manisha 5/24 Med §3 — Hold requires a structured reason
+    // code (drives the two-path patient message); OTHER additionally requires a
+    // free-text rationale. The reason is also captured in the audit log.
+    if (nextStatus === MedicationVerificationStatus.HOLD) {
+      if (!dto.holdReason) {
+        throw new BadRequestException('A hold reason is required to place a medication on hold')
+      }
+      if (dto.holdReason === 'OTHER' && !dto.rationale) {
+        throw new BadRequestException('A rationale is required when the hold reason is "Other"')
+      }
     }
 
+    const isHold = nextStatus === MedicationVerificationStatus.HOLD
     const [updated] = await this.prisma.$transaction([
       this.prisma.patientMedication.update({
         where: { id: medicationId },
@@ -1041,6 +1169,13 @@ export class IntakeService {
           verificationStatus: nextStatus,
           verifiedByAdminId: actor.id,
           verifiedAt: new Date(),
+          // Stamp/clear the structured hold metadata. holdSetAt anchors the
+          // 7/14/30/45-day reconciliation escalation ladder; leaving a hold
+          // clears both so a re-held med restarts the clock. holdEscalationLevel
+          // always resets to 0 (entering OR leaving a hold restarts the ladder).
+          holdReason: isHold ? (dto.holdReason as MedicationHoldReason) : null,
+          holdSetAt: isHold ? new Date() : null,
+          holdEscalationLevel: 0,
         },
       }),
       this.prisma.profileVerificationLog.create({
@@ -1054,6 +1189,10 @@ export class IntakeService {
           changeType,
           rationale: dto.rationale,
           discrepancyFlag: changeType === VerificationChangeType.ADMIN_REJECT,
+          // Phase/practice-identity (Manisha 2026-06-12 §1, HIPAA 45 CFR
+          // §164.312(a)(2)(i)) — capture WHICH practice the admin/provider
+          // was acting under at verification time.
+          practiceContext: ctx?.practiceId ?? null,
         },
       }),
     ])
@@ -1063,20 +1202,51 @@ export class IntakeService {
     // to dispatch is logged but does not roll back the status change — the
     // medication is on hold regardless of whether the notification landed.
     if (nextStatus === MedicationVerificationStatus.HOLD) {
+      // Provider-directed = "pause it" (names the med); administrative =
+      // "keep taking as usual" (does NOT name the med) — Manisha 5/24 §3.
+      const providerDirected = isProviderDirectedHold(dto.holdReason!)
+      const title = providerDirected ? 'Please pause a medication' : 'Medicine list review'
+      const body = systemMsgMedicationHold(med.drugName, dto.holdReason!)
       try {
-        await this.prisma.notification.create({
-          data: {
-            userId: med.userId,
-            // PUSH (not DASHBOARD) so it lands in the patient's Notifications
-            // tab — that tab renders only PUSH/null channels; DASHBOARD rows
-            // are treated as alert-linked and surface on the Alerts tab. This
-            // is a standalone care-team message (CLINICAL_SPEC §14.2), so it
-            // belongs with gap-alert / monthly-reask / care-team-update (all PUSH).
-            channel: NotificationChannel.PUSH,
-            title: 'Medication on hold',
-            body: systemMsgMedicationHold(med.drugName),
-          },
-        })
+        // F16 — administrative holds consolidate to ONE bell row per Manisha A1
+        // "Display once": a patient with 4 administrative holds should see a
+        // single "Medicine list review" notice, not 4 identical rows. The
+        // administrative body is generic (doesn't name a med), so an unread
+        // notice already standing for one hold covers the rest — bump its
+        // timestamp instead of stacking a duplicate. Provider-directed holds
+        // name a specific medication, so each keeps its own row.
+        const existing = providerDirected
+          ? null
+          : await this.prisma.notification.findFirst({
+              where: {
+                userId: med.userId,
+                channel: NotificationChannel.PUSH,
+                title: 'Medicine list review',
+                readAt: null,
+              },
+              select: { id: true },
+            })
+        if (existing) {
+          await this.prisma.notification.update({
+            where: { id: existing.id },
+            data: { sentAt: new Date(), body },
+          })
+        } else {
+          await this.prisma.notification.create({
+            data: {
+              userId: med.userId,
+              // PUSH (not DASHBOARD) so it lands in the patient's Notifications
+              // tab — that tab renders only PUSH/null channels; DASHBOARD rows
+              // are treated as alert-linked and surface on the Alerts tab. This
+              // is a standalone care-team message (CLINICAL_SPEC §14.2), so it
+              // belongs with gap-alert / monthly-reask / care-team-update (all PUSH).
+              channel: NotificationChannel.PUSH,
+              title,
+              body,
+              dispatchTrigger: 'CARE_TEAM_UPDATE',
+            },
+          })
+        }
       } catch (err) {
         this.logger.error(
           `HOLD notification failed for medication ${medicationId}`,
@@ -1129,6 +1299,264 @@ export class IntakeService {
     }
   }
 
+  // ─── #92 — admin add / edit medication ─────────────────────────────────
+  //
+  // Clinical roles (SUPER_ADMIN / PROVIDER / MEDICAL_DIRECTOR) can record a
+  // medication on a patient's behalf. Admin is authoritative, so the row is
+  // VERIFIED on add — EXCEPT the ACE/ARB-on-angioedema safety gate (mirror of
+  // #84), which forces PROVIDER_DIRECTED_HOLD instead. Dedup reuses #85's
+  // canonical resolution: a brand/generic duplicate of an existing active med
+  // is rejected with 409 + the existing record so the caller edits it instead.
+
+  /** Map the actor's admin role to the audit VerifierRole. */
+  private adminVerifierRole(roles: UserRole[]): VerifierRole {
+    return roles.includes(UserRole.PROVIDER)
+      ? VerifierRole.PROVIDER
+      : VerifierRole.ADMIN
+  }
+
+  /** Fold an optional free-text dose into notes (no dedicated dose column). */
+  private composeNotes(dose?: string, notes?: string): string | null {
+    const parts = [dose?.trim() ? `Dose: ${dose.trim()}` : '', notes?.trim() ?? '']
+      .filter(Boolean)
+    return parts.length ? parts.join(' — ') : null
+  }
+
+  private canonicalDuplicate409(
+    drugName: string,
+    canonicalDrugId: string,
+    existing: { id: string; drugName: string; verificationStatus: MedicationVerificationStatus; holdReason: MedicationHoldReason | null },
+  ): never {
+    throw new ConflictException({
+      statusCode: 409,
+      error: 'DUPLICATE_CANONICAL_DRUG',
+      message: `This medication is already on the patient’s record (${existing.drugName}).`,
+      existing: {
+        id: existing.id,
+        drugName: existing.drugName,
+        canonicalDrugId,
+        verificationStatus: existing.verificationStatus,
+        holdReason: existing.holdReason,
+      },
+    })
+  }
+
+  async adminAddMedication(
+    actor: ActorUser,
+    patientUserId: string,
+    dto: AdminAddMedicationDto,
+    ctx?: { practiceId: string | null },
+  ) {
+    await this.access.assertCanAccessPatient(actor, patientUserId)
+
+    const canonicalDrugId = resolveCanonicalDrugId(dto.drugName)
+    // #85 dedup — only when the name resolves to the catalog. Off-catalog
+    // (null canonical) meds are never blocked.
+    if (canonicalDrugId) {
+      const dup = await this.prisma.patientMedication.findFirst({
+        where: { userId: patientUserId, canonicalDrugId, discontinuedAt: null },
+      })
+      if (dup) this.canonicalDuplicate409(dto.drugName, canonicalDrugId, dup)
+    }
+
+    // Defensive fallback dedup: an existing active row with the SAME drugName
+    // (case-insensitive) that the canonical check above missed — e.g. a legacy
+    // row whose canonicalDrugId was never populated (pre-fix seed / import gap),
+    // or an off-catalog drug. Only 409s when the canonical pass didn't already
+    // cover this exact row, so it never double-throws.
+    const nameDup = await this.prisma.patientMedication.findFirst({
+      where: {
+        userId: patientUserId,
+        drugName: { equals: dto.drugName, mode: 'insensitive' },
+        discontinuedAt: null,
+      },
+    })
+    if (nameDup && (!canonicalDrugId || nameDup.canonicalDrugId !== canonicalDrugId)) {
+      this.canonicalDuplicate409(dto.drugName, canonicalDrugId ?? 'off-catalog', nameDup)
+    }
+
+    // Catalog wins on class: if the name resolves to the catalog, prefer the
+    // catalog's drugClass over whatever the provider picked — prevents a known
+    // drug being mis-filed (e.g. Metoprolol saved as OTHER_UNVERIFIED). Off-
+    // catalog names keep the provider's class.
+    const effectiveDrugClass = resolveCanonicalDrugClass(dto.drugName) ?? dto.drugClass
+
+    // ACE/ARB-on-angioedema safety gate (mirror of #84). Auto-hold instead of
+    // auto-verify so an admin can't silently re-introduce a contraindicated drug.
+    const profile = await this.prisma.patientProfile.findUnique({
+      where: { userId: patientUserId },
+      select: { aceContraindicatedAt: true },
+    })
+    const isAceArb =
+      effectiveDrugClass === DrugClass.ACE_INHIBITOR ||
+      effectiveDrugClass === DrugClass.ARB
+    const angioedemaHold = profile?.aceContraindicatedAt != null && isAceArb
+
+    const now = new Date()
+    const role = this.adminVerifierRole(actor.roles)
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const med = await tx.patientMedication.create({
+        data: {
+          userId: patientUserId,
+          drugName: dto.drugName,
+          drugClass: effectiveDrugClass,
+          canonicalDrugId,
+          frequency: dto.frequency,
+          notes: this.composeNotes(dto.dose, dto.notes),
+          source: 'PROVIDER_ENTERED',
+          addedByUserId: actor.id,
+          addedByRole: role,
+          addedAt: now,
+          verificationStatus: angioedemaHold
+            ? MedicationVerificationStatus.HOLD
+            : MedicationVerificationStatus.VERIFIED,
+          verifiedByAdminId: angioedemaHold ? null : actor.id,
+          verifiedAt: angioedemaHold ? null : now,
+          holdReason: angioedemaHold ? MedicationHoldReason.PROVIDER_DIRECTED_HOLD : null,
+          holdSetAt: angioedemaHold ? now : null,
+        },
+      })
+      await tx.profileVerificationLog.create({
+        data: {
+          userId: patientUserId,
+          fieldPath: `medication:${med.id}`,
+          previousValue: Prisma.JsonNull,
+          newValue: {
+            drugName: dto.drugName,
+            drugClass: effectiveDrugClass,
+            verificationStatus: med.verificationStatus,
+            holdReason: med.holdReason,
+          } as Prisma.InputJsonValue,
+          changedBy: actor.id,
+          changedByRole: role,
+          changeType: VerificationChangeType.ADMIN_CORRECT,
+          discrepancyFlag: angioedemaHold,
+          rationale: angioedemaHold
+            ? 'Admin-added ACE/ARB on angioedema-contraindicated patient — auto-held (PROVIDER_DIRECTED_HOLD).'
+            : 'Admin-added medication.',
+          practiceContext: ctx?.practiceId ?? null,
+        },
+      })
+      return med
+    })
+
+    return {
+      statusCode: 201,
+      message: 'Medication added',
+      // Tells the admin UI to show the confirmation modal explaining the hold.
+      requiresAcknowledgement: angioedemaHold,
+      data: this.serializeMedication(created),
+    }
+  }
+
+  async adminEditMedication(
+    actor: ActorUser,
+    medicationId: string,
+    dto: AdminEditMedicationDto,
+    ctx?: { practiceId: string | null },
+  ) {
+    const med = await this.prisma.patientMedication.findUnique({
+      where: { id: medicationId },
+    })
+    if (!med) throw new NotFoundException('Medication not found')
+    await this.access.assertCanAccessPatient(actor, med.userId)
+
+    const now = new Date()
+    const role = this.adminVerifierRole(actor.roles)
+    const nameChanged = dto.drugName != null && dto.drugName !== med.drugName
+    let newDrugClass = dto.drugClass ?? med.drugClass
+    let canonicalDrugId = med.canonicalDrugId
+    if (nameChanged) {
+      canonicalDrugId = resolveCanonicalDrugId(dto.drugName!)
+      if (canonicalDrugId) {
+        const dup = await this.prisma.patientMedication.findFirst({
+          where: {
+            userId: med.userId,
+            canonicalDrugId,
+            discontinuedAt: null,
+            id: { not: medicationId },
+          },
+        })
+        if (dup) this.canonicalDuplicate409(dto.drugName!, canonicalDrugId, dup)
+      }
+    }
+
+    // Catalog wins on class (mirror of adminAddMedication): if the effective
+    // drug name resolves to the catalog, the catalog's class overrides whatever
+    // the provider picked — self-heals a mis-classified catalog drug on any
+    // edit. Off-catalog names keep the provider/existing class.
+    const canonicalClass = resolveCanonicalDrugClass(dto.drugName ?? med.drugName)
+    if (canonicalClass) newDrugClass = canonicalClass
+
+    // If the edit turns this into an ACE/ARB for an angioedema patient, hold it.
+    const isAceArb =
+      newDrugClass === DrugClass.ACE_INHIBITOR || newDrugClass === DrugClass.ARB
+    const profile = isAceArb
+      ? await this.prisma.patientProfile.findUnique({
+          where: { userId: med.userId },
+          select: { aceContraindicatedAt: true },
+        })
+      : null
+    const angioedemaHold = profile?.aceContraindicatedAt != null && isAceArb
+
+    const data: Prisma.PatientMedicationUpdateInput = {
+      lastEditedByUserId: actor.id,
+      lastEditedByRole: role,
+      lastEditedAt: now,
+    }
+    if (dto.drugName != null) data.drugName = dto.drugName
+    // Persist the effective class (catalog-corrected) whenever it changes —
+    // covers both an explicit provider class change and a catalog auto-correct.
+    if (newDrugClass !== med.drugClass) data.drugClass = newDrugClass
+    if (dto.frequency != null) data.frequency = dto.frequency
+    if (dto.dose != null || dto.notes != null) {
+      data.notes = this.composeNotes(dto.dose, dto.notes ?? med.notes ?? undefined)
+    }
+    if (nameChanged) data.canonicalDrugId = canonicalDrugId
+    if (angioedemaHold && med.verificationStatus !== MedicationVerificationStatus.HOLD) {
+      data.verificationStatus = MedicationVerificationStatus.HOLD
+      data.holdReason = MedicationHoldReason.PROVIDER_DIRECTED_HOLD
+      data.holdSetAt = now
+      data.holdEscalationLevel = 0
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.patientMedication.update({ where: { id: medicationId }, data })
+      // N5 (2026-07-09) — capture the FULL clinical snapshot before + after.
+      // Was 3 fields (drugName/drugClass/frequency); now mirrors serializeMedication
+      // so an alteration on dose, notes, verificationStatus, holdReason,
+      // holdEscalationLevel, discontinuedAt, etc. is reconstructable from the
+      // audit trail (HIPAA §164.312(c) integrity, Humaira Activity 4 item 2).
+      // The patient-facing update paths at :566 already use per-field snapshots;
+      // this brings the admin edit path to the same coverage.
+      await tx.profileVerificationLog.create({
+        data: {
+          userId: med.userId,
+          fieldPath: `medication:${medicationId}`,
+          previousValue: this.serializeMedication(med) as Prisma.InputJsonValue,
+          newValue: this.serializeMedication(row) as Prisma.InputJsonValue,
+          changedBy: actor.id,
+          changedByRole: role,
+          changeType: VerificationChangeType.ADMIN_CORRECT,
+          discrepancyFlag: angioedemaHold,
+          rationale: angioedemaHold
+            ? 'Admin edit to ACE/ARB on angioedema-contraindicated patient — auto-held.'
+            : 'Admin edit to medication.',
+          practiceContext: ctx?.practiceId ?? null,
+        },
+      })
+      return row
+    })
+
+    return {
+      statusCode: 200,
+      message: 'Medication updated',
+      requiresAcknowledgement: angioedemaHold,
+      data: this.serializeMedication(updated),
+    }
+  }
+
   async listMedications(
     userId: string,
     includeDiscontinued = false,
@@ -1168,17 +1596,48 @@ export class IntakeService {
       this.prisma,
       logs.map((l) => l.changedBy),
     )
+    // Manual-test round 2 Group A4 — humanize caregiver references in the
+    // timeline. Caregiver-scoped logs use fieldPath `caregiver:${id}` (see
+    // caregiver.service.ts:writeAudit). Without resolution the timeline
+    // renders raw UUIDs ("Caregiver:9a0446d9-…"). Batch-fetch every
+    // referenced caregiver in one query (same N+1-avoiding pattern as
+    // resolveUserDisplays) and stamp the name + relationship onto each log.
+    const caregiverIds = Array.from(
+      new Set(
+        logs
+          .map((l) => caregiverIdFromFieldPath(l.fieldPath))
+          .filter((id): id is string => id != null),
+      ),
+    )
+    const caregiversById = new Map<string, { name: string; relationship: string | null }>()
+    if (caregiverIds.length > 0) {
+      const caregivers = await this.prisma.patientCaregiver.findMany({
+        where: { id: { in: caregiverIds } },
+        select: { id: true, name: true, relationship: true },
+      })
+      for (const c of caregivers) {
+        caregiversById.set(c.id, { name: c.name, relationship: c.relationship })
+      }
+    }
     return {
       statusCode: 200,
       message: 'Verification logs retrieved',
-      data: logs.map((l) => ({
-        ...l,
-        changedByName: pickDisplayName(l.changedBy, names),
-        // The actor's real role (e.g. PROVIDER) resolved from their account —
-        // the stored changedByRole is the coarse ADMIN for every admin action.
-        // Falls back to the stored role when the user can't be resolved.
-        changedByRoleResolved: pickDisplayRole(l.changedBy, names, l.changedByRole),
-      })),
+      data: logs.map((l) => {
+        const caregiverId = caregiverIdFromFieldPath(l.fieldPath)
+        const caregiver = caregiverId ? caregiversById.get(caregiverId) ?? null : null
+        return {
+          ...l,
+          changedByName: pickDisplayName(l.changedBy, names),
+          // The actor's real role (e.g. PROVIDER) resolved from their account —
+          // the stored changedByRole is the coarse ADMIN for every admin action.
+          // Falls back to the stored role when the user can't be resolved.
+          changedByRoleResolved: pickDisplayRole(l.changedBy, names, l.changedByRole),
+          // Round 2 A4 — null when the log isn't caregiver-scoped, or when the
+          // caregiver row has been deleted. UI falls back to "Caregiver contact".
+          caregiverName: caregiver?.name ?? null,
+          caregiverRelationship: caregiver?.relationship ?? null,
+        }
+      }),
     }
   }
 
@@ -1302,6 +1761,7 @@ export class IntakeService {
         channel: NotificationChannel.PUSH,
         title,
         body,
+        dispatchTrigger: 'CARE_TEAM_UPDATE',
       })),
     })
   }
@@ -1315,13 +1775,19 @@ export class IntakeService {
         }),
         this.prisma.patientProfile.findUnique({
           where: { userId: patientUserId },
-          select: { heartFailureType: true, hasHCM: true, hasDCM: true },
+          select: {
+            heartFailureType: true,
+            hasHCM: true,
+            hasDCM: true,
+            hasAorticStenosis: true,
+          },
         }),
       ])
       const conditions = [
         profile?.heartFailureType === 'HFREF' ? 'HFrEF' : null,
         profile?.hasHCM ? 'HCM' : null,
         profile?.hasDCM ? 'DCM' : null,
+        profile?.hasAorticStenosis ? 'aortic stenosis' : null,
       ]
         .filter(Boolean)
         .join(' / ')
@@ -1483,6 +1949,8 @@ export class IntakeService {
       changeType: VerificationChangeType
       discrepancyFlag?: boolean
       rationale?: string
+      /** Phase/practice-identity — populated only on admin-actor paths. */
+      practiceContext?: string | null
     },
   ) {
     if (!params.changes.length) return
@@ -1497,6 +1965,7 @@ export class IntakeService {
         changeType: params.changeType,
         discrepancyFlag: params.discrepancyFlag ?? false,
         rationale: params.rationale,
+        practiceContext: params.practiceContext ?? null,
       })),
     })
   }
@@ -1558,6 +2027,8 @@ export class IntakeService {
       pregnancyDueDate: profile.pregnancyDueDate?.toISOString() ?? null,
       profileVerifiedAt: profile.profileVerifiedAt?.toISOString() ?? null,
       profileLastEditedAt: profile.profileLastEditedAt.toISOString(),
+      // Manisha 5/24 Q4 — permanent ACE-inhibitor contraindication (angioedema).
+      aceContraindicatedAt: profile.aceContraindicatedAt?.toISOString() ?? null,
       createdAt: profile.createdAt.toISOString(),
       updatedAt: profile.updatedAt.toISOString(),
     }

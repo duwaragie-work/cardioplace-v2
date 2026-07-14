@@ -15,8 +15,22 @@ import {
   Bell,
   X,
   Building2,
+  UserPlus,
+  ClipboardList,
+  Settings,
+  LifeBuoy,
+  FileSearch,
+  ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import {
+  canManageSupport,
+  canManageAudit,
+  canReviewWorklist,
+  canViewUsers,
+  canViewReports,
+  isCoordinatorOnly,
+} from '@/lib/roleGates';
 
 interface NavItem {
   href: string;
@@ -28,18 +42,108 @@ interface NavItem {
   show?: (roles: string[] | null | undefined) => boolean;
 }
 
-// /practices is visible to all four admin roles. PROVIDER + MED_DIR see
-// only their scoped practices (backend filter via PatientAccessService);
-// OPS + SUPER see all. CRUD buttons are hidden on the page itself for
-// non-OPS/SUPER. See docs/ACCESS_SCOPE.md (May 2026 — scope-not-hide).
+// /practices is visible to all four clinical admin roles. PROVIDER +
+// MED_DIR see only their scoped practices (backend filter via
+// PatientAccessService); OPS + SUPER see all. CRUD buttons are hidden on
+// the page itself for non-OPS/SUPER. See docs/ACCESS_SCOPE.md (May 2026
+// — scope-not-hide).
+//
+// COORDINATOR is a non-clinical role — they only manage their practice's
+// patient roster via /users. Dashboard / Patients / Practices / Alerts
+// are all clinical surfaces they don't have access to, so they're hidden
+// from the sidebar (and the page-level guards 403 them if they navigate
+// by URL).
 const PRIMARY_NAV: NavItem[] = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/patients', label: 'Patients', icon: Users, matchPrefix: true },
-  { href: '/practices', label: 'Practices', icon: Building2, matchPrefix: true },
+  {
+    href: '/dashboard',
+    label: 'Dashboard',
+    icon: LayoutDashboard,
+    show: (roles) => !isCoordinatorOnly(roles),
+  },
+  {
+    href: '/patients',
+    label: 'Patients',
+    icon: Users,
+    matchPrefix: true,
+    // Visible to everyone incl. COORDINATOR — coordinators get a restricted,
+    // no-clinical roster + care-team assignment view (page-level branch).
+  },
+  {
+    href: '/practices',
+    label: 'Practices',
+    icon: Building2,
+    matchPrefix: true,
+    // COORDINATOR sees Practices too — read-only view of their own practice +
+    // staff (backend scopes it; CRUD buttons are OPS/SUPER-only). Dashboard /
+    // Patients stay hidden for them (clinical surfaces).
+    show: () => true,
+  },
+  // phase/23 — user management. Visible to COORDINATOR, HEALPLACE_OPS,
+  // SUPER_ADMIN, MEDICAL_DIRECTOR, and PROVIDER (2026-07-01). PROVIDER is
+  // read-only (sees their active practice's roster, no invite / actions);
+  // everyone else manages. All scoped server-side to the active practice.
+  {
+    href: '/users',
+    label: 'Users',
+    icon: UserPlus,
+    matchPrefix: true,
+    show: (roles) => canViewUsers(roles),
+  },
+  // phase/24 — monthly practice analytics. Oversight surface — visible
+  // to MEDICAL_DIRECTOR (scoped to own practice), HEALPLACE_OPS, and
+  // SUPER_ADMIN. PROVIDER + COORDINATOR don't see it.
+  // phase/24 + phase/25 — practice analytics. The Reports page hosts both
+  // the Monthly report and the 90-day Adherence report as tabs.
+  {
+    href: '/reports',
+    label: 'Reports',
+    icon: ClipboardList,
+    matchPrefix: true,
+    show: (roles) => canViewReports(roles),
+  },
 ];
 
 const SECONDARY_NAV: NavItem[] = [
-  { href: '/notifications', label: 'Alerts', icon: Bell },
+  {
+    href: '/notifications',
+    label: 'Alerts',
+    icon: Bell,
+    show: (roles) => !isCoordinatorOnly(roles),
+  },
+  // Support ticket queue — HEALPLACE_OPS + SUPER_ADMIN only.
+  {
+    href: '/support',
+    label: 'Support',
+    icon: LifeBuoy,
+    matchPrefix: true,
+    show: (roles) => canManageSupport(roles),
+  },
+  // HIPAA audit-review console (§164.312(b) L2) — HEALPLACE_OPS + SUPER_ADMIN
+  // only. Opening it also requires a Rules-of-Behavior ack (L1 AuditAccessGate).
+  {
+    href: '/audit',
+    label: 'Audit',
+    icon: FileSearch,
+    matchPrefix: true,
+    show: (roles) => canManageAudit(roles),
+  },
+  // L3 reviewer worklist — triage N7 audit exceptions + security incidents.
+  // HEALPLACE_OPS + SUPER_ADMIN only; also ROB-gated (AuditAccessGate).
+  {
+    href: '/worklist',
+    label: 'Worklist',
+    icon: ShieldAlert,
+    matchPrefix: true,
+    show: (roles) => canReviewWorklist(roles),
+  },
+  // Account-level settings (security / 2FA today). Available to every
+  // signed-in staff role, including COORDINATOR.
+  {
+    href: '/settings',
+    label: 'Settings',
+    icon: Settings,
+    matchPrefix: true,
+  },
 ];
 
 interface Props {
@@ -96,9 +200,31 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
   );
 }
 
+// Skeleton pill shown in place of a real nav item while the auth context
+// is still rehydrating after a refresh. Avoids the flash where everyone
+// (incl. COORDINATOR) sees all sidebar items for a tick before the role
+// filter collapses them to the actual allowed set.
+function NavSkeleton() {
+  return (
+    <div
+      className="flex items-center gap-3 px-3 h-10 rounded-lg"
+      aria-hidden
+    >
+      <span
+        className="w-4 h-4 rounded shrink-0 animate-pulse"
+        style={{ backgroundColor: 'var(--brand-border)' }}
+      />
+      <span
+        className="h-3 rounded animate-pulse"
+        style={{ backgroundColor: 'var(--brand-border)', width: '60%' }}
+      />
+    </div>
+  );
+}
+
 export default function AdminSidebar({ withCloseButton, onClose }: Props) {
   const pathname = usePathname() ?? '';
-  const { user, logout } = useAuth();
+  const { user, isLoading, logout } = useAuth();
   const role = user?.roles?.[0] ?? 'ADMIN';
   // Filter nav items through their `show` predicate. Items without a
   // predicate stay visible to all admin roles (default behaviour).
@@ -109,6 +235,10 @@ export default function AdminSidebar({ withCloseButton, onClose }: Props) {
   const visibleSecondary = SECONDARY_NAV.filter((item) =>
     item.show ? item.show(visibleRoles) : true,
   );
+  // While auth is rehydrating we don't yet know the caller's roles. Render
+  // a skeleton instead of the (incorrect) default nav so COORDINATOR
+  // doesn't briefly see Dashboard/Patients/Practices flash in.
+  const showSkeleton = isLoading || !user;
 
   return (
     <aside
@@ -177,19 +307,33 @@ export default function AdminSidebar({ withCloseButton, onClose }: Props) {
         >
           Workspace
         </p>
-        {visiblePrimary.map((item) => (
-          <NavLink key={item.href} item={item} pathname={pathname} />
-        ))}
+        {showSkeleton ? (
+          <>
+            <NavSkeleton />
+            <NavSkeleton />
+            <NavSkeleton />
+          </>
+        ) : (
+          visiblePrimary.map((item) => (
+            <NavLink key={item.href} item={item} pathname={pathname} />
+          ))
+        )}
 
-        <p
-          className="px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider"
-          style={{ color: 'var(--brand-text-muted)' }}
-        >
-          More
-        </p>
-        {visibleSecondary.map((item) => (
-          <NavLink key={item.href} item={item} pathname={pathname} />
-        ))}
+        {/* "More" section — hidden entirely (incl. its header) when the
+            section has no items, e.g. for COORDINATOR. */}
+        {!showSkeleton && visibleSecondary.length > 0 && (
+          <>
+            <p
+              className="px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider"
+              style={{ color: 'var(--brand-text-muted)' }}
+            >
+              More
+            </p>
+            {visibleSecondary.map((item) => (
+              <NavLink key={item.href} item={item} pathname={pathname} />
+            ))}
+          </>
+        )}
       </nav>
 
       {/* User footer */}
@@ -201,39 +345,68 @@ export default function AdminSidebar({ withCloseButton, onClose }: Props) {
           className="flex items-center gap-2.5 p-2 rounded-lg transition-colors hover:bg-white"
           style={{ backgroundColor: 'var(--brand-background)' }}
         >
-          <div
-            className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-white text-[12px] font-bold"
-            style={{
-              background: 'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
-              boxShadow: '0 2px 8px rgba(123,0,224,0.25)',
-            }}
-          >
-            {initialsFor(user?.name, user?.email)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p
-              className="text-[12.5px] font-bold leading-tight truncate"
-              style={{ color: 'var(--brand-text-primary)' }}
-            >
-              {user?.name || 'Admin user'}
-            </p>
-            <p
-              className="text-[10px] mt-0.5 font-semibold uppercase tracking-wider truncate"
-              style={{ color: 'var(--brand-text-muted)' }}
-            >
-              {role.replace(/_/g, ' ')}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={logout}
-            className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-150 hover:bg-[var(--brand-alert-red-light)] hover:text-[var(--brand-alert-red)] cursor-pointer"
-            style={{ color: 'var(--brand-text-muted)' }}
-            aria-label="Sign out"
-            title="Sign out"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
+          {showSkeleton ? (
+            <>
+              <div
+                className="shrink-0 w-9 h-9 rounded-lg animate-pulse"
+                style={{ backgroundColor: 'var(--brand-border)' }}
+                aria-hidden
+              />
+              <div className="flex-1 min-w-0 space-y-1.5">
+                <span
+                  className="block h-3 rounded animate-pulse"
+                  style={{
+                    backgroundColor: 'var(--brand-border)',
+                    width: '70%',
+                  }}
+                />
+                <span
+                  className="block h-2 rounded animate-pulse"
+                  style={{
+                    backgroundColor: 'var(--brand-border)',
+                    width: '40%',
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div
+                className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-white text-[12px] font-bold"
+                style={{
+                  background:
+                    'linear-gradient(135deg, #7B00E0 0%, #9333EA 100%)',
+                  boxShadow: '0 2px 8px rgba(123,0,224,0.25)',
+                }}
+              >
+                {initialsFor(user?.name, user?.email)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p
+                  className="text-[12.5px] font-bold leading-tight truncate"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {user?.name || 'Admin user'}
+                </p>
+                <p
+                  className="text-[10px] mt-0.5 font-semibold uppercase tracking-wider truncate"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                >
+                  {role.replace(/_/g, ' ')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={logout}
+                className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-150 hover:bg-[var(--brand-alert-red-light)] hover:text-[var(--brand-alert-red)] cursor-pointer"
+                style={{ color: 'var(--brand-text-muted)' }}
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </>
+          )}
         </div>
       </div>
     </aside>

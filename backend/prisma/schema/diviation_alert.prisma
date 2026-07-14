@@ -19,14 +19,18 @@ model DeviationAlert {
   pulsePressure         Int?
   suboptimalMeasurement Boolean    @default(false)
 
-  patientMessage    String? @db.Text
-  caregiverMessage  String? @db.Text
-  physicianMessage  String? @db.Text
+  patientMessage   String? @db.Text
+  caregiverMessage String? @db.Text
+  physicianMessage String? @db.Text
 
   dismissible         Boolean @default(true)
   resolutionAction    String?
   resolutionRationale String? @db.Text
   resolvedBy          String?
+  // Manisha 5/24 Q4 — structured sub-fields for bespoke resolution actions
+  // (e.g. angioedema: willGo Y/N, ED facility, replacement med, outcome). Shape
+  // is action-specific JSON; audit-trail captures it alongside resolutionAction.
+  resolutionDetails   Json?
 
   escalated Boolean     @default(false)
   status    AlertStatus @default(OPEN)
@@ -40,11 +44,23 @@ model DeviationAlert {
   // existing rows pick up CURRENT_TIMESTAMP at migration time.
   acknowledgedByUserId String?
   resolvedAt           DateTime?
-  updatedAt            DateTime  @updatedAt @default(now())
+  // June 2026 — practice-context attribution (Manisha 2026-06-12 Access
+  // Control §1, HIPAA 45 CFR §164.312(a)(2)(i)). The activePracticeId on
+  // the actor's AuthSession at the moment of ack/resolve. NULL on creation
+  // (cron-fired alerts have no actor) and for pre-policy rows.
+  actorPracticeContext String?
+  updatedAt            DateTime  @default(now()) @updatedAt
+  // Inline audit (2026-07-03) — generic edit-actor, auto-stamped from the CLS
+  // actor by the access-log extension. resolvedBy / acknowledgedByUserId stay
+  // action-specific; createdByActorId captures the manual/request creator
+  // (null for engine + cron-fired alerts, which are SYSTEM_ACTOR), and
+  // updatedByActorId catches any subsequent mutation.
+  createdByActorId     String?
+  updatedByActorId     String?
 
-  escalationEvents EscalationEvent[]
-  notifications    Notification[]
-  scheduledCalls   ScheduledCall[]
+  escalationEvents      EscalationEvent[]
+  notifications         Notification[]
+  caregiverDispatchLogs CaregiverDispatchLog[]
 
   // Phase/7 — dropped @@unique([journalEntryId, type]). v2 allows multiple
   // alerts per entry (e.g. Tier 3 pulse-pressure annotation alongside a Tier 1

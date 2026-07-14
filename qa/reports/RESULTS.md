@@ -50,6 +50,21 @@ Re-seed: `cd backend && npx tsx prisma/seed-role-scope-local.ts`.
 
 ---
 
+## Gap 5 — Caregiver feature (2026-05-21, `nivakaran-dev`)
+
+Caregiver relationship + consent + alert delivery shipped end-to-end:
+
+- **Schema:** `PatientCaregiver` (contact + channel + consent) + `CaregiverDispatchLog` (per-alert idempotency) + `CaregiverNotifyChannel` enum. Migration `20260520120000_gap5_patient_caregiver` is committed but **NOT yet applied** — run `prisma migrate deploy` against the target DB before enabling dispatch. **Never `migrate dev` on the shared Cloud DB.**
+- **API:** patient `GET/POST/PATCH/DELETE /api/me/caregivers` + admin `…/api/admin/patients/:id/caregivers`; consent stamps `consentGivenAt`; every mutation writes a `ProfileVerificationLog` audit row.
+- **Dispatch:** consented + active caregivers receive the signed-off `caregiverMessage` (Minimum Necessary) via EMAIL (Resend) / DASHBOARD; SMS captured behind a `NoopSmsService` (no provider wired). Idempotent via `CaregiverDispatchLog`. Writes a `CAREGIVER` `EscalationEvent` so it shows in the admin audit trail.
+- **UI:** patient capture + consent on the profile page; admin management panel in the Care team tab (RBAC = `canAssignCareTeam`).
+- **Tests:** backend unit — 24 green (dispatch flag/consent/channel/idempotency/event + CRUD consent/validation/audit + escalation). Full backend jest suite **green: 1005 / 1005**. UI E2E (Playwright) deferred — needs the migration applied to a live test DB + `RUN_WRITE_TESTS=1`.
+- **Flag:** `CAREGIVER_DISPATCH_ENABLED` stays **false**. Flip to `true` in dev/staging only after (a) the migration is applied and (b) pilot/compliance sign-off on PHI-over-email (Duwaragie + counsel). Keep OFF in prod.
+
+**Follow-ons in the same branch:** B.1 (3 palpitation-rule scenarios + cleared from §F.1 gate), B.2 (reconciled 3 stale specs → backend suite green 1005), B.3 (escalation ladder shapes hoisted to `@cardioplace/shared` + backend↔shared drift guard).
+
+---
+
 ## Bottom line
 
 | | Backend unit (jest) | Playwright (no-write, local) | Write-gated + full matrix |

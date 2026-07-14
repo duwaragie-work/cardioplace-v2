@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { Bell, Menu, X, Globe } from 'lucide-react';
+import { Bell, Menu, X, Globe, User as UserIcon, Settings, LifeBuoy, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { getAlerts, getNotifications } from '@/lib/services/journal.service';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -12,12 +12,14 @@ import { ALL_LOCALES, isLocaleSupported } from '@/i18n';
 
 export default function Navbar() {
   const pathname = usePathname();
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading, logout } = useAuth();
   const { locale, setLocale, t } = useLanguage();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
   const [langOpen, setLangOpen] = useState(false);
   const langRef = useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -89,6 +91,17 @@ export default function Navbar() {
     if (langOpen) document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [langOpen]);
+
+  // Close the profile dropdown on outside click.
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    if (menuOpen) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
 
   const userInitials = isLoading
     ? ''
@@ -163,7 +176,7 @@ export default function Navbar() {
           <div className="relative" ref={langRef}>
             <button
               onClick={() => setLangOpen((v) => !v)}
-              className="flex items-center gap-1 h-8 px-2 rounded-lg text-[12px] font-semibold transition hover:opacity-80"
+              className="flex items-center gap-1 h-8 px-2 rounded-lg text-[0.75rem] font-semibold transition hover:opacity-80"
               style={{
                 backgroundColor: langOpen ? 'rgba(255,255,255,0.2)' : 'transparent',
                 color: 'rgba(255,255,255,0.85)',
@@ -192,7 +205,7 @@ export default function Navbar() {
                         setLocale(l.code);
                         setLangOpen(false);
                       }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-[13px] transition hover:bg-gray-50"
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-[0.8125rem] transition hover:bg-gray-50"
                       style={{
                         backgroundColor: active ? 'var(--brand-primary-purple-light)' : undefined,
                         color: active
@@ -205,7 +218,7 @@ export default function Navbar() {
                       <span className="flex-1">{l.nativeName}</span>
                       {!supported && (
                         <span
-                          className="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                          className="px-1.5 py-0.5 rounded text-[0.625rem] font-bold"
                           style={{
                             backgroundColor: 'var(--brand-warning-amber-light)',
                             color: 'var(--brand-warning-amber-text)',
@@ -239,7 +252,7 @@ export default function Navbar() {
             />
             {alertCount > 0 && (
               <span
-                className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
+                className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[0.625rem] font-bold text-white"
                 style={{ backgroundColor: 'var(--brand-warning-amber)' }}
               >
                 {alertCount > 9 ? '9+' : alertCount}
@@ -247,15 +260,101 @@ export default function Navbar() {
             )}
           </Link>
 
-          <Link
-            href="/profile"
-            data-testid="navbar-sign-out-button"
-            onClick={() => setMobileOpen(false)}
-            className="w-9 h-9 rounded-full flex items-center justify-center font-semibold text-sm shrink-0"
-            style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: 'white', border: '1.5px solid rgba(255,255,255,0.3)' }}
-          >
-            {userInitials}
-          </Link>
+          {/* Profile dropdown — Profile / Settings / Sign out */}
+          <div className="relative" ref={menuRef}>
+            <button
+              type="button"
+              data-testid="navbar-profile-button"
+              onClick={() => { setMenuOpen((v) => !v); setMobileOpen(false); }}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label="Account menu"
+              className="w-9 h-9 rounded-full flex items-center justify-center font-semibold text-sm shrink-0 cursor-pointer"
+              style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: 'white', border: '1.5px solid rgba(255,255,255,0.3)' }}
+            >
+              {userInitials}
+            </button>
+
+            {menuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl overflow-hidden z-50"
+                style={{
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+                  border: '1px solid var(--brand-border)',
+                }}
+              >
+                {/* Identity header */}
+                <div
+                  className="px-4 py-3"
+                  style={{ borderBottom: '1px solid var(--brand-border)' }}
+                >
+                  <p
+                    className="text-[13px] font-bold truncate"
+                    style={{ color: 'var(--brand-text-primary)' }}
+                  >
+                    {user?.name || 'Account'}
+                  </p>
+                  {user?.email && (
+                    <p
+                      className="text-[11.5px] truncate"
+                      style={{ color: 'var(--brand-text-muted)' }}
+                    >
+                      {user.email}
+                    </p>
+                  )}
+                </div>
+
+                <Link
+                  href="/profile"
+                  role="menuitem"
+                  data-testid="navbar-menu-profile"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2.5 px-4 py-3 text-[13.5px] font-medium transition hover:bg-gray-50"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  <UserIcon className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+                  {t('profile.title')}
+                </Link>
+                <Link
+                  href="/settings"
+                  role="menuitem"
+                  data-testid="navbar-menu-settings"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2.5 px-4 py-3 text-[13.5px] font-medium transition hover:bg-gray-50"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  <Settings className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+                  {t('settings.title')}
+                </Link>
+                <Link
+                  href="/support/my-tickets"
+                  role="menuitem"
+                  data-testid="navbar-menu-support"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2.5 px-4 py-3 text-[13.5px] font-medium transition hover:bg-gray-50"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  <LifeBuoy className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+                  {t('nav.support')}
+                </Link>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="navbar-sign-out-button"
+                  onClick={() => { setMenuOpen(false); void logout(); }}
+                  className="w-full flex items-center gap-2.5 px-4 py-3 text-[13.5px] font-medium transition hover:bg-[var(--brand-alert-red-light)] cursor-pointer text-left"
+                  style={{
+                    color: 'var(--brand-alert-red)',
+                    borderTop: '1px solid var(--brand-border)',
+                  }}
+                >
+                  <LogOut className="w-4 h-4" />
+                  {t('profile.signOut')}
+                </button>
+              </div>
+            )}
+          </div>
 
           <button
             className="md:hidden p-1"

@@ -22,6 +22,7 @@ import {
   acknowledgeAlert,
   type DeviationAlertDto,
 } from '@/lib/services/journal.service';
+import { getProfile } from '@/lib/services/auth.service';
 import EmergencyAlertScreen from '@/components/alerts/EmergencyAlertScreen';
 import TierAlertView from '@/components/alerts/TierAlertView';
 
@@ -102,13 +103,13 @@ function CareTeamOnly() {
           />
         </div>
         <h1
-          className="text-[20px] font-bold mb-2"
+          className="text-[1.25rem] font-bold mb-2"
           style={{ color: 'var(--brand-text-primary)' }}
         >
           Reviewed by your care team
         </h1>
         <p
-          className="text-[13.5px] mb-6 leading-relaxed"
+          className="text-[0.84375rem] mb-6 leading-relaxed"
           style={{ color: 'var(--brand-text-secondary)' }}
         >
           {t('alerts.notFound.tier2')}
@@ -116,7 +117,7 @@ function CareTeamOnly() {
         <button
           type="button"
           onClick={() => router.push('/dashboard')}
-          className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-white font-bold text-[14px] cursor-pointer"
+          className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
           style={{
             backgroundColor: 'var(--brand-primary-purple)',
             boxShadow: 'var(--brand-shadow-button)',
@@ -151,13 +152,13 @@ function NotFound({ reason }: { reason: string }) {
           />
         </div>
         <h1
-          className="text-[20px] font-bold mb-2"
+          className="text-[1.25rem] font-bold mb-2"
           style={{ color: 'var(--brand-text-primary)' }}
         >
           {t('alerts.notFound.title')}
         </h1>
         <p
-          className="text-[13.5px] mb-6 leading-relaxed"
+          className="text-[0.84375rem] mb-6 leading-relaxed"
           style={{ color: 'var(--brand-text-secondary)' }}
         >
           {reason}
@@ -165,7 +166,7 @@ function NotFound({ reason }: { reason: string }) {
         <button
           type="button"
           onClick={() => router.push('/dashboard')}
-          className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-white font-bold text-[14px] cursor-pointer"
+          className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
           style={{
             backgroundColor: 'var(--brand-primary-purple)',
             boxShadow: 'var(--brand-shadow-button)',
@@ -190,6 +191,12 @@ export default function AlertDetailPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ackLoading, setAckLoading] = useState(false);
+  // F27 — the escalation pipeline defers ALL dispatch until the patient is
+  // ENROLLED, so a pre-enrollment patient's care team has NOT been notified.
+  // Surface that truthfully instead of a false reassurance. Default false so
+  // an enrolled patient (or a transient profile-load failure) never gets the
+  // scarier pre-enrollment copy by mistake.
+  const [isPreEnrollment, setIsPreEnrollment] = useState(false);
   // Cluster 6 Q4 (Manisha 5/9/26) — when a pregnant patient at 175/115 fires
   // both BP_LEVEL_2 + RULE_PREGNANCY_ACE_ARB, surface them sequentially:
   // 911 screen first, then route to the Tier-1 ACE/ARB contraindication
@@ -203,6 +210,27 @@ export default function AlertDetailPage({ params }: PageProps) {
       router.replace('/sign-in');
     }
   }, [isAuthenticated, isLoading, router]);
+
+  // F27 — resolve the patient's enrollment status so the alert surfaces can
+  // tell the truth about whether the care team was actually notified.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await getProfile();
+        if (!cancelled) {
+          setIsPreEnrollment(p?.enrollmentStatus != null && p.enrollmentStatus !== 'ENROLLED');
+        }
+      } catch {
+        // Leave the default (false) — never show the pre-enrollment notice on
+        // a transient profile-load failure.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isLoading]);
 
   // Fetch alerts and find by id
   useEffect(() => {
@@ -313,11 +341,16 @@ export default function AlertDetailPage({ params }: PageProps) {
     tier === 'TIER_1_ANGIOEDEMA' ||
     (tier == null && (sbp >= 180 || dbp >= 120));
 
-  if (tier === 'TIER_2_DISCREPANCY') {
-    // Tier 2 is admin-only per V2-C. Patients shouldn't land here from
-    // the dashboard (Recent Alerts filters Tier 2 out), but a stale link
-    // or bookmark can still lead here — render a friendly "reviewed by
-    // your care team" screen instead of a misleading "not found" error.
+  const hasPatientMessage =
+    typeof alert.patientMessage === 'string' &&
+    alert.patientMessage.trim().length > 0;
+  if (tier === 'TIER_2_DISCREPANCY' && !hasPatientMessage) {
+    // Tier 2 with NO patient-facing message is admin-only per V2-C. Patients
+    // shouldn't land here, but a stale link or bookmark can still lead here —
+    // render a friendly "reviewed by your care team" screen instead of a
+    // misleading "not found" error. F32 — a Tier 2 that DOES carry a
+    // patientMessage (e.g. the A5-3 beta-blocker carve-out) is patient-facing
+    // and falls through to the normal TierAlertView below.
     return <CareTeamOnly />;
   }
 
@@ -327,7 +360,13 @@ export default function AlertDetailPage({ params }: PageProps) {
   // instead of being trapped on a 911-prompt with no exit.
   const isResolved = alert.status === 'ACKNOWLEDGED' || alert.status === 'RESOLVED';
   if (isEmergency && !isResolved) {
-    return <EmergencyAlertScreen alert={alert} onAcknowledge={handleAcknowledge} />;
+    return (
+      <EmergencyAlertScreen
+        alert={alert}
+        onAcknowledge={handleAcknowledge}
+        isPreEnrollment={isPreEnrollment}
+      />
+    );
   }
 
   return (
@@ -335,6 +374,7 @@ export default function AlertDetailPage({ params }: PageProps) {
       alert={alert}
       acknowledging={ackLoading}
       onAcknowledge={handleAcknowledge}
+      isPreEnrollment={isPreEnrollment}
     />
   );
 }

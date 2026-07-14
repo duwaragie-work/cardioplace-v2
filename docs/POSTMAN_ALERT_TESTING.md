@@ -214,7 +214,7 @@ Tier 1 is non-dismissable, fires regardless of BP, takes precedence over BP-leve
 | Field | Value |
 |---|---|
 | Patient | `priya.menon@cardioplace.test` |
-| Pre-conditions | Profile: `isPregnant=true`, `historyPreeclampsia=true`. Meds: Lisinopril ACE_INHIBITOR VERIFIED. (All seeded — no setup needed.) |
+| Pre-conditions | Profile: `isPregnant=true`, `historyHDP=true`. Meds: Lisinopril ACE_INHIBITOR VERIFIED. (All seeded — no setup needed.) |
 | Endpoint | `POST {{baseUrl}}/api/daily-journal` |
 
 Payload:
@@ -394,7 +394,7 @@ Payload `144/88, pulse 82`. **Expected:** `RULE_PREGNANCY_L1_HIGH`, `tier: "BP_L
 
 | Patient | `charles.brown@cardioplace.test` |
 
-This requires **3 readings in the same session** (AFib gate). Charles is configured for this — log the same payload 3 times within a 30-min window:
+This requires **3 readings in the same session** (AFib gate). Charles is configured for this — log the same payload 3 times within a 5-min window:
 
 Payload (run 3×, increment `measuredAt` by 1 minute each time, same `sessionId` UUID):
 ```json

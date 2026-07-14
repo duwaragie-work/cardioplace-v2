@@ -97,7 +97,16 @@ export class PracticeService {
       include: { _count: { select: { assignments: true } } },
     })
     if (!practice) throw new NotFoundException('Practice not found')
-    const staffCounts = await this.staffCounts([id])
+    const [staffCounts, medicalDirectors] = await Promise.all([
+      this.staffCounts([id]),
+      // Heads of this practice — drives the admin-app runtime edit check
+      // (canEditThisPractice): a MED_DIR sees the editor only for practices
+      // whose id list contains their user id.
+      this.prisma.practiceMedicalDirector.findMany({
+        where: { practiceId: id },
+        select: { userId: true },
+      }),
+    ])
     return {
       statusCode: 200,
       message: 'Practice retrieved',
@@ -112,6 +121,7 @@ export class PracticeService {
         updatedAt: practice.updatedAt,
         patientCount: practice._count.assignments,
         staffCount: staffCounts.get(id) ?? 0,
+        medicalDirectorIds: medicalDirectors.map((m) => m.userId),
       },
     }
   }
@@ -202,23 +212,53 @@ export class PracticeService {
 
   /** Internal: unique staff count per practice id. */
   private async staffCounts(practiceIds: string[]): Promise<Map<string, number>> {
-    const assignments = await this.prisma.patientProviderAssignment.findMany({
-      where: { practiceId: { in: practiceIds } },
-      select: {
-        practiceId: true,
-        primaryProviderId: true,
-        backupProviderId: true,
-        medicalDirectorId: true,
-      },
-    })
+    // Count UNIQUE staff per practice from all sources, mirroring listStaff:
+    //   1. PatientProviderAssignment slots (primary/backup/MD) — legacy
+    //      derivation that still holds for practices with assigned patients.
+    //   2. PracticeProvider — explicit provider membership (invite/OPS add).
+    //   3. PracticeMedicalDirector — explicit MD membership.
+    //   4. PracticeCoordinator — the practice's coordinator.
+    // Without 2–4 a freshly-staffed practice with no patient assignments yet
+    // reported 0 staff even though providers/MDs/coordinators were members.
+    const [assignments, providers, mds, coordinators] = await Promise.all([
+      this.prisma.patientProviderAssignment.findMany({
+        where: { practiceId: { in: practiceIds } },
+        select: {
+          practiceId: true,
+          primaryProviderId: true,
+          backupProviderId: true,
+          medicalDirectorId: true,
+        },
+      }),
+      this.prisma.practiceProvider.findMany({
+        where: { practiceId: { in: practiceIds } },
+        select: { practiceId: true, userId: true },
+      }),
+      this.prisma.practiceMedicalDirector.findMany({
+        where: { practiceId: { in: practiceIds } },
+        select: { practiceId: true, userId: true },
+      }),
+      this.prisma.practiceCoordinator.findMany({
+        where: { practiceId: { in: practiceIds } },
+        select: { practiceId: true, userId: true },
+      }),
+    ])
     const buckets = new Map<string, Set<string>>()
-    for (const a of assignments) {
-      const set = buckets.get(a.practiceId) ?? new Set<string>()
-      set.add(a.primaryProviderId)
-      set.add(a.backupProviderId)
-      set.add(a.medicalDirectorId)
-      buckets.set(a.practiceId, set)
+    const add = (practiceId: string, userId: string | null | undefined) => {
+      if (!userId) return
+      const set = buckets.get(practiceId) ?? new Set<string>()
+      set.add(userId)
+      buckets.set(practiceId, set)
     }
+    for (const a of assignments) {
+      add(a.practiceId, a.primaryProviderId)
+      add(a.practiceId, a.backupProviderId)
+      add(a.practiceId, a.medicalDirectorId)
+    }
+    for (const p of providers) add(p.practiceId, p.userId)
+    for (const m of mds) add(m.practiceId, m.userId)
+    for (const c of coordinators) add(c.practiceId, c.userId)
+
     const out = new Map<string, number>()
     for (const [pid, set] of buckets) out.set(pid, set.size)
     return out
@@ -307,6 +347,29 @@ export class PracticeService {
   }
 
   async removeProvider(practiceId: string, userId: string) {
+    // Reassign-stale guard (phase/28) — a provider who is still the primary or
+    // backup on any patient's assignment in this practice cannot be removed
+    // until an admin reassigns those patients. Block with 409 + the orphan list
+    // so the FE can drive the reassignment.
+    const orphans = await this.prisma.patientProviderAssignment.findMany({
+      where: {
+        practiceId,
+        OR: [{ primaryProviderId: userId }, { backupProviderId: userId }],
+      },
+      select: { userId: true, primaryProviderId: true, backupProviderId: true },
+    })
+    if (orphans.length > 0) {
+      throw new ConflictException({
+        message:
+          'This provider is still assigned to patients. Reassign them before removing the provider.',
+        errorCode: 'PROVIDER_HAS_ASSIGNMENTS',
+        orphanedPatients: orphans.map((o) => ({
+          patientId: o.userId,
+          role: o.primaryProviderId === userId ? 'PRIMARY' : 'BACKUP',
+        })),
+      })
+    }
+
     await this.prisma.practiceProvider.deleteMany({
       where: { practiceId, userId },
     })
@@ -331,6 +394,24 @@ export class PracticeService {
   }
 
   async removeMedicalDirector(practiceId: string, userId: string) {
+    // Reassign-stale guard (phase/28) — same rule as removeProvider, for the
+    // medicalDirector slot on the assignment.
+    const orphans = await this.prisma.patientProviderAssignment.findMany({
+      where: { practiceId, medicalDirectorId: userId },
+      select: { userId: true },
+    })
+    if (orphans.length > 0) {
+      throw new ConflictException({
+        message:
+          'This medical director is still assigned to patients. Reassign them before removing.',
+        errorCode: 'MEDICAL_DIRECTOR_HAS_ASSIGNMENTS',
+        orphanedPatients: orphans.map((o) => ({
+          patientId: o.userId,
+          role: 'MEDICAL_DIRECTOR',
+        })),
+      })
+    }
+
     await this.prisma.practiceMedicalDirector.deleteMany({
       where: { practiceId, userId },
     })

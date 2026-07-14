@@ -1,5 +1,6 @@
 import {
   IsEnum,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -27,4 +28,14 @@ export class ResolveAlertDto {
   @MinLength(3, { message: 'resolutionRationale must be at least 3 characters' })
   @MaxLength(2000)
   resolutionRationale?: string
+
+  /**
+   * Manisha 5/24 Q4 — conditional sub-fields for angioedema resolution actions
+   * (willGo, facility, replacementOrdered, replacementMed, outcome,
+   * actualCause). Persisted to DeviationAlert.resolutionDetails. Required
+   * sub-fields are validated per-action in AlertResolutionService.resolve.
+   */
+  @IsOptional()
+  @IsObject()
+  resolutionDetails?: Record<string, unknown>
 }

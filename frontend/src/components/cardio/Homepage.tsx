@@ -1,15 +1,22 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Mic, Send, Activity, Heart, MessageCircle, CheckCircle, AlertTriangle, Brain, Building2 } from 'lucide-react';
+import { Mic, Send, Activity, Heart, MessageCircle, CheckCircle, AlertTriangle, Brain, Building2, Play, X } from 'lucide-react';
 import { BsSoundwave } from "react-icons/bs";
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/lib/auth-context';
 import LandingHeader from './LandingHeader';
 import LandingFooter from './LandingFooter';
+
+// Demo walkthrough — YouTube unlisted upload.
+// Source: https://www.youtube.com/watch?v=IcFdT3Kz-40
+// To swap providers (e.g. back to the Drive preview at
+// https://drive.google.com/file/d/155WXpSh3daRqoKoIlGgR7lO61mkzVCxI/preview),
+// change this constant AND the iframe src in the modal below.
+const YOUTUBE_VIDEO_ID = 'IcFdT3Kz-40';
 
 export default function Homepage() {
   const { t } = useLanguage();
@@ -21,6 +28,34 @@ export default function Homepage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
   const loggedIn = mounted && isAuthenticated;
+
+  // Demo video modal state. iframe is unmounted on close so playback
+  // stops; we lock body scroll, wire Esc/backdrop dismissal, and return
+  // focus to the play button after close.
+  const [showDemo, setShowDemo] = useState(false);
+  // Cleared every time the modal opens so the spinner shows on first frame
+  // and is hidden by the iframe's onLoad once YouTube finishes streaming in.
+  const [videoLoaded, setVideoLoaded] = useState(false);
+  const playButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!showDemo) return;
+    setVideoLoaded(false);
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowDemo(false);
+    };
+    window.addEventListener('keydown', handleKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', handleKey);
+      document.body.style.overflow = '';
+      // The play button lives in the page, not the modal — it is always
+      // mounted while this effect can fire, so .current is stable across
+      // the effect lifecycle.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      playButtonRef.current?.focus();
+    };
+  }, [showDemo]);
 
   const handleChatClick = () => {
     if (!isAuthenticated) return router.push('/sign-in');
@@ -45,7 +80,7 @@ export default function Homepage() {
           <div className="lg:hidden absolute top-10 left-4 sm:top-6 sm:left-6 z-20">
             <div className="bg-[#7b00e0] inline-flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full">
               <Activity className="w-3 h-3 text-white" />
-              <span className="font-semibold text-white text-[9px] sm:text-[10px] md:text-xs">{t('home.heroBadge')}</span>
+              <span className="font-semibold text-white text-[0.5625rem] sm:text-[0.625rem] md:text-xs">{t('home.heroBadge')}</span>
             </div>
           </div>
 
@@ -62,7 +97,7 @@ export default function Homepage() {
                     Previously rendered as two <h1>s which the audit flagged
                     as a WCAG violation (heading-order / single-h1-per-page). */}
                 <div className="hidden lg:block">
-                  <h1 className="font-bold text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[72px] leading-[1.05] tracking-tight"
+                  <h1 className="font-bold text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[4.5rem] leading-[1.05] tracking-tight"
                     style={{ textShadow: '0 2px 10px rgba(0,0,0,0.4)', color: '#ffffff' }}>
                     <span className="block">{t('home.heroTitle1')}</span>
                     <span
@@ -107,7 +142,7 @@ export default function Homepage() {
                     onFocus={handleChatClick}
                     placeholder={t('home.aiPlaceholder')}
                     aria-label={t('home.aiPlaceholder')}
-                    className="flex-1 px-2 sm:px-4 py-2 sm:py-3 text-sm sm:text-base bg-transparent outline-none text-black placeholder-white min-w-0 cursor-text"
+                    className="flex-1 px-2 sm:px-4 py-2 sm:py-3 text-sm sm:text-base bg-transparent outline-none text-black placeholder:text-white min-w-0 cursor-text"
                   />
                   <button
                     type="submit"
@@ -118,8 +153,8 @@ export default function Homepage() {
                   </button>
                 </form>
                 {/* Prompt chips — single row */}
-                <div className="flex items-center gap-1.5 sm:gap-2 flex-nowrap overflow-x-auto">
-                  <span className="text-white/70 text-[10px] sm:text-xs font-semibold uppercase tracking-wider shrink-0">Try now</span>
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                  <span className="text-white/70 text-[0.625rem] sm:text-xs font-semibold uppercase tracking-wider shrink-0">Try now</span>
                   {(['home.chip1', 'home.chip2', 'home.chip3'] as const).map((key) => (
                     <button
                       key={key}
@@ -131,18 +166,18 @@ export default function Homepage() {
                           router.push('/sign-in');
                         }
                       }}
-                      className="backdrop-blur-md bg-white/15 border border-white/25 text-white text-[8px] sm:text-xs md:text-sm px-2.5 sm:px-3 md:px-4 py-1 sm:py-1.5 rounded-full hover:bg-white/25 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                      className="backdrop-blur-md bg-white/15 border border-white/25 text-white text-[0.5rem] sm:text-xs md:text-sm px-2.5 sm:px-3 md:px-4 py-1 sm:py-1.5 rounded-full hover:bg-white/25 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
                     >
                       {t(key)}
                     </button>
                   ))}
                 </div>
                 {/* CTA buttons — single row */}
-                <div className="flex items-center gap-2 sm:gap-3 md:gap-6 flex-nowrap">
+                <div className="flex items-center gap-2 sm:gap-3 md:gap-6 flex-wrap">
                   <Link href={loggedIn ? '/dashboard' : '/sign-in'} className="bg-[#7b00e0] text-white font-bold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-[#6600bc] transition-colors whitespace-nowrap shrink-0">
                     {loggedIn ? t('home.goToDashboard') : t('home.startCheckin')}
                   </Link>
-                  <Link href="#features" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-gray-600 font-semibold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-white transition-colors whitespace-nowrap shrink-0">
+                  <Link href="#demo" className="backdrop-blur-sm bg-white/80 border border-[#cfc2d8] text-gray-600 font-semibold text-xs sm:text-sm md:text-lg px-5 sm:px-7 md:px-10 py-2.5 sm:py-3 md:py-3.5 rounded-full hover:bg-white transition-colors whitespace-nowrap shrink-0">
                     {t('home.howItWorks')}
                   </Link>
                 </div>
@@ -174,10 +209,60 @@ export default function Homepage() {
           </div>
         </section>
 
+        {/* ============ DEMO VIDEO SECTION ============ */}
+        {/* White background to make the thumbnail the visual anchor against
+            the adjacent #f5eafa partnership banner. scroll-mt-20 keeps the
+            heading clear of the fixed 64px top nav when the hero CTA scrolls
+            here. */}
+        <section id="demo" className="w-full bg-white py-16 md:py-24 scroll-mt-20">
+          <div className="max-w-[1200px] mx-auto px-4 sm:px-6 md:px-8">
+            <div className="flex flex-col md:flex-row items-center gap-8 md:gap-12 lg:gap-16">
+              {/* LEFT — title + description */}
+              <div className="flex-1 flex flex-col gap-4 md:gap-5 text-center md:text-left">
+                <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[2.625rem] leading-tight tracking-tight">
+                  {t('home.demoTitle')}
+                </h2>
+                <p className="text-[#4c4355] text-sm sm:text-base md:text-lg leading-relaxed max-w-[520px] mx-auto md:mx-0">
+                  {t('home.demoDesc')}
+                </p>
+              </div>
+
+              {/* RIGHT — clickable thumbnail */}
+              <button
+                ref={playButtonRef}
+                onClick={() => setShowDemo(true)}
+                aria-label={t('home.demoPlayLabel')}
+                className="flex-1 relative aspect-video w-full max-w-[560px] rounded-2xl overflow-hidden shadow-xl border border-[#eedbff] group cursor-pointer focus:outline-none focus:ring-4 focus:ring-[#7b00e0]/40"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`https://img.youtube.com/vi/${YOUTUBE_VIDEO_ID}/maxresdefault.jpg`}
+                  // YouTube returns a 120×90 placeholder for maxresdefault on
+                  // videos that never had a HD frame generated yet. Swap to
+                  // hqdefault on error so we still get a real thumbnail.
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (!img.src.endsWith('/hqdefault.jpg')) {
+                      img.src = `https://img.youtube.com/vi/${YOUTUBE_VIDEO_ID}/hqdefault.jpg`;
+                    }
+                  }}
+                  alt=""
+                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                />
+                <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                  <div className="bg-[#7b00e0] rounded-full w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                    <Play className="w-7 h-7 sm:w-8 sm:h-8 text-white fill-white ml-1" />
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </section>
+
         {/* ============ FEATURES SECTION ============ */}
         <section id="features" className="w-full max-w-[1280px] px-4 sm:px-6 md:px-8 py-10 md:py-16 lg:py-24">
           <div className="flex flex-col items-center gap-4 md:gap-6 mb-10 md:mb-24">
-            <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center tracking-tight leading-tight">
+            <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[3rem] text-center tracking-tight leading-tight">
               {t('home.sanctuaryTitle')}
             </h2>
             <div className="w-24 md:w-32 h-2 bg-[#7b00e0] rounded-full" />
@@ -231,13 +316,13 @@ export default function Homepage() {
                   style={{ backgroundColor: 'var(--brand-alert-red)' }}
                 >
                   <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                  <span className="text-white text-[8px] sm:text-[9px] font-bold uppercase">Alert</span>
+                  <span className="text-white text-[0.5rem] sm:text-[0.5625rem] font-bold uppercase">Alert</span>
                 </div>
               </div>
 
-              <div className="mt-3 sm:mt-4 flex gap-3">
+              <div className="mt-3 sm:mt-4 flex flex-col gap-2.5">
                 <div
-                  className="flex-1 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3"
+                  className="w-full min-w-0 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3"
                   style={{
                     backgroundColor: 'var(--brand-warning-amber-light)',
                     borderLeft: '4px solid var(--brand-warning-amber)',
@@ -248,18 +333,18 @@ export default function Homepage() {
                   data-axe-debt="avatar-orange-small-text"
                 >
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--brand-warning-amber)' }} />
+                    <div className="w-2 h-2 shrink-0 rounded-full" style={{ backgroundColor: 'var(--brand-warning-amber)' }} />
                     <p
-                      className="text-[10px] sm:text-xs font-bold uppercase tracking-wider"
+                      className="text-[0.625rem] sm:text-xs font-bold uppercase tracking-wider"
                       style={{ color: 'var(--brand-warning-amber-text)' }}
                     >
                       Level 1
                     </p>
                   </div>
-                  <p className="text-[9px] sm:text-[10px]" style={{ color: 'var(--brand-warning-amber-text)' }}>24hr care team review</p>
+                  <p className="text-[0.5625rem] sm:text-[0.625rem] break-words" style={{ color: 'var(--brand-warning-amber-text)' }}>24hr care team review</p>
                 </div>
                 <div
-                  className="flex-1 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3"
+                  className="w-full min-w-0 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3"
                   style={{
                     backgroundColor: 'var(--brand-alert-red-light)',
                     borderLeft: '4px solid var(--brand-alert-red)',
@@ -269,15 +354,15 @@ export default function Homepage() {
                   data-axe-debt="avatar-orange-small-text"
                 >
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: 'var(--brand-alert-red)' }} />
+                    <div className="w-2 h-2 shrink-0 rounded-full animate-pulse" style={{ backgroundColor: 'var(--brand-alert-red)' }} />
                     <p
-                      className="text-[10px] sm:text-xs font-bold uppercase tracking-wider"
+                      className="text-[0.625rem] sm:text-xs font-bold uppercase tracking-wider"
                       style={{ color: 'var(--brand-alert-red-text)' }}
                     >
                       Level 2
                     </p>
                   </div>
-                  <p className="text-[9px] sm:text-[10px]" style={{ color: 'var(--brand-alert-red-text)' }}>Immediate 911 alert</p>
+                  <p className="text-[0.5625rem] sm:text-[0.625rem] break-words" style={{ color: 'var(--brand-alert-red-text)' }}>Immediate 911 alert</p>
                 </div>
               </div>
             </div>
@@ -320,7 +405,7 @@ export default function Homepage() {
         {/* ============ TARGET AUDIENCE ============ */}
         <section className="w-full max-w-[1280px] px-4 sm:px-6 md:px-8 py-10 md:py-12">
           <div className="flex flex-col items-center gap-4 md:gap-6 mb-10 md:mb-20">
-            <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center tracking-tight">
+            <h2 className="font-semibold text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[3rem] text-center tracking-tight">
               {t('home.designedForEveryone')}
             </h2>
             <p className="text-[#4c4355] text-lg md:text-xl lg:text-2xl text-left md:text-center italic font-bold max-w-[672px]">{t('home.forPatientsOpening')}</p>
@@ -337,9 +422,9 @@ export default function Homepage() {
             <div className="bg-[#f9fafb] md:bg-[#f9fafb] border border-[#e5e7eb] rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 md:p-10 shadow-sm">
               <div className="flex items-center gap-4 sm:gap-5 mb-6 sm:mb-8">
                 <div className="bg-white border border-[#ececec] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0 overflow-hidden">
-                  <Image src="/patient.png" alt="Patient" width={32} height={32} className="object-cover" />
+                  <Image src="/patient.png" alt="" aria-hidden="true" width={32} height={32} className="object-cover" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-[#1f1924] text-lg sm:text-xl md:text-2xl font-normal">{t('home.forPatients')}</h3>
                   <p className="text-[#5c00a9] text-xs sm:text-sm font-bold">{t('home.forPatientsSubtitle')}</p>
                 </div>
@@ -360,7 +445,7 @@ export default function Homepage() {
                 <div className="bg-white border border-[#ececec] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0 overflow-hidden">
                   <Image src="/care team.png" alt="Care Team" width={32} height={32} className="object-cover" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-[#1f1924] text-lg sm:text-xl md:text-2xl font-normal">{t('home.forCareTeams')}</h3>
                   <p className="text-[#5c00a9] text-xs sm:text-sm font-bold">{t('home.forCareTeamsSubtitle')}</p>
                 </div>
@@ -381,7 +466,7 @@ export default function Homepage() {
                 <div className="bg-white border border-[#ececec] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0">
                   <Building2 className="w-6 h-6 sm:w-7 sm:h-7 text-[#7b00e0]" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-[#1f1924] text-lg sm:text-xl md:text-2xl font-normal">{t('home.forSystems')}</h3>
                   <p className="text-[#5c00a9] text-xs sm:text-sm font-bold">{t('home.forSystemsSubtitle')}</p>
                 </div>
@@ -401,7 +486,7 @@ export default function Homepage() {
         {/* ============ CTA ============ */}
         <section className="w-full">
           <div className="w-full p-8 sm:p-10 md:p-16 flex flex-col items-center gap-6 md:gap-8 bg-[#f5eafa]" >
-            <h2 className="text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[48px] text-center font-semibold max-w-[1024px]">{t('home.ctaTitle')}</h2>
+            <h2 className="text-[#7b00e0] text-2xl sm:text-3xl md:text-4xl lg:text-[3rem] text-center font-semibold max-w-[1024px]">{t('home.ctaTitle')}</h2>
             <p className="text-gray-700 text-sm sm:text-base md:text-xl text-left md:text-center leading-relaxed max-w-[672px]">{t('home.ctaDesc')}</p>
             <Link href="/about" className="bg-[#7b00e0] text-white font-semibold text-base md:text-lg px-8 md:px-12 py-3 md:py-3.5 rounded-full hover:bg-[#9333ea] transition-colors mt-2">
               {t('home.ctaButton')}
@@ -414,6 +499,52 @@ export default function Homepage() {
 
         <LandingFooter />
       </main>
+
+      {/* ============ DEMO VIDEO MODAL ============ */}
+      {/* Conditionally mounted so the iframe is destroyed on close — that's
+          how playback is stopped (no postMessage handshake needed). */}
+      {showDemo && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('home.demoTitle')}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowDemo(false); }}
+        >
+          <div className="relative w-full max-w-5xl aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl">
+            <button
+              onClick={() => setShowDemo(false)}
+              aria-label={t('home.demoCloseLabel')}
+              autoFocus
+              className="absolute -top-12 right-0 sm:top-3 sm:right-3 z-10 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white rounded-full p-2 flex items-center justify-center transition-colors focus:outline-none focus:ring-2 focus:ring-white/60"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            {/* Centered spinner while the YouTube iframe streams in. Hidden
+                once `onLoad` fires (YT player UI then covers the parent's
+                black background). pointer-events-none so it never eats the
+                close button's click. */}
+            {!videoLoaded && (
+              <div
+                aria-hidden="true"
+                className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              >
+                <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+              </div>
+            )}
+            <iframe
+              src={`https://www.youtube.com/embed/${YOUTUBE_VIDEO_ID}?autoplay=1&rel=0&modestbranding=1`}
+              title="Cardioplace — 5-minute platform walkthrough"
+              width="100%"
+              height="100%"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              onLoad={() => setVideoLoaded(true)}
+              className="w-full h-full"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

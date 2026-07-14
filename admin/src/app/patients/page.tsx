@@ -53,20 +53,42 @@ import {
   CheckCircle2,
   Loader2,
   Info,
+  UserCheck,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
-import { canCompleteEnrollment, canVerifyProfile, hasAdminRole } from '@/lib/roleGates';
+import { canCompleteEnrollment, canVerifyProfile, hasAdminRole, isCoordinatorOnly, isProviderOnly } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getPatients, getPatientSummary } from '@/lib/services/provider.service';
+import CoordinatorPatientsView from '@/components/coordinator/CoordinatorPatientsView';
 import {
   completePatientEnrollment,
   ENROLLMENT_REASON_LABELS,
   type EnrollmentGateReason,
 } from '@/lib/services/practice.service';
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Formats a canonical display ID ("CPPATK8M2R4N7") with hyphens for human
+ * display ("CP-PAT-K8M2R4N-7"). Defensive: if input is already hyphenated
+ * or off the expected length, returns it verbatim. Mirrors the formatter
+ * in DisplayIdService.formatForDisplay — kept local so the admin app
+ * doesn't reach into backend internals.
+ */
+function formatDisplayId(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value;
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Patient {
   id: string;
+  // Permanent public-facing identifier (CP-PAT-...). Set at account
+  // creation; locked forever. Surfaced under the patient name on row +
+  // detail header so coordinators can quote it on calls and clinicians
+  // can paste it into other systems. See
+  // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+  displayId: string | null;
   name: string | null;
   email: string | null;
   riskTier: string;
@@ -77,7 +99,7 @@ interface Patient {
    *  (CLINICAL_SPEC §3 enhanced-monitoring marker for women with a
    *  documented history, including outside pregnancy). */
   isPregnant?: boolean;
-  historyPreeclampsia?: boolean;
+  historyHDP?: boolean;
   onboardingStatus: string;
   // Clinical enrollment state (admin-owned). `onboardingStatus` above is
   // identity onboarding only (name/DOB/timezone). See TESTING_FLOW_GUIDE §4.1.
@@ -89,6 +111,11 @@ interface Patient {
    *  tint + the "Threshold needed" filter chip. Matches the detail-page banner. */
   needsThreshold?: boolean;
   latestBaseline: { baselineSystolic: number; baselineDiastolic: number } | null;
+  /** True when the signed-in provider is the primary or backup provider on this
+   *  patient's assignment. Drives the "Yours" badge + mine-first sort + "My
+   *  patients" filter chip. Always false for MED_DIR / OPS / SUPER (the UI
+   *  suppresses the distinction for those roles). */
+  assignedToMe?: boolean;
   activeAlertsCount: number;
   alertsByTier: Record<string, number>;
   lastEntryDate: string | null;
@@ -314,7 +341,8 @@ function tierChrome(tier: string | null): {
     case 'BP_LEVEL_1_LOW':
       return { bg: 'var(--brand-warning-amber-light)', color: 'var(--brand-warning-amber-text)', label: 'BP L1', short: 'L1' };
     case 'TIER_3_INFO':
-      return { bg: 'var(--brand-accent-teal-light)', color: 'var(--brand-accent-teal)', label: 'Tier 3', short: 'T3' };
+      // Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — Tier 3 = info-blue.
+      return { bg: 'var(--brand-info-blue-light)', color: 'var(--brand-info-blue)', label: 'Tier 3', short: 'T3' };
     default:
       return { bg: 'var(--brand-background)', color: 'var(--brand-text-muted)', label: 'Open', short: 'OP' };
   }
@@ -631,7 +659,16 @@ function PatientModal({
             </div>
             <div>
               <h3 className="text-white font-bold text-[16px]">{patient.name ?? 'Unknown'}</h3>
-              <p className="text-white/70 text-[12px]">{patient.email ?? '--'}</p>
+              <p className="text-white text-[12px]">{patient.email ?? '--'}</p>
+              {patient.displayId ? (
+                <p
+                  className="text-white/80 text-[11px] font-mono mt-0.5"
+                  data-testid="patient-display-id"
+                  title="Cardioplace ID — quote this on support calls"
+                >
+                  {formatDisplayId(patient.displayId)}
+                </p>
+              ) : null}
             </div>
           </div>
           <button
@@ -752,16 +789,25 @@ function PatientModal({
                               {entry.systolicBP && entry.diastolicBP ? `${entry.systolicBP}/${entry.diastolicBP}` : '--'}
                             </td>
                             <td className="px-3 py-2">
-                              <span
-                                className="inline-block w-2 h-2 rounded-full"
-                                style={{
-                                  backgroundColor: entry.medicationTaken
-                                    ? 'var(--brand-success-green)'
-                                    : entry.medicationTaken === false
-                                    ? 'var(--brand-alert-red)'
-                                    : 'var(--brand-border)',
-                                }}
-                              />
+                              {(() => {
+                                // WCAG 1.4.1 — don't rely on the dot colour alone;
+                                // pair it with a text label (Taken / Missed / —).
+                                const meta = entry.medicationTaken
+                                  ? { color: 'var(--brand-success-green)', label: 'Taken' }
+                                  : entry.medicationTaken === false
+                                  ? { color: 'var(--brand-alert-red)', label: 'Missed' }
+                                  : { color: 'var(--brand-border)', label: '—' };
+                                return (
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span
+                                      className="inline-block w-2 h-2 rounded-full shrink-0"
+                                      style={{ backgroundColor: meta.color }}
+                                      aria-hidden
+                                    />
+                                    <span style={{ color: 'var(--brand-text-secondary)' }}>{meta.label}</span>
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-3 py-2" style={{ color: 'var(--brand-text-muted)' }}>
                               {entry.symptoms.length > 0 ? entry.symptoms.join(', ') : 'None'}
@@ -858,6 +904,10 @@ export default function PatientsPage() {
   // Threshold-attention quick-toggle — "show only patients who need a threshold
   // set or re-reviewed". Mirrors the awaiting filter; the chip pulses when >0.
   const [thresholdNeededOnly, setThresholdNeededOnly] = useState(false);
+  // "My patients only" quick-toggle — narrows the practice-wide list to the
+  // provider's own caseload (assignedToMe). Client-side only; the list stays
+  // practice-wide by default (Layer 1). Only meaningful for a plain PROVIDER.
+  const [myPatientsOnly, setMyPatientsOnly] = useState(false);
 
   // Flow K3 — per-row enrollment state. Loading state for the in-flight CTA
   // and a per-patient cache of 409 reasons returned by the backend gate.
@@ -901,6 +951,11 @@ export default function PatientsPage() {
       .finally(() => setSummaryLoading(false));
   }, [selectedPatient]);
 
+  // Ownership distinction only applies to a plain PROVIDER — MED_DIR / OPS /
+  // SUPER are never in a provider slot, so the "Yours" badge, the mine-first
+  // sort, and the "My patients" chip are all suppressed for them.
+  const showOwnership = !!user && isProviderOnly(user);
+
   // Filter + search
   const filtered = patients.filter((p) => {
     if (riskFilter !== 'ALL' && p.riskTier !== riskFilter) return false;
@@ -913,6 +968,9 @@ export default function PatientsPage() {
     if (thresholdNeededOnly && !p.needsThreshold) {
       return false;
     }
+    if (showOwnership && myPatientsOnly && !p.assignedToMe) {
+      return false;
+    }
     if (search) {
       const q = search.toLowerCase();
       return (
@@ -923,11 +981,27 @@ export default function PatientsPage() {
     return true;
   });
 
+  // Mine-first ordering for providers — their own caseload rises to the top
+  // while everyone else's practice patients stay visible below. Stable sort
+  // (V8) preserves the existing within-group order. Suppressed for non-
+  // providers, whose list has no ownership concept.
+  if (showOwnership) {
+    filtered.sort(
+      (a, b) => Number(!!b.assignedToMe) - Number(!!a.assignedToMe),
+    );
+  }
+
   // ─── Auth guard ───────────────────────────────────────────────────────────
   if (isLoading) return null;
   // No user (logged out / mid-navigation) — render nothing so the
   // role-mismatch screen doesn't flash before window.location.href fires.
   if (!user) return null;
+
+  // COORDINATOR (front-desk) gets a restricted, no-clinical roster + care-team
+  // assignment view — not the clinical patient list below.
+  if (isCoordinatorOnly(user)) {
+    return <CoordinatorPatientsView />;
+  }
 
   if (!hasAdminRole(user)) {
     return (
@@ -961,8 +1035,10 @@ export default function PatientsPage() {
     <div className="h-full" style={{ backgroundColor: '#FAFBFF' }}>
       <style>{thresholdPulseStyles}</style>
       <div className="max-w-6xl mx-auto px-4 md:px-8 py-6">
-        {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+        {/* Page Header — one fully-wrapping flex row: the title block, search,
+            and every filter chip are wrapping siblings, so at any width they
+            reflow onto as many lines as needed instead of cramming or clipping. */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div className="flex items-center gap-3">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center"
@@ -980,15 +1056,10 @@ export default function PatientsPage() {
             </div>
           </div>
 
-          {/* Filter cluster — responsive:
-             • Mobile (<sm): search bar gets its own full-width row;
-               filter chips sit below in a horizontal-scroll strip so a
-               350px screen never has to fit 3 controls side-by-side.
-             • sm: search shrinks to fixed width and joins the filter
-               row inline.
-             • md+: everything sits on the same line as the title.
-          */}
-          <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:items-center">
+          {/* Filter cluster — a wrapping flex group. Search + chips flow onto
+             new lines as the viewport narrows; nothing is pinned to a single
+             row. */}
+          <div className="flex flex-wrap items-center gap-2">
             {/* Search */}
             <div
               className="flex items-center gap-2 px-3 h-9 rounded-full w-full sm:w-56"
@@ -1000,6 +1071,7 @@ export default function PatientsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t('provider.searchPatients')}
+                aria-label={t('provider.searchPatients')}
                 data-testid="admin-patient-search-input"
                 className="flex-1 text-[12px] outline-none bg-transparent min-w-0"
                 style={{ color: 'var(--brand-text-primary)' }}
@@ -1011,21 +1083,18 @@ export default function PatientsPage() {
               )}
             </div>
 
-            {/* Filter chip row — wraps on tablet, scroll-x on phone so it
-                never breaks layout. -mx-4 + px-4 lets the scroll strip
-                bleed to the screen edges on mobile so users can flick
-                without bumping the page padding. */}
-            <div
-              className="flex items-center gap-2 overflow-x-auto sm:overflow-visible -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 sm:pb-0"
-              style={{ scrollbarWidth: 'thin' }}
-            >
+            {/* Filter chips — wrap freely; pt-1 leaves room for the threshold
+                chip's pulsing ring (a box-shadow that would clip if an ancestor
+                scrolled). */}
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pt-1 sm:pt-0">
               {/* Risk filter */}
               <div className="relative shrink-0">
                 <select
                   value={riskFilter}
                   onChange={(e) => setRiskFilter(e.target.value)}
+                  aria-label={t('provider.allTiers')}
                   data-testid="admin-patient-risk-filter"
-                  className="appearance-none h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
+                  className="appearance-none w-auto h-9 pl-3 pr-7 rounded-full text-[12px] font-semibold outline-none cursor-pointer"
                   style={{
                     backgroundColor: 'white',
                     border: '1.5px solid var(--brand-border)',
@@ -1060,18 +1129,18 @@ export default function PatientsPage() {
                     data-testid="admin-patient-awaiting-filter"
                     aria-pressed={active}
                     aria-label={active ? 'Showing only unverified patients' : 'Filter to unverified patients'}
-                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
+                    className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
                     style={{
                       backgroundColor: active ? 'var(--brand-warning-amber)' : 'var(--brand-warning-amber-light)',
                       color: active ? 'white' : 'var(--brand-warning-amber)',
                       border: `1.5px solid ${active ? 'var(--brand-warning-amber)' : 'transparent'}`,
                     }}
                   >
-                    <ShieldAlert className="w-3 h-3" />
+                    <ShieldAlert className="w-3 h-3 shrink-0" />
                     <span className="hidden md:inline">Awaiting verification</span>
-                    <span className="md:hidden">Unverified</span>
+                    <span className="md:hidden truncate">Unverified</span>
                     <span
-                      className="text-[10px] font-bold px-1.5 rounded-full"
+                      className="text-[10px] font-bold px-1.5 rounded-full shrink-0"
                       style={{
                         backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
                         color: active ? 'white' : 'var(--brand-warning-amber)',
@@ -1083,7 +1152,7 @@ export default function PatientsPage() {
                     </span>
                     {active && (
                       <X
-                        className="w-3 h-3"
+                        className="w-3 h-3 shrink-0"
                         onClick={(e) => {
                           e.stopPropagation();
                           setAwaitingVerificationOnly(false);
@@ -1109,7 +1178,7 @@ export default function PatientsPage() {
                     data-testid="admin-patient-threshold-filter"
                     aria-pressed={active}
                     aria-label={active ? 'Showing only patients needing a threshold' : 'Filter to patients needing a threshold'}
-                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
+                    className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
                     style={{
                       backgroundColor: active
                         ? 'var(--brand-alert-red)'
@@ -1125,11 +1194,11 @@ export default function PatientsPage() {
                       animation: alarming && !active ? 'threshold-pulse 1.6s ease-in-out infinite' : undefined,
                     }}
                   >
-                    <AlertTriangle className="w-3 h-3" />
+                    <AlertTriangle className="w-3 h-3 shrink-0" />
                     <span className="hidden md:inline">Threshold needed</span>
-                    <span className="md:hidden">Threshold</span>
+                    <span className="md:hidden truncate">Threshold</span>
                     <span
-                      className="text-[10px] font-bold px-1.5 rounded-full"
+                      className="text-[10px] font-bold px-1.5 rounded-full shrink-0"
                       style={{
                         backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
                         color: active ? 'white' : 'var(--brand-alert-red-text)',
@@ -1141,10 +1210,58 @@ export default function PatientsPage() {
                     </span>
                     {active && (
                       <X
-                        className="w-3 h-3"
+                        className="w-3 h-3 shrink-0"
                         onClick={(e) => {
                           e.stopPropagation();
                           setThresholdNeededOnly(false);
+                        }}
+                      />
+                    )}
+                  </button>
+                );
+              })()}
+
+              {/* "My patients" quick-toggle — provider-only. Narrows the
+                  practice-wide list to the provider's own caseload
+                  (assignedToMe). Suppressed for MED_DIR / OPS / SUPER, who
+                  have no ownership concept. */}
+              {showOwnership && (() => {
+                const count = patients.filter((p) => p.assignedToMe).length;
+                const active = myPatientsOnly;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setMyPatientsOnly((v) => !v)}
+                    data-testid="admin-patient-mine-filter"
+                    aria-pressed={active}
+                    aria-label={active ? 'Showing only your patients' : 'Filter to your patients'}
+                    className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-full text-[12px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap"
+                    style={{
+                      backgroundColor: active ? 'var(--brand-primary-purple)' : 'var(--brand-background)',
+                      color: active ? 'white' : 'var(--brand-text-muted)',
+                      border: `1.5px solid ${active ? 'var(--brand-primary-purple)' : 'transparent'}`,
+                    }}
+                  >
+                    <UserCheck className="w-3 h-3 shrink-0" />
+                    <span className="hidden md:inline">My patients</span>
+                    <span className="md:hidden truncate">Mine</span>
+                    <span
+                      className="text-[10px] font-bold px-1.5 rounded-full shrink-0"
+                      style={{
+                        backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'white',
+                        color: active ? 'white' : 'var(--brand-primary-purple)',
+                        minWidth: 18,
+                        textAlign: 'center',
+                      }}
+                    >
+                      {count}
+                    </span>
+                    {active && (
+                      <X
+                        className="w-3 h-3 shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMyPatientsOnly(false);
                         }}
                       />
                     )}
@@ -1162,7 +1279,7 @@ export default function PatientsPage() {
         >
           {/* Table header */}
           <div
-            className="hidden md:grid items-center px-5 py-3 text-[10px] font-bold uppercase tracking-wider gap-3"
+            className="hidden lg:grid items-center px-5 py-3 text-[10px] font-bold uppercase tracking-wider gap-3"
             style={{
               color: 'var(--brand-text-muted)',
               gridTemplateColumns: '1.8fr 0.9fr 0.9fr 1fr 1fr 1fr 1.2fr 32px',
@@ -1215,7 +1332,7 @@ export default function PatientsPage() {
                     // Whole-row subtle red tint when a threshold is missing/stale
                     // (no left stripe). The base class tints the entire row; the
                     // hover variant still wins on hover (no inline bg to clobber it).
-                    className={`w-full text-left px-5 py-3.5 flex items-center gap-4 md:grid md:gap-3 transition-colors hover:bg-[#F8F4FF] cursor-pointer group ${p.needsThreshold ? 'bg-[#FDE8E8]' : ''}`}
+                    className={`w-full text-left px-5 py-3.5 flex items-center gap-4 lg:grid lg:gap-3 transition-colors hover:bg-[#F8F4FF] cursor-pointer group ${p.needsThreshold ? 'bg-[#FDE8E8]' : ''}`}
                     style={{
                       gridTemplateColumns: '1.8fr 0.9fr 0.9fr 1fr 1fr 1fr 1.2fr 32px',
                       borderTop: idx > 0 ? '1px solid var(--brand-border)' : 'none',
@@ -1237,17 +1354,34 @@ export default function PatientsPage() {
                           <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
                             {p.name ?? 'Unknown'}
                           </p>
+                          {/* "Yours" pill — this patient is in the signed-in
+                              provider's caseload (primary or backup). Only
+                              rendered for a plain PROVIDER; the practice-wide
+                              list still shows everyone. */}
+                          {showOwnership && p.assignedToMe && (
+                            <span
+                              className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide"
+                              style={{
+                                backgroundColor: 'var(--brand-primary-purple-light)',
+                                color: 'var(--brand-primary-purple)',
+                              }}
+                              title="You are the primary or backup provider for this patient"
+                            >
+                              <UserCheck className="w-2.5 h-2.5" aria-hidden />
+                              Yours
+                            </span>
+                          )}
                           {/* Preeclampsia-history notation per CLINICAL_SPEC §3.
                               Only when patient is NOT currently pregnant — the
                               pregnancy banner already covers active pregnancies,
                               so the value of this flag is for women with a
                               documented history outside pregnancy. */}
-                          {p.historyPreeclampsia && !p.isPregnant && (
+                          {p.historyHDP && !p.isPregnant && (
                             <span
                               role="img"
                               className="shrink-0 inline-flex items-center"
-                              title="Preeclampsia history. Enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
-                              aria-label="Preeclampsia history"
+                              title="History of hypertensive disorder of pregnancy (HDP). Enhanced monitoring recommended outside pregnancy per 2025 AHA/ACC Hypertension Guideline."
+                              aria-label="History of hypertensive disorder of pregnancy"
                             >
                               <Heart
                                 className="w-3 h-3"
@@ -1264,7 +1398,7 @@ export default function PatientsPage() {
                     </div>
 
                     {/* BP */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <p className="text-[13px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
                         {p.latestBP ? `${p.latestBP.systolicBP}/${p.latestBP.diastolicBP}` : '--/--'}
                       </p>
@@ -1272,29 +1406,29 @@ export default function PatientsPage() {
                     </div>
 
                     {/* Risk */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <RiskBadge tier={p.riskTier} />
                     </div>
 
                     {/* Verification (K1) */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <VerificationBadge status={p.profileVerificationStatus} />
                     </div>
 
                     {/* Alerts (K2 — tier-color-coded) */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <AlertsCell alertsByTier={p.alertsByTier} count={p.activeAlertsCount} />
                     </div>
 
                     {/* Last check-in */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <p className="text-[12px]" style={{ color: 'var(--brand-text-secondary)' }}>
                         {p.lastEntryDate ? timeAgo(p.lastEntryDate) : 'Never'}
                       </p>
                     </div>
 
                     {/* Onboarding (K3) */}
-                    <div className="hidden md:block min-w-0">
+                    <div className="hidden lg:block min-w-0">
                       <OnboardingCell
                         patient={p}
                         completing={completingId === p.id}
@@ -1327,15 +1461,16 @@ export default function PatientsPage() {
                     </div>
 
                     {/* Arrow indicator */}
-                    <div className="hidden md:flex items-center justify-center">
+                    <div className="hidden lg:flex items-center justify-center">
                       <ChevronRight
                         className="w-4 h-4 transition-transform group-hover:translate-x-0.5"
                         style={{ color: 'var(--brand-text-muted)' }}
                       />
                     </div>
 
-                    {/* Mobile: compact info */}
-                    <div className="flex items-center gap-2 md:hidden ml-auto shrink-0">
+                    {/* Compact info — shown below lg (phones + tablets), where
+                        the row renders as a card instead of the full grid. */}
+                    <div className="flex items-center gap-2 lg:hidden ml-auto shrink-0">
                       <VerificationBadge status={p.profileVerificationStatus} compact />
                       <RiskBadge tier={p.riskTier} />
                       <AlertsCell alertsByTier={p.alertsByTier} count={p.activeAlertsCount} compact />

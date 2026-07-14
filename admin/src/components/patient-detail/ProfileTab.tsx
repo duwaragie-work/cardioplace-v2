@@ -70,7 +70,7 @@ const FIELDS: FieldDef[] = [
   // Pregnancy
   { key: 'isPregnant', label: 'Currently pregnant', type: 'boolean', group: 'pregnancy' },
   { key: 'pregnancyDueDate', label: 'Pregnancy due date', type: 'date', group: 'pregnancy' },
-  { key: 'historyPreeclampsia', label: 'History of preeclampsia', type: 'boolean', group: 'pregnancy' },
+  { key: 'historyHDP', label: 'History of hypertensive disorder of pregnancy (HDP)', type: 'boolean', group: 'pregnancy' },
   // Cardiac
   { key: 'diagnosedHypertension', label: 'Diagnosed hypertension', type: 'boolean', group: 'cardiac' },
   { key: 'hasHeartFailure', label: 'Heart failure', type: 'boolean', group: 'cardiac' },
@@ -79,6 +79,7 @@ const FIELDS: FieldDef[] = [
   { key: 'hasAFib', label: 'Atrial fibrillation', type: 'boolean', group: 'cardiac' },
   { key: 'hasHCM', label: 'Hypertrophic cardiomyopathy (HCM)', type: 'boolean', group: 'cardiac' },
   { key: 'hasDCM', label: 'Dilated cardiomyopathy (DCM)', type: 'boolean', group: 'cardiac' },
+  { key: 'hasAorticStenosis', label: 'Aortic stenosis', type: 'boolean', group: 'cardiac' },
   { key: 'hasTachycardia', label: 'Tachycardia', type: 'boolean', group: 'cardiac' },
   { key: 'hasBradycardia', label: 'Bradycardia', type: 'boolean', group: 'cardiac' },
 ];
@@ -615,6 +616,32 @@ export default function ProfileTab({ patientId, profile, logs, loading, onChange
 
   return (
     <div className="space-y-5">
+      {/* Manisha 5/24 Q4 — permanent ACE-inhibitor contraindication (angioedema
+          history). Pinned at the top of the profile so a provider never
+          re-prescribes an ACE inhibitor for this patient. */}
+      {profile.aceContraindicatedAt && (
+        <div
+          className="rounded-2xl p-4 flex items-start gap-2.5"
+          data-testid="admin-profile-ace-contraindication-banner"
+          style={{
+            backgroundColor: 'var(--brand-alert-red-light)',
+            borderLeft: '4px solid var(--brand-alert-red)',
+          }}
+        >
+          <AlertTriangle className="w-5 h-5 shrink-0" style={{ color: 'var(--brand-alert-red)' }} />
+          <div>
+            <p className="text-[13px] font-bold" style={{ color: 'var(--brand-alert-red-text)' }}>
+              ACE INHIBITOR CONTRAINDICATED — history of angioedema
+            </p>
+            <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--brand-text-secondary)' }}>
+              Do not prescribe ACE inhibitors. Flagged{' '}
+              {new Date(profile.aceContraindicatedAt).toLocaleDateString()}
+              {profile.aceContraindicationReason ? ` · ${profile.aceContraindicationReason}` : ''}.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Status banner */}
       <div
         className="rounded-2xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
@@ -819,6 +846,7 @@ export default function ProfileTab({ patientId, profile, logs, loading, onChange
                 value={completeRationale}
                 onChange={(e) => setCompleteRationale(e.target.value)}
                 data-testid="admin-profile-verify-rationale"
+                aria-label="Optional rationale for the audit log"
                 placeholder="Optional rationale for the audit log"
                 className="px-3 h-9 rounded-lg text-[12.5px] outline-none"
                 style={{ border: '1px solid var(--brand-border)', minWidth: 240 }}
@@ -893,6 +921,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
       <select
         value={value ? 'true' : 'false'}
         onChange={(e) => onChange(e.target.value === 'true')}
+        aria-label={field.label}
         data-testid={`admin-profile-edit-input-${field.key}`}
         className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
         style={{ border: '1px solid var(--brand-border)' }}
@@ -907,6 +936,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
       <select
         value={(value as string) ?? ''}
         onChange={(e) => onChange(e.target.value)}
+        aria-label={field.label}
         data-testid={`admin-profile-edit-input-${field.key}`}
         className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
         style={{ border: '1px solid var(--brand-border)' }}
@@ -925,6 +955,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
         type="date"
         value={value ? String(value).slice(0, 10) : ''}
         onChange={(e) => onChange(e.target.value || null)}
+        aria-label={field.label}
         data-testid={`admin-profile-edit-input-${field.key}`}
         className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
         style={{ border: '1px solid var(--brand-border)' }}
@@ -937,6 +968,7 @@ function renderEditor(field: FieldDef, value: unknown, onChange: (v: unknown) =>
       type="number"
       value={(value as number | null) ?? ''}
       onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+      aria-label={field.label}
       data-testid={`admin-profile-edit-input-${field.key}`}
       className="px-2.5 h-8 rounded-lg text-[12px] outline-none w-full"
       style={{ border: '1px solid var(--brand-border)' }}

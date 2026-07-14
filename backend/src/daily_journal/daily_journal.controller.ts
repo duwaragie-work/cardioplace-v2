@@ -15,14 +15,42 @@ import {
 } from '@nestjs/common'
 import type { Request } from 'express'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'
+import { Roles } from '../auth/decorators/roles.decorator.js'
+import { UserRole } from '../generated/prisma/enums.js'
 import { DailyJournalService } from './daily_journal.service.js'
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto.js'
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto.js'
 import { UpdateNotificationStatusDto } from './dto/update-notification-status.dto.js'
 import { BulkUpdateNotificationStatusDto } from './dto/bulk-update-notification-status.dto.js'
 
+/**
+ * Roles allowed to read/ack their OWN notification feed. The admin app's
+ * NotificationBell + /notifications inbox poll the same daily-journal
+ * notification routes as the patient app — every notification query is
+ * scoped to `req.user.id`, so each role only ever sees its own rows, and the
+ * universal BELL_VISIBLE_NOTIFICATION_FILTER (G.4) applies identically for
+ * both apps (clinical alerts live in the patient-detail Alerts tab, not the
+ * bell). Patient journal mutations stay PATIENT-only via the class decorator.
+ */
+const NOTIFICATION_FEED_ROLES = [
+  UserRole.PATIENT,
+  UserRole.PROVIDER,
+  UserRole.MEDICAL_DIRECTOR,
+  UserRole.HEALPLACE_OPS,
+  UserRole.SUPER_ADMIN,
+] as const
+
+/**
+ * Patient-side journal endpoints — create / update / list / delete the
+ * logged-in patient's own readings. Role-gated via the global RolesGuard:
+ * only PATIENT may hit these routes (PROVIDER/admin views the same data via
+ * the separate admin app endpoints with different ownership semantics). The
+ * notification feed/status routes below override this to also admit
+ * care-team roles (see NOTIFICATION_FEED_ROLES).
+ */
 @Controller('daily-journal')
 @UseGuards(JwtAuthGuard)
+@Roles(UserRole.PATIENT)
 export class DailyJournalController {
   constructor(private readonly dailyJournalService: DailyJournalService) {}
 
@@ -75,6 +103,7 @@ export class DailyJournalController {
   }
 
   @Get('notifications')
+  @Roles(...NOTIFICATION_FEED_ROLES)
   getNotifications(
     @Req() req: Request,
     @Query('status') status?: 'all' | 'unread' | 'read',
@@ -88,6 +117,7 @@ export class DailyJournalController {
   }
 
   @Patch('notifications/bulk-status')
+  @Roles(...NOTIFICATION_FEED_ROLES)
   bulkUpdateNotificationStatus(
     @Req() req: Request,
     @Body() dto: BulkUpdateNotificationStatusDto,
@@ -106,18 +136,21 @@ export class DailyJournalController {
   // (those rows are tracking-only and don't represent in-app unread state).
   // Declared BEFORE notifications/:id so Express matches the literal path.
   @Get('notifications/unread-count')
+  @Roles(...NOTIFICATION_FEED_ROLES)
   getNotificationsUnreadCount(@Req() req: Request) {
     const { id: userId } = req.user as { id: string }
     return this.dailyJournalService.getNotificationsUnreadCount(userId)
   }
 
   @Get('notifications/:id')
+  @Roles(...NOTIFICATION_FEED_ROLES)
   getNotification(@Req() req: Request, @Param('id') id: string) {
     const { id: userId } = req.user as { id: string }
     return this.dailyJournalService.getNotificationById(userId, id)
   }
 
   @Patch('notifications/:id/status')
+  @Roles(...NOTIFICATION_FEED_ROLES)
   updateNotificationStatus(
     @Req() req: Request,
     @Param('id') id: string,
@@ -149,6 +182,25 @@ export class DailyJournalController {
     return this.dailyJournalService.getLatestBaseline(userId)
   }
 
+  // The patient's currently-open reading session (or null). Drives the
+  // check-in "add to this session or start new?" prompt. Declared BEFORE
+  // the `:id` catch-all so Express matches the literal path.
+  @Get('active-session')
+  getActiveSession(@Req() req: Request) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.getActiveSession(userId)
+  }
+
+  // Option D (Manisha 2026-06-12 Q2) — the patient's most recent held emergency
+  // reading awaiting its confirmatory second reading (or null). Drives the
+  // /check-in Screen A auto-resume + the /readings "Continue confirmation" CTA.
+  // Declared BEFORE the `:id` catch-all so Express matches the literal path.
+  @Get('awaiting-emergency')
+  getAwaitingEmergency(@Req() req: Request) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.getAwaitingEmergency(userId)
+  }
+
   @Get(':id')
   findOne(@Req() req: Request, @Param('id') id: string) {
     const { id: userId } = req.user as { id: string }
@@ -174,6 +226,22 @@ export class DailyJournalController {
   ) {
     const { id: userId } = req.user as { id: string }
     return this.dailyJournalService.finalizeSingleReadingSession(userId, id)
+  }
+
+  /**
+   * Option D (Manisha 2026-06-12 Q2) — patient declined / closed the
+   * confirmatory retake (Screen C), or the 5-min window elapsed client-side.
+   * Resolves the held AWAITING first-of-pair as UNCONFIRMED, firing
+   * RULE_UNCONFIRMED_EMERGENCY (Tier 1 provider-only). The SessionFinalizeService
+   * cron is the app-closed safety net that calls the same service method.
+   */
+  @Post(':id/decline-confirmation')
+  declineEmergencyConfirmation(
+    @Req() req: Request,
+    @Param('id') id: string,
+  ) {
+    const { id: userId } = req.user as { id: string }
+    return this.dailyJournalService.finalizeUnconfirmedEmergency(userId, id)
   }
 
   @Patch('alerts/:id/acknowledge')

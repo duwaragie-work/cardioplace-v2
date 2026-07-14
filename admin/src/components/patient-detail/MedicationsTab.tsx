@@ -28,11 +28,14 @@ import {
 } from '@/lib/services/patient-detail.service';
 import { useAuth } from '@/lib/auth-context';
 import { canVerifyMedications } from '@/lib/roleGates';
+import AddEditMedicationModal from './AddEditMedicationModal';
 import { matchToCatalog } from '@cardioplace/shared';
 import MedicationRejectModal from './MedicationRejectModal';
 import MedicationHoldModal from './MedicationHoldModal';
 
 interface Props {
+  /** #92 — patient whose meds these are; needed for the admin-add endpoint. */
+  patientUserId: string;
   medications: PatientMedication[];
   loading: boolean;
   onChanged: () => void;
@@ -113,8 +116,10 @@ const FREQ_LABELS: Record<string, string> = {
   UNSURE: 'Unsure',
 };
 
-export default function MedicationsTab({ medications, loading, onChanged, alerts }: Props) {
+export default function MedicationsTab({ patientUserId, medications, loading, onChanged, alerts }: Props) {
   const { user } = useAuth();
+  // #92 — add/edit modal state: undefined = closed, null = add new, med = edit.
+  const [addEditMed, setAddEditMed] = useState<PatientMedication | null | undefined>(undefined);
   // Verify / reject / hold buttons render only for the clinical-verifier
   // roles (SUPER_ADMIN, PROVIDER, MEDICAL_DIRECTOR). HEALPLACE_OPS sees
   // the same medication cards but no action buttons.
@@ -225,15 +230,37 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
 
   if (medications.length === 0) {
     return (
-      <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-med-empty">
-        <Pill className="w-7 h-7 mx-auto mb-2" style={{ color: 'var(--brand-text-muted)' }} />
-        <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
-          No medications on file
-        </p>
-        <p className="text-[12px] mt-1" style={{ color: 'var(--brand-text-muted)' }}>
-          The patient hasn&apos;t reported any medications yet.
-        </p>
-      </div>
+      <>
+        <div className="bg-white rounded-2xl p-8 text-center" style={{ boxShadow: 'var(--brand-shadow-card)' }} data-testid="admin-med-empty">
+          <Pill className="w-7 h-7 mx-auto mb-2" style={{ color: 'var(--brand-text-muted)' }} />
+          <p className="text-[14px] font-semibold" style={{ color: 'var(--brand-text-primary)' }}>
+            No medications on file yet
+          </p>
+          <p className="text-[12px] mt-1 mb-3" style={{ color: 'var(--brand-text-muted)' }}>
+            Patients add their medications through Clinical Intake. You can also add
+            a medication on their behalf if they have a new prescription or recall.
+          </p>
+          {canVerify && (
+            <button
+              type="button"
+              data-testid="admin-med-add-empty"
+              onClick={() => setAddEditMed(null)}
+              className="px-4 h-10 rounded-full text-[13px] font-bold text-white cursor-pointer"
+              style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+            >
+              Add medication
+            </button>
+          )}
+        </div>
+        {addEditMed !== undefined && (
+          <AddEditMedicationModal
+            patientUserId={patientUserId}
+            medication={addEditMed}
+            onClose={() => setAddEditMed(undefined)}
+            onSaved={onChanged}
+          />
+        )}
+      </>
     );
   }
 
@@ -246,6 +273,30 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
         >
           {error}
         </div>
+      )}
+
+      {/* #92 — clinical roles can add a medication on the patient's behalf. */}
+      {canVerify && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            data-testid="admin-med-add"
+            onClick={() => setAddEditMed(null)}
+            className="px-3 h-9 rounded-full text-[12.5px] font-bold text-white cursor-pointer"
+            style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+          >
+            + Add medication
+          </button>
+        </div>
+      )}
+
+      {addEditMed !== undefined && (
+        <AddEditMedicationModal
+          patientUserId={patientUserId}
+          medication={addEditMed}
+          onClose={() => setAddEditMed(undefined)}
+          onSaved={onChanged}
+        />
       )}
 
       {rows.map((row) => {
@@ -273,16 +324,18 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
               </div>
               <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                 {/* Tier 3 informational notes for this drug class. Quiet
-                    teal palette + Info icon — physician-only context, not
-                    a safety-critical warning. Tooltip carries the full
-                    physicianMessage. */}
+                    info-blue palette + Info icon — physician-only context,
+                    not a safety-critical warning. Tooltip carries the full
+                    physicianMessage.
+                    Manisha Open-Decisions sign-off 2026-06-06 (Decision 1):
+                    Tier 3 chrome moved from teal to info-blue. */}
                 {tier3Notes.map((note) => (
                   <span
                     key={note.id}
                     className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-0.5 rounded-full"
                     style={{
-                      backgroundColor: 'var(--brand-accent-teal-light)',
-                      color: 'var(--brand-accent-teal)',
+                      backgroundColor: 'var(--brand-info-blue-light)',
+                      color: 'var(--brand-info-blue)',
                     }}
                     title={note.physicianMessage ?? note.patientMessage ?? note.ruleId ?? 'Physician note'}
                   >
@@ -310,6 +363,7 @@ export default function MedicationsTab({ medications, loading, onChanged, alerts
                         onSetStatus={setMedicationStatus}
                         side="patient"
                         canVerify={canVerify}
+                        onEdit={setAddEditMed}
                       />
                       {/* IVR-19 — this drug was previously rejected, then the
                           patient re-reported it. Flag it for re-review. */}
@@ -399,9 +453,11 @@ interface MedCardProps {
   /** Whether the current admin role can verify medications. When false,
    *  the card shows the data + status pill but no action buttons. */
   canVerify: boolean;
+  /** #92 — opens the edit modal for this med (clinical roles only). */
+  onEdit?: (med: PatientMedication) => void;
 }
 
-function MedCard({ med, savingId, side, onSetStatus, canVerify }: MedCardProps) {
+function MedCard({ med, savingId, side, onSetStatus, canVerify, onEdit }: MedCardProps) {
   const v = verificationChrome(med.verificationStatus);
   const isDiscontinued = med.discontinuedAt != null;
   const saving = savingId === med.id;
@@ -447,10 +503,32 @@ function MedCard({ med, savingId, side, onSetStatus, canVerify }: MedCardProps) 
           &ldquo;I take this&rdquo; · reported {new Date(med.reportedAt).toLocaleDateString()}
         </p>
       )}
+      {/* #92 — provenance for admin-added meds (patient-reported shows no label). */}
+      {med.addedByRole && med.addedByRole !== 'PATIENT' && (
+        <p
+          className="text-[10.5px] mt-0.5"
+          data-testid={`admin-med-provenance-${med.id}`}
+          style={{ color: 'var(--brand-text-muted)' }}
+        >
+          Added by care team{med.addedAt ? ` on ${new Date(med.addedAt).toLocaleDateString()}` : ''}
+        </p>
+      )}
       {side === 'provider' && med.notes && (
         <p className="text-[11px] mt-1 leading-relaxed" style={{ color: 'var(--brand-text-secondary)' }}>
           {med.notes}
         </p>
+      )}
+
+      {!isDiscontinued && canVerify && onEdit && (
+        <button
+          type="button"
+          data-testid={`admin-med-edit-${med.id}`}
+          onClick={() => onEdit(med)}
+          className="mt-2.5 mr-1.5 text-[11px] font-semibold underline cursor-pointer"
+          style={{ color: 'var(--brand-primary-purple)' }}
+        >
+          Edit
+        </button>
       )}
 
       {!isDiscontinued && canVerify && (

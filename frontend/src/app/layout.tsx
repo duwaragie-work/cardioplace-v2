@@ -5,8 +5,11 @@ import { AuthProvider } from "@/lib/auth-context";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import NavbarWrapper from "@/components/NavbarWrapper";
 import ScrollToTop from "@/components/ScrollToTop";
+import HardReloadOnNavigate from "@/components/HardReloadOnNavigate";
 import PoweredByFooter from "@/components/PoweredByFooter";
 import SkipLink from "@/components/SkipLink";
+import IdleWarningToast from "@/components/auth/IdleWarningToast";
+import PushRegistrar from "@/components/auth/PushRegistrar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,8 +24,18 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Cardioplace",
   description: "Cardiovascular patient monitoring and care coordination platform",
+  // Web app manifest — required for "Add to Home Screen", which iOS Safari
+  // requires before it will allow Web Push at all.
+  manifest: "/manifest.webmanifest",
   icons: {
     icon: "/cardioplace-icon.svg",
+    apple: "/cardioplace-icon.svg",
+  },
+  // Marks the installed PWA as a standalone iOS web app (enables push on iOS).
+  appleWebApp: {
+    capable: true,
+    title: "Cardioplace",
+    statusBarStyle: "default",
   },
 };
 
@@ -41,6 +54,9 @@ export default function RootLayout({
           <LanguageProvider>
             <SkipLink />
             <ScrollToTop />
+            <HardReloadOnNavigate />
+            <IdleWarningToast />
+            <PushRegistrar />
             <NavbarWrapper>{children}</NavbarWrapper>
             <PoweredByFooter />
           </LanguageProvider>

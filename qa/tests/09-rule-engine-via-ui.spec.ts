@@ -560,6 +560,22 @@ test.describe('Benign reading auto-resolves open BP_LEVEL_1', () => {
 test.describe('Bucket B G1: Loop diuretic — orthostatic hypotension band', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
+  // Olive's seed persona is loop-diuretic + 65+ with NO AFib / NO CAD. Reset
+  // those flags to her seed baseline before the band tests: a drifted DB (or a
+  // prior test) can leave Olive with hasAFib=true, which trips the AFib
+  // <3-reading gate and suppresses EVERY single-reading BP/HR rule (incl.
+  // AGE_65_LOW) — making the band tests fire nothing. A condition-specific
+  // test must establish its own preconditions rather than trust seed state.
+  test.beforeAll(async () => {
+    if (!process.env.RUN_WRITE_TESTS) return
+    const tcOlive = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
+    const olive = await tcOlive.findUser(PATIENTS.olive.email)
+    await tcOlive.setUserCondition(olive.id, 'hasAFib', false)
+    await tcOlive.setUserCondition(olive.id, 'hasCAD', false)
+    await tcOlive.setUserCondition(olive.id, 'diagnosedHypertension', true)
+    await tcOlive.dispose()
+  })
+
   test('Olive (loop + age 70, no HF) SBP 88 → AGE_65_LOW + loop-diuretic annotation', async () => {
     // Below the 90–92 band, the loop-diuretic rule defers to the lower-bound
     // rules. For Olive (DOB 1955, 70+) AGE_65_LOW claims the bp-low axis,
@@ -1026,10 +1042,11 @@ test.describe('Bucket B G6: Per-condition × age 65+ edges', () => {
 test.describe('Bucket B G7: Multi-axis co-fire additional combinations', () => {
   test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated')
 
-  test('Mike (HFpEF) SBP 165 + severeHeadache → HFPEF_HIGH + SYMPTOM_OVERRIDE_GENERAL', async () => {
-    // Bucket B spec calls for Dana (HFpEF) but seed defers her — Mike has
-    // the same archetype. Two distinct axis claims expected: bp-high
-    // (HFpEF) and emergency (symptom override).
+  test('Mike (HFpEF) SBP 165 + severeHeadache → emergency override is EXCLUSIVE (F20); HFPEF_HIGH suppressed', async () => {
+    // F20 (bf838ff) — once a symptom-override emergency claims the 'emergency'
+    // axis, the lower-tier bp-high rule on the same reading is suppressed
+    // (a "see provider tomorrow" L1 alongside a "call 911" emergency is a
+    // mixed-urgency harm path). Only the override fires.
     const r = await submitAndAssert({
       label: 'mike multi: HFpEF + headache',
       patient: 'mike',
@@ -1040,22 +1057,23 @@ test.describe('Bucket B G7: Multi-axis co-fire additional combinations', () => {
         pulse: 78,
         severeHeadache: true,
       },
-      expectRuleIds: ['RULE_HFPEF_HIGH', 'RULE_SYMPTOM_OVERRIDE_GENERAL'],
-      expectTiers: ['BP_LEVEL_1_HIGH', 'BP_LEVEL_2_SYMPTOM_OVERRIDE'],
+      expectRuleIds: ['RULE_SYMPTOM_OVERRIDE_GENERAL'],
+      expectTiers: ['BP_LEVEL_2_SYMPTOM_OVERRIDE'],
+      exclusive: true,
     })
     expect(r.fired).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    expect(
-      r.fired.includes('RULE_HFPEF_HIGH') || r.fired.includes('RULE_STANDARD_L1_HIGH'),
-      `expected HFpEF or standard high; fired: [${r.fired.join(',')}]`,
-    ).toBeTruthy()
+    expect(r.fired).not.toContain('RULE_HFPEF_HIGH')
+    expect(r.fired).not.toContain('RULE_STANDARD_L1_HIGH')
   })
 
-  test('James (HFrEF + Diltiazem) SBP 80 + chestPain → 3 axes co-fire', async () => {
-    // Triple co-fire: contraindication (NDHP_HFREF) + bp-low (HFREF_LOW)
-    // + emergency (SYMPTOM_OVERRIDE_GENERAL). Tests that the new engine
-    // doesn't collapse three distinct axes into one row.
+  test('James (HFrEF + Diltiazem) SBP 80 + chestPain → contraindication + emergency co-fire; bp-low HFREF_LOW suppressed (F20)', async () => {
+    // F20 (bf838ff): the Tier 1 contraindication (NDHP_HFREF) is claimed in
+    // Stage A and SURVIVES the emergency short-circuit (runs its own ladder),
+    // and the symptom-override emergency fires — but the lower-tier bp-low
+    // HFREF_LOW (Stage C) is suppressed once the emergency claims. The earlier
+    // CLUSTER_6_RISK note predicted exactly this flip.
     const r = await submitAndAssert({
-      label: 'james triple co-fire',
+      label: 'james contraindication + emergency (bp-low suppressed)',
       patient: 'james',
       entry: {
         measuredAt: FUTURE(),
@@ -1064,26 +1082,13 @@ test.describe('Bucket B G7: Multi-axis co-fire additional combinations', () => {
         pulse: 64,
         chestPainOrDyspnea: true,
       },
-      expectRuleIds: [
-        'RULE_NDHP_HFREF',
-        'RULE_HFREF_LOW',
-        'RULE_SYMPTOM_OVERRIDE_GENERAL',
-      ],
-      expectTiers: [
-        'TIER_1_CONTRAINDICATION',
-        'BP_LEVEL_1_LOW',
-        'BP_LEVEL_2_SYMPTOM_OVERRIDE',
-      ],
+      expectRuleIds: ['RULE_NDHP_HFREF', 'RULE_SYMPTOM_OVERRIDE_GENERAL'],
+      expectTiers: ['TIER_1_CONTRAINDICATION', 'BP_LEVEL_2_SYMPTOM_OVERRIDE'],
+      exclusive: true,
     })
     expect(r.fired).toContain('RULE_NDHP_HFREF')
     expect(r.fired).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    // HFREF_LOW is the bp-low axis claim — this is the new co-fire path.
-    // CLUSTER_6_RISK: if Cluster 6 changes axis precedence (e.g. emergency
-    // suppresses bp-low) this assertion may flip.
-    expect(
-      r.fired.includes('RULE_HFREF_LOW'),
-      `expected HFREF_LOW alongside contraindication + emergency; fired: [${r.fired.join(',')}]`,
-    ).toBeTruthy()
+    expect(r.fired).not.toContain('RULE_HFREF_LOW')
   })
 
   test('Iris (AFib + Apixaban + BB) HR 130 single reading → AFib gate (no fire)', async () => {
@@ -1101,11 +1106,11 @@ test.describe('Bucket B G7: Multi-axis co-fire additional combinations', () => {
     expect(r.fired).not.toContain('RULE_AFIB_HR_HIGH')
   })
 
-  test('Kate (HCM + Amlodipine) SBP 100 + visualChanges → HCM_LOW + symptom override', async () => {
-    // HCM patient on a vasodilator at the lower threshold + Level 2 symptom.
-    // Expected axes: bp-low (HCM_LOW), info (HCM_VASODILATOR annotation
-    // OR row), emergency (SYMPTOM_OVERRIDE_GENERAL). Vasodilator note may
-    // ride as physicianMessage on the primary or as its own row.
+  test('Kate (HCM + Amlodipine) SBP 100 + visualChanges → emergency override is EXCLUSIVE (F20); HCM_LOW + vasodilator note suppressed', async () => {
+    // F20 (bf838ff): the Level-2 symptom override (visualChanges) claims the
+    // 'emergency' axis and short-circuits — the lower-tier bp-low HCM_LOW and
+    // the Tier-3 HCM_VASODILATOR info note (both Stage C) are suppressed on
+    // this reading; they re-fire on a subsequent non-emergency reading.
     const r = await submitAndAssert({
       label: 'kate HCM 100 + visual',
       patient: 'kate',
@@ -1116,20 +1121,12 @@ test.describe('Bucket B G7: Multi-axis co-fire additional combinations', () => {
         pulse: 72,
         visualChanges: true,
       },
-      expectRuleIds: ['RULE_HCM_LOW', 'RULE_SYMPTOM_OVERRIDE_GENERAL'],
-      expectTiers: ['BP_LEVEL_1_LOW', 'BP_LEVEL_2_SYMPTOM_OVERRIDE'],
+      expectRuleIds: ['RULE_SYMPTOM_OVERRIDE_GENERAL'],
+      expectTiers: ['BP_LEVEL_2_SYMPTOM_OVERRIDE'],
+      exclusive: true,
     })
     expect(r.fired).toContain('RULE_SYMPTOM_OVERRIDE_GENERAL')
-    expect(
-      r.fired.includes('RULE_HCM_LOW'),
-      `expected HCM_LOW alongside symptom override; fired: [${r.fired.join(',')}]`,
-    ).toBeTruthy()
-    const vasodilatorMention =
-      r.fired.includes('RULE_HCM_VASODILATOR') ||
-      r.physicianMessages.some((m) => /vasodilator|amlodipine/i.test(m))
-    expect(
-      vasodilatorMention,
-      `expected vasodilator framing somewhere; fired: [${r.fired.join(',')}], messages: [${r.physicianMessages.join(' || ')}]`,
-    ).toBeTruthy()
+    expect(r.fired).not.toContain('RULE_HCM_LOW')
+    expect(r.fired).not.toContain('RULE_HCM_VASODILATOR')
   })
 })

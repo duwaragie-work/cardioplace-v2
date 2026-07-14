@@ -6,9 +6,26 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
-import { Prisma, EntrySource, EscalationLevel } from '../generated/prisma/client.js'
+import { randomUUID } from 'node:crypto'
+import { SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared'
+import {
+  Prisma,
+  EntrySource,
+  EscalationLevel,
+  DelayBand,
+  EmergencyConfirmationState,
+  Position,
+} from '../generated/prisma/client.js'
+import {
+  UserRole,
+  VerifierRole,
+  VerificationChangeType,
+} from '../generated/prisma/enums.js'
+import type { NotificationTrigger } from '../generated/prisma/enums.js'
+import type { ActorUser } from '../common/patient-access.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from './constants/events.js'
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto.js'
@@ -23,6 +40,90 @@ const SOURCE_MAP: Record<string, EntrySource> = {
 
 const POSITION_VALUES = ['SITTING', 'STANDING', 'LYING'] as const
 
+// Manisha Backdated Readings sign-off 2026-06-06 (Chunk A) — bucketed lag
+// between when the patient says they measured (measuredAt) and when the
+// system received the row (now). Thresholds match the DelayBand enum
+// comments in prisma/schema/daily_journal.prisma:
+//   REAL_TIME         (<5 min)        normal current-session entry
+//   NEAR_REAL_TIME    (5 min - <1 h)  acceptable lag (e.g. forgot to log)
+//   DELAYED_ENTRY     (1 h - <24 h)   L2 911 CTA suppressed (provider flag)
+//   HISTORICAL_ENTRY  (>=24 h)        L2 not fired; CMS 99454 16-day excluded
+const DELAY_BAND_NEAR_MS = 5 * 60 * 1000
+const DELAY_BAND_DELAYED_MS = 60 * 60 * 1000
+const DELAY_BAND_HISTORICAL_MS = 24 * 60 * 60 * 1000
+
+export function computeDelayBand(measuredAt: Date, now: Date): DelayBand {
+  const lagMs = now.getTime() - measuredAt.getTime()
+  if (lagMs < DELAY_BAND_NEAR_MS) return DelayBand.REAL_TIME
+  if (lagMs < DELAY_BAND_DELAYED_MS) return DelayBand.NEAR_REAL_TIME
+  if (lagMs < DELAY_BAND_HISTORICAL_MS) return DelayBand.DELAYED_ENTRY
+  return DelayBand.HISTORICAL_ENTRY
+}
+
+// Structured symptom booleans snapshotted into journal audit rows — collapsed
+// to the names that are true so the Timeline renders one readable list
+// instead of 19 booleans. Order mirrors the schema groupings.
+const AUDIT_SYMPTOM_FLAGS = [
+  'severeHeadache',
+  'visualChanges',
+  'alteredMentalStatus',
+  'chestPainOrDyspnea',
+  'focalNeuroDeficit',
+  'severeEpigastricPain',
+  'newOnsetHeadache',
+  'ruqPain',
+  'edema',
+  'dizziness',
+  'syncope',
+  'palpitations',
+  'legSwelling',
+  'fatigue',
+  'shortnessOfBreath',
+  'dryCough',
+  'nsaidUse',
+  'faceSwelling',
+  'throatTightness',
+] as const
+
+/**
+ * Predicate for the in-app bell LIST + unread COUNT. Both exclusions are
+ * READ-SIDE ONLY — the escalation write path (`Notification.create`) and the
+ * SMTP email send are untouched.
+ *  • EMAIL rows — outbound deliveries, not in-app bell state. A patient with
+ *    both a PUSH and an EMAIL row for one event was seeing it twice while the
+ *    badge counted it once (H3 #80).
+ *  • ALERT_* trigger rows — the escalation ladder's clinical alerts already
+ *    render in the Alerts stream (getAlerts), so they must not ALSO render in
+ *    the bell (H5 G.4). This now keys off `dispatchTrigger`, not the old
+ *    `alertId != null AND PUSH` heuristic, which leaked once a DeviationAlert
+ *    cascade nulled `alertId` (journal-entry delete → onDelete:SetNull). The
+ *    rows STAY in the DB. EMERGENCY_FLAGGED (chat/voice pages with no
+ *    DeviationAlert backing) is NOT alert-class here — it stays visible.
+ * Memory: project_notification_tab_split_2026_06_04,
+ *         project_no_push_service_pilot_gap_2026_06_04.
+ */
+// Alert-class triggers — hidden from the in-app bell because they already
+// render in the Alerts stream (getAlerts). Keyed off dispatchTrigger, NOT the
+// nullable `alertId`: a null alertId is a legitimate, common state for action
+// rows, AND the system actively produces null-alertId ALERT rows
+// (DeviationAlert.journalEntry onDelete:Cascade → Notification.alert
+// onDelete:SetNull nulls alertId on delete), so alertId cannot distinguish an
+// alert from an action. dispatchTrigger can. EMERGENCY_FLAGGED is deliberately
+// NOT here — chat/voice emergency pages have no DeviationAlert backing and must
+// stay visible. See project_notification_tab_split_2026_06_04.
+const ALERT_TRIGGERS: NotificationTrigger[] = [
+  'ALERT_CREATED',
+  'ALERT_ESCALATION',
+  'ALERT_RESOLVED',
+]
+
+const BELL_VISIBLE_NOTIFICATION_FILTER: Prisma.NotificationWhereInput = {
+  AND: [
+    { channel: { not: 'EMAIL' } },
+    { dispatchTrigger: { notIn: ALERT_TRIGGERS } },
+  ],
+}
+
 @Injectable()
 export class DailyJournalService {
   private readonly logger = new Logger(DailyJournalService.name)
@@ -32,7 +133,19 @@ export class DailyJournalService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  async create(userId: string, dto: CreateJournalEntryDto) {
+  /**
+   * `actor` is set when care-team staff create the reading on the patient's
+   * behalf via the admin readings endpoints (Phase 3B) — it flips the audit
+   * changeType to ADMIN_READING_ADDED, stamps addedByUserId + source=ADMIN,
+   * and makes a stale client sessionId a hard 400 instead of a silent
+   * re-group. Patient-app calls leave it undefined.
+   */
+  async create(
+    userId: string,
+    dto: CreateJournalEntryDto,
+    actor?: ActorUser,
+    ctx?: { practiceId: string | null },
+  ) {
     // Layer A journaling gate — patient must have a PatientProfile row
     // (completed clinical intake) before their readings get persisted. The
     // rule engine relies on PatientProfile for every safety-net bias; without
@@ -55,6 +168,41 @@ export class DailyJournalService {
       })
     }
 
+    // Manisha 5/24 Q1 Tier 1 — physiologically-impossible reading (diastolic at
+    // or above systolic). Reject at entry: do NOT persist, do NOT run the rule
+    // engine (a transposed 120/140 would otherwise fire a false DBP≥120 Level-2
+    // emergency). Log the rejected values for QA + the provider dashboard note.
+    if (
+      dto.systolicBP != null &&
+      dto.diastolicBP != null &&
+      dto.diastolicBP >= dto.systolicBP
+    ) {
+      await this.prisma.rejectedReadingLog.create({
+        data: {
+          userId,
+          systolicBP: dto.systolicBP,
+          diastolicBP: dto.diastolicBP,
+          pulse: dto.pulse ?? null,
+          reason: 'diastolic-ge-systolic',
+        },
+      })
+      throw new UnprocessableEntityException({
+        message: 'implausible-reading',
+        reason:
+          "That reading doesn't look right — the bottom number should be lower than the top number. Please check your cuff and try again.",
+      })
+    }
+
+    // Manisha 5/24 Q1 Tier 2 — narrow pulse pressure on THIS individual reading
+    // (artifact range, 0 < SBP−DBP < 15). Physician-only flag (no alert tier, no
+    // patient message); the reading still enters the session average where the
+    // separate <25 hemodynamic rule may fire.
+    const narrowPpArtifact =
+      dto.systolicBP != null &&
+      dto.diastolicBP != null &&
+      dto.systolicBP - dto.diastolicBP > 0 &&
+      dto.systolicBP - dto.diastolicBP < 15
+
     // Resolve any missed-medication rows that came in with only `drugName`
     // (voice agent / chat tool). Looks up PatientMedication.id by name,
     // filters out AS_NEEDED (PRN) drugs since they aren't on a daily
@@ -64,23 +212,178 @@ export class DailyJournalService {
       dto.missedMedications,
     )
 
+    // Reject attaching this reading to an EXPIRED session. The client supplies
+    // sessionId, so a stale/reused id (e.g. a cached id from a prior sitting)
+    // could otherwise smuggle a reading hours apart into one averaged session.
+    // Patient path: dropped (not 400) so voice/chat flows that pass a cached
+    // id don't fail. Admin path: strict 400 — the admin multi-reading flow
+    // passes sessionId deliberately, so a stale id is an error the staff
+    // member must see, not silently re-group.
+    if (actor && dto.sessionId) {
+      await this.assertSessionJoinable(userId, dto.sessionId, new Date(dto.measuredAt))
+    }
+    // resolveCreateSessionId honors any non-null supplied sessionId as a
+    // deliberate boundary (Bug 14 deprecation), so Option D readings — which
+    // always supply their own id — anchor their own session without a special
+    // guard, and the confirmatory pairs in via that same id + confirmsEntryId.
+    const effectiveSessionId = await this.resolveCreateSessionId(
+      userId,
+      dto.sessionId,
+      new Date(dto.measuredAt),
+    )
+
+    // Option D (Manisha 2026-06-12 Q2) — retake-to-confirm state from the DTO.
+    // AWAITING = first-of-pair emergency reading (held; engine NOT run here);
+    // CONFIRMATORY = second reading confirming/clearing the first.
+    const optionDState: EmergencyConfirmationState | null =
+      dto.beginEmergencyConfirmation
+        ? EmergencyConfirmationState.AWAITING
+        : dto.confirmsEntryId
+          ? EmergencyConfirmationState.CONFIRMATORY
+          : null
+
+    // Bug 23 (2026-06-17) — per-pathway latency. The non-emergency single-
+    // reading hold (alert-engine: gate non-emergency rules until
+    // singleReadingFinalized) + the 2-min session-finalize cron add a SECOND
+    // 5-min window on top of the FE buffer's pre-commit 5-min window, so a
+    // buffer-committed reading's alert fired 5-10 min after "I'm good". When
+    // the patient explicitly closes the session (`closeSession` — the buffer
+    // already gave them their 5-min edit window on-device), that second window
+    // is pure redundant latency. Now ON BY DEFAULT (Manisha standing approval
+    // 2026-06-18); BUFFER_SKIPS_DEFER stays as a rollback switch — set it to
+    // 'false' to revert to the legacy single-reading-hold behavior (CTO
+    // 2026-06-09 policy) without a code change.
+    //
+    // Scope: ordinary buffer commits (closeSession, patient, non-Option-D) AND
+    // Option D CONFIRMATORY second readings (Bug 27 — see below). Admin entries,
+    // Option D AWAITING, and chat/voice tool creates (no buffer step — they keep
+    // the 5-min defer as their only edit window) are unchanged.
+    // Read per-request so prod/dev (and unit tests) can flip it without a
+    // rebuild. Default ON — only an explicit 'false' opts back into the hold.
+    const bufferSkipsDefer = process.env.BUFFER_SKIPS_DEFER !== 'false'
+    const bufferCommitFastFire =
+      bufferSkipsDefer &&
+      dto.closeSession === true &&
+      !actor &&
+      optionDState === null
+    // Bug 27 (2026-06-18) — a CONFIRMATORY second-of-pair is evaluated against
+    // the held first-of-pair IMMEDIATELY on create (the engine fires the resolved
+    // outcome here, not via the cron), so the 5-min "editable before the engine
+    // commits" window is a lie for it — the readings page was showing the badge
+    // on a reading that's already finalized. Skip the defer for it too. Same
+    // flag gate as the buffer fast-fire so 'false' restores all legacy behavior.
+    const confirmatoryFastFire =
+      bufferSkipsDefer &&
+      optionDState === EmergencyConfirmationState.CONFIRMATORY &&
+      !actor
+
+    // Step 2 edit window (Manisha 2026-06-12 Q1+Q4) — patient (non-admin)
+    // readings are editable/deletable for 5 min before the engine commits. The
+    // readings page reads this to surface the edit/delete affordance; the engine
+    // firing itself is still gated by the existing single-reading hold. Admin
+    // entries and Option D AWAITING readings (held under their own retake
+    // semantics) get no window. Bug 23/27 — buffer fast-fire + confirmatory
+    // commits get no window: they fire now, so there's nothing to be "editable
+    // before".
+    const engineEvaluationDeferredUntil =
+      actor ||
+      optionDState === EmergencyConfirmationState.AWAITING ||
+      bufferCommitFastFire ||
+      confirmatoryFastFire
+        ? null
+        : new Date(Date.now() + SINGLE_READING_FINALIZE_MS)
+
+    // Bug 13 (live-test 2026-06-15) — a CONFIRMATORY second-of-pair is the SAME
+    // sitting as the held first-of-pair: Option D Screen B only re-collects
+    // BP (+ optional pulse), so the second entry would otherwise lose the
+    // patient's position + medication answers, skewing session-level context.
+    // Inherit those fields from the first-of-pair when the DTO omits them.
+    // Tenant-scoped by userId. Measured vitals (pulse) are NOT inherited —
+    // they're re-measured; symptoms stay false (Option D is the no-symptom path).
+    let inherited:
+      | {
+          position: Position | null
+          weight: Prisma.Decimal | null
+          pulse: number | null
+          medicationTaken: boolean | null
+          medicationScheduledLater: boolean
+          missedMedications: JsonValue
+          medicationStatuses: JsonValue
+        }
+      | null = null
+    if (optionDState === EmergencyConfirmationState.CONFIRMATORY && dto.confirmsEntryId) {
+      inherited = await this.prisma.journalEntry.findFirst({
+        where: { id: dto.confirmsEntryId, userId },
+        select: {
+          position: true,
+          // Bug 13 Part 2 — weight is the same-sitting body weight; the Option D
+          // Screen B only re-collects BP (+ optional pulse), so inherit it too.
+          weight: true,
+          // Pulse IS re-measured, but if the patient left it blank on the second
+          // reading, fall back to the first-of-pair rather than dropping it.
+          pulse: true,
+          medicationTaken: true,
+          medicationScheduledLater: true,
+          missedMedications: true,
+          medicationStatuses: true,
+        },
+      })
+    }
+
     try {
-      const entry = await this.prisma.journalEntry.create({
+      // Chunk A — compute the measurement-lag band at persist time so the
+      // patient app + admin can render the right affordance off a stored value.
+      const delayBand = computeDelayBand(new Date(dto.measuredAt), new Date())
+      // Audit write is transaction-scoped with the insert — a reading can't
+      // exist without its PATIENT_READING_CREATED / ADMIN_READING_ADDED audit
+      // row; an audit failure rolls the insert back (succeed/fail together).
+      const entry = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.journalEntry.create({
         data: {
           userId,
+          addedByUserId: actor?.id ?? null,
           measuredAt: new Date(dto.measuredAt),
+          delayBand,
           systolicBP: dto.systolicBP ?? null,
           diastolicBP: dto.diastolicBP ?? null,
-          pulse: dto.pulse ?? null,
-          weight: dto.weight != null ? new Prisma.Decimal(dto.weight) : null,
-          position: dto.position ?? null,
-          sessionId: dto.sessionId ?? null,
+          // Bug 13 Part 2 — inherit pulse from the first-of-pair when the
+          // CONFIRMATORY reading didn't re-enter one.
+          pulse: dto.pulse ?? inherited?.pulse ?? null,
+          narrowPpArtifact,
+          // Bug 13 Part 2 — inherit the first-of-pair's weight on a CONFIRMATORY
+          // entry (Screen B doesn't re-collect it), so the reading detail isn't
+          // missing the weight the patient already gave moments earlier.
+          weight:
+            dto.weight != null
+              ? new Prisma.Decimal(dto.weight)
+              : (inherited?.weight ?? null),
+          // Bug 13 — inherit position from the first-of-pair on a CONFIRMATORY entry.
+          position: dto.position ?? inherited?.position ?? null,
+          sessionId: effectiveSessionId,
+          // Option D + edit window (Manisha 2026-06-12).
+          emergencyConfirmation: optionDState,
+          confirmsEntryId: dto.confirmsEntryId ?? null,
+          engineEvaluationDeferredUntil,
+          // Bug 23 — a buffer fast-fire commit is finalized at create so the
+          // immediate ENTRY_CREATED evaluation isn't suppressed by the single-
+          // reading hold (alert-engine gate). For a multi-reading sitting the
+          // earlier readings are finalized by the closeSession updateMany below
+          // when the LAST reading (the only one carrying closeSession) lands.
+          singleReadingFinalized: bufferCommitFastFire,
           measurementConditions: (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull,
-          medicationTaken: dto.medicationTaken ?? null,
-          medicationScheduledLater: dto.medicationScheduledLater ?? false,
+          // Bug 13 — inherit medication context from the first-of-pair (same sitting).
+          medicationTaken: dto.medicationTaken ?? inherited?.medicationTaken ?? null,
+          medicationScheduledLater:
+            dto.medicationScheduledLater ?? inherited?.medicationScheduledLater ?? false,
           missedDoses: dto.missedDoses ?? null,
-          missedMedications: (resolvedMissedMedications as unknown as JsonValue) ?? Prisma.JsonNull,
-          medicationStatuses: (dto.medicationStatuses as unknown as JsonValue) ?? Prisma.JsonNull,
+          missedMedications:
+            (resolvedMissedMedications as unknown as JsonValue) ??
+            (inherited?.missedMedications as JsonValue) ??
+            Prisma.JsonNull,
+          medicationStatuses:
+            (dto.medicationStatuses as unknown as JsonValue) ??
+            (inherited?.medicationStatuses as JsonValue) ??
+            Prisma.JsonNull,
           // V2 structured Level-2 symptom triggers (Flow B). Prefer the
           // explicit booleans, otherSymptoms goes to the same column. The
           // legacy `symptoms` array (v1 clients) is appended so nothing is
@@ -113,21 +416,89 @@ export class DailyJournalService {
           teachBackAnswer: dto.teachBackAnswer ?? null,
           teachBackCorrect: dto.teachBackCorrect ?? null,
           notes: dto.notes ?? null,
-          source: dto.source ? SOURCE_MAP[dto.source] : EntrySource.MANUAL,
+          source: actor
+            ? EntrySource.ADMIN
+            : dto.source
+              ? SOURCE_MAP[dto.source]
+              : EntrySource.MANUAL,
           sourceMetadata: (dto.sourceMetadata as JsonValue) ?? Prisma.JsonNull,
         },
+        })
+
+        await this.writeJournalAudit(tx, {
+          userId,
+          actor,
+          changeType: actor
+            ? VerificationChangeType.ADMIN_READING_ADDED
+            : VerificationChangeType.PATIENT_READING_CREATED,
+          fieldPath: actor ? 'journal_entry.admin_added' : 'journal_entry.created',
+          previousValue: null,
+          newValue: this.serializeForAudit(created),
+          practiceContext: ctx?.practiceId ?? null,
+        })
+
+        return created
       })
 
-      this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_CREATED, {
-        userId,
-        entryId: entry.id,
-        measuredAt: entry.measuredAt,
-        systolicBP: entry.systolicBP,
-        diastolicBP: entry.diastolicBP,
-        pulse: entry.pulse,
-        weight: entry.weight != null ? Number(entry.weight) : null,
-        sessionId: entry.sessionId,
-      })
+      // Option D (Manisha 2026-06-12 Q2) — when this reading CONFIRMS a held
+      // first-of-pair: (1) release the hold so the session-finalize cron won't
+      // ALSO fire RULE_UNCONFIRMED_EMERGENCY on it, and (2) clear its AWAITING
+      // state — the pair is now resolved, so it becomes an ordinary historical
+      // reading. Without (2) the first-of-pair would show the read-only "Held"
+      // badge on the readings tab FOREVER (the cron skips it once finalized).
+      // BP1 for the CONFIRMED_NORMAL message is still fetched by confirmsEntryId,
+      // not by this row's state, so clearing it here is safe. The atomic
+      // updateMany guard mirrors finalizeSingleReadingSession.
+      if (
+        optionDState === EmergencyConfirmationState.CONFIRMATORY &&
+        dto.confirmsEntryId
+      ) {
+        await this.prisma.journalEntry.updateMany({
+          where: { id: dto.confirmsEntryId, userId, singleReadingFinalized: false },
+          data: { singleReadingFinalized: true, emergencyConfirmation: null },
+        })
+      }
+
+      // Bug 19 — the patient explicitly closed the session ("I'm good" buffer
+      // commit, or an Option D confirmatory). Stamp every entry in the session so
+      // the active-session "add to this session?" prompt won't re-offer a session
+      // the patient already declared done.
+      if (dto.closeSession && effectiveSessionId) {
+        await this.prisma.journalEntry.updateMany({
+          where: { userId, sessionId: effectiveSessionId },
+          data: {
+            sessionClosedAt: new Date(),
+            // Bug 23 — when the buffer-skip flag is on, "I'm good" also finalizes
+            // the whole sitting (every reading shares this sessionId) so the
+            // engine fires the averaged result now instead of waiting out the
+            // 5-min single-reading hold + cron. Also clears the FE edit badge on
+            // the earlier (held) readings of a multi-reading sitting. Scoped to
+            // the buffer pathway via bufferCommitFastFire — Option D confirmatory
+            // closes its session here too but keeps its own retake semantics.
+            ...(bufferCommitFastFire
+              ? { singleReadingFinalized: true, engineEvaluationDeferredUntil: null }
+              : {}),
+          },
+        })
+      }
+
+      // Engine evaluation runs for BOTH patient and admin creates — a new
+      // reading is a new clinical datapoint regardless of who keyed it in.
+      // EXCEPTION: an Option D AWAITING first-of-pair is HELD — the engine must
+      // NOT run (no emergency may page until the patient confirms or the
+      // cron/decline path resolves it as UNCONFIRMED). So skip the emit.
+      if (optionDState !== EmergencyConfirmationState.AWAITING) {
+        this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_CREATED, {
+          userId,
+          entryId: entry.id,
+          measuredAt: entry.measuredAt,
+          systolicBP: entry.systolicBP,
+          diastolicBP: entry.diastolicBP,
+          pulse: entry.pulse,
+          weight: entry.weight != null ? Number(entry.weight) : null,
+          sessionId: entry.sessionId,
+        })
+      }
 
       // Cluster 6 Q2 (Manisha 5/9/26): frontend hint to render the "Take a
       // second reading in about 1 minute" prompt + 5-min timeout. True when
@@ -135,13 +506,46 @@ export class DailyJournalService {
       // (which has its own ≥3-reading gate) AND isn't Pre-Day-3. The engine
       // gate is the authoritative source — this hint is just for UX so the
       // patient sees the prompt without polling.
-      const pendingSecondReading = await this.computePendingSecondReading(userId, entry)
+      // Option D readings drive their own retake UI (Screen B), not the
+      // ordinary Cluster 6 Q2 "take a second reading" non-emergency prompt.
+      const pendingSecondReading = optionDState
+        ? false
+        : await this.computePendingSecondReading(userId, entry)
+
+      // Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) —
+      // Gate A (structural "is new latest?") POST signal. If a strictly later
+      // reading already exists OUTSIDE this entry's 5-min session window, the
+      // engine will suppress all alerts for this entry, and the patient app
+      // shows the "recorded but won't trigger real-time alerts" banner. The
+      // window margin keeps a second same-session reading from false-
+      // positives; the engine's own gate (alert-engine.service.ts) compares
+      // against the session max, so the two predicates agree except in
+      // exotic overlap cases, where the engine (suppression side) wins.
+      // Computed at create time only — not on GETs (recomputing later could
+      // misreport entries whose alerts genuinely fired before a later-
+      // measured entry arrived; persisting it would need a schema change).
+      const newerOutsideSession = await this.prisma.journalEntry.findFirst({
+        where: {
+          userId,
+          measuredAt: {
+            gt: new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS),
+          },
+        },
+        select: { id: true },
+      })
 
       return {
         statusCode: 202,
         message: 'Journal entry accepted. Background analysis in progress.',
-        data: this.serializeEntry(entry),
+        data: this.serializeEntry(entry, {
+          gateASuppressed: newerOutsideSession != null,
+        }),
         pendingSecondReading,
+        // Option D (Manisha 2026-06-12 Q2) — tells the patient app to show the
+        // confirmatory second-reading screen (Screen B). The held first-of-pair
+        // id is `data.id`, which the app passes back as `confirmsEntryId`.
+        pendingEmergencyConfirmation:
+          optionDState === EmergencyConfirmationState.AWAITING,
       }
     } catch (error) {
       if (
@@ -160,12 +564,38 @@ export class DailyJournalService {
     }
   }
 
-  async update(userId: string, entryId: string, dto: UpdateJournalEntryDto) {
+  /**
+   * `actor` set = care-team edit via the admin readings endpoints: audit row
+   * is ADMIN_READING_EDITED and no event is emitted at all.
+   *
+   * Patient edits (actor undefined) emit ENTRY_UPDATED — but per the signed CTO
+   * 2026-06-09 no-re-trigger policy (Manisha 2026-06-12 Q2 "we cannot un-page"),
+   * the rule engine deliberately does NOT subscribe to ENTRY_UPDATED. The emit
+   * exists ONLY so chat / voice refresh their context cache. The edited value
+   * is seen by the engine only when it next evaluates a NEW entry (e.g. session
+   * averaging picks up the corrected sibling). A patient editing a fired reading
+   * never flips/double-fires its alert.
+   */
+  async update(
+    userId: string,
+    entryId: string,
+    dto: UpdateJournalEntryDto,
+    actor?: ActorUser,
+    ctx?: { practiceId: string | null },
+  ) {
     const existing = await this.prisma.journalEntry.findFirst({
       where: { id: entryId, userId },
     })
 
     if (!existing) {
+      // Composite WHERE failed — either the entry doesn't exist OR it exists
+      // but belongs to a different patient. We don't distinguish: both surface
+      // the same NotFoundException so a probe can't confirm an id's existence.
+      // The log line lets ops detect cross-tenant probes + LLM-hallucinated
+      // UUIDs (Gemini native-audio hallucinates ids, python-genai#1894).
+      this.logger.warn(
+        `[SECURITY] cross_tenant_attempt service=journal action=update userId=${userId} requestedId=${entryId}`,
+      )
       throw new NotFoundException('Journal entry not found')
     }
 
@@ -183,6 +613,7 @@ export class DailyJournalService {
           ? (dto.position as typeof POSITION_VALUES[number])
           : null
       if (dto.sessionId !== undefined) data.sessionId = dto.sessionId
+
       if (dto.measurementConditions !== undefined)
         data.measurementConditions =
           (dto.measurementConditions as JsonValue) ?? Prisma.JsonNull
@@ -240,26 +671,95 @@ export class DailyJournalService {
       if (dto.sourceMetadata !== undefined)
         data.sourceMetadata = (dto.sourceMetadata as JsonValue) ?? Prisma.JsonNull
 
-      const updated = await this.prisma.journalEntry.update({
-        where: { id: entryId },
-        data,
+      // Bug 41 + 42 — no-op filter. Strip any field whose new value equals
+      // the existing value so the LLM/patient gets a graceful "nothing to
+      // update" response instead of a successful but meaningless Prisma
+      // round-trip. Side effect (Bug 42): the resolveUpdateSessionId call
+      // below is now gated on data.measuredAt SURVIVING the filter — i.e.
+      // it only fires when the new time actually differs. Pre-fix Bug 25's
+      // regroup churned sessionId even when the LLM re-set measuredAt to
+      // its current value.
+      this.filterNoOpFieldsInPlace(data, existing)
+      if (Object.keys(data).length === 0) {
+        // Bug 59 — explicit `noChange: true` flag so dispatchers can route
+        // the response to a graceful "values already match" reply for the
+        // patient instead of claiming "Reading updated successfully." when
+        // nothing actually changed. Pre-fix dispatchers ignored result.message
+        // and hardcoded "Reading updated successfully." — the patient got
+        // told their reading was edited even when it wasn't.
+        return {
+          statusCode: 200,
+          noChange: true,
+          message:
+            'No changes — the reading already has those values. Nothing to update.',
+          data: this.serializeEntry(existing),
+        }
+      }
+
+      // Bug 25 — when measuredAt is being changed AND the caller did NOT
+      // explicitly override sessionId, re-evaluate the session assignment
+      // against the new time. Auto-joins a 5-min-window sibling session,
+      // leaves a stale session when moving away from originals, or stays
+      // put when still grouped with current siblings. Bug 42 — gated on
+      // data.measuredAt surviving the no-op filter above so we don't churn
+      // sessionId on a no-change "edit".
+      if (data.measuredAt !== undefined && dto.sessionId === undefined) {
+        const resolved = await this.resolveUpdateSessionId(
+          userId,
+          entryId,
+          existing.sessionId,
+          data.measuredAt as Date,
+        )
+        if (resolved !== existing.sessionId) {
+          this.logger.log(
+            `update: time-edit auto-regrouping entry=${entryId} ` +
+              `${existing.sessionId ?? 'null'} → ${resolved}`,
+          )
+        }
+        data.sessionId = resolved
+      }
+
+      // Update + audit are one transaction — the edit can't land without its
+      // prior/new snapshot pair, and an audit failure rolls the edit back.
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.journalEntry.update({
+          where: { id: entryId },
+          data,
+        })
+        await this.writeJournalAudit(tx, {
+          userId,
+          actor,
+          changeType: actor
+            ? VerificationChangeType.ADMIN_READING_EDITED
+            : VerificationChangeType.PATIENT_READING_EDITED,
+          fieldPath: actor ? 'journal_entry.admin_edited' : 'journal_entry.edited',
+          previousValue: this.serializeForAudit(existing),
+          newValue: this.serializeForAudit(row),
+          practiceContext: ctx?.practiceId ?? null,
+        })
+        return row
       })
 
-      this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
-        userId,
-        entryId: updated.id,
-        measuredAt: updated.measuredAt,
-        systolicBP: updated.systolicBP,
-        diastolicBP: updated.diastolicBP,
-        pulse: updated.pulse,
-        weight: updated.weight != null ? Number(updated.weight) : null,
-        sessionId: updated.sessionId,
-      })
+      // Patient edits keep the engine re-evaluation (see method doc). Admin
+      // edits skip it per CTO Option C — no new emit, existing alerts stand.
+      if (!actor) {
+        this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
+          userId,
+          entryId: updated.id,
+          measuredAt: updated.measuredAt,
+          systolicBP: updated.systolicBP,
+          diastolicBP: updated.diastolicBP,
+          pulse: updated.pulse,
+          weight: updated.weight != null ? Number(updated.weight) : null,
+          sessionId: updated.sessionId,
+        })
+      }
 
       return {
-        statusCode: 202,
-        message:
-          'Journal entry updated. Background re-analysis in progress.',
+        statusCode: actor ? 200 : 202,
+        message: actor
+          ? 'Journal entry updated.'
+          : 'Journal entry updated. Background re-analysis in progress.',
         data: this.serializeEntry(updated),
       }
     } catch (error) {
@@ -377,12 +877,77 @@ export class DailyJournalService {
     }
   }
 
+  /**
+   * Bug 60 — does the patient have ANY active (non-discontinued, non-rejected,
+   * non-PRN) medications on file? Used by the chat + voice dispatchers to
+   * gate the popup / verbal summary so 0-meds patients don't see a
+   * misleading "All medications taken" pill rendered from the vacuously-
+   * true `medicationTaken=true` we save for them per Bug 53. Matches the
+   * filter rule in system-prompt.service.ts:appendMedications (i.e.
+   * `contextMeds` + `pendingMeds` — both empty for 0-meds patients).
+   */
+  async hasActiveMedications(userId: string): Promise<boolean> {
+    const count = await this.prisma.patientMedication.count({
+      where: {
+        userId,
+        discontinuedAt: null,
+        verificationStatus: { not: 'REJECTED' },
+        NOT: { frequency: 'AS_NEEDED' },
+      },
+    })
+    return count > 0
+  }
+
+  /**
+   * Phase/16 Item 5 — out-of-window reading flag. Patient asked to correct a
+   * reading that's locked (older than the 5-min edit window or already
+   * engine-evaluated), so we can't mutate it. Instead we write a
+   * non-blocking audit row the care team picks up on their next chart
+   * review. NOT an emergency — no escalation, no dispatch, just an
+   * audit-trail note tagged PATIENT_REPORT.
+   */
+  async flagReadingError(
+    userId: string,
+    entryId: string,
+    reason: string,
+  ): Promise<{ flagged: true; entryId: string }> {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { id: entryId, userId },
+      select: { id: true, measuredAt: true, systolicBP: true, diastolicBP: true },
+    })
+    if (!entry) {
+      throw new NotFoundException('Journal entry not found')
+    }
+    const trimmed = (reason ?? '').trim().slice(0, 500)
+    await this.prisma.profileVerificationLog.create({
+      data: {
+        userId,
+        fieldPath: `journalEntry:${entryId}.flagged`,
+        previousValue: {
+          systolicBP: entry.systolicBP,
+          diastolicBP: entry.diastolicBP,
+          measuredAt: entry.measuredAt.toISOString(),
+        } as Prisma.InputJsonValue,
+        newValue: Prisma.JsonNull,
+        changedBy: userId,
+        changedByRole: 'PATIENT',
+        changeType: 'PATIENT_REPORT',
+        discrepancyFlag: true,
+        rationale: trimmed || 'Patient flagged this reading as possibly incorrect.',
+      },
+    })
+    return { flagged: true, entryId }
+  }
+
   async findOne(userId: string, id: string) {
     const entry = await this.prisma.journalEntry.findFirst({
       where: { id, userId },
     })
 
     if (!entry) {
+      this.logger.warn(
+        `[SECURITY] cross_tenant_attempt service=journal action=findOne userId=${userId} requestedId=${id}`,
+      )
       throw new NotFoundException('Journal entry not found')
     }
 
@@ -397,6 +962,12 @@ export class DailyJournalService {
     const alerts = await this.prisma.deviationAlert.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
+      // Cap at 200 most-recent alerts — a heavy patient with years of
+      // history doesn't need every alert dumped at once. Older alerts can
+      // be fetched via paginated routes if/when needed. Defence-in-depth
+      // for OWASP LLM02 "minimum necessary" — even within a single
+      // patient's data, don't fetch more than the UI uses.
+      take: 200,
       include: {
         journalEntry: {
           select: {
@@ -411,10 +982,26 @@ export class DailyJournalService {
       },
     })
 
+    // Bug 12 (live-test 2026-06-15) — provider-only alerts must NEVER reach the
+    // patient surface, regardless of tier. A PROVIDER-ONLY alert is one with an
+    // empty patientMessage: Tier-3 caregiver/physician notes
+    // (RULE_HF_CAREGIVER_EDEMA, RULE_HCM_VASODILATOR, RULE_PULSE_PRESSURE_NARROW,
+    // loop-diuretic, etc.) AND the Option D Tier-1 RULE_UNCONFIRMED_EMERGENCY /
+    // Tier-3 RULE_EMERGENCY_RANGE_CONFIRMED_NORMAL. The previous filter only
+    // gated TIER_3_INFO, so RULE_UNCONFIRMED_EMERGENCY (TIER_1_CONTRAINDICATION,
+    // empty patientMessage) leaked into the patient feed with a tier-generic
+    // "Important medication alert" title. Filtering on a non-empty patientMessage
+    // universally is the robust guard — every genuinely patient-facing alert
+    // (BP L1/L2, emergencies, contraindications, adherence) carries one; the
+    // admin endpoint is unchanged (Physician Notes keep everything).
+    const patientVisible = alerts.filter(
+      (a) => typeof a.patientMessage === 'string' && a.patientMessage.trim().length > 0,
+    )
+
     return {
       statusCode: 200,
       message: 'Alerts retrieved successfully',
-      data: alerts.map((alert) => ({
+      data: patientVisible.map((alert) => ({
         ...alert,
         magnitude: alert.magnitude != null ? Number(alert.magnitude) : null,
         baselineValue: alert.baselineValue
@@ -498,7 +1085,12 @@ export class DailyJournalService {
     userId: string,
     status: 'all' | 'unread' | 'read' = 'all',
   ) {
-    const where: Prisma.NotificationWhereInput = { userId }
+    // Bell LIST uses the shared BELL_VISIBLE_NOTIFICATION_FILTER (H3 #80 EMAIL
+    // exclusion + H5 G.4 alert-linked-PUSH exclusion). READ-SIDE only.
+    const where: Prisma.NotificationWhereInput = {
+      userId,
+      ...BELL_VISIBLE_NOTIFICATION_FILTER,
+    }
 
     if (status === 'unread') {
       where.readAt = null
@@ -511,6 +1103,10 @@ export class DailyJournalService {
         this.prisma.notification.findMany({
           where,
           orderBy: { sentAt: 'desc' },
+          // Cap at 200 — bell shows the most-recent N; older notifications
+          // exist in the DB but don't need to flood the response. Same
+          // OWASP LLM02 "minimum necessary" rationale as getAlerts above.
+          take: 200,
           // Pull the patient userId via the linked alert so the bell can
           // deep-link clicks to /patients/{patientUserId}?alert={alertId}.
           // notification.userId is the *recipient* (admin/provider/ops), not
@@ -536,10 +1132,10 @@ export class DailyJournalService {
   }
 
   /**
-   * Count of in-app unread notifications for the bell badge. EMAIL rows
-   * are excluded — they represent outbound deliveries, not in-app state
-   * the user can clear by clicking the bell. Cheap (indexed on
-   * [userId, readAt]).
+   * Count of in-app unread notifications for the bell badge. Uses the SAME
+   * BELL_VISIBLE_NOTIFICATION_FILTER as getNotifications so the badge count and
+   * the list contents can never drift (EMAIL + alert-linked PUSH excluded).
+   * Cheap (indexed on [userId, readAt]).
    */
   async getNotificationsUnreadCount(userId: string) {
     const count = await this.prisma.withConnectionRetry(
@@ -548,7 +1144,7 @@ export class DailyJournalService {
           where: {
             userId,
             readAt: null,
-            channel: { not: 'EMAIL' },
+            ...BELL_VISIBLE_NOTIFICATION_FILTER,
           },
         }),
       'getNotificationsUnreadCount',
@@ -718,13 +1314,28 @@ export class DailyJournalService {
       }
     }
 
-    await this.prisma.journalEntry.update({
-      where: { id: entryId },
+    // Bug 1 (secondary) — atomic claim. The frontend 5-min timer and the
+    // SessionFinalizeService cron (and two cron ticks) can call this
+    // concurrently; the read-then-update above would let both pass the guard,
+    // both re-emit ENTRY_UPDATED, and double-fire the alert. updateMany flips
+    // the flag only while it's still false, so exactly one caller wins
+    // (count === 1) and proceeds to re-evaluate — the rest no-op.
+    const claim = await this.prisma.journalEntry.updateMany({
+      where: { id: entryId, singleReadingFinalized: false },
       data: { singleReadingFinalized: true },
     })
+    if (claim.count === 0) {
+      return {
+        statusCode: 200,
+        message: 'Already finalized — no-op.',
+      }
+    }
 
-    // Re-trigger evaluation. AlertEngineService.handleEntryUpdated subscribes.
-    this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
+    // FIRST evaluation of the held single reading (not a re-trigger).
+    // AlertEngineService.handleEntryFinalized subscribes to ENTRY_FINALIZED;
+    // ENTRY_UPDATED (patient edits) deliberately no longer reaches the engine
+    // per the CTO 2026-06-09 no-re-trigger policy.
+    this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_FINALIZED, {
       userId: entry.userId,
       entryId: entry.id,
       measuredAt: entry.measuredAt,
@@ -742,38 +1353,165 @@ export class DailyJournalService {
     }
   }
 
-  async delete(userId: string, id: string) {
+  /**
+   * Option D (Manisha 2026-06-12 Q2) — resolve a held AWAITING first-of-pair as
+   * UNCONFIRMED. Called by the explicit decline endpoint (patient closed/declined
+   * the retake) and by the SessionFinalizeService cron (app-closed safety net,
+   * 5-min window elapsed with no confirmatory reading). Flips the row to
+   * UNCONFIRMED + releases the hold, then re-triggers the engine, which fires
+   * RULE_UNCONFIRMED_EMERGENCY (Tier 1 provider-only).
+   *
+   * Idempotent via the same `singleReadingFinalized` atomic claim as
+   * finalizeSingleReadingSession — a CONFIRMATORY resolution releases the hold
+   * first (sets singleReadingFinalized=true), so a racing cron tick no-ops and
+   * never double-fires.
+   */
+  async finalizeUnconfirmedEmergency(userId: string, entryId: string) {
     const entry = await this.prisma.journalEntry.findFirst({
-      where: { id, userId },
+      where: { id: entryId, userId },
       select: {
         id: true,
         userId: true,
         sessionId: true,
         measuredAt: true,
+        systolicBP: true,
+        diastolicBP: true,
+        pulse: true,
+        weight: true,
+        singleReadingFinalized: true,
+        emergencyConfirmation: true,
       },
+    })
+    if (!entry) {
+      throw new NotFoundException('Journal entry not found')
+    }
+    // Only a still-held AWAITING entry becomes UNCONFIRMED. A CONFIRMATORY
+    // resolution already released the hold — no-op.
+    if (
+      entry.emergencyConfirmation !== EmergencyConfirmationState.AWAITING ||
+      entry.singleReadingFinalized
+    ) {
+      return { statusCode: 200, message: 'Already resolved — no-op.' }
+    }
+
+    // Atomic claim — flip hold + state only while still AWAITING + unfinalized.
+    const claim = await this.prisma.journalEntry.updateMany({
+      where: {
+        id: entryId,
+        singleReadingFinalized: false,
+        emergencyConfirmation: EmergencyConfirmationState.AWAITING,
+      },
+      data: {
+        singleReadingFinalized: true,
+        emergencyConfirmation: EmergencyConfirmationState.UNCONFIRMED,
+      },
+    })
+    if (claim.count === 0) {
+      return { statusCode: 200, message: 'Already resolved — no-op.' }
+    }
+
+    // Bug 19 — declining (or the cron expiry) explicitly closes the session, so
+    // the active-session prompt won't re-offer the resolved emergency's session.
+    if (entry.sessionId) {
+      await this.prisma.journalEntry.updateMany({
+        where: { userId, sessionId: entry.sessionId },
+        data: { sessionClosedAt: new Date() },
+      })
+    }
+
+    // FIRST evaluation of the held reading (not a re-trigger). runPipeline sees
+    // emergencyConfirmation=UNCONFIRMED and fires RULE_UNCONFIRMED_EMERGENCY.
+    // Uses ENTRY_FINALIZED so the no-re-trigger policy on ENTRY_UPDATED holds.
+    this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_FINALIZED, {
+      userId: entry.userId,
+      entryId: entry.id,
+      measuredAt: entry.measuredAt,
+      systolicBP: entry.systolicBP,
+      diastolicBP: entry.diastolicBP,
+      pulse: entry.pulse,
+      weight: entry.weight != null ? Number(entry.weight) : null,
+      sessionId: entry.sessionId,
+    })
+
+    return {
+      statusCode: 202,
+      message:
+        'Unconfirmed emergency finalized. Background analysis in progress.',
+    }
+  }
+
+  /**
+   * Soft delete (HIPAA L5, Duwaragie sign-off 2026-07-06). Stamps `deletedAt`
+   * instead of removing the row, so the reading's fired DeviationAlert +
+   * escalations + notifications survive (the onDelete: Cascade never fires) —
+   * the clinically-conservative "amend, don't destroy" approach. The reading
+   * drops out of all normal reads via the soft-delete Prisma client extension.
+   * `actor` set = care-team delete via the admin readings endpoints —
+   * ADMIN_READING_DELETED audit row and NO session re-evaluation emit. Full row
+   * fetched (not a narrow select) because the audit snapshot must capture the
+   * state at delete time.
+   */
+  async delete(
+    userId: string,
+    id: string,
+    actor?: ActorUser,
+    ctx?: { practiceId: string | null },
+  ) {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { id, userId },
     })
 
     if (!entry) {
+      this.logger.warn(
+        `[SECURITY] cross_tenant_attempt service=journal action=delete userId=${userId} requestedId=${id}`,
+      )
       throw new NotFoundException('Journal entry not found')
     }
 
     // Resolve the session anchor that will trigger a re-evaluation BEFORE the
-    // delete cascades. SessionAveragerService groups by sessionId OR a 30-min
-    // measuredAt window; we mirror that here so the rule engine recomputes the
-    // averaged vitals for what's left of the session.
+    // soft-delete. SessionAveragerService groups by sessionId OR a 5-min
+    // measuredAt window (CLINICAL_SPEC §5.2); we mirror that here so the rule
+    // engine recomputes the averaged vitals for what's left of the session.
+    // The soft-deleted reading drops out of that recompute automatically — the
+    // averager's findMany sibling load is filtered by the soft-delete extension.
     //
-    // DeviationAlert / EscalationEvent rows owned by `entry` cascade-delete
-    // via the FK (phase/2 schema). The re-evaluation below re-runs the rule
-    // engine against the surviving session-anchor entry. Bug #6/#7 fix
+    // With soft-delete the DeviationAlert / EscalationEvent rows owned by
+    // `entry` SURVIVE (the FK onDelete: Cascade never fires — the row is
+    // updated, not deleted); that is the whole point of L5. Bug #6/#7 fix
     // (alert-engine.service.ts) removed the silent auto-resolve sweep, so
     // sibling-owned alerts retain their state until an admin resolves them
     // explicitly via /admin/alerts/:id/resolve. Re-evaluation may surface
     // NEW alerts on the surviving entry, but it never silently closes
     // existing ones.
-    const survivingAnchor = await this.findSessionReevalAnchor(entry)
+    const survivingAnchor = actor ? null : await this.findSessionReevalAnchor(entry)
 
-    await this.prisma.journalEntry.delete({ where: { id } })
+    // Audit row is written BEFORE the reading is soft-deleted, in the same
+    // transaction — a failed audit write rolls the soft-delete back (a reading
+    // can't be marked deleted without its audit row).
+    await this.prisma.$transaction(async (tx) => {
+      await this.writeJournalAudit(tx, {
+        userId,
+        actor,
+        changeType: actor
+          ? VerificationChangeType.ADMIN_READING_DELETED
+          : VerificationChangeType.PATIENT_READING_DELETED,
+        fieldPath: actor ? 'journal_entry.admin_deleted' : 'journal_entry.deleted',
+        previousValue: this.serializeForAudit(entry),
+        newValue: null,
+        practiceContext: ctx?.practiceId ?? null,
+      })
+      // Soft delete: stamp deletedAt instead of removing the row, so the fired
+      // alert + escalations + notifications survive (the cascade never fires).
+      // The row drops out of all normal reads via the soft-delete extension.
+      await tx.journalEntry.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      })
+    })
 
+    // Patient deletes keep the surviving-sibling re-evaluation (session-
+    // integrity maintenance — the averaged vitals must recompute for what's
+    // left of the session). Admin deletes skip it per CTO Option C.
     if (survivingAnchor) {
       this.eventEmitter.emit(JOURNAL_EVENTS.ENTRY_UPDATED, {
         userId: survivingAnchor.userId,
@@ -805,7 +1543,21 @@ export class DailyJournalService {
     sessionId: string | null
     measuredAt: Date
   }) {
-    const SESSION_WINDOW_MS = 30 * 60 * 1000
+    // Window is anchored on this entry's measuredAt; mirror SessionAverager so
+    // the surviving anchor we pick is one that would actually re-average with
+    // what's left of the session (same id AND within the window, or null + window).
+    const windowStart = new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS)
+    const select = {
+      id: true,
+      userId: true,
+      sessionId: true,
+      measuredAt: true,
+      systolicBP: true,
+      diastolicBP: true,
+      pulse: true,
+      weight: true,
+    }
 
     if (entry.sessionId) {
       return this.prisma.journalEntry.findFirst({
@@ -813,23 +1565,13 @@ export class DailyJournalService {
           userId: entry.userId,
           sessionId: entry.sessionId,
           id: { not: entry.id },
+          measuredAt: { gte: windowStart, lte: windowEnd },
         },
         orderBy: { measuredAt: 'desc' },
-        select: {
-          id: true,
-          userId: true,
-          sessionId: true,
-          measuredAt: true,
-          systolicBP: true,
-          diastolicBP: true,
-          pulse: true,
-          weight: true,
-        },
+        select,
       })
     }
 
-    const windowStart = new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS)
-    const windowEnd = new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS)
     return this.prisma.journalEntry.findFirst({
       where: {
         userId: entry.userId,
@@ -838,16 +1580,7 @@ export class DailyJournalService {
         measuredAt: { gte: windowStart, lte: windowEnd },
       },
       orderBy: { measuredAt: 'desc' },
-      select: {
-        id: true,
-        userId: true,
-        sessionId: true,
-        measuredAt: true,
-        systolicBP: true,
-        diastolicBP: true,
-        pulse: true,
-        weight: true,
-      },
+      select,
     })
   }
 
@@ -859,12 +1592,19 @@ export class DailyJournalService {
     const [totalEntries, recentEntries, allEntries] = await Promise.all([
       this.prisma.journalEntry.count({ where: { userId } }),
       this.prisma.journalEntry.findMany({
+        // 30-day window is the natural cap for recentEntries — already
+        // date-bounded so no `take` ceiling needed (worst-case: a patient
+        // who logs 50 entries/day for 30 days = 1500 narrow rows, fine).
         where: { userId, measuredAt: { gte: thirtyDaysAgo } },
         select: { systolicBP: true, diastolicBP: true },
       }),
       this.prisma.journalEntry.findMany({
         where: { userId },
         orderBy: { measuredAt: 'desc' },
+        // Cap full-history streak read at 1000 entries (~3 years of daily
+        // check-ins) — long enough to compute any plausible streak, short
+        // enough that a pathological row count can't blow the response.
+        take: 1000,
         select: { measuredAt: true, medicationTaken: true },
       }),
     ])
@@ -935,6 +1675,10 @@ export class DailyJournalService {
     const escalations = await this.prisma.escalationEvent.findMany({
       where: { userId },
       orderBy: { triggeredAt: 'desc' },
+      // Cap at 200 most-recent escalations — patient escalation history
+      // can grow large over time; older events are still queryable via
+      // paginated routes if needed. Same OWASP "minimum necessary" rationale.
+      take: 200,
       include: {
         alert: {
           select: {
@@ -1019,10 +1763,139 @@ export class DailyJournalService {
     }
   }
 
+  /**
+   * Compact JSON snapshot of a reading for the journal audit rows
+   * (ProfileVerificationLog.previousValue / newValue) — the patient-visible
+   * state only: vitals, timing, session, symptoms, notes. Internal engine
+   * flags (narrowPpArtifact, singleReadingFinalized, teach-back) are not
+   * audit-surface. `symptoms` collapses the structured booleans to the names
+   * that are true plus freeform otherSymptoms.
+   */
+  private serializeForAudit(entry: {
+    id: string
+    measuredAt: Date
+    systolicBP?: number | null
+    diastolicBP?: number | null
+    pulse?: number | null
+    weight?: Prisma.Decimal | number | null
+    position?: string | null
+    sessionId?: string | null
+    medicationTaken?: boolean | null
+    missedDoses?: number | null
+    otherSymptoms?: string[]
+    notes?: string | null
+    source?: EntrySource
+    [key: string]: unknown
+  }): Prisma.InputJsonValue {
+    const symptoms: string[] = [
+      ...AUDIT_SYMPTOM_FLAGS.filter((flag) => entry[flag] === true),
+      ...(entry.otherSymptoms ?? []),
+    ]
+    return {
+      entryId: entry.id,
+      measuredAt: entry.measuredAt.toISOString(),
+      systolicBP: entry.systolicBP ?? null,
+      diastolicBP: entry.diastolicBP ?? null,
+      pulse: entry.pulse ?? null,
+      weight: entry.weight != null ? Number(entry.weight) : null,
+      position: entry.position ?? null,
+      sessionId: entry.sessionId ?? null,
+      medicationTaken: entry.medicationTaken ?? null,
+      missedDoses: entry.missedDoses ?? null,
+      symptoms,
+      notes: entry.notes ?? null,
+      source: entry.source ? entry.source.toLowerCase() : null,
+    }
+  }
+
+  /**
+   * Journal-entry audit row writer — HIPAA/JCAHO closure for reading
+   * create/edit/delete, which previously left no trace. Transaction-scoped
+   * (caller passes the tx) so the audit row and the data operation succeed
+   * or fail together; mirrors caregiver.service.ts writeAudit.
+   */
+  private async writeJournalAudit(
+    tx: Prisma.TransactionClient,
+    args: {
+      userId: string
+      actor?: ActorUser
+      changeType: VerificationChangeType
+      fieldPath: string
+      previousValue: Prisma.InputJsonValue | null
+      newValue: Prisma.InputJsonValue | null
+      /**
+       * Phase/practice-identity (Manisha 2026-06-12 §1) — the activePracticeId
+       * on the actor's AuthSession at the moment of write. NULL on patient-
+       * self-report rows and pre-policy entries.
+       */
+      practiceContext?: string | null
+    },
+  ): Promise<void> {
+    await tx.profileVerificationLog.create({
+      data: {
+        userId: args.userId,
+        fieldPath: args.fieldPath,
+        previousValue: args.previousValue ?? Prisma.JsonNull,
+        newValue: args.newValue ?? Prisma.JsonNull,
+        changedBy: args.actor?.id ?? args.userId,
+        changedByRole: this.verifierRoleFor(args.actor),
+        changeType: args.changeType,
+        practiceContext: args.practiceContext ?? null,
+      },
+    })
+  }
+
+  /**
+   * VerifierRole predates the 5-role split, so admin actors collapse:
+   * PROVIDER (without a broader admin role) keeps its own VerifierRole;
+   * SUPER_ADMIN / MEDICAL_DIRECTOR map to ADMIN. No actor = patient action.
+   */
+  private verifierRoleFor(actor?: ActorUser): VerifierRole {
+    if (!actor) return VerifierRole.PATIENT
+    if (
+      actor.roles.includes(UserRole.PROVIDER) &&
+      !actor.roles.includes(UserRole.SUPER_ADMIN) &&
+      !actor.roles.includes(UserRole.MEDICAL_DIRECTOR)
+    ) {
+      return VerifierRole.PROVIDER
+    }
+    return VerifierRole.ADMIN
+  }
+
+  /**
+   * Strict admin-POST variant of resolveCreateSessionId's staleness check.
+   * The admin multi-reading flow passes sessionId deliberately, so a stale id
+   * must surface as a 400 ("Session expired or invalid") rather than being
+   * silently re-grouped like the forgiving patient/voice path. A sessionId
+   * with no members yet is fine — the reading establishes the session.
+   */
+  private async assertSessionJoinable(
+    userId: string,
+    sessionId: string,
+    measuredAt: Date,
+  ): Promise<void> {
+    const newest = await this.prisma.journalEntry.findFirst({
+      where: { userId, sessionId },
+      orderBy: { measuredAt: 'desc' },
+      select: { measuredAt: true },
+    })
+    if (!newest) return
+    const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
+    if (gapMs > SESSION_WINDOW_MS) {
+      throw new BadRequestException('Session expired or invalid')
+    }
+  }
+
   private serializeEntry(entry: {
     id: string
     userId: string
     measuredAt: Date
+    // Manisha Backdated Readings sign-off 2026-06-06 (Chunk A) — bucketed
+    // measurement-lag band. Surfaced for the patient time-picker UI (Chunk C)
+    // and the admin "DELAYED" badge. Optional so legacy callers / tests that
+    // mock the entry without delayBand keep compiling — Prisma always supplies
+    // it on real reads via the @default(REAL_TIME) on the column.
+    delayBand?: string
     systolicBP: number | null
     diastolicBP: number | null
     pulse: number | null
@@ -1061,13 +1934,38 @@ export class DailyJournalService {
     notes: string | null
     source: EntrySource
     sourceMetadata: JsonValue
+    // Option D + edit window (Manisha 2026-06-12). Optional so mocked/legacy
+    // callers keep compiling; Prisma supplies them on real reads.
+    engineEvaluationDeferredUntil?: Date | null
+    emergencyConfirmation?: string | null
     createdAt: Date
     updatedAt: Date
-  }) {
+  },
+  // Chunk B fix-up — POST-time-only signals that can't be derived from the
+  // row itself. Omitted by GET/list callers.
+  opts?: { gateASuppressed?: boolean },
+  ) {
     return {
       id: entry.id,
       userId: entry.userId,
       measuredAt: entry.measuredAt,
+      // Chunk A — surface the bucketed lag so the patient app + admin can
+      // show the right UI affordance (DELAYED badge, 911-CTA-suppression
+      // copy, HISTORICAL_ENTRY informational note). Defaults to REAL_TIME for
+      // legacy rows persisted before the migration.
+      delayBand: entry.delayBand ?? 'REAL_TIME',
+      // Chunk B fix-up (Manisha Backdated Readings sign-off 2026-06-06) — why
+      // real-time alerts were suppressed for this entry, if at all.
+      // 'HISTORICAL_ENTRY' derives from the stored band, so it is stable on
+      // POST and every subsequent GET and takes precedence; 'GATE_A' is
+      // computed at create time only (see create()). Drives the Chunk C
+      // "recorded but won't trigger real-time alerts" banner.
+      alertsSuppressedReason:
+        (entry.delayBand ?? 'REAL_TIME') === 'HISTORICAL_ENTRY'
+          ? ('HISTORICAL_ENTRY' as const)
+          : opts?.gateASuppressed
+            ? ('GATE_A' as const)
+            : null,
       systolicBP: entry.systolicBP,
       diastolicBP: entry.diastolicBP,
       pulse: entry.pulse,
@@ -1106,6 +2004,12 @@ export class DailyJournalService {
       notes: entry.notes,
       source: entry.source.toLowerCase(),
       sourceMetadata: entry.sourceMetadata,
+      // Option D + edit window (Manisha 2026-06-12) — the readings page uses
+      // engineEvaluationDeferredUntil to show the "editable for 5 min / not yet
+      // sent to your care team" affordance; emergencyConfirmation lets the app
+      // distinguish a held/retake reading from an ordinary one.
+      engineEvaluationDeferredUntil: entry.engineEvaluationDeferredUntil ?? null,
+      emergencyConfirmation: entry.emergencyConfirmation ?? null,
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
     }
@@ -1135,23 +2039,33 @@ export class DailyJournalService {
     userId: string,
     entry: { id: string; sessionId: string | null; measuredAt: Date },
   ): Promise<boolean> {
-    const SESSION_WINDOW_MS = 30 * 60 * 1000
+    return this.shouldFinalizeAsSingleReading(userId, entry)
+  }
+
+  /**
+   * Single source of truth for "is this a lone reading that should fire a
+   * single-reading-informational alert if no second reading arrives?" — i.e.
+   * the only sibling-free, non-AFib, post-Day-3 case. Used by:
+   *  - `computePendingSecondReading` (create-time frontend hint),
+   *  - the server-side session-finalize cron (SessionFinalizeService),
+   * so the rule lives in exactly one place. AFib (own ≥3 gate) and Pre-Day-3
+   * (rules already fire on a single reading) are excluded.
+   */
+  async shouldFinalizeAsSingleReading(
+    userId: string,
+    entry: { id: string; sessionId: string | null; measuredAt: Date },
+  ): Promise<boolean> {
     const PRE_DAY_3_THRESHOLD = 7
+    const windowStart = new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS)
 
     const [siblingCount, profile, lifetimeReadingCount] = await Promise.all([
       this.prisma.journalEntry.count({
         where: {
           userId,
           id: { not: entry.id },
-          ...(entry.sessionId
-            ? { sessionId: entry.sessionId }
-            : {
-                sessionId: null,
-                measuredAt: {
-                  gte: new Date(entry.measuredAt.getTime() - SESSION_WINDOW_MS),
-                  lte: new Date(entry.measuredAt.getTime() + SESSION_WINDOW_MS),
-                },
-              }),
+          measuredAt: { gte: windowStart, lte: windowEnd },
+          ...(entry.sessionId ? { sessionId: entry.sessionId } : { sessionId: null }),
         },
       }),
       this.prisma.patientProfile
@@ -1164,6 +2078,462 @@ export class DailyJournalService {
     if (profile?.hasAFib) return false
     if (lifetimeReadingCount < PRE_DAY_3_THRESHOLD) return false
     return true
+  }
+
+  /**
+   * Resolve the sessionId a new reading should actually be persisted with.
+   * A client-supplied sessionId is honoured for a fresh session (no existing
+   * members) or one still inside the window; an expired/stale id is dropped to
+   * null (with a log) so it can't average readings taken hours apart. Returns
+   * null when no id was supplied.
+   */
+  private async resolveCreateSessionId(
+    userId: string,
+    sessionId: string | undefined,
+    measuredAt: Date,
+  ): Promise<string> {
+    // #91 — a JournalEntry MUST always carry a sessionId (never null). Rules:
+    //   • non-null client id → HONOR it as a deliberate session boundary. Since
+    //     the FE buffer (2026-06-16) every check-in threads one sessionId per
+    //     sitting and commits it on "I'm good", a supplied id is an explicit
+    //     boundary we must never silently merge across.
+    //   • STALE id (its members are older than the window) → mint a FRESH
+    //     session rather than reviving an hours-old one.
+    //   • no id (legacy null-session rows, chat tool calls that never threaded
+    //     an id) → JOIN the patient's open in-window session if one exists
+    //     (preserves proximity averaging for those clients), else mint a UUID.
+    //
+    // Bug 14 deprecation: this used to join a FRESH supplied id into an open
+    // in-window session (the Bug 4 cross-id workaround for clients that forgot
+    // to thread an id). The buffer threads ids natively, so that workaround is
+    // obsolete AND clinically wrong — it averaged two separate "I'm good"
+    // sittings into one meaningless number. Cross-id joining is removed; the
+    // proximity join now applies ONLY to the no-id path. This also naturally
+    // anchors Option D readings to their own session (they always supply an id),
+    // so the previous `skipOpenSessionJoin` guard is no longer needed.
+    if (sessionId) {
+      const newest = await this.prisma.journalEntry.findFirst({
+        where: { userId, sessionId },
+        orderBy: { measuredAt: 'desc' },
+        select: { measuredAt: true },
+      })
+      if (!newest) return sessionId // fresh, deliberate id — honor it
+      const gapMs = Math.abs(measuredAt.getTime() - newest.measuredAt.getTime())
+      if (gapMs <= SESSION_WINDOW_MS) return sessionId
+      this.logger.warn(
+        `create: supplied sessionId ${sessionId} is stale for user ${userId} ` +
+          `(gap ${Math.round(gapMs / 60000)}min exceeds session window); starting a new session`,
+      )
+      return randomUUID()
+    }
+    // No client id — join an open, non-finalized in-window session if any, else
+    // mint a fresh UUID. Never null.
+    const joinable = await this.findOpenInWindowSession(userId, measuredAt)
+    return joinable ?? randomUUID()
+  }
+
+  /**
+   * The most-recent OPEN, in-window, non-finalized ORDINARY session for the
+   * patient, or null. Used to group readings within CLINICAL_SPEC §5.2's 5-min
+   * window regardless of the client's sessionId (Bug 4). ANY Option D session
+   * (emergencyConfirmation non-null — AWAITING, CONFIRMATORY, or UNCONFIRMED) is
+   * EXCLUDED via `emergencyConfirmation: null` below (Bug 14): each Option D
+   * reading is its own clinical episode, so a fresh reading must never auto-join
+   * it — confirmed or not.
+   */
+  private async findOpenInWindowSession(
+    userId: string,
+    measuredAt: Date,
+  ): Promise<string | null> {
+    const windowStart = new Date(measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(measuredAt.getTime() + SESSION_WINDOW_MS)
+    const open = await this.prisma.journalEntry.findFirst({
+      where: {
+        userId,
+        sessionId: { not: null },
+        singleReadingFinalized: false,
+        emergencyConfirmation: null,
+        measuredAt: { gte: windowStart, lte: windowEnd },
+      },
+      orderBy: { measuredAt: 'desc' },
+      select: { sessionId: true },
+    })
+    return open?.sessionId ?? null
+  }
+
+  /**
+   * Bug 25 — when the patient edits an existing entry's measurement_time, the
+   * session_id must be re-evaluated against the new time. Pre-fix, `update()`
+   * mutated `measuredAt` but left `sessionId` untouched. Two failure modes:
+   *
+   *   1. Entry moves AWAY from its current session's siblings: stays glued
+   *      to a stale session_id whose other members are now > 5 min away.
+   *      The averaging window already prevents data corruption (sibling
+   *      lookup bounds by measuredAt too), but the session_id is misleading
+   *      and the UI groups them visually as one session.
+   *
+   *   2. Entry moves INTO another session's window: stays in its lone /
+   *      stale session and is never grouped with what the clinical spec
+   *      ("readings within 5 min average together") says should be its
+   *      new session-mates.
+   *
+   * Resolution policy:
+   *   • Caller explicitly passed dto.sessionId → respect it (LLM move).
+   *     Handled by the caller; this helper is only invoked when sessionId
+   *     was NOT explicitly set.
+   *   • New time falls within ±5 min of a sibling sharing the CURRENT
+   *     session_id (excluding self) → keep current session_id. (Still
+   *     grouped with our originals.)
+   *   • New time falls within ±5 min of a DIFFERENT-session entry → adopt
+   *     the newest such entry's session_id. (Join their session.)
+   *   • New time is not within ±5 min of any other entry → if current
+   *     session has other siblings, mint a fresh UUID (we're leaving);
+   *     else keep current session_id (we were alone — nothing to regroup).
+   */
+  /**
+   * Bug 41 — strip fields from a Prisma update payload when the new value
+   * equals the existing value, so the LLM/patient gets a clean "no changes"
+   * response when they ask to edit a reading to its current value (instead
+   * of a successful but meaningless DB round-trip + an "updated" message
+   * that confuses them). Side-effect supports Bug 42 — the gated
+   * resolveUpdateSessionId call only fires when data.measuredAt actually
+   * survives this filter, preventing spurious session-id churn.
+   *
+   * Mutates `data` in place. Compares the common-path fields the LLM
+   * touches on edit: measuredAt (millisecond compare), numeric BP/pulse,
+   * weight (Decimal → number compare), position, sessionId, medication
+   * flags, structured symptom booleans, source, notes, and the freeform
+   * otherSymptoms array (set-equality, order-irrelevant).
+   *
+   * Complex JSON fields (measurementConditions, missedMedications,
+   * medicationStatuses, sourceMetadata) are NOT compared — they're rare
+   * on LLM-edits AND their deep-equality is expensive + error-prone. If
+   * present in `data` they pass through to Prisma unchanged; in practice
+   * the LLM doesn't re-issue them without intent.
+   */
+  private filterNoOpFieldsInPlace(
+    data: Prisma.JournalEntryUpdateInput,
+    existing: {
+      measuredAt: Date | string
+      systolicBP: number | null
+      diastolicBP: number | null
+      pulse: number | null
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      weight: any
+      position: string | null
+      sessionId: string | null
+      medicationTaken: boolean | null
+      medicationScheduledLater: boolean | null
+      missedDoses: number | null
+      severeHeadache: boolean
+      visualChanges: boolean
+      alteredMentalStatus: boolean
+      chestPainOrDyspnea: boolean
+      focalNeuroDeficit: boolean
+      severeEpigastricPain: boolean
+      newOnsetHeadache: boolean
+      ruqPain: boolean
+      edema: boolean
+      dizziness: boolean
+      syncope: boolean
+      palpitations: boolean
+      legSwelling: boolean
+      fatigue: boolean
+      shortnessOfBreath: boolean
+      dryCough: boolean
+      nsaidUse: boolean
+      faceSwelling: boolean
+      throatTightness: boolean
+      otherSymptoms: string[]
+      teachBackAnswer: string | null
+      teachBackCorrect: boolean | null
+      notes: string | null
+      source: string | null
+    },
+  ): void {
+    // measuredAt — millisecond equality. Avoids a regroup when LLM re-set
+    // time to its current value.
+    if (data.measuredAt !== undefined) {
+      const newMs = (data.measuredAt as Date).getTime?.()
+      const existingMs =
+        existing.measuredAt instanceof Date
+          ? existing.measuredAt.getTime()
+          : new Date(existing.measuredAt).getTime()
+      if (newMs === existingMs) delete data.measuredAt
+    }
+    // Numeric scalars.
+    if (data.systolicBP !== undefined && data.systolicBP === existing.systolicBP)
+      delete data.systolicBP
+    if (data.diastolicBP !== undefined && data.diastolicBP === existing.diastolicBP)
+      delete data.diastolicBP
+    if (data.pulse !== undefined && data.pulse === existing.pulse) delete data.pulse
+    // Weight is Decimal in storage — compare via Number().
+    if (data.weight !== undefined) {
+      const newW = data.weight === null ? null : Number(data.weight)
+      const existingW =
+        existing.weight === null || existing.weight === undefined
+          ? null
+          : Number(existing.weight)
+      if (newW === existingW) delete data.weight
+    }
+    if (data.position !== undefined && data.position === existing.position)
+      delete data.position
+    if (data.sessionId !== undefined && data.sessionId === existing.sessionId)
+      delete data.sessionId
+    // Medication flags.
+    if (data.medicationTaken !== undefined && data.medicationTaken === existing.medicationTaken)
+      delete data.medicationTaken
+    if (
+      data.medicationScheduledLater !== undefined &&
+      data.medicationScheduledLater === existing.medicationScheduledLater
+    )
+      delete data.medicationScheduledLater
+    if (data.missedDoses !== undefined && data.missedDoses === existing.missedDoses)
+      delete data.missedDoses
+    // Structured symptom booleans (Flow B + Cluster 6/7/8).
+    const symptomBools: Array<
+      keyof Prisma.JournalEntryUpdateInput & keyof typeof existing
+    > = [
+      'severeHeadache',
+      'visualChanges',
+      'alteredMentalStatus',
+      'chestPainOrDyspnea',
+      'focalNeuroDeficit',
+      'severeEpigastricPain',
+      'newOnsetHeadache',
+      'ruqPain',
+      'edema',
+      'dizziness',
+      'syncope',
+      'palpitations',
+      'legSwelling',
+      'fatigue',
+      'shortnessOfBreath',
+      'dryCough',
+      'nsaidUse',
+      'faceSwelling',
+      'throatTightness',
+    ]
+    for (const k of symptomBools) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (data[k] !== undefined && (data as any)[k] === (existing as any)[k]) {
+        delete data[k]
+      }
+    }
+    // otherSymptoms — set equality, order-irrelevant.
+    if (Array.isArray(data.otherSymptoms)) {
+      const newSet = new Set(data.otherSymptoms as string[])
+      const existingSet = new Set(existing.otherSymptoms ?? [])
+      if (
+        newSet.size === existingSet.size &&
+        [...newSet].every((s) => existingSet.has(s))
+      ) {
+        delete data.otherSymptoms
+      }
+    }
+    if (data.teachBackAnswer !== undefined && data.teachBackAnswer === existing.teachBackAnswer)
+      delete data.teachBackAnswer
+    if (
+      data.teachBackCorrect !== undefined &&
+      data.teachBackCorrect === existing.teachBackCorrect
+    )
+      delete data.teachBackCorrect
+    if (data.notes !== undefined && data.notes === existing.notes) delete data.notes
+    if (data.source !== undefined && data.source === existing.source) delete data.source
+  }
+
+  private async resolveUpdateSessionId(
+    userId: string,
+    entryId: string,
+    currentSessionId: string | null,
+    newMeasuredAt: Date,
+  ): Promise<string> {
+    const windowStart = new Date(newMeasuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(newMeasuredAt.getTime() + SESSION_WINDOW_MS)
+
+    // Any sibling in our CURRENT session (other than us) still within the
+    // new window? If yes, stay put — we're still grouped with our originals.
+    if (currentSessionId) {
+      const stillNearOriginalSibling =
+        await this.prisma.journalEntry.findFirst({
+          where: {
+            userId,
+            sessionId: currentSessionId,
+            id: { not: entryId },
+            measuredAt: { gte: windowStart, lte: windowEnd },
+          },
+          select: { id: true },
+        })
+      if (stillNearOriginalSibling) return currentSessionId
+    }
+
+    // No sibling-in-original-session match. Look for a different-session
+    // entry within the window — we should join it. AND-stacking the two
+    // sessionId constraints because Prisma's field-level filter takes
+    // exactly one `not`; layering needs explicit AND.
+    const otherSessionInWindow = await this.prisma.journalEntry.findFirst({
+      where: {
+        userId,
+        id: { not: entryId },
+        singleReadingFinalized: false,
+        measuredAt: { gte: windowStart, lte: windowEnd },
+        AND: [
+          { sessionId: { not: null } },
+          ...(currentSessionId ? [{ sessionId: { not: currentSessionId } }] : []),
+        ],
+      },
+      orderBy: { measuredAt: 'desc' },
+      select: { sessionId: true },
+    })
+    if (otherSessionInWindow?.sessionId) return otherSessionInWindow.sessionId
+
+    // Nothing within ±5 min. If our original session has other members
+    // (we're leaving them behind), mint a fresh id. Otherwise we were
+    // alone in our session — keep the id so we don't churn the UUID.
+    if (currentSessionId) {
+      const originalSibling = await this.prisma.journalEntry.findFirst({
+        where: {
+          userId,
+          sessionId: currentSessionId,
+          id: { not: entryId },
+        },
+        select: { id: true },
+      })
+      if (originalSibling) return randomUUID()
+      return currentSessionId
+    }
+    // No current session id (rare — pre-#91 data) — mint one.
+    return randomUUID()
+  }
+
+  /**
+   * Returns the patient's currently OPEN reading session, or null. "Open" =
+   * the latest reading is within SESSION_WINDOW_MS of `now` AND the session
+   * hasn't been finalized as single-reading. Reads server state so it catches
+   * sessions opened by ANY path (form / voice / chat), not just the form.
+   * Drives the patient app's "add to this session or start new?" prompt.
+   */
+  async getActiveSession(
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<{
+    sessionId: string | null
+    openedAt: string
+    lastReadingAt: string
+    readingCount: number
+    expiresAt: string
+    requiresMoreReadings: boolean
+  } | null> {
+    const PRE_DAY_3_THRESHOLD = 7
+
+    const latest = await this.prisma.journalEntry.findFirst({
+      where: { userId },
+      orderBy: { measuredAt: 'desc' },
+      select: {
+        id: true,
+        sessionId: true,
+        measuredAt: true,
+        singleReadingFinalized: true,
+        emergencyConfirmation: true,
+        sessionClosedAt: true,
+      },
+    })
+    if (!latest) return null
+    // Bug 19 — the patient explicitly closed this session ("I'm good" / Option D
+    // confirm-decline). "I'm good" is a deliberate boundary, so never re-offer it.
+    if (latest.sessionClosedAt != null) return null
+    // Option D (Manisha 2026-06-12 Q2) — a held emergency awaiting its
+    // confirmatory reading anchors its own session and must NOT surface the
+    // "add to this session?" prompt. The dedicated awaiting-emergency resume
+    // flow (Screen A auto-resume + the /readings CTA) takes over instead.
+    if (latest.emergencyConfirmation === EmergencyConfirmationState.AWAITING) return null
+    // Expired — last reading older than the window.
+    if (now.getTime() - latest.measuredAt.getTime() > SESSION_WINDOW_MS) return null
+    // Closed — single-reading already finalized; its alert has fired.
+    if (latest.singleReadingFinalized) return null
+
+    // Resolve the session group exactly like SessionAverager.loadSessionSiblings.
+    const windowStart = new Date(latest.measuredAt.getTime() - SESSION_WINDOW_MS)
+    const windowEnd = new Date(latest.measuredAt.getTime() + SESSION_WINDOW_MS)
+    const members = await this.prisma.journalEntry.findMany({
+      where: {
+        userId,
+        measuredAt: { gte: windowStart, lte: windowEnd },
+        ...(latest.sessionId ? { sessionId: latest.sessionId } : { sessionId: null }),
+      },
+      orderBy: { measuredAt: 'asc' },
+      select: { measuredAt: true },
+    })
+    if (members.length === 0) return null
+
+    const readingCount = members.length
+    const openedAt = members[0].measuredAt
+    const lastReadingAt = members[members.length - 1].measuredAt
+    const expiresAt = new Date(lastReadingAt.getTime() + SESSION_WINDOW_MS)
+
+    const [profile, lifetimeReadingCount] = await Promise.all([
+      this.prisma.patientProfile
+        .findUnique({ where: { userId }, select: { hasAFib: true } })
+        .catch(() => null),
+      this.prisma.journalEntry.count({ where: { userId } }),
+    ])
+    const hasAFib = profile?.hasAFib ?? false
+    const preDay3 = lifetimeReadingCount < PRE_DAY_3_THRESHOLD
+    // Mirror the engine gates: AFib needs ≥3, other non-emergency tiers need
+    // ≥2; Pre-Day-3 fires on a single reading so nothing more is required.
+    const requiresMoreReadings = hasAFib
+      ? readingCount < 3
+      : !preDay3 && readingCount < 2
+
+    return {
+      sessionId: latest.sessionId,
+      openedAt: openedAt.toISOString(),
+      lastReadingAt: lastReadingAt.toISOString(),
+      readingCount,
+      expiresAt: expiresAt.toISOString(),
+      requiresMoreReadings,
+    }
+  }
+
+  /**
+   * Option D (Manisha 2026-06-12 Q2) — the patient's most recent held emergency
+   * reading awaiting its confirmatory second reading, or null when none. Drives
+   * the /check-in auto-resume (Screen A) and the /readings "Continue
+   * confirmation" CTA. Deliberately independent of the session window so a
+   * patient who returns a little late still lands back in Screen A; the
+   * SessionFinalizeService cron is the backstop that resolves it as UNCONFIRMED
+   * if they never do.
+   */
+  async getAwaitingEmergency(
+    userId: string,
+  ): Promise<{
+    id: string
+    sessionId: string | null
+    systolicBP: number | null
+    diastolicBP: number | null
+    measuredAt: string
+  } | null> {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { userId, emergencyConfirmation: EmergencyConfirmationState.AWAITING },
+      orderBy: { measuredAt: 'desc' },
+      select: {
+        id: true,
+        sessionId: true,
+        systolicBP: true,
+        diastolicBP: true,
+        measuredAt: true,
+      },
+    })
+    if (!entry) return null
+    return {
+      id: entry.id,
+      // The held first-of-pair's session — the resumed confirmatory reuses it
+      // so both readings group together in the session card.
+      sessionId: entry.sessionId,
+      systolicBP: entry.systolicBP,
+      diastolicBP: entry.diastolicBP,
+      measuredAt: entry.measuredAt.toISOString(),
+    }
   }
 
   private async resolveMissedMedications(

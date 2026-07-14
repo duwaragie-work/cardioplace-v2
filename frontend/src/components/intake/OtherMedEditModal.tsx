@@ -118,7 +118,7 @@ export default function OtherMedEditModal({
         >
           <h2
             id={titleId}
-            className="text-[16px] font-bold"
+            className="text-[1rem] font-bold"
             style={{ color: 'var(--brand-text-primary)' }}
           >
             {t('intake.a5.otherMedEditModalTitle')}
@@ -138,7 +138,7 @@ export default function OtherMedEditModal({
           <div className="flex flex-col gap-1">
             <label
               htmlFor="other-med-name"
-              className="text-[12px] font-semibold"
+              className="text-[0.75rem] font-semibold"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
               {t('intake.a5.otherMedDrugLabel')}
@@ -153,7 +153,7 @@ export default function OtherMedEditModal({
                 setDrugName(e.target.value);
                 if (error) setError(null);
               }}
-              className="h-11 px-3 rounded-lg text-[14px] outline-none box-border bg-white"
+              className="h-11 px-3 rounded-lg text-[0.875rem] outline-none box-border bg-white"
               style={{
                 border: error
                   ? '2px solid var(--brand-alert-red)'
@@ -163,7 +163,7 @@ export default function OtherMedEditModal({
             />
             {catalogMatch && !error && (
               <p
-                className="text-[11px] mt-0.5 leading-snug"
+                className="text-[0.6875rem] mt-0.5 leading-snug"
                 style={{ color: 'var(--brand-primary-purple)' }}
               >
                 {t('intake.a5.otherMedCatalogHint').replace(
@@ -175,7 +175,7 @@ export default function OtherMedEditModal({
             {error && (
               <p
                 role="alert"
-                className="text-[12px] mt-0.5 leading-snug"
+                className="text-[0.75rem] mt-0.5 leading-snug"
                 style={{ color: 'var(--brand-alert-red)' }}
               >
                 {error}
@@ -186,7 +186,7 @@ export default function OtherMedEditModal({
           <div className="flex flex-col gap-1">
             <label
               htmlFor="other-med-freq"
-              className="text-[12px] font-semibold"
+              className="text-[0.75rem] font-semibold"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
               {t('intake.a5.otherMedFrequencyLabel')}
@@ -197,7 +197,7 @@ export default function OtherMedEditModal({
               onChange={(e) =>
                 setFrequency(e.target.value as MedicationFrequencyInput)
               }
-              className="h-11 px-3 rounded-lg text-[14px] outline-none cursor-pointer box-border bg-white"
+              className="h-11 px-3 rounded-lg text-[0.875rem] outline-none cursor-pointer box-border bg-white"
               style={{
                 border: '2px solid var(--brand-border)',
                 color: 'var(--brand-text-primary)',

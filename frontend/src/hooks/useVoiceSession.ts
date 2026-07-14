@@ -86,6 +86,29 @@ export interface CheckinSummary {
   bmi?: number;
   medicationTaken?: boolean;
   medicationScheduledLater?: boolean;
+  /**
+   * Bug 16B — missed-med detail surfaced on the check-in card. Backend
+   * `serializeEntry` returns the array under `missedMedications` after
+   * resolving `drugName` from the patient's medication list. Card-side
+   * `medicationLabel` shows "Missed: <drug1>, <drug2>" when this is
+   * non-empty, regardless of the `medicationTaken` boolean. Backend Bug 16A
+   * normalises `medicationTaken=false` when this array is non-empty so the
+   * two are consistent.
+   */
+  missedMedications?: Array<{
+    drugName: string;
+    reason?: string;
+    missedDoses?: number;
+  }>;
+  /**
+   * Bug 60 — whether the patient has ANY active (non-discontinued,
+   * non-rejected, non-PRN) medications on file. When false, render sites
+   * (CheckinCard popup, verbal audio summary) SUPPRESS the medication
+   * label entirely. Without this, the vacuously-true `medicationTaken=true`
+   * we save for 0-meds patients (per Bug 53) was rendering as the
+   * misleading "All medications taken ✓" pill everywhere.
+   */
+  hasActiveMedications?: boolean;
   /** structured Level-2 booleans set on the entry */
   structuredSymptoms?: StructuredSymptoms;
   /** legacy + "anything else" symptoms — both shown in the card */
@@ -98,6 +121,17 @@ export interface CheckinSummary {
   pulsePressureWide?: boolean;
   /** ISO measuredAt string — used in card header */
   measuredAt?: string;
+  /**
+   * Editable-buffer-window parity. `entryId` is the saved entry; `editableUntil`
+   * is engineEvaluationDeferredUntil (ISO). While `editableUntil` is in the
+   * future the reading is HELD in its 5-min editable window — no alert, not
+   * surfaced to the care team — and the card shows a countdown badge + an
+   * "I'm good" button that finalizes it early (mirrors the check-in form).
+   * Both undefined when the reading fast-fired (emergency / explicit close /
+   * Option D confirmatory).
+   */
+  entryId?: string;
+  editableUntil?: string;
 }
 
 export interface UpdateSummary {
@@ -111,11 +145,22 @@ export interface UpdateSummary {
   bmi?: number;
   medicationTaken?: boolean;
   medicationScheduledLater?: boolean;
+  /**
+   * Bug 16B — same as CheckinSummary.missedMedications, surfaced on the
+   * post-update card so editing a check-in retains the per-med detail.
+   */
+  missedMedications?: Array<{
+    drugName: string;
+    reason?: string;
+    missedDoses?: number;
+  }>;
   structuredSymptoms?: StructuredSymptoms;
   symptoms: string[];
   otherSymptoms?: string[];
   updated: boolean;
   alert?: AlertTierEcho | null;
+  /** Bug 60 — see CheckinSummary.hasActiveMedications. */
+  hasActiveMedications?: boolean;
 }
 
 export interface DeleteSummary {
@@ -167,7 +212,19 @@ export interface StartOptions {
 
 // ── Audio helpers ─────────────────────────────────────────────────────────────
 
-function base64ToFloat32(base64: string, sampleRate: number): AudioBuffer | null {
+/**
+ * Decode a base64 Int16 PCM chunk into a Float32Array of samples in [-1, 1].
+ *
+ * Bug 48 — previously this returned a full `AudioBuffer` and the caller
+ * scheduled a fresh `AudioBufferSourceNode` per chunk. That scheduling model
+ * is fragile: every 40 ms Gemini Live chunk became a separate node, and any
+ * sub-frame jitter or below-realtime arrival rate produced audible gaps
+ * (the "voice breaking / choppy / stuttering" symptom). The fix moves
+ * playback into a single long-lived `AudioWorkletNode` that pulls samples
+ * from a FIFO queue on the audio render thread; the helper now just decodes
+ * raw samples for the main thread to post to the worklet.
+ */
+function base64ToFloat32Samples(base64: string): Float32Array | null {
   try {
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
@@ -179,11 +236,7 @@ function base64ToFloat32(base64: string, sampleRate: number): AudioBuffer | null
     for (let i = 0; i < int16.length; i++) {
       float32[i] = int16[i] / 32768;
     }
-    const ctx = new AudioContext({ sampleRate });
-    const buffer = ctx.createBuffer(1, float32.length, sampleRate);
-    buffer.getChannelData(0).set(float32);
-    ctx.close();
-    return buffer;
+    return float32;
   } catch {
     return null;
   }
@@ -267,12 +320,43 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
   // false when the agent finishes speaking and we transition back to
   // 'listening' (in playAudio's drain timer).
   const audioStreamEndSentRef = useRef(false);
-  // Scheduled playback — each arriving audio chunk is scheduled to start at
-  // nextStartTimeRef on the playback AudioContext, avoiding the onended gap
-  // that caused choppy output. When no chunks arrive for ~200ms after the
-  // last scheduled end, drainTimerRef fires and reverts state to 'listening'.
-  const nextStartTimeRef = useRef<number>(0);
+  // Bug 48 — playback is driven by a single long-lived AudioWorkletNode that
+  // pulls samples from a FIFO queue on the audio render thread (see
+  // `public/voice-playback-worklet.js`). Per-chunk BufferSourceNode
+  // scheduling and `nextStartTimeRef` math are gone: incoming Gemini chunks
+  // are decoded to Float32Array samples and posted to the worklet's port.
+  // The worklet handles below-realtime arrival rates by emitting silence on
+  // underrun instead of producing a perceptible "click" between buffers
+  // (which was the choppy/stuttering symptom users reported).
+  //
+  // - playbackWorkletNodeRef: the live worklet node. Created lazily on the
+  //   first audio_response of a session; reused across turns.
+  // - playbackWorkletReadyRef: the addModule() Promise. Cached so we don't
+  //   re-fetch the worklet script for every chunk while load is in flight.
+  // - pendingPlaybackSamplesRef: chunks that arrived BEFORE the worklet
+  //   finished loading. Drained into the worklet's port the moment it's
+  //   ready.
+  // - awaitingDrainRef: flipped true when endAgentTurn fires for
+  //   generation_complete / drain_backstop. The worklet posts a single
+  //   { type: 'drained' } message when its queue transitions to empty —
+  //   that's the authoritative signal the agent's audio has finished
+  //   playing, and the cue for flipToListening.
+  // - drainTimerRef: long safety backstop (~5s) — flips state if the
+  //   worklet's drained signal never arrives (worklet crashed, ctx
+  //   suspended by browser, etc.). Never the primary path.
+  const playbackWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const playbackWorkletReadyRef = useRef<Promise<void> | null>(null);
+  const pendingPlaybackSamplesRef = useRef<Float32Array[]>([]);
+  const awaitingDrainRef = useRef(false);
   const drainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The latest flipToListening closure from endAgentTurn. The worklet's
+  // 'drained' message handler reads this ref to fire the correct state
+  // flip without forcing endAgentTurn to be inlined or recreated.
+  const flipToListeningRef = useRef<(() => void) | null>(null);
+  // True between the first audio_response of a turn and the eventual
+  // agent_generation_complete / agent_interrupted / drain backstop. Used by
+  // the VAD bookkeeping reset and to guard duplicate state transitions.
+  const inTurnRef = useRef(false);
   // Latency: stamp when user's final transcript arrives, measure again on the
   // first agent audio chunk of the reply. Cleared after one measurement so we
   // don't keep rewriting the stamp as more audio streams in.
@@ -338,7 +422,15 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       await playbackContextRef.current.close().catch(() => {});
       playbackContextRef.current = null;
     }
-    nextStartTimeRef.current = 0;
+    // Bug 48 — also tear down the worklet refs so the next session starts
+    // clean (re-loads the worklet, re-creates the node) instead of holding
+    // dangling references to a closed AudioContext.
+    playbackWorkletNodeRef.current = null;
+    playbackWorkletReadyRef.current = null;
+    pendingPlaybackSamplesRef.current = [];
+    awaitingDrainRef.current = false;
+    flipToListeningRef.current = null;
+    inTurnRef.current = false;
     prewarmedRef.current = false;
     startMicPendingRef.current = false;
     // Reset prewarm lifecycle on full cleanup so the next mount starts clean.
@@ -480,66 +572,177 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
     setSessionState('listening', 'startMic success');
   }, [setSessionState, armListeningWatchdog]);
 
-  // Scheduled playback — eliminates the onended gap that causes choppy audio.
-  // Each arriving chunk is decoded and scheduled to start at nextStartTimeRef.
-  // If the first chunk in a turn, seed the scheduler PREROLL_MS ahead of
-  // currentTime so one late-arriving second chunk can't underrun. After the
-  // last scheduled chunk ends, DRAIN_MS of silence triggers a revert to
-  // 'listening' state.
-  const playAudio = useCallback((audioBase64: string) => {
-    const OUTPUT_SAMPLE_RATE = 24000;
-    // Playback pre-roll. Seeds the scheduler this many ms ahead of
-    // currentTime on the first chunk of a turn so one late-arriving second
-    // chunk can't underrun. Lower = first syllable arrives sooner; higher =
-    // more tolerant of network jitter. 60 ms is tight but tolerable on a
-    // wired/good-WiFi connection for most listeners.
-    const PREROLL_MS = 60;
-    const DRAIN_MS = 200;
+  // Bug 48 — playback output sample rate. Gemini Live's native-audio model
+  // emits 24 kHz PCM; we create the playback AudioContext at the same rate
+  // so no resampling math runs between the model and the worklet.
+  const OUTPUT_SAMPLE_RATE = 24000;
 
+  // Drain backstop — fires if the worklet's authoritative `drained` message
+  // never arrives after endAgentTurn declares the agent done. 5 s is
+  // intentionally generous (longer than any reasonable response tail) so we
+  // never preempt audio that's still being played by the worklet.
+  const DRAIN_BACKSTOP_MS = 5_000;
+
+  // Lazily set up the playback AudioContext + worklet on the first audio
+  // chunk of a session. Subsequent turns reuse the same context and node —
+  // we do NOT close on interrupt; the worklet's 'clear' message is enough
+  // to flush the queue and instantly stop playback.
+  const ensurePlaybackWorklet = useCallback(async (): Promise<AudioWorkletNode | null> => {
     if (!playbackContextRef.current) {
       playbackContextRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
     }
     const ctx = playbackContextRef.current;
-
-    const buffer = base64ToFloat32(audioBase64, OUTPUT_SAMPLE_RATE);
-    if (!buffer) {
-      debug('audio', 'playAudio: decode failed');
-      return;
+    if (playbackWorkletNodeRef.current) return playbackWorkletNodeRef.current;
+    if (!playbackWorkletReadyRef.current) {
+      playbackWorkletReadyRef.current = ctx.audioWorklet.addModule('/voice-playback-worklet.js');
     }
-
-    // Seed the scheduler if this is the first chunk of a new agent turn.
-    // nextStartTime is "behind" the clock when there's been a gap.
-    const now = ctx.currentTime;
-    if (nextStartTimeRef.current < now + 0.01) {
-      nextStartTimeRef.current = now + PREROLL_MS / 1000;
-      debug('audio', `first chunk of turn — seeded scheduler at +${PREROLL_MS}ms`);
+    try {
+      await playbackWorkletReadyRef.current;
+    } catch (err) {
+      debug('audio', `worklet addModule failed: ${(err as Error).message}`);
+      playbackWorkletReadyRef.current = null;
+      return null;
     }
+    if (playbackWorkletNodeRef.current) return playbackWorkletNodeRef.current;
+    const node = new AudioWorkletNode(ctx, 'voice-playback');
+    node.port.onmessage = (event: MessageEvent) => {
+      const msg = event.data as { type?: string } | undefined;
+      if (msg?.type === 'drained' && awaitingDrainRef.current) {
+        awaitingDrainRef.current = false;
+        if (drainTimerRef.current) {
+          clearTimeout(drainTimerRef.current);
+          drainTimerRef.current = null;
+        }
+        flipToListeningRef.current?.();
+        flipToListeningRef.current = null;
+      }
+    };
+    node.connect(ctx.destination);
+    playbackWorkletNodeRef.current = node;
+    // Drain any chunks that arrived before the worklet was ready.
+    while (pendingPlaybackSamplesRef.current.length > 0) {
+      const samples = pendingPlaybackSamplesRef.current.shift();
+      if (!samples) break;
+      node.port.postMessage(samples, [samples.buffer]);
+    }
+    return node;
+  }, []);
 
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    source.start(nextStartTimeRef.current);
-    nextStartTimeRef.current += buffer.duration;
+  // End-of-agent-turn — single source of truth, used by three triggers:
+  //   • 'generation_complete' : backend forwarded Gemini's authoritative
+  //                             serverContent.generationComplete signal.
+  //   • 'interrupted'         : Gemini said the user barged in. Per Live API
+  //                             docs the client MUST immediately discard its
+  //                             buffer — we post {type:'clear'} to the
+  //                             worklet, which empties its sample queue on
+  //                             the next render quantum (one frame).
+  //   • 'drain_backstop'      : Worklet's 'drained' signal never arrived
+  //                             (e.g. AudioContext suspended by browser).
+  // For non-interrupt reasons we wait for the worklet to emit 'drained' —
+  // that's the precise moment all queued audio has played out, so flipping
+  // state then never cuts the last word.
+  const endAgentTurn = useCallback(
+    (reason: 'generation_complete' | 'interrupted' | 'drain_backstop') => {
+      inTurnRef.current = false;
+      if (drainTimerRef.current) {
+        clearTimeout(drainTimerRef.current);
+        drainTimerRef.current = null;
+      }
 
-    setSessionState('agent_speaking', 'audio_response');
+      const flipToListening = () => {
+        debug('audio', `agent turn ended (${reason}) — reverting to listening`);
+        setSessionState(
+          (prev) => (prev === 'agent_speaking' ? 'listening' : prev),
+          `audio_${reason}`,
+        );
+        // Clear VAD bookkeeping so the next user turn starts clean.
+        speakingRef.current = false;
+        silenceStartRef.current = null;
+        audioStreamEndSentRef.current = false;
+        drainTimerRef.current = null;
+      };
 
-    // Reset the drain timer — if no more chunks arrive for DRAIN_MS after the
-    // last scheduled chunk ends, revert to listening.
-    if (drainTimerRef.current) clearTimeout(drainTimerRef.current);
-    const msUntilEnd = Math.max(0, (nextStartTimeRef.current - now) * 1000) + DRAIN_MS;
-    drainTimerRef.current = setTimeout(() => {
-      debug('audio', 'drain timer fired — reverting to listening');
-      setSessionState((prev) => (prev === 'agent_speaking' ? 'listening' : prev), 'audio drained');
-      // Clear VAD bookkeeping so the next user turn starts clean — no stale
-      // silenceStart ticking down from before the agent spoke. Also re-arm
-      // audio_stream_end so the next user pause can signal end-of-turn
-      // (the previous turn used its one allotted fire).
-      speakingRef.current = false;
-      silenceStartRef.current = null;
-      audioStreamEndSentRef.current = false;
-      drainTimerRef.current = null;
-    }, msUntilEnd);
-  }, [setSessionState]);
+      if (reason === 'interrupted') {
+        // Live API docs: "You must immediately discard your client-side audio
+        // buffer." Tell the worklet to drop everything; this stops playback
+        // within one audio render quantum (~3 ms at the default 128-sample
+        // buffer / 44.1 kHz). The context stays alive so the next turn
+        // doesn't pay the worklet-load cost again.
+        playbackWorkletNodeRef.current?.port.postMessage({ type: 'clear' });
+        pendingPlaybackSamplesRef.current = [];
+        awaitingDrainRef.current = false;
+        flipToListeningRef.current = null;
+        flipToListening();
+        return;
+      }
+
+      // generation_complete / drain_backstop — defer the flip until the
+      // worklet drains. If the worklet has already drained (zero chunks
+      // pending and no playback in flight), this still works because the
+      // worklet sends 'drained' on the next render quantum after any
+      // queued samples finish.
+      awaitingDrainRef.current = true;
+      flipToListeningRef.current = flipToListening;
+      drainTimerRef.current = setTimeout(() => {
+        // Worklet 'drained' never arrived — flip anyway.
+        awaitingDrainRef.current = false;
+        flipToListeningRef.current = null;
+        flipToListening();
+      }, DRAIN_BACKSTOP_MS);
+    },
+    [setSessionState],
+  );
+
+  // Bug 48 — streaming PCM playback via AudioWorklet FIFO.
+  //
+  // Each incoming Gemini chunk is decoded to a Float32Array of [-1, 1]
+  // samples and posted (zero-copy) to a single long-lived
+  // AudioWorkletNode. The worklet's `process()` pulls samples from its
+  // queue every 128-sample render quantum and writes them straight to the
+  // output buffer — no per-chunk AudioBufferSourceNode, no
+  // nextStartTimeRef scheduling math, no snap-forward gap on underrun.
+  // When the queue is empty the worklet emits silence (zeros) until more
+  // samples arrive, then signals 'drained' so the main thread can flip
+  // sessionState back to 'listening' precisely when playback finishes.
+  //
+  // Trade-off: 100-200 ms initial latency for worklet load on the very
+  // first audio_response of a session (one-time, cached after that). All
+  // subsequent chunks post instantly. Net latency budget is well under
+  // the previous per-chunk-scheduling approach because no more
+  // node-create/connect/start work happens on the main thread.
+  const playAudio = useCallback(
+    (audioBase64: string) => {
+      const samples = base64ToFloat32Samples(audioBase64);
+      if (!samples) {
+        debug('audio', 'playAudio: decode failed');
+        return;
+      }
+
+      // Lazy AudioContext + worklet setup. ensurePlaybackWorklet is
+      // idempotent and resolves to the live node once ready; for chunks
+      // that arrive while loading we queue locally and drain on resolve.
+      if (!playbackContextRef.current) {
+        playbackContextRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
+      }
+
+      const node = playbackWorkletNodeRef.current;
+      if (node) {
+        node.port.postMessage(samples, [samples.buffer]);
+      } else {
+        pendingPlaybackSamplesRef.current.push(samples);
+        // Fire-and-forget — drains pending samples once ready.
+        void ensurePlaybackWorklet();
+      }
+
+      if (!inTurnRef.current) {
+        inTurnRef.current = true;
+        debug('audio', 'first chunk of turn — playback queue armed');
+      }
+
+      setSessionState('agent_speaking', 'audio_response');
+    },
+    [setSessionState, ensurePlaybackWorklet],
+  );
 
   const appendTranscript = useCallback(
     (text: string, speaker: 'user' | 'agent', isFinal: boolean) => {
@@ -708,6 +911,22 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
         setActionType((current) => (current ? null : current), 'audio_response safety net');
       });
 
+      // Authoritative end-of-agent-turn signal from Gemini, forwarded by the
+      // backend. Used INSTEAD of the silence-based drain timer so we don't
+      // flap state mid-sentence on inter-chunk arrival jitter.
+      socket.on('agent_generation_complete', () => {
+        if (VOICE_DEBUG) debug('socket', 'agent_generation_complete');
+        endAgentTurn('generation_complete');
+      });
+
+      // User barged in (Gemini-side VAD detected speech overlap). Live API
+      // docs require immediate buffer discard — endAgentTurn closes the
+      // AudioContext for 'interrupted'.
+      socket.on('agent_interrupted', () => {
+        debug('socket', 'agent_interrupted');
+        endAgentTurn('interrupted');
+      });
+
       socket.on('transcript', (data: { text: string; isFinal: boolean; speaker: 'user' | 'agent' }) => {
         if (data.isFinal && data.text.trim()) {
           debug('socket', `transcript [${data.speaker}] "${data.text.slice(0, 60)}"`);
@@ -866,11 +1085,24 @@ export function useVoiceSession(onSessionCreated?: (sessionId: string) => void) 
       });
 
       socket.on('connect', () => {
-        debug('socket', `connect → emit start_session sessionId=${sessionId ?? 'new'}`);
-        socket.emit('start_session', { sessionId: sessionId ?? null });
+        // Send the browser's IANA timezone so the backend records voice
+        // check-in measuredAt values in the patient's actual local time.
+        // The stored User.timezone may be stale (signup region, never
+        // updated after travel) — the browser is the ground truth.
+        // Older browsers may return '' from resolvedOptions; pass null in
+        // that case and let the backend fall back to User.timezone.
+        let clientTimezone: string | null = null;
+        try {
+          const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          if (detected) clientTimezone = detected;
+        } catch {
+          // Intl unavailable — leave null.
+        }
+        debug('socket', `connect → emit start_session sessionId=${sessionId ?? 'new'} tz=${clientTimezone ?? 'null'}`);
+        socket.emit('start_session', { sessionId: sessionId ?? null, clientTimezone });
       });
     },
-    [startMic, stopMic, playAudio, appendTranscript, setSessionState, setActionType, clearListeningWatchdog],
+    [startMic, stopMic, playAudio, endAgentTurn, appendTranscript, setSessionState, setActionType, clearListeningWatchdog],
   );
 
   // Keep the _openRef synced to the latest _open instance so the inner

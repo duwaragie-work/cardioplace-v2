@@ -16,7 +16,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "test": "node --experimental-vm-modules ../node_modules/jest/bin/jest.js"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

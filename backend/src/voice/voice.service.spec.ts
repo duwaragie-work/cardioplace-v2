@@ -17,6 +17,7 @@ import { SystemPromptService } from '../chat/services/system-prompt.service.js'
 import { ProfileResolverService } from '../daily_journal/services/profile-resolver.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
 import { VoiceToolsService } from './tools/voice-tools.service.js'
+import { IntakeStatusService } from '../intake/intake-status.service.js'
 
 const NOW = new Date('2026-04-22T10:00:00Z')
 const DOB = new Date('1980-06-15T00:00:00Z')
@@ -34,7 +35,7 @@ function buildResolvedContext(
       heightCm: 165,
       isPregnant: false,
       pregnancyDueDate: null,
-      historyPreeclampsia: false,
+      historyHDP: false,
       hasHeartFailure: false,
       heartFailureType: 'NOT_APPLICABLE',
       resolvedHFType: 'NOT_APPLICABLE',
@@ -44,6 +45,7 @@ function buildResolvedContext(
       hasDCM: false,
       hasTachycardia: false,
       hasBradycardia: false,
+      hasAorticStenosis: false,
       diagnosedHypertension: true,
       verificationStatus: 'VERIFIED',
       verifiedAt: NOW,
@@ -60,6 +62,7 @@ function buildResolvedContext(
     triggerPregnancyContraindicationCheck: false,
     enrolledAt: null,
     practiceName: null,
+    patientName: null,
     resolvedAt: NOW,
     ...over,
   }
@@ -68,13 +71,18 @@ function buildResolvedContext(
 describe('VoiceService.buildPatientContext() — phase/16', () => {
   let service: VoiceService
   let prisma: Record<string, any>
-  let profileResolver: { resolve: jest.Mock }
+  let profileResolver: { resolve: jest.Mock<any> }
   let configService: { get: jest.Mock; getOrThrow: jest.Mock }
+  let conversationHistory: { getSessionSummaryForVoice: jest.Mock<any> }
 
   beforeEach(async () => {
     prisma = {
       journalEntry: {
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+        // Phase/16 — voice.service buildPatientContext now also queries for
+        // the most-recent open AWAITING entry (Option D resume). Default to
+        // null so unrelated tests stay quiet.
+        findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
       },
       deviationAlert: {
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
@@ -98,8 +106,22 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
       ),
     }
     configService = {
-      get: jest.fn().mockImplementation((key: string, dflt?: string) => dflt),
+      // Voice service constructs its Live client via the Vertex factory
+      // (buildGoogleGenAIClient). The factory reads GOOGLE_CLOUD_PROJECT
+      // and throws if unset, so stub a project here. GOOGLE_CLOUD_LOCATION
+      // defaults to us-central1 in the factory — no need to stub.
+      get: jest.fn().mockImplementation((key: string, dflt?: string) => {
+        if (key === 'GOOGLE_CLOUD_PROJECT') return 'test-gcp-project'
+        return dflt
+      }),
       getOrThrow: jest.fn().mockReturnValue('test-secret'),
+    }
+    // Bug 17 — voice now fetches the rolling session summary from
+    // ConversationHistoryService so tests can control what prior text/voice
+    // turns the system instruction sees. Default = empty string (fresh
+    // session, no prior conversation block injected).
+    conversationHistory = {
+      getSessionSummaryForVoice: (jest.fn() as jest.Mock<any>).mockResolvedValue(''),
     }
 
     const module: TestingModule = await Test.createTestingModule({
@@ -109,9 +131,15 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
         { provide: ConfigService, useValue: configService },
         { provide: PrismaService, useValue: prisma },
         { provide: ProfileResolverService, useValue: profileResolver },
-        { provide: ConversationHistoryService, useValue: {} },
+        { provide: ConversationHistoryService, useValue: conversationHistory },
         { provide: GeminiService, useValue: { clientInstance: {} } },
         { provide: VoiceToolsService, useValue: { getToolDeclarations: () => [] } },
+        {
+          provide: IntakeStatusService,
+          useValue: {
+            getStatus: jest.fn(async () => ({ completed: true, profileExists: true })),
+          },
+        },
       ],
     }).compile()
     service = module.get(VoiceService)
@@ -220,18 +248,20 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
   // Query shape + parallelism
   // ==========================================================================
   describe('query shape', () => {
-    it('runs user/journal/deviation/session/resolver in parallel', async () => {
+    it('runs user/journal/deviation/session-summary/resolver in parallel', async () => {
       await run('user-1', 'session-xyz')
       expect(prisma.user.findUnique).toHaveBeenCalledTimes(1)
       expect(prisma.journalEntry.findMany).toHaveBeenCalledTimes(1)
       expect(prisma.deviationAlert.findMany).toHaveBeenCalledTimes(1)
-      expect(prisma.session.findUnique).toHaveBeenCalledTimes(1)
+      // Bug 17 — session lookup moved from prisma.session.findUnique (unscoped)
+      // to ConversationHistoryService.getSessionSummaryForVoice (userId-scoped).
+      expect(conversationHistory.getSessionSummaryForVoice).toHaveBeenCalledTimes(1)
       expect(profileResolver.resolve).toHaveBeenCalledTimes(1)
     })
 
-    it('omits session query when no sessionId passed', async () => {
+    it('omits session-summary query when no sessionId passed', async () => {
       await run('user-1')
-      expect(prisma.session.findUnique).not.toHaveBeenCalled()
+      expect(conversationHistory.getSessionSummaryForVoice).not.toHaveBeenCalled()
     })
   })
 
@@ -296,6 +326,177 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
       )
       const context = await run('user-1')
       expect(context).toContain('⚠ unverified')
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Bug 1 regression — voice intake-updated live broadcast.
+  // The systemInstruction Gemini Live receives at connect is immutable for the
+  // life of the session, so an `intake.updated` event must broadcast a text
+  // turn to every active session for the affected user; otherwise the bot
+  // stays stuck refusing submit_checkin until the patient ends the call.
+  // ────────────────────────────────────────────────────────────────────────────
+  describe('onIntakeUpdated (Bug 1)', () => {
+    function makeMockSession(over: Partial<{ userId: string; streamClosed: boolean }> = {}) {
+      const sendRealtimeInput = jest.fn()
+      return {
+        sendRealtimeInput,
+        session: {
+          userId: over.userId ?? 'user-1',
+          streamClosed: over.streamClosed ?? false,
+          liveSession: { sendRealtimeInput },
+        },
+      }
+    }
+
+    it('broadcasts a [System update] text turn to every active session for the user', () => {
+      const sessions = (service as any).sessions as Map<string, any>
+      const a = makeMockSession({ userId: 'user-1' })
+      const b = makeMockSession({ userId: 'user-1' })
+      sessions.set('socket-A', a.session)
+      sessions.set('socket-B', b.session)
+
+      service.onIntakeUpdated({ userId: 'user-1' })
+
+      expect(a.sendRealtimeInput).toHaveBeenCalledWith(
+        expect.objectContaining({ text: expect.stringMatching(/intake/i) }),
+      )
+      expect(b.sendRealtimeInput).toHaveBeenCalledWith(
+        expect.objectContaining({ text: expect.stringMatching(/intake/i) }),
+      )
+    })
+
+    it('does NOT broadcast to sessions belonging to other users', () => {
+      const sessions = (service as any).sessions as Map<string, any>
+      const self = makeMockSession({ userId: 'user-1' })
+      const other = makeMockSession({ userId: 'user-2' })
+      sessions.set('socket-self', self.session)
+      sessions.set('socket-other', other.session)
+
+      service.onIntakeUpdated({ userId: 'user-1' })
+
+      expect(self.sendRealtimeInput).toHaveBeenCalledTimes(1)
+      expect(other.sendRealtimeInput).not.toHaveBeenCalled()
+    })
+
+    it('skips already-closed sessions', () => {
+      const sessions = (service as any).sessions as Map<string, any>
+      const closed = makeMockSession({ userId: 'user-1', streamClosed: true })
+      sessions.set('socket-closed', closed.session)
+
+      service.onIntakeUpdated({ userId: 'user-1' })
+
+      expect(closed.sendRealtimeInput).not.toHaveBeenCalled()
+    })
+
+    it('still invalidates the context cache even when no active session exists', () => {
+      const spy = jest.spyOn(service, 'invalidateContextCache')
+      service.onIntakeUpdated({ userId: 'user-with-no-active-session' })
+      expect(spy).toHaveBeenCalledWith('user-with-no-active-session')
+    })
+
+    it('does not throw when sendRealtimeInput fails for one of multiple sessions', () => {
+      const sessions = (service as any).sessions as Map<string, any>
+      const failing = makeMockSession({ userId: 'user-1' })
+      failing.sendRealtimeInput.mockImplementation(() => {
+        throw new Error('stream broken')
+      })
+      const ok = makeMockSession({ userId: 'user-1' })
+      sessions.set('socket-fail', failing.session)
+      sessions.set('socket-ok', ok.session)
+
+      expect(() => service.onIntakeUpdated({ userId: 'user-1' })).not.toThrow()
+      expect(ok.sendRealtimeInput).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // ─── Bug 58 — JournalEntry mutations invalidate the voice patient-
+  // context cache so a FOLLOW-UP voice session reads fresh values after
+  // any edit (chat tool, voice tool, HTTP REST). This was the gap the
+  // user reported: editing a reading via My Readings left the voice's
+  // cached recent-readings block showing pre-edit values.
+  describe('onJournalEntryMutated (Bug 58)', () => {
+    it('invalidates the context cache when a journal entry is updated', () => {
+      const spy = jest.spyOn(service, 'invalidateContextCache')
+      service.onJournalEntryMutated({ userId: 'user-1' })
+      expect(spy).toHaveBeenCalledWith('user-1')
+    })
+
+    it('invalidates the context cache when a journal entry is created (works for ENTRY_CREATED too)', () => {
+      // Same listener method handles both ENTRY_CREATED and ENTRY_UPDATED
+      // via stacked @OnEvent decorators. The method itself is unit-tested
+      // here; the decorator registrations are verified by the integration
+      // path (when the event emitter fires, the runtime calls this method).
+      const spy = jest.spyOn(service, 'invalidateContextCache')
+      service.onJournalEntryMutated({ userId: 'user-create' })
+      expect(spy).toHaveBeenCalledWith('user-create')
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Bug 17 — prior-conversation summary injection so voice knows what the
+  // patient already said in text (and earlier voice) when joining a session
+  // mid-conversation. Without this, Gemini Live opens fresh and greets the
+  // patient like a new conversation, re-asking questions already answered.
+  // ────────────────────────────────────────────────────────────────────────────
+  describe('prior-conversation summary injection (Bug 17)', () => {
+    it('does NOT call getSessionSummaryForVoice when sessionId is undefined', async () => {
+      await run('user-1')
+      expect(conversationHistory.getSessionSummaryForVoice).not.toHaveBeenCalled()
+    })
+
+    it('passes BOTH userId and sessionId to the summary lookup (defence-in-depth scope guard)', async () => {
+      conversationHistory.getSessionSummaryForVoice.mockResolvedValue('')
+      await run('user-1', 'session-A')
+      expect(conversationHistory.getSessionSummaryForVoice).toHaveBeenCalledWith(
+        'user-1',
+        'session-A',
+      )
+    })
+
+    it('omits the prior-conversation block when summary is empty (fresh session, no fresh-greet weirdness)', async () => {
+      conversationHistory.getSessionSummaryForVoice.mockResolvedValue('')
+      const context = await run('user-1', 'session-A')
+      expect(context).not.toContain('PRIOR CONVERSATION SUMMARY')
+      expect(context).not.toContain('JOINING an ongoing conversation')
+    })
+
+    it('omits the prior-conversation block when summary is whitespace-only', async () => {
+      conversationHistory.getSessionSummaryForVoice.mockResolvedValue('   \n  ')
+      const context = await run('user-1', 'session-A')
+      expect(context).not.toContain('PRIOR CONVERSATION SUMMARY')
+    })
+
+    it('injects the prior-conversation block + JOIN instruction when summary is non-empty', async () => {
+      const summary = [
+        'Compressed bullets from the older history.',
+        '- [Text] Patient: My BP was 145/95 → AI: That is elevated — take it again in 5 minutes.',
+        '- [Voice] Patient: I took my meds → AI: Good — keep it up.',
+      ].join('\n')
+      conversationHistory.getSessionSummaryForVoice.mockResolvedValue(summary)
+      const context = await run('user-1', 'session-A')
+      // Block header + footer present
+      expect(context).toContain('--- PRIOR CONVERSATION SUMMARY (text + voice turns so far) ---')
+      expect(context).toContain('--- END PRIOR CONVERSATION ---')
+      // Summary content present verbatim — both [Text] and [Voice] lines
+      expect(context).toContain('Compressed bullets from the older history.')
+      expect(context).toContain('[Text] Patient: My BP was 145/95')
+      expect(context).toContain('[Voice] Patient: I took my meds')
+      // JOIN instruction tells Gemini Live not to greet fresh
+      expect(context).toContain('JOINING an ongoing conversation')
+      expect(context).toMatch(/do NOT greet the patient as if it'?s a fresh conversation/)
+      expect(context).toMatch(/do NOT re-ask questions already answered/)
+    })
+
+    it('keeps the CURRENT DATE AND TIME block AFTER the prior-conversation block', async () => {
+      conversationHistory.getSessionSummaryForVoice.mockResolvedValue(
+        '- [Text] Patient: hi → AI: hello',
+      )
+      const context = await run('user-1', 'session-A')
+      const priorIdx = context.indexOf('PRIOR CONVERSATION SUMMARY')
+      const dateIdx = context.indexOf('CURRENT DATE AND TIME')
+      expect(priorIdx).toBeGreaterThan(-1)
+      expect(dateIdx).toBeGreaterThan(priorIdx)
     })
   })
 })

@@ -98,6 +98,14 @@ export default function MedicationPhotoConfirmModal({
 }: Props) {
   const { t } = useLanguage();
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCancel();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
   // Initial rows — derive frequency from Gemini's free text, default kept=true.
   const [rows, setRows] = useState<RowState[]>(() =>
     medications.map((m) => ({
@@ -199,7 +207,7 @@ export default function MedicationPhotoConfirmModal({
           <div className="flex items-center gap-2">
             <h2
               id="med-confirm-title"
-              className="text-[16px] font-bold"
+              className="text-[1rem] font-bold"
               style={{ color: 'var(--brand-text-primary)' }}
             >
               {t('ocr.med.confirmTitle')}
@@ -230,14 +238,14 @@ export default function MedicationPhotoConfirmModal({
               />
               <div className="flex-1 min-w-0">
                 <p
-                  className="text-[13px] leading-relaxed"
+                  className="text-[0.8125rem] leading-relaxed"
                   style={{ color: 'var(--brand-text-secondary)' }}
                 >
                   {t('ocr.med.helpText').replace('{count}', String(rows.length))}
                 </p>
                 {lowConfidence && (
                   <p
-                    className="text-[11px] mt-1"
+                    className="text-[0.6875rem] mt-1"
                     style={{ color: 'var(--brand-warning-amber-text)' }}
                   >
                     {t('ocr.med.lowConfidenceWarning')}
@@ -267,7 +275,7 @@ export default function MedicationPhotoConfirmModal({
             {actionableCount === 0 && rows.some((r) => r.kept) && (
               <p
                 role="note"
-                className="text-[12px] mt-1 leading-snug text-center"
+                className="text-[0.75rem] mt-1 leading-snug text-center"
                 style={{ color: 'var(--brand-text-muted)' }}
               >
                 {t('ocr.med.addNothingHelp')}
@@ -424,7 +432,7 @@ function RowCard({
             lang="en"
             value={row.drugName}
             onChange={(e) => onChange({ drugName: e.target.value })}
-            className="w-full text-[14px] font-semibold outline-none bg-transparent"
+            className="w-full text-[0.875rem] font-semibold outline-none bg-transparent"
             style={{ color: 'var(--brand-text-primary)' }}
             aria-label={t('ocr.med.rowDrugNameLabel')}
             disabled={!row.kept}
@@ -432,7 +440,7 @@ function RowCard({
           {row.doseText && (
             <p
               lang="en"
-              className="text-[11px] mt-0.5"
+              className="text-[0.6875rem] mt-0.5"
               style={{ color: 'var(--brand-text-muted)' }}
             >
               {row.doseText}
@@ -440,7 +448,7 @@ function RowCard({
           )}
           {!match && !existingMatch && enrichment?.plainLanguageDescription && (
             <p
-              className="text-[11px] mt-0.5 leading-snug"
+              className="text-[0.6875rem] mt-0.5 leading-snug"
               style={{ color: 'var(--brand-text-secondary)' }}
             >
               {enrichment.plainLanguageDescription}
@@ -450,7 +458,7 @@ function RowCard({
             <button
               type="button"
               onClick={() => onChange({ drugName: enrichment!.canonicalDrugName })}
-              className="text-[11px] font-semibold mt-1 underline cursor-pointer"
+              className="text-[0.6875rem] font-semibold mt-1 underline cursor-pointer"
               style={{ color: 'var(--brand-primary-purple)' }}
             >
               {t('ocr.med.useCanonical').replace(
@@ -461,7 +469,7 @@ function RowCard({
           )}
           {willUpdateFrequency && existingMatch?.currentFrequency && (
             <p
-              className="text-[11px] mt-1 leading-snug"
+              className="text-[0.6875rem] mt-1 leading-snug"
               style={{ color: 'var(--brand-primary-purple)' }}
             >
               {t('ocr.med.willUpdateFreq')
@@ -486,7 +494,7 @@ function RowCard({
             onChange({ frequency: e.target.value as RowState['frequency'] })
           }
           disabled={!row.kept}
-          className="text-[12px] h-9 px-2 rounded-lg outline-none cursor-pointer"
+          className="text-[0.75rem] h-9 px-2 rounded-lg outline-none cursor-pointer"
           style={{
             border: '1px solid var(--brand-border)',
             color: 'var(--brand-text-primary)',
@@ -503,7 +511,7 @@ function RowCard({
         <button
           type="button"
           onClick={() => onChange({ kept: !row.kept })}
-          className="text-[12px] font-semibold px-3 h-9 rounded-lg transition-colors cursor-pointer"
+          className="text-[0.75rem] font-semibold px-3 h-9 rounded-lg transition-colors cursor-pointer"
           style={{
             backgroundColor: row.kept
               ? 'var(--brand-background)'
@@ -536,7 +544,7 @@ function MatchBadge({
   if (existingMatch) {
     return (
       <span
-        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold uppercase tracking-wider"
         style={{
           backgroundColor: 'var(--brand-primary-purple-light)',
           color: 'var(--brand-primary-purple)',
@@ -550,7 +558,7 @@ function MatchBadge({
   if (match) {
     return (
       <span
-        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold uppercase tracking-wider"
         style={{
           backgroundColor: 'var(--brand-success-green-light)',
           color: 'var(--brand-success-green)',
@@ -564,7 +572,7 @@ function MatchBadge({
   if (enriching) {
     return (
       <span
-        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold uppercase tracking-wider"
         style={{
           backgroundColor: 'var(--brand-background)',
           color: 'var(--brand-text-muted)',
@@ -577,7 +585,7 @@ function MatchBadge({
   }
   return (
     <span
-      className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+      className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold uppercase tracking-wider"
       style={{
         backgroundColor: 'var(--brand-warning-amber-light)',
         color: 'var(--brand-warning-amber-text)',

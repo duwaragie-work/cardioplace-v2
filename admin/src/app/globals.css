@@ -11,9 +11,18 @@
   --brand-primary-purple-ultra-light: #FAF5FF;
 
   /* Cluster-3 / B11+B12: teal-600 (#0D9488) on teal-100 was 3.32:1 — fails
-     AA. Bumped to teal-800 ~6.4:1. */
+     AA. Bumped to teal-800 ~6.4:1. Used for care-team / backup-provider /
+     caregiver-consent chrome; NOT for TIER_3_INFO (see info-blue below). */
   --brand-accent-teal: #115E59;
   --brand-accent-teal-light: #CCFBF1;
+
+  /* Manisha Open-Decisions sign-off 2026-06-06 (Decision 1) — TIER_3_INFO
+     moved from teal to blue. Rationale: blue is the CDSS standard for
+     informational alerts; green could be misread as "normal/safe", and
+     teal is now reserved for non-alert care-team accents. blue-600 on
+     blue-100 = 4.7:1 → AA Normal. */
+  --brand-info-blue: #2563EB;
+  --brand-info-blue-light: #DBEAFE;
 
   /* SEMANTIC PALETTE — vibrant single-shade for red + amber.
      Green stays single-token (chips only, no button-bg variant). Teal too.
@@ -88,6 +97,50 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ── Visible keyboard focus (WCAG 2.4.7 Focus Visible) ────────────────────
+   Many admin controls use Tailwind's `outline-none`, which otherwise leaves
+   keyboard focus invisible. Restore a clear, on-brand focus ring for keyboard
+   / programmatic focus only — `:focus-visible` does NOT match mouse clicks, so
+   pointer users are unaffected. `outline` (not box-shadow) can't be clipped by
+   `overflow-hidden` ancestors and stays visible in Windows high-contrast /
+   forced-colors mode. Defined after the Tailwind import so it wins over plain
+   `.outline-none` (equal specificity, later source); controls that set their
+   own `focus:ring` still show those too. */
+:focus-visible {
+  outline: 2px solid var(--brand-primary-purple, #7B00E0);
+  outline-offset: 2px;
+}
+
+/* In-page anchor jumps (hero "Watch demo" → #demo) ease instead of snapping. */
+html {
+  scroll-behavior: smooth;
+}
+
+/* ── Skip-to-main link (WCAG 2.4.1 Bypass Blocks) ─────────────────────────
+   First focusable element on every admin page. Hidden offscreen until a
+   keyboard user presses Tab, then it slides into view; Enter jumps focus to
+   <main id="main">, skipping the sidebar + top bar. */
+.skip-link {
+  position: absolute;
+  top: -48px;
+  left: 0;
+  background: var(--brand-primary-purple, #7B00E0);
+  color: white;
+  padding: 12px 20px;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: 0 0 8px 0;
+  z-index: 1000;
+  transition: top 120ms ease-out;
+  text-decoration: none;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 0;
+  outline: 3px solid #ffffff;
+  outline-offset: -3px;
 }
 
 /* ── Thin brand scrollbar utility ─────────────────────────────────────────
@@ -200,4 +253,39 @@ body {
 }
 .btn-admin-danger:hover {
   filter: brightness(0.92);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Mobile input-zoom fix (iOS Safari).
+   iOS Safari auto-zooms the viewport when a focused form field has a computed
+   font-size below 16px — which shifts/breaks the layout on phones. Enforce a
+   16px floor on TOUCH devices only (`pointer: coarse`) so desktop keeps its
+   compact type. `max(16px, 1rem)` keeps the field scaling up with the user's
+   browser font-size setting (WCAG 1.4.4 — resize text) while never dropping
+   below the no-zoom floor. We deliberately do NOT set `user-scalable=no` /
+   `maximum-scale=1`: pinch-zoom must stay available. `!important` is required
+   to win over Tailwind `text-*` utilities set on individual inputs.
+   ────────────────────────────────────────────────────────────────────────── */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: max(16px, 1rem) !important;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Readable placeholders.
+   Tailwind Preflight defaults `::placeholder` to gray-400 (#9ca3af ≈ 2.8:1 on
+   white) — faint on phones and below WCAG AA. Set a darker default (~7:1) and
+   keep opacity:1 (some mobile browsers fade placeholders). Scoped to
+   `@layer base` so any explicit `placeholder:text-*` utility (Tailwind's
+   `utilities` layer) overrides it. An UNLAYERED rule would beat every utility
+   regardless of specificity (unlayered > layered).
+   ────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  ::placeholder {
+    color: #595959;
+    opacity: 1;
+  }
 }

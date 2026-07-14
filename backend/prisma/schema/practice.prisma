@@ -8,7 +8,15 @@ model Practice {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
-  assignments       PatientProviderAssignment[]
-  medicalDirectors  PracticeMedicalDirector[]
-  providers         PracticeProvider[]
+  assignments            PatientProviderAssignment[]
+  medicalDirectors       PracticeMedicalDirector[]
+  providers              PracticeProvider[]
+  practiceCoordinators   PracticeCoordinator[]
+  userInvites            UserInvite[]
+  monthlyReportSnapshots MonthlyReportSnapshot[]
+  // June 2026 — back-reference for AuthSession.activePracticeId. onDelete:
+  // SetNull on the AuthSession side means deleting a Practice leaves the
+  // sessions intact (next request routes the user to /sign-in/select-
+  // practice with a "membership has changed" banner). See AuthSession.
+  activeSessions         AuthSession[]               @relation("AuthSessionActivePractice")
 }

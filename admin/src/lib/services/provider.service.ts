@@ -64,8 +64,9 @@ export async function getPatientJournal(userId: string, page?: number, limit?: n
 //
 // Typed wrapper around getPatientJournal for the ReadingsTab. Mirrors the
 // shape produced by ProviderService.getPatientJournal in the backend (see
-// provider.service.ts). Read-only — the admin doesn't edit patient
-// readings here; that's a patient-side action only.
+// provider.service.ts). Mutations (add/edit/delete below) go through the
+// admin readings endpoints (admin-readings.controller.ts) — role-gated to
+// SUPER_ADMIN / MEDICAL_DIRECTOR / PROVIDER and audited as ADMIN_READING_*.
 
 export interface PatientJournalEntry {
   id: string
@@ -78,12 +79,23 @@ export interface PatientJournalEntry {
   position: 'SITTING' | 'STANDING' | 'LYING' | null
   weight: number | null
   medicationTaken: boolean | null
+  medicationScheduledLater?: boolean
   missedDoses: number | null
   /** Per-medication miss detail snapshot at entry time. */
   missedMedications: Array<{
     medicationId?: string | null
     drugName: string
     drugClass?: string | null
+    reason?: string | null
+    missedDoses?: number | null
+  }> | unknown
+  /** Per-med yes/no/not-due-yet snapshot for EVERY answered med — the reading
+   *  modal rebuilds each med's exact answer from this on edit/view. */
+  medicationStatuses?: Array<{
+    medicationId: string
+    drugName: string
+    drugClass?: string | null
+    taken: 'yes' | 'no' | 'scheduledLater'
     reason?: string | null
     missedDoses?: number | null
   }> | unknown
@@ -109,9 +121,21 @@ export interface PatientJournalEntry {
   otherSymptoms: string[]
   measurementConditions: Record<string, unknown> | null
   suboptimalMeasurement: boolean
+  // Manisha 5/24 Q1 — narrow pulse pressure (<15) flagged at entry as a
+  // possible measurement artifact (physician-only, no patient alert tier).
+  narrowPpArtifact?: boolean
+  /** Option D (Item B) — retake-to-confirm state. AWAITING = first-of-pair
+   *  emergency reading; CONFIRMATORY = the second reading; null = ordinary. */
+  emergencyConfirmation?: 'AWAITING' | 'CONFIRMATORY' | 'UNCONFIRMED' | null
+  /** On a CONFIRMATORY entry, the id of the AWAITING first-of-pair it confirms. */
+  confirmsEntryId?: string | null
   failedConditions: string[]
   notes: string | null
   source: string
+  /** Care-team actor on admin-entered readings (source === 'admin'); null on
+   *  patient-entered rows. Drives the "entered by [staff]" display. */
+  addedByUserId?: string | null
+  addedByName?: string | null
   deviations: Array<{
     id: string
     type: string | null
@@ -131,6 +155,152 @@ export async function getPatientJournalEntries(
 ): Promise<PatientJournalEntry[]> {
   const data = await getPatientJournal(userId, 1, opts?.limit ?? 200)
   return Array.isArray(data) ? (data as PatientJournalEntry[]) : []
+}
+
+// ─── Admin readings CRUD (admin-readings.controller.ts) ─────────────────────
+
+/** Structured symptom booleans the add/edit modal can set — mirrors the
+ *  backend CreateJournalEntryDto symptom flags. All optional. */
+export interface ReadingSymptoms {
+  severeHeadache?: boolean
+  visualChanges?: boolean
+  alteredMentalStatus?: boolean
+  chestPainOrDyspnea?: boolean
+  focalNeuroDeficit?: boolean
+  severeEpigastricPain?: boolean
+  newOnsetHeadache?: boolean
+  ruqPain?: boolean
+  edema?: boolean
+  dizziness?: boolean
+  syncope?: boolean
+  palpitations?: boolean
+  legSwelling?: boolean
+  fatigue?: boolean
+  shortnessOfBreath?: boolean
+  dryCough?: boolean
+  nsaidUse?: boolean
+  faceSwelling?: boolean
+  throatTightness?: boolean
+}
+
+export interface AdminReadingInput extends ReadingSymptoms {
+  measuredAt: string
+  systolicBP: number
+  diastolicBP: number
+  pulse?: number | null
+  position?: 'SITTING' | 'STANDING' | 'LYING' | null
+  /** Kilograms — callers convert lbs before sending (×0.45359237), mirroring
+   *  the patient check-in. Backend stores Decimal kg. */
+  weight?: number | null
+  /** Freeform symptoms not covered by the structured booleans —
+   *  JournalEntry.otherSymptoms. */
+  otherSymptoms?: string[]
+  notes?: string | null
+  // Medication adherence rollup + per-med detail — same derivation as the
+  // patient check-in (CheckIn.tsx handleSubmit): medicationTaken only when
+  // every med answered AND at least one explicit yes/no; scheduledLater =
+  // any "not due yet"; missedMedications only for missed meds WITH a reason;
+  // medicationStatuses for every answered med.
+  medicationTaken?: boolean | null
+  medicationScheduledLater?: boolean
+  missedMedications?: Array<{
+    medicationId: string
+    drugName: string
+    drugClass: string
+    reason: string
+    missedDoses: number
+  }>
+  medicationStatuses?: Array<{
+    medicationId: string
+    drugName: string
+    drugClass: string
+    taken: 'yes' | 'no' | 'scheduledLater'
+    reason?: string
+    missedDoses?: number
+  }>
+  /** Joins an existing multi-reading session. The backend 400s "Session
+   *  expired or invalid" when the 5-min window has elapsed; absent, the
+   *  backend assigns a fresh sessionId (returned on the created entry). */
+  sessionId?: string | null
+}
+
+async function mutateReading<T>(
+  url: string,
+  method: 'POST' | 'PUT' | 'DELETE',
+  body?: unknown,
+): Promise<T> {
+  const res = await fetchWithAuth(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    // Backend error bodies carry message OR { message, reason } (e.g. the
+    // implausible-reading 422) — prefer the human-readable reason.
+    throw new Error(json.reason || json.message || `Request failed: ${res.status}`)
+  }
+  return (json.data ?? json) as T
+}
+
+export async function addReading(
+  userId: string,
+  input: AdminReadingInput,
+): Promise<PatientJournalEntry> {
+  return mutateReading<PatientJournalEntry>(
+    `${API}/api/admin/patients/${userId}/readings`,
+    'POST',
+    input,
+  )
+}
+
+export async function editReading(
+  userId: string,
+  entryId: string,
+  input: Partial<AdminReadingInput>,
+): Promise<PatientJournalEntry> {
+  return mutateReading<PatientJournalEntry>(
+    `${API}/api/admin/patients/${userId}/readings/${entryId}`,
+    'PUT',
+    input,
+  )
+}
+
+export async function deleteReading(userId: string, entryId: string): Promise<void> {
+  await mutateReading<unknown>(
+    `${API}/api/admin/patients/${userId}/readings/${entryId}`,
+    'DELETE',
+  )
+}
+
+// Manisha 5/24 Q1 — readings rejected at entry (DBP ≥ SBP). Never persisted as
+// journal rows; surfaced on the Readings tab as an informational QA note.
+export interface RejectedReading {
+  id: string
+  systolicBP: number | null
+  diastolicBP: number | null
+  pulse: number | null
+  reason: string
+  createdAt: string
+}
+
+export async function getPatientRejectedReadings(
+  userId: string,
+  opts?: { limit?: number },
+): Promise<RejectedReading[]> {
+  const qs = new URLSearchParams()
+  if (opts?.limit) qs.append('limit', String(opts.limit))
+  const query = qs.toString()
+  const res = await fetchWithAuth(
+    `${API}/api/provider/patients/${userId}/rejected-readings${query ? `?${query}` : ''}`,
+  )
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `Request failed: ${res.status}`)
+  }
+  const json = await res.json()
+  const data = json.data ?? json
+  return Array.isArray(data) ? (data as RejectedReading[]) : []
 }
 
 export async function getPatientBpTrend(userId: string, startDate: string, endDate: string) {
@@ -172,66 +342,6 @@ export async function getAlertDetail(alertId: string) {
   }
   const json = await res.json()
   return json.data ?? json
-}
-
-export async function scheduleCall(body: {
-  patientUserId: string
-  alertId?: string
-  callDate: string
-  callTime: string
-  callType: string
-  notes?: string
-}) {
-  const res = await fetchWithAuth(`${API}/api/provider/schedule-call`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.message || `Request failed: ${res.status}`)
-  }
-  const json = await res.json()
-  return json
-}
-
-export async function getScheduledCalls(filters?: { status?: string }) {
-  const qs = new URLSearchParams()
-  if (filters?.status) qs.append('status', filters.status)
-  const query = qs.toString()
-  const res = await fetchWithAuth(`${API}/api/provider/scheduled-calls${query ? `?${query}` : ''}`)
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.message || `Request failed: ${res.status}`)
-  }
-  const json = await res.json()
-  return json.data ?? json
-}
-
-export async function updateCallStatus(callId: string, status: string) {
-  const res = await fetchWithAuth(`${API}/api/provider/scheduled-calls/${callId}/status`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.message || `Request failed: ${res.status}`)
-  }
-  const json = await res.json()
-  return json.data ?? json
-}
-
-export async function deleteScheduledCall(callId: string) {
-  const res = await fetchWithAuth(`${API}/api/provider/scheduled-calls/${callId}`, {
-    method: 'DELETE',
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.message || `Request failed: ${res.status}`)
-  }
-  const json = await res.json()
-  return json
 }
 
 export async function acknowledgeProviderAlert(alertId: string) {
@@ -279,8 +389,24 @@ export type ResolutionAction =
   | 'BP_L2_SEEN_IN_OFFICE'
   | 'BP_L2_REVIEWED_TRENDING_DOWN'
   | 'BP_L2_UNABLE_TO_REACH_RETRY'
+  // Tier 1 angioedema (Manisha 5/24 Q4) — bespoke 6-option set
+  | 'ANGIO_ADVISED_ED'
+  | 'ANGIO_CONFIRMED_ED'
+  | 'ANGIO_ACE_DISCONTINUED'
+  | 'ANGIO_SEEN_IN_OFFICE'
+  | 'ANGIO_FALSE_ALARM'
+  | 'ANGIO_UNABLE_TO_REACH'
 
-export type ResolutionTier = 'TIER_1' | 'TIER_2' | 'BP_LEVEL_2'
+export type ResolutionTier = 'TIER_1' | 'TIER_2' | 'BP_LEVEL_2' | 'TIER_1_ANGIOEDEMA'
+
+/** Conditional sub-field rendered under an angioedema resolution action and
+ *  posted into resolutionDetails. Mirrors backend ResolutionSubField. */
+export interface ResolutionSubField {
+  key: string
+  label: string
+  kind: 'yesno' | 'text'
+  required: boolean
+}
 
 export interface ResolutionActionDef {
   tier: ResolutionTier
@@ -289,6 +415,11 @@ export interface ResolutionActionDef {
   description?: string
   requiresRationale: boolean
   triggersBpL2Retry?: boolean
+  /** Conditional sub-fields (angioedema actions). */
+  subFields?: ResolutionSubField[]
+  /** UI hint — this action carries a destructive/clinical side-effect
+   *  (auto-discontinue ACE/ARB + permanent contraindication flag). */
+  warnSideEffect?: string
 }
 
 /**
@@ -388,18 +519,71 @@ export const RESOLUTION_CATALOG: Record<ResolutionAction, ResolutionActionDef> =
     requiresRationale: true,
     triggersBpL2Retry: true,
   },
+
+  // ── Tier 1 Angioedema (Manisha 5/24 Q4) ─────────────────────────────────
+  ANGIO_ADVISED_ED: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'Advised patient to call 911 / go to the ED',
+    description: 'If the patient declines, an immediate Medical Director escalation fires and the alert stays open.',
+    requiresRationale: true,
+    subFields: [
+      { key: 'willGo', label: 'Patient agreed to go to the ED', kind: 'yesno', required: true },
+    ],
+  },
+  ANGIO_CONFIRMED_ED: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'Confirmed patient is being evaluated in the ED',
+    requiresRationale: true,
+    subFields: [
+      { key: 'facility', label: 'Facility / ED name', kind: 'text', required: true },
+    ],
+  },
+  ANGIO_ACE_DISCONTINUED: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'ACE inhibitor / ARB discontinued',
+    requiresRationale: true,
+    warnSideEffect:
+      'This discontinues the patient’s ACE/ARB medications and sets a permanent ACE-inhibitor contraindication on their profile.',
+    subFields: [
+      { key: 'replacementOrdered', label: 'Replacement therapy ordered', kind: 'yesno', required: true },
+      { key: 'replacementMed', label: 'Replacement medication (if ordered)', kind: 'text', required: false },
+    ],
+  },
+  ANGIO_SEEN_IN_OFFICE: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'Patient seen in office',
+    requiresRationale: true,
+    subFields: [
+      { key: 'outcome', label: 'Office visit outcome', kind: 'text', required: true },
+    ],
+  },
+  ANGIO_FALSE_ALARM: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'False alarm — not angioedema',
+    description: 'No contraindication flag is set.',
+    requiresRationale: true,
+    subFields: [
+      { key: 'actualCause', label: 'Actual cause of symptoms', kind: 'text', required: true },
+    ],
+  },
+  ANGIO_UNABLE_TO_REACH: {
+    tier: 'TIER_1_ANGIOEDEMA',
+    label: 'Unable to reach patient — continue escalation',
+    description: 'Alert stays open; the compressed angioedema ladder keeps escalating.',
+    requiresRationale: true,
+  },
 }
 
 /** AlertTier (DB enum) → ResolutionTier (catalog grouping). */
 export function resolutionTierFor(tier: AlertTier | string | null): ResolutionTier | null {
   switch (tier) {
     case 'TIER_1_CONTRAINDICATION':
-    // Cluster 8 (Manisha 5/18/26, P0) — angioedema is non-dismissible and
-    // "resolved like all Tier 1 alerts" with 15-field audit rationale.
-    // Same resolution catalog (TIER1_FALSE_POSITIVE,
-    // TIER1_MEDICATION_CORRECTED, etc.) as the Tier 1 contraindication.
-    case 'TIER_1_ANGIOEDEMA':
       return 'TIER_1'
+    // Manisha 5/24 Q4 — angioedema now has its own bespoke 6-option catalog
+    // (auto-discontinue ACE/ARB, permanent contraindication flag, targeted MD
+    // escalation, compressed re-escalation), split out of the generic Tier 1.
+    case 'TIER_1_ANGIOEDEMA':
+      return 'TIER_1_ANGIOEDEMA'
     case 'TIER_2_DISCREPANCY':
       return 'TIER_2'
     case 'BP_LEVEL_2':
@@ -540,11 +724,16 @@ export async function resolveAlert(
   alertId: string,
   action: ResolutionAction,
   rationale?: string,
+  resolutionDetails?: Record<string, unknown>,
 ): Promise<{ status: 'RESOLVED' | 'OPEN'; resolvedAt: string | null; retryScheduledFor?: string }> {
   const res = await fetchWithAuth(`${API}/api/admin/alerts/${alertId}/resolve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ resolutionAction: action, resolutionRationale: rationale }),
+    body: JSON.stringify({
+      resolutionAction: action,
+      resolutionRationale: rationale,
+      ...(resolutionDetails ? { resolutionDetails } : {}),
+    }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
