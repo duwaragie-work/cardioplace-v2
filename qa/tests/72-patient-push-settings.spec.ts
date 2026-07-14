@@ -43,6 +43,16 @@ test.describe('Spec 72 — patient push notification settings', () => {
     // Deterministic push ceremony: replace the service worker + push manager
     // with an in-memory fake so enable/disable resolve without a real push
     // service. Re-injected on every navigation (incl. the app's full reloads).
+    //
+    // push.service.ts:13 `supported()` gates on the presence of three globals
+    // in the page context: `'serviceWorker' in navigator`, `'PushManager' in
+    // window`, `'Notification' in window`. Headless Chromium at localhost does
+    // expose Notification but does NOT always expose PushManager — with only
+    // navigator.serviceWorker stubbed, supported() returned false, the
+    // NotificationSettings component fell through to the "Unsupported" info
+    // banner, and neither the enable nor disable data-testid ever rendered.
+    // Stub PushManager on the window (as a plain constructor stand-in) so the
+    // `in` check passes and the toggle actually mounts.
     await page.addInitScript(() => {
       let current: unknown = null
       const fakeSub = {
@@ -73,6 +83,16 @@ test.describe('Spec 72 — patient push notification settings', () => {
           ready: Promise.resolve(fakeReg),
         },
       })
+      // Stand-in for the missing PushManager global so `'PushManager' in
+      // window` returns true. push.service.ts never news-up this class —
+      // the real ceremony goes through the ServiceWorkerRegistration mock
+      // above — so an empty constructor is enough for the `in` check.
+      if (!('PushManager' in window)) {
+        Object.defineProperty(window, 'PushManager', {
+          configurable: true,
+          value: function PushManager() {},
+        })
+      }
     })
 
     // Stub the push API so no real backend rows are touched.

@@ -141,6 +141,12 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
 
     const api = await authedApi(API_BASE_URL, patient.email)
     // 165/105 — well above the normal-range predicate → no "Looking good" tail.
+    // Wall-clock snapshot after the request lands: the earlier N7 test in this
+    // file posted 118/76 (normal-range) moments ago, so its "Looking good"
+    // push is still fresh. Filtering only by `sentAt >= before` matches that
+    // stale push and the assertion mis-fires. Take the LATEST push instead —
+    // event dispatch preserves order, so the current entry's push always
+    // outranks a prior test's on `sentAt`.
     const before = new Date(Date.now() - 5_000)
     await postJournalEntry(api, {
       measuredAt: new Date().toISOString(),
@@ -149,17 +155,27 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
       pulse: 78,
     })
 
-    let confirmation: { title: string; body: string; channel: string } | undefined
+    let confirmation: { title: string; body: string; channel: string; sentAt: string } | undefined
     const start = Date.now()
     while (Date.now() - start < 15_000) {
       const notes = await tc.listNotifications(u!.id)
-      confirmation = notes.find(
-        (n) =>
-          n.channel === 'PUSH' &&
-          n.title.includes('Logged') &&
-          new Date(n.sentAt) >= before,
-      )
-      if (confirmation) break
+      const matches = notes
+        .filter(
+          (n) =>
+            n.channel === 'PUSH' &&
+            n.title.includes('Logged') &&
+            new Date(n.sentAt) >= before,
+        )
+        .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime())
+      // Need the entry we just posted to have produced a push AFTER the
+      // request. If the only match predates our post by more than a second,
+      // it's the stale one — keep polling.
+      const postStart = new Date(start)
+      const fresh = matches.find((m) => new Date(m.sentAt) >= postStart)
+      if (fresh) {
+        confirmation = fresh
+        break
+      }
       await new Promise((r) => setTimeout(r, 500))
     }
     expect(confirmation, 'expected a "Logged ✓" PUSH Notification').toBeTruthy()
@@ -362,17 +378,28 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
     // Some journals reject BP-null entries — skip gracefully if so.
     test.skip(!posted, 'API rejected BP-null entry; range-check edge test not exercised')
 
-    let confirmation: { title: string; body: string; channel: string } | undefined
+    let confirmation: { title: string; body: string; channel: string; sentAt: string } | undefined
     const start = Date.now()
     while (Date.now() - start < 15_000) {
       const notes = await tc.listNotifications(u!.id)
-      confirmation = notes.find(
-        (n) =>
-          n.channel === 'PUSH' &&
-          n.title.includes('Logged') &&
-          new Date(n.sentAt) >= before,
-      )
-      if (confirmation) break
+      const matches = notes
+        .filter(
+          (n) =>
+            n.channel === 'PUSH' &&
+            n.title.includes('Logged') &&
+            new Date(n.sentAt) >= before,
+        )
+        .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime())
+      // Take the LATEST match — an earlier test in this file posted
+      // 118/76 (normal-range) whose "Looking good" push may still be
+      // fresh, so plain `.find()` returns the stale row and mis-fires
+      // the .not.toContain assertion.
+      const postStart = new Date(start)
+      const fresh = matches.find((m) => new Date(m.sentAt) >= postStart)
+      if (fresh) {
+        confirmation = fresh
+        break
+      }
       await new Promise((r) => setTimeout(r, 500))
     }
     if (confirmation) {
