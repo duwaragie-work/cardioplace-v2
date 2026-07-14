@@ -30,6 +30,11 @@ import {
 } from './cookie-scope.js'
 import { ActiveContext } from './decorators/active-context.decorator.js'
 import { Public } from './decorators/public.decorator.js'
+
+/** Mirrors the client's `x-device-id`. Lets the magic-link GET (which can't
+ *  send custom headers) still identify the device for the per-device biometric
+ *  rule. See setDeviceCookie / buildAuthContext. */
+const DEVICE_ID_COOKIE = 'cp_device_id'
 import { ConsentDto } from './dto/consent.dto.js'
 import { ProfileDto } from './dto/profile.dto.js'
 import { RefreshDto } from './dto/refresh.dto.js'
@@ -90,7 +95,14 @@ export class AuthController {
   } {
     const userAgent = req.headers['user-agent']
     return {
-      deviceId: req.headers['x-device-id'] as string | undefined,
+      // Header first (XHR paths). Cookie fallback exists for MAGIC-LINK, which
+      // is a top-level GET navigation from the user's mail client and therefore
+      // cannot carry a custom header — without the cookie we'd read the device
+      // as "unknown" and skip the biometric challenge even on the enrolled
+      // device. The cookie is written on OTP sign-in and on biometric setup.
+      deviceId:
+        (req.headers['x-device-id'] as string | undefined) ??
+        (req.cookies?.[DEVICE_ID_COOKIE] as string | undefined),
       ipAddress: this.extractIpAddress(req),
       userAgent,
       timezone: req.headers['x-timezone'] as string | undefined,
@@ -186,6 +198,9 @@ export class AuthController {
       )
     }
     const context = { ...baseContext, deviceId, appContext: dto.appContext }
+    // Remember this device so a later magic-link sign-in (no custom headers)
+    // still resolves the same deviceId and applies the per-device biometric rule.
+    this.setDeviceCookie(res, deviceId)
     const result = await this.authService.verifyOtp(dto.email, dto.otp, context)
     // Phase/practice-identity — multi-practice provider gets a challenge
     // token instead of the real token pair. Return the discriminator shape
@@ -471,14 +486,20 @@ export class AuthController {
   async webAuthnRegisterVerify(
     @Body() dto: WebAuthnRegisterVerifyDto,
     @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const { id } = req.user as { id: string }
+    const context = this.buildAuthContext(req)
+    // The binding moment: this passkey belongs to THIS device. Persist the id
+    // in a cookie too, so a later magic-link sign-in from this same device is
+    // still recognised and gets challenged for biometric.
+    if (context.deviceId) this.setDeviceCookie(res, context.deviceId)
     return this.authService.completeWebAuthnRegistration(
       id,
       dto.registrationToken,
       dto.response,
       dto.deviceName,
-      this.buildAuthContext(req),
+      context,
     )
   }
 
@@ -900,6 +921,18 @@ export class AuthController {
     res.cookie(cookieName(scope, 'refresh'), token, {
       ...this.cookieDefaults(),
       maxAge: 30 * 24 * 60 * 60 * 1000,
+    })
+  }
+
+  /** Persist the device id so the MAGIC-LINK path (a top-level GET navigation
+   *  that can't send `x-device-id`) can still recognise this device and apply
+   *  the per-device biometric rule. Written on OTP sign-in and on biometric
+   *  setup — the two moments we're guaranteed to have the header. Not a
+   *  security control: it only decides whether we PROMPT for biometric. */
+  private setDeviceCookie(res: Response, deviceId: string) {
+    res.cookie(DEVICE_ID_COOKIE, deviceId, {
+      ...this.cookieDefaults(),
+      maxAge: 365 * 24 * 60 * 60 * 1000,
     })
   }
 }

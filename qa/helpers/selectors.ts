@@ -752,7 +752,9 @@ export const T = {
     // no per-row testid; rename/remove are reached via their aria-labels
     // ("Rename device" / "Remove device" / "Save name").
     settingsEnableBiometric: 'settings-enable-biometric',
-    settingsAddAnotherDevice: 'settings-add-another-device',
+    // settingsAddAnotherDevice removed 2026-07-14 — the cross-device QR
+    // enrollment flow is gone; biometric is bound to the device that registers
+    // it, so each device enables it from its own Settings.
     settingsRenameInput: 'settings-rename-input',
     settingsRegenerateCodes: 'settings-regenerate-codes',
   },

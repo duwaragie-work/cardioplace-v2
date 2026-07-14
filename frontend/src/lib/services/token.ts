@@ -1,3 +1,5 @@
+import { getOrCreateDeviceId } from '@/lib/device';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 // Re-exported for backward-compat with imports that still reference the
@@ -96,6 +98,9 @@ export async function fetchWithAuth(
     typeof FormData !== 'undefined' && options.body instanceof FormData;
   const buildHeaders = (token: string | null): Record<string, string> => ({
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    // Identifies this browser to the API. Biometric is bound per-device, so the
+    // WebAuthn registration call must carry it or the passkey lands unbound.
+    'x-device-id': getOrCreateDeviceId(),
     ...(options.headers as Record<string, string>),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   });
