@@ -83,16 +83,33 @@ test.describe('Spec 72 — patient push notification settings', () => {
           ready: Promise.resolve(fakeReg),
         },
       })
-      // Stand-in for the missing PushManager global so `'PushManager' in
-      // window` returns true. push.service.ts never news-up this class —
-      // the real ceremony goes through the ServiceWorkerRegistration mock
-      // above — so an empty constructor is enough for the `in` check.
-      if (!('PushManager' in window)) {
-        Object.defineProperty(window, 'PushManager', {
-          configurable: true,
-          value: function PushManager() {},
-        })
+      // Stand-in for PushManager so `'PushManager' in window` returns true.
+      // push.service.ts never news-up this class — the ceremony goes through
+      // the ServiceWorkerRegistration mock above — so an empty constructor
+      // suffices. Force-set unconditionally: `if (!('PushManager' in window))`
+      // was silently skipped in the last CI run (either the check itself was
+      // wrong, or headless Chromium reports the identifier but not a real
+      // impl), and the toggle never mounted.
+      Object.defineProperty(window, 'PushManager', {
+        configurable: true,
+        value: function PushManager() {},
+      })
+      // context.grantPermissions('notifications') updates the browser's per-
+      // origin permission but Chromium headless still reports
+      // `Notification.permission === 'default'` for the Notification class's
+      // static getter unless the page explicitly asks. NotificationSettings
+      // reads Notification.permission directly to compute `blocked` — with
+      // 'default' we're fine (not blocked), but if 'Notification' is somehow
+      // absent from `window` under this Chromium's config, supported() short-
+      // circuits false. Force a stub that always reports 'granted'.
+      class FakeNotification {
+        static permission: 'granted' | 'default' | 'denied' = 'granted'
+        static async requestPermission(): Promise<'granted'> { return 'granted' }
       }
+      Object.defineProperty(window, 'Notification', {
+        configurable: true,
+        value: FakeNotification,
+      })
     })
 
     // Stub the push API so no real backend rows are touched.
