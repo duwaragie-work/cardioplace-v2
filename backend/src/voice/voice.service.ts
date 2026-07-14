@@ -823,7 +823,30 @@ export class VoiceService implements OnModuleDestroy {
     const session = this.sessions.get(socketId)
     if (!session || session.streamClosed) return
     try {
-      session.liveSession.sendRealtimeInput({ text })
+      // Gemini Live: sendRealtimeInput({text}) is a STREAMING partial (see
+      // @google/genai LiveSendRealtimeInputParameters.text — "realtime text
+      // input stream"), so it enqueues characters without ending the user's
+      // turn. The model then waits for more input and either times out into a
+      // truncated response ("any questions? One moment", "Is th…") or silently
+      // fails to respond at all (the exact failure mode voice-chat E2E test 4
+      // hit deterministically on Vertex — 3/3 retries produced no 911 guidance
+      // for "severe chest pain right now").
+      //
+      // For a complete user turn that expects an immediate reply, the correct
+      // API is sendClientContent({turns, turnComplete: true}) — see genai.d.ts
+      // §LiveSendClientContentParameters: "If true, indicates that the server
+      // content generation should start with the currently accumulated prompt".
+      // This is the same shape the SDK docstring shows for the "conversation
+      // via text" use-case (`sendClientContent({turns:"Hello?"})`).
+      //
+      // Audio path (sendRealtimeInput + audioStreamEnd) is unchanged; the
+      // intake-updated broadcaster (onIntakeUpdated) also stays on
+      // sendRealtimeInput because it's a mid-turn system notice, not a user
+      // message expecting an immediate response.
+      session.liveSession.sendClientContent({
+        turns: text,
+        turnComplete: true,
+      })
       // Track user text input in activity
       if (text.trim()) {
         session.activity.userTexts.push(text.trim())
