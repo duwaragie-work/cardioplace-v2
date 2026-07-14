@@ -37,6 +37,18 @@ test.describe('Bug 19 — no active-session prompt after an explicit close', () 
       await expect(page).toHaveURL(/\/check-in/, { timeout: 15_000 }) // confirmation overlay
 
       // Within 5 min, start a new check-in — NO "add to this session?" prompt.
+      //
+      // commitBuffer sends `closeSession: true` on the last reading, which
+      // schedules a background sessionClosedAt stamp on the backend. On slow
+      // CI runners the frontend can fetch /sessions/active before that write
+      // commits — activeSession comes back non-null, the wizard bails out to
+      // the "checkin-open-session-prompt" branch (see CheckIn.tsx:3135), and
+      // neither `check-in-submit` nor a fresh wizard renders. Round-trip via
+      // /dashboard first: it forces a full CheckIn unmount + gives the async
+      // session-close a moment to settle, so the subsequent /check-in fetch
+      // sees a truly closed session.
+      await page.goto('/dashboard')
+      await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {})
       await page.goto('/check-in')
       await expect(page.locator(byTestId('check-in-submit'))).toBeVisible({ timeout: 20_000 })
       await expect(page.locator(byTestId(T.checkin.openSessionPrompt))).toHaveCount(0)
