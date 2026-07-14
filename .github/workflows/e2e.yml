@@ -53,21 +53,27 @@ jobs:
     env:
       # Backend
       DATABASE_URL: postgresql://cardioplace:cardioplace@localhost:5432/cardioplace_e2e
-      # CI-only throwaway values, randomly generated. They must be REAL random
-      # values, not readable placeholders: the boot guard
-      # (backend/src/common/config/secret-guard.ts) refuses to start on anything
-      # that looks like a placeholder, and every e2e spec boots AppModule.
-      JWT_SECRET: s1Hwe9UIYL8S8NOgV_x0u7vNABEX0rvV6ZcFP5R7jWqCmG_K-jmFxochkJTJYKZY
-      JWT_ACCESS_SECRET: 8cfCn3ZrZHZj_JxONQF_4GJoZLWay3tuERnFngEKd_YqPuxMp_eODCjkcgaPOECd
+      # CI-only throwaway values, but now sourced from repo GitHub Secrets so
+      # they never appear inline in git history. The boot guard
+      # (backend/src/common/config/secret-guard.ts) rejects placeholder-shaped
+      # inputs (all-zero, repeated-pattern, short strings), so the secrets
+      # MUST be real random values — generate each with
+      #   openssl rand -base64 48 | tr -d '=+/' | head -c 64
+      # for the JWTs, and
+      #   openssl rand -hex 32
+      # for MFA_ENCRYPTION_KEY (must match ^[0-9a-fA-F]{64}$). If any of
+      # these secrets is missing, the env var comes through as an empty
+      # string and the backend fails fast at boot — CI breaks loudly rather
+      # than silently running with a weak default.
+      JWT_SECRET: ${{ secrets.CI_JWT_SECRET }}
+      JWT_ACCESS_SECRET: ${{ secrets.CI_JWT_ACCESS_SECRET }}
       JWT_ACCESS_EXPIRES_IN: 15m
-      JWT_REFRESH_SECRET: RvW3PIYSGJq8qTP0fOBYW95aN0n_5xRRhwCZK_It7XLrJoWBBd0RIWkRaJWMLI80
+      JWT_REFRESH_SECRET: ${{ secrets.CI_JWT_REFRESH_SECRET }}
       JWT_REFRESH_EXPIRES_IN: 30d
-      # MFA (TOTP) — EncryptionService requires a 32-byte key as 64 hex chars
-      # (^[0-9a-fA-F]{64}$). Without it every mfa/enroll/complete returns 500
-      # (specs 66/66b). CI-only throwaway key; prod sets a real secret.
-      # Was '0123456789abcdef' x4 — format-valid and maximal Shannon entropy, but
-      # a repeated 16-char unit. The boot guard's repeat check rejects it.
-      MFA_ENCRYPTION_KEY: 'fa11da7e7124e04f5e2eae5004398676cdc6b401a46d6832766b5ea28f5c036f'
+      # MFA_ENCRYPTION_KEY — EncryptionService requires a 32-byte key as 64
+      # hex chars (^[0-9a-fA-F]{64}$). Without it every mfa/enroll/complete
+      # returns 500 (specs 66/66b).
+      MFA_ENCRYPTION_KEY: ${{ secrets.CI_MFA_ENCRYPTION_KEY }}
       WEB_APP_URL: http://localhost:3000,http://localhost:3001
       ADMIN_BASE_URL: http://localhost:3001
       COOKIE_SAME_SITE: lax
@@ -89,7 +95,10 @@ jobs:
       DRUG_ENRICHMENT_ENABLED: 'false'
       CHAT_V2_PROMPT_ENABLED: 'false'
       ENABLE_TEST_CONTROL: 'true'
-      TEST_CONTROL_SECRET: SWClhsP-MxK_EpRp2-bDsp8UzoUxc_740nIKbQATQZcTJ77n_uTNeqJ9iuFcmZDj
+      # Bearer secret guarding the /test-control/* surface (reset user, backdate
+      # readings, drive cron scans). Sourced from repo Secrets — see the JWT
+      # comment above for the generation command.
+      TEST_CONTROL_SECRET: ${{ secrets.CI_TEST_CONTROL_SECRET }}
       NODE_ENV: test
       # Frontend
       NEXT_PUBLIC_API_URL: http://localhost:4000
