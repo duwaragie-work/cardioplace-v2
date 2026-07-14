@@ -21,7 +21,11 @@ export const SYSTEM_PRINCIPAL_LABELS = [
   'engine-alert-generator',
   'escalation-ladder',
   'session-finalize',
-  'gap-alert',
+  // 'gap-alert' — REMOVED in N3 (2026-07-13). Superseded by 'daily-reminder'.
+  // The seed row for `system-gap-alert@internal.cardioplace.test` is kept
+  // in the DB (soft-deleted at seed time) so any historical AccessLog rows
+  // referencing that principal id stay joinable; the label itself is out of
+  // the runtime allowlist so a stray CLS actor label cannot resolve.
   'monthly-reask',
   'medication-hold-escalation',
   'monthly-report',
@@ -29,6 +33,9 @@ export const SYSTEM_PRINCIPAL_LABELS = [
   // N7 (2026-07-11) — automated audit exception-report cron
   // (§164.308(a)(1)(ii)(D) Information System Activity Review).
   'audit-exception-report',
+  // N2 (2026-07-13) — daily patient reminder cron (Reminder & Engagement).
+  // Replaces gap-alert with an escalating-tone daily nudge.
+  'daily-reminder',
 ] as const
 
 export type SystemPrincipalLabel = (typeof SYSTEM_PRINCIPAL_LABELS)[number]
@@ -42,7 +49,9 @@ export type SystemPrincipalLabel = (typeof SYSTEM_PRINCIPAL_LABELS)[number]
  */
 export const CRON_LABEL_TO_PRINCIPAL: Readonly<Record<string, SystemPrincipalLabel>> = {
   'cron-content-stale-flag': 'content-scheduler',
-  'cron-gap-alert': 'gap-alert',
+  // 'cron-gap-alert' — REMOVED in N3 (2026-07-13). Any late-arriving CLS
+  // actor label using this string now falls through to the safe null-actor
+  // fallback (SYSTEM_ACTOR, actorId null) instead of resolving.
   'cron-medication-hold-escalation': 'medication-hold-escalation',
   'cron-monthly-reask': 'monthly-reask',
   'cron-session-finalize': 'session-finalize',
@@ -50,6 +59,8 @@ export const CRON_LABEL_TO_PRINCIPAL: Readonly<Record<string, SystemPrincipalLab
   'cron-monthly-report': 'monthly-report',
   // N7 (2026-07-11).
   'cron-audit-exception-report': 'audit-exception-report',
+  // N2 (2026-07-13).
+  'cron-daily-reminder': 'daily-reminder',
   // Engine @OnEvent handler — no 'cron-' prefix; label == principal.
   'engine-alert-generator': 'engine-alert-generator',
 }

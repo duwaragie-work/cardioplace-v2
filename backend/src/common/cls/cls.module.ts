@@ -31,13 +31,22 @@ import { SystemPrincipalsService } from './system-principals.service.js'
         mount: true,
         setup: (cls, context) => {
           const req = context.switchToHttp().getRequest()
-          const actor = req?.user as { id: string; roles?: string[] } | undefined
+          const actor = req?.user as
+            | { id: string; roles?: string[]; activePracticeId?: string | null }
+            | undefined
           cls.set('actorId', actor?.id ?? null)
           cls.set('actorType', actor ? 'USER' : 'SYSTEM_ACTOR')
           // HTTP requests never carry a cron label — a real actor (or an
           // unauthenticated request) is not a background process. Only
           // runAsCronActor sets this. Left null here explicitly.
           cls.set('systemActorLabel', null)
+          // N4 follow-up (2026-07-11) — active-practice attribution. Mirrors
+          // the field already threaded through AuthLog / ProfileVerificationLog
+          // / EmailDisclosureLog, so per-practice audit queries can filter
+          // AccessLog directly. Reads the JWT's activePracticeId claim (set
+          // at sign-in / select-practice / switch-practice); null for
+          // SUPER_ADMIN / HEALPLACE_OPS / PATIENT + unauthenticated paths.
+          cls.set('activePracticeId', actor?.activePracticeId ?? null)
           // N2 (2026-07-07) — per-request correlation id. AccessLog rows written
           // during this request share the same runId; distinct HTTP requests get
           // distinct ids. Symmetric with the cron path in runAsCronActor so the

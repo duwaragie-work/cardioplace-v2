@@ -85,7 +85,7 @@ test.describe('HIPAA audit controls — N4/N5/N6/N7 end-to-end', () => {
     const row = await tc.latestEmailDisclosure(patient.email)
     expect(row).not.toBeNull()
     expect(row!.template).toBe('otp')
-    expect(row!.purpose).toBe('PATIENT_DIRECTED')
+    expect(row!.purpose).toBe('DIRECT_TO_PATIENT')
     expect(row!.recipientCategory).toBe('PATIENT')
     expect(row!.briefDescription).toBeTruthy()
     expect(row!.briefDescription.length).toBeLessThanOrEqual(200)

@@ -23,13 +23,19 @@ const SYSTEM_PRINCIPALS = [
   { label: 'engine-alert-generator', displayName: 'Alert Engine' },
   { label: 'escalation-ladder', displayName: 'Escalation Ladder' },
   { label: 'session-finalize', displayName: 'Session Finalize Cron' },
-  { label: 'gap-alert', displayName: 'Gap Alert Cron' },
+  // N3 (2026-07-13) — gap-alert cron deleted; its principal is intentionally
+  // NOT re-seeded here. Existing rows in the DB stay in place (idempotent
+  // upsert on missing labels means we neither delete nor rotate them), so
+  // historical AccessLog rows joined against that principal id remain
+  // resolvable. Superseded by 'daily-reminder' below.
   { label: 'monthly-reask', displayName: 'Monthly Re-ask Cron' },
   { label: 'medication-hold-escalation', displayName: 'Medication Hold Escalation' },
   { label: 'monthly-report', displayName: 'Monthly Report Cron' },
   { label: 'content-scheduler', displayName: 'Content Scheduler' },
   // N7 (2026-07-11) — §164.308(a)(1)(ii)(D) Information System Activity Review.
   { label: 'audit-exception-report', displayName: 'Audit Exception Report Cron' },
+  // N2 (2026-07-13) — daily patient reminder cron (Reminder & Engagement).
+  { label: 'daily-reminder', displayName: 'Daily Reminder Cron' },
 ] as const
 
 export function systemPrincipalEmail(label: string): string {

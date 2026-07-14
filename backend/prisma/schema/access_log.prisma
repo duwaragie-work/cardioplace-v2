@@ -27,9 +27,18 @@ model AccessLog {
   // request") rather than day-granularity aggregates. Nullable — pre-N2 rows
   // pre-date this column.
   runId     String?
+  // N4 follow-up (2026-07-11) — practice-context attribution (Manisha
+  // 2026-06-12 Access Control §1, HIPAA 45 CFR §164.312(a)(2)(i)). The
+  // activePracticeId on the actor's AuthSession at the time of the row.
+  // NULL for SUPER_ADMIN / HEALPLACE_OPS / SYSTEM_ACTOR reads and pre-policy
+  // rows. Mirrors the field on AuthLog + ProfileVerificationLog +
+  // EmailDisclosureLog so per-practice audit queries can filter without
+  // resolving the actor's practice memberships at query time.
+  practiceContext String?
   createdAt DateTime @default(now())
 
   @@index([actorId, createdAt])
   @@index([modelName, recordId, createdAt])
   @@index([runId])
+  @@index([practiceContext, createdAt])
 }

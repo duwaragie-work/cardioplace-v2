@@ -4,7 +4,7 @@ import { ClsService } from 'nestjs-cls'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { TestControlService } from './test-control.service.js'
 import { AuditExceptionReportService } from '../crons/audit-exception-report.service.js'
-import { GapAlertService } from '../crons/gap-alert.service.js'
+import { DailyReminderService } from '../crons/daily-reminder.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
 import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
@@ -58,7 +58,7 @@ describe('TestControlService — medication-hold escalation cron driver (F33)', 
           },
         },
         // The other cron drivers are unused by this path — stub them.
-        { provide: GapAlertService, useValue: {} },
+        { provide: DailyReminderService, useValue: {} },
         { provide: MonthlyReaskService, useValue: {} },
         { provide: EscalationService, useValue: {} },
         // N7 (2026-07-11) — stub the audit-exception cron driver too.

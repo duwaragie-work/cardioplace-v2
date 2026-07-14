@@ -440,10 +440,21 @@ describe('AuthService', () => {
         }),
       ).resolves.not.toThrow()
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        'Failed to log auth event:',
-        expect.any(Error),
-      )
+      // N1 (2026-07-08) — logAuthEvent no longer console.errors a two-arg
+      // ("prefix", Error) tuple. It now delegates to writeAuditWithRetry,
+      // which on retry exhaustion emits a SINGLE JSON string carrying
+      // `{audit_write_failed: true, kind: "auth-log", error_name, error_message, ...}`.
+      // Log aggregators (CloudWatch, Loki) index on `audit_write_failed`
+      // for alerting; the test is updated to assert on the new shape.
+      expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+      const logged = JSON.parse(consoleErrorSpy.mock.calls[0][0] as string)
+      expect(logged).toMatchObject({
+        audit_write_failed: true,
+        kind: 'auth-log',
+        error_name: 'Error',
+        error_message: 'Database connection failed',
+        'audit.event': 'otp_verified',
+      })
 
       consoleErrorSpy.mockRestore()
     })

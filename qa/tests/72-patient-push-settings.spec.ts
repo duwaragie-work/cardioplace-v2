@@ -43,6 +43,16 @@ test.describe('Spec 72 — patient push notification settings', () => {
     // Deterministic push ceremony: replace the service worker + push manager
     // with an in-memory fake so enable/disable resolve without a real push
     // service. Re-injected on every navigation (incl. the app's full reloads).
+    //
+    // push.service.ts:13 `supported()` gates on the presence of three globals
+    // in the page context: `'serviceWorker' in navigator`, `'PushManager' in
+    // window`, `'Notification' in window`. Headless Chromium at localhost does
+    // expose Notification but does NOT always expose PushManager — with only
+    // navigator.serviceWorker stubbed, supported() returned false, the
+    // NotificationSettings component fell through to the "Unsupported" info
+    // banner, and neither the enable nor disable data-testid ever rendered.
+    // Stub PushManager on the window (as a plain constructor stand-in) so the
+    // `in` check passes and the toggle actually mounts.
     await page.addInitScript(() => {
       let current: unknown = null
       const fakeSub = {
@@ -72,6 +82,33 @@ test.describe('Spec 72 — patient push notification settings', () => {
           getRegistration: async () => fakeReg,
           ready: Promise.resolve(fakeReg),
         },
+      })
+      // Stand-in for PushManager so `'PushManager' in window` returns true.
+      // push.service.ts never news-up this class — the ceremony goes through
+      // the ServiceWorkerRegistration mock above — so an empty constructor
+      // suffices. Force-set unconditionally: `if (!('PushManager' in window))`
+      // was silently skipped in the last CI run (either the check itself was
+      // wrong, or headless Chromium reports the identifier but not a real
+      // impl), and the toggle never mounted.
+      Object.defineProperty(window, 'PushManager', {
+        configurable: true,
+        value: function PushManager() {},
+      })
+      // context.grantPermissions('notifications') updates the browser's per-
+      // origin permission but Chromium headless still reports
+      // `Notification.permission === 'default'` for the Notification class's
+      // static getter unless the page explicitly asks. NotificationSettings
+      // reads Notification.permission directly to compute `blocked` — with
+      // 'default' we're fine (not blocked), but if 'Notification' is somehow
+      // absent from `window` under this Chromium's config, supported() short-
+      // circuits false. Force a stub that always reports 'granted'.
+      class FakeNotification {
+        static permission: 'granted' | 'default' | 'denied' = 'granted'
+        static async requestPermission(): Promise<'granted'> { return 'granted' }
+      }
+      Object.defineProperty(window, 'Notification', {
+        configurable: true,
+        value: FakeNotification,
       })
     })
 

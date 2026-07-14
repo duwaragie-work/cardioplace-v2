@@ -32,7 +32,7 @@ const USER_CLS = clsWith({
 })
 const EMPTY_CLS = clsWith({})
 // A cron that identified itself via runAsCronActor: no actorId, a label set.
-const CRON_CLS = clsWith({ systemActorLabel: 'cron-gap-alert' })
+const CRON_CLS = clsWith({ systemActorLabel: 'cron-daily-reminder' })
 
 describe('computeAccessLogData — operation → audit row', () => {
   it('findUnique on JournalEntry with where.id → READ, recordId = where.id', () => {
@@ -206,7 +206,7 @@ describe('computeAccessLogData — actor attribution', () => {
     expect(data).toMatchObject({
       actorType: 'SYSTEM_ACTOR',
       actorId: null,
-      systemActorLabel: 'cron-gap-alert',
+      systemActorLabel: 'cron-daily-reminder',
     })
   })
 
@@ -237,13 +237,13 @@ describe('computeAccessLogData — N2 runId correlation', () => {
 
   it('cron run with runId in CLS → runId flows through, systemActorLabel unaffected', () => {
     const cls = clsWith({
-      systemActorLabel: 'cron-gap-alert',
+      systemActorLabel: 'cron-daily-reminder',
       runId: 'cron-run-abc-def-123',
     })
     const data = computeAccessLogData('Notification', 'create', { data: {} }, { id: 'n-1' }, cls)
     expect(data).toMatchObject({
       actorType: 'SYSTEM_ACTOR',
-      systemActorLabel: 'cron-gap-alert',
+      systemActorLabel: 'cron-daily-reminder',
       runId: 'cron-run-abc-def-123',
     })
   })
@@ -383,7 +383,7 @@ describe('auditAndReturn — fire-and-forget write', () => {
       data: expect.objectContaining({
         actorType: 'SYSTEM_ACTOR',
         actorId: null,
-        systemActorLabel: 'cron-gap-alert',
+        systemActorLabel: 'cron-daily-reminder',
       }),
     })
   })

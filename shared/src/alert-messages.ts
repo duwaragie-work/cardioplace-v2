@@ -226,6 +226,179 @@ export const CARE_TEAM_NOTIFIED = 'Your care team has been notified.'
 export const DO_NOT_STOP_MED =
   'Please do not stop taking any medication on your own without talking to your care team.'
 
+// ─── Reminder & Engagement (N1–N10, 2026-07-13) ───────────────────────────────
+// Patient-facing daily nudge copy. Governing principle from Duwaragie's spec:
+// "engages, does not pressure". ≤5th-grade reading level, never blames, never
+// says "you missed your check-in". Copy strings below are the SIGNED-OFF
+// verbatim wording from the 2026-07-07 Final Engineering Specification —
+// paraphrasing without a fresh sign-off is a spec regression.
+//
+// Title stays stable across all three day tiers so the idempotency filter in
+// DailyReminderService (mirroring the gap-alert/monthly-reask pattern) can
+// deduplicate by title match. The tone escalation lives in the body.
+export const REMINDER_DAILY_TITLE = 'Cardioplace daily check-in'
+
+export type ReminderLanguage = 'en' | 'es' | 'am' | 'fr' | 'de'
+
+/**
+ * Time-of-day greeting per spec §N2. Bucket is patient-local hour
+ * (0–23). Returned string is a locale-appropriate greeting that opens
+ * every Day-1 message.
+ *
+ *   <12:00  → morning
+ *   12–16   → midday / neutral
+ *   17+     → evening
+ */
+export function reminderGreeting(hour: number, language: ReminderLanguage = 'en'): string {
+  const bucket: 'morning' | 'midday' | 'evening' =
+    hour < 12 ? 'morning' : hour < 17 ? 'midday' : 'evening'
+  const GREETINGS: Record<ReminderLanguage, Record<typeof bucket, string>> = {
+    en: { morning: 'Good morning', midday: 'Hi', evening: 'Good evening' },
+    es: { morning: 'Buenos días', midday: 'Hola', evening: 'Buenas tardes' },
+    fr: { morning: 'Bonjour', midday: 'Bonjour', evening: 'Bonsoir' },
+    de: { morning: 'Guten Morgen', midday: 'Hallo', evening: 'Guten Abend' },
+    // Amharic — TODO(l10n-am): native-speaker verified before ship.
+    // Fallback English strings so nothing breaks at runtime.
+    am: { morning: 'Good morning', midday: 'Hi', evening: 'Good evening' },
+  }
+  return GREETINGS[language]?.[bucket] ?? GREETINGS.en[bucket]
+}
+
+/**
+ * Day 1 (standard). Spec §N2 verbatim wording. Interpolates the
+ * time-of-day greeting AND the patient's first name.
+ */
+export function reminderBodyDay1(
+  name: string,
+  hour: number,
+  language: ReminderLanguage = 'en',
+): string {
+  const greet = reminderGreeting(hour, language)
+  const TEMPLATES: Record<ReminderLanguage, (g: string, n: string) => string> = {
+    en: (g, n) => `${g}, ${n}. When you're ready, take a moment to check your blood pressure. Your care team sees every reading.`,
+    es: (g, n) => `${g}, ${n}. Cuando esté listo, tómese un momento para revisar su presión arterial. Su equipo de atención ve cada lectura.`,
+    fr: (g, n) => `${g}, ${n}. Quand vous êtes prêt·e, prenez un instant pour vérifier votre tension artérielle. Votre équipe soignante voit chaque mesure.`,
+    de: (g, n) => `${g}, ${n}. Wenn Sie bereit sind, nehmen Sie sich einen Moment Zeit, um Ihren Blutdruck zu messen. Ihr Behandlungsteam sieht jede Messung.`,
+    // TODO(l10n-am): native-speaker verified before ship.
+    am: (g, n) => `${g}, ${n}. When you're ready, take a moment to check your blood pressure. Your care team sees every reading.`,
+  }
+  return (TEMPLATES[language] ?? TEMPLATES.en)(greet, name)
+}
+
+/**
+ * Day 1 TTS variant — read aloud by the voice-first surface (§N2). Uses
+ * "have a moment" instead of "take a moment" so the spoken cadence
+ * lands warmer.
+ */
+export function reminderBodyDay1Tts(
+  name: string,
+  hour: number,
+  language: ReminderLanguage = 'en',
+): string {
+  const greet = reminderGreeting(hour, language)
+  const TEMPLATES: Record<ReminderLanguage, (g: string, n: string) => string> = {
+    en: (g, n) => `${g}, ${n}. When you have a moment, go ahead and check your blood pressure. Your care team sees every reading you log.`,
+    es: (g, n) => `${g}, ${n}. Cuando tenga un momento, adelante y revise su presión arterial. Su equipo de atención ve cada lectura que registra.`,
+    fr: (g, n) => `${g}, ${n}. Quand vous aurez un instant, mesurez votre tension artérielle. Votre équipe soignante voit chaque mesure que vous enregistrez.`,
+    de: (g, n) => `${g}, ${n}. Wenn Sie einen Moment haben, messen Sie bitte Ihren Blutdruck. Ihr Behandlungsteam sieht jede Messung, die Sie erfassen.`,
+    am: (g, n) => `${g}, ${n}. When you have a moment, go ahead and check your blood pressure. Your care team sees every reading you log.`,
+  }
+  return (TEMPLATES[language] ?? TEMPLATES.en)(greet, name)
+}
+
+/** Day 2 — spec §N4 verbatim. Interpolates first name only. */
+export function reminderBodyDay2(name: string, language: ReminderLanguage = 'en'): string {
+  const TEMPLATES: Record<ReminderLanguage, (n: string) => string> = {
+    en: (n) => `Hi ${n} — just a gentle reminder to check your blood pressure when you can. Your care team is here for you.`,
+    es: (n) => `Hola ${n}: solo un recordatorio suave para revisar su presión arterial cuando pueda. Su equipo de atención está aquí para usted.`,
+    fr: (n) => `Bonjour ${n} — un petit rappel pour vérifier votre tension artérielle quand vous le pouvez. Votre équipe soignante est là pour vous.`,
+    de: (n) => `Hallo ${n} — nur eine sanfte Erinnerung, Ihren Blutdruck zu messen, wenn Sie können. Ihr Behandlungsteam ist für Sie da.`,
+    am: (n) => `Hi ${n} — just a gentle reminder to check your blood pressure when you can. Your care team is here for you.`,
+  }
+  return (TEMPLATES[language] ?? TEMPLATES.en)(name)
+}
+
+/**
+ * Day 3+ — spec §N4 verbatim. Repeats daily while the gap persists;
+ * day count resets on ANY logged reading. Spec deliberately does NOT
+ * interpolate {days} into the visible copy — the tone stays constant.
+ */
+export function reminderBodyDay3Plus(
+  name: string,
+  _days: number,
+  language: ReminderLanguage = 'en',
+): string {
+  const TEMPLATES: Record<ReminderLanguage, (n: string) => string> = {
+    en: (n) => `Hi ${n}, it's been a few days since your last check-in. Your care team is here if anything is making it hard. You can check in anytime.`,
+    es: (n) => `Hola ${n}, han pasado unos días desde su último registro. Su equipo de atención está aquí si algo lo está dificultando. Puede registrarse en cualquier momento.`,
+    fr: (n) => `Bonjour ${n}, cela fait quelques jours depuis votre dernière saisie. Votre équipe soignante est là si quelque chose vous complique la tâche. Vous pouvez vous enregistrer à tout moment.`,
+    de: (n) => `Hallo ${n}, es sind ein paar Tage seit Ihrer letzten Erfassung vergangen. Ihr Behandlungsteam ist da, falls etwas es Ihnen schwer macht. Sie können sich jederzeit melden.`,
+    am: (n) => `Hi ${n}, it's been a few days since your last check-in. Your care team is here if anything is making it hard. You can check in anytime.`,
+  }
+  return (TEMPLATES[language] ?? TEMPLATES.en)(name)
+}
+
+/**
+ * N7 — "Logged ✓" push. Body is spec §N7 verbatim. Copy variants:
+ *  • base: "Logged ✓ — your reading has been recorded."
+ *  • normal-range: base + " Looking good — keep it up!"
+ *  • alert-triggering: base only (NO positive language).
+ *
+ * BP values NEVER appear in the body (lock-screen preview safety).
+ */
+export const REMINDER_LOGGED_TITLE = 'Logged ✓'
+
+const LOGGED_BASE: Record<ReminderLanguage, string> = {
+  en: 'Logged ✓ — your reading has been recorded.',
+  es: 'Registrado ✓ — su lectura ha sido guardada.',
+  fr: 'Enregistré ✓ — votre mesure a été enregistrée.',
+  de: 'Erfasst ✓ — Ihre Messung wurde gespeichert.',
+  am: 'Logged ✓ — your reading has been recorded.',
+}
+const LOGGED_POSITIVE_SUFFIX: Record<ReminderLanguage, string> = {
+  en: ' Looking good — keep it up!',
+  es: ' ¡Se ve bien — siga así!',
+  fr: ' Tout va bien — continuez !',
+  de: ' Sieht gut aus — weiter so!',
+  am: ' Looking good — keep it up!',
+}
+
+export function reminderLoggedBody(
+  variant: 'base' | 'normal-range' | 'alert-triggering' = 'base',
+  language: ReminderLanguage = 'en',
+): string {
+  const base = LOGGED_BASE[language] ?? LOGGED_BASE.en
+  if (variant === 'normal-range') {
+    return base + (LOGGED_POSITIVE_SUFFIX[language] ?? LOGGED_POSITIVE_SUFFIX.en)
+  }
+  // 'alert-triggering' and 'base' both return the plain base — the alert
+  // engine owns any clinical follow-up messaging.
+  return base
+}
+
+/** N5 — care-team gap alert (provider-visible). Clinical wording is OK here. */
+export const CARE_TEAM_GAP_TITLE = 'Patient has not checked in'
+export function careTeamGapBody(patientName: string, days: number): string {
+  return `Patient ${patientName} has not logged a reading in ${days} days. Consider outreach.`
+}
+
+/**
+ * Cheap normal-range predicate for the N7 "Looking good" gate.
+ * Deliberately CONSERVATIVE — a reading only counts as normal when both
+ * SBP and DBP sit inside a comfortable window with no missing values.
+ * The alert engine is the source of truth for anything clinical; this
+ * helper is only used to decide whether to append encouraging copy.
+ *
+ * Reference: AHA "normal" BP is SBP < 120 AND DBP < 80. We widen the
+ * ceiling slightly to SBP < 130 / DBP < 85 because "elevated" (120–129/<80)
+ * doesn't merit an alert either — the patient is still doing fine.
+ */
+export function isBpNormalRange(sbp: number | null, dbp: number | null): boolean {
+  if (sbp == null || dbp == null) return false
+  if (!Number.isFinite(sbp) || !Number.isFinite(dbp)) return false
+  return sbp >= 90 && sbp < 130 && dbp >= 60 && dbp < 85
+}
+
 // Manisha 5/24 Q3 — pre-personalization fires Level 1 WITH this disclaimer
 // (option a), and personalization is anchored on a reading count, not a calendar
 // day. Wording updated "after Day 3" → "after 7 readings" to match the actual

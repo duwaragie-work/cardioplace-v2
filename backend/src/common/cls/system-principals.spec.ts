@@ -31,8 +31,8 @@ describe('system-principals registry', () => {
   })
 
   it('derives the principal label from a seed email', () => {
-    expect(principalLabelFromEmail('system-gap-alert@internal.cardioplace.test')).toBe(
-      'gap-alert',
+    expect(principalLabelFromEmail('system-daily-reminder@internal.cardioplace.test')).toBe(
+      'daily-reminder',
     )
     expect(
       principalLabelFromEmail('system-engine-alert-generator@internal.cardioplace.test'),
@@ -41,19 +41,19 @@ describe('system-principals registry', () => {
 
   it('cold registry → null for both resolvers (safe fallback)', () => {
     setSystemPrincipalRegistry(null)
-    expect(getSystemPrincipalId('gap-alert')).toBeNull()
-    expect(resolveCronActorId('cron-gap-alert')).toBeNull()
+    expect(getSystemPrincipalId('daily-reminder')).toBeNull()
+    expect(resolveCronActorId('cron-daily-reminder')).toBeNull()
   })
 
   it('warmed registry → resolveCronActorId maps cron label to the principal id', () => {
     setSystemPrincipalRegistry(
       new Map([
-        ['gap-alert', 'sys-gap'],
+        ['daily-reminder', 'sys-daily'],
         ['content-scheduler', 'sys-content'],
         ['engine-alert-generator', 'sys-engine'],
       ]),
     )
-    expect(resolveCronActorId('cron-gap-alert')).toBe('sys-gap')
+    expect(resolveCronActorId('cron-daily-reminder')).toBe('sys-daily')
     // Label that does not strip cleanly — explicit map is load-bearing.
     expect(resolveCronActorId('cron-content-stale-flag')).toBe('sys-content')
     // Engine handler carries no 'cron-' prefix.
@@ -61,7 +61,10 @@ describe('system-principals registry', () => {
   })
 
   it('unknown cron label → null', () => {
-    setSystemPrincipalRegistry(new Map([['gap-alert', 'sys-gap']]))
+    setSystemPrincipalRegistry(new Map([['daily-reminder', 'sys-daily']]))
     expect(resolveCronActorId('cron-does-not-exist')).toBeNull()
+    // N3 (2026-07-13) — the removed gap-alert label no longer resolves,
+    // even if a stale cron actor label somehow leaks into a CLS context.
+    expect(resolveCronActorId('cron-gap-alert')).toBeNull()
   })
 })

@@ -141,6 +141,12 @@ export interface AccessLogData {
   // run granularity rather than day granularity. Nullable because pre-N2 rows
   // have none.
   runId: string | null
+  // N4 follow-up (2026-07-11) — practice-context attribution. Mirrors the
+  // same field already carried by AuthLog / EmailDisclosureLog /
+  // ProfileVerificationLog. Populated from the CLS-carried activePracticeId
+  // set on the actor's AuthSession at request time. Null for SUPER_ADMIN /
+  // HEALPLACE_OPS / SYSTEM_ACTOR reads and pre-policy rows.
+  practiceContext: string | null
   action: 'READ' | 'WRITE' | 'DELETE'
   modelName: string
   recordId: string | null
@@ -185,6 +191,11 @@ export function computeAccessLogData(
   const ip = cls.get<string | null>('ip') ?? null
   const userAgent = cls.get<string | null>('userAgent') ?? null
   const runId = cls.get<string | null>('runId') ?? null
+  // N4 follow-up (2026-07-11) — CLS-carried activePracticeId, threaded
+  // through cls.module.ts on the HTTP path and runAsCronActor on the cron
+  // path (null on both today; USER paths that hit /admin/* stamp it via
+  // the practice-context resolver — same wiring AuthLog uses).
+  const practiceContext = cls.get<string | null>('activePracticeId') ?? null
 
   let recordId: string | null = null
   if (WHERE_ID_OPS.has(operation)) {
@@ -198,6 +209,7 @@ export function computeAccessLogData(
     actorType,
     systemActorLabel,
     runId,
+    practiceContext,
     action,
     modelName: model,
     recordId,

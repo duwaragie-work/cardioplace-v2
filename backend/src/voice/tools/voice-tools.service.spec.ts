@@ -1261,6 +1261,19 @@ describe('VoiceToolsService.dispatch — Bug 56 (symptom auto-map + dedupe)', ()
   let service: VoiceToolsService
   let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock; hasActiveMedications: jest.Mock }
 
+  // These tests use `entry_date: '2026-06-12'`. submitCheckin has a 30-day
+  // STALE_READING guard (voice-tools.service.ts) that rejects entries older
+  // than 30 days from Date.now() — so with real wall-clock time these tests
+  // start failing on 2026-07-13 with `mock.calls[0]` undefined (the mock is
+  // never invoked). Pin the clock inside the entry's freshness window so the
+  // suite stays deterministic and doesn't decay.
+  beforeEach(() => {
+    jest.useFakeTimers({ now: new Date('2026-06-13T12:00:00Z'), doNotFake: ['setImmediate'] })
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
   beforeEach(async () => {
     dailyJournal = {
       create: jest.fn() as jest.Mock,

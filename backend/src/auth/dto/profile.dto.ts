@@ -61,4 +61,29 @@ export class ProfileDto {
       'timezone must be a valid IANA identifier (e.g. "America/New_York")',
   })
   timezone?: string
+
+  // N8 (2026-07-13) — Reminder & Engagement preferences. All three are
+  // patient-local "HH:mm" 24-hour strings validated to a 30-min-slot regex
+  // (matches the UI's <select> options). Empty string is rejected to catch a
+  // frontend clearing bug; use the absence of the field to mean "no change".
+  @IsOptional()
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):(00|30)$/, {
+    message: 'reminderTime must be a 30-min HH:mm slot (e.g. "09:00" or "09:30")',
+  })
+  reminderTime?: string
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):(00|30)$/, {
+    message: 'quietHoursStart must be a 30-min HH:mm slot (e.g. "22:00")',
+  })
+  quietHoursStart?: string
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):(00|30)$/, {
+    message: 'quietHoursEnd must be a 30-min HH:mm slot (e.g. "07:00")',
+  })
+  quietHoursEnd?: string
 }

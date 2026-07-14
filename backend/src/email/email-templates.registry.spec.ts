@@ -33,6 +33,8 @@ const ALL_TEMPLATES: EmailTemplateName[] = [
   'contact_form',
   'gap_alert',
   'medication_reask',
+  'daily_reminder',
+  'care_team_gap_alert',
   'monthly_report',
 ]
 
@@ -151,7 +153,8 @@ describe('EMAIL_TEMPLATE_REGISTRY — N6 extension', () => {
       'TREATMENT',
       'PAYMENT',
       'HEALTHCARE_OPERATIONS',
-      'PATIENT_DIRECTED',
+      'DIRECT_TO_PATIENT',
+      'PATIENT_AUTHORIZED',
       'CARE_COORDINATION',
       'REQUIRED_BY_LAW',
       'OTHER',

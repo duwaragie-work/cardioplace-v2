@@ -12,10 +12,17 @@ const SCAN_WINDOW_MS = 24 * 60 * 60 * 1000
 /**
  * N7 (2026-07-11) — automated audit exception-report cron.
  *
- * Runs at 03:00 UTC daily. For each of the 6 registered detectors, scans
- * the past 24h of audit data and hands each candidate to the writer.
- * Failures inside a single detector are logged and never abort the whole
- * run — one detector's bad query cannot starve the others.
+ * Runs at 03:00 America/New_York (Eastern Time) daily — chosen because the
+ * Ward 7 & 8 DC pilot operates in ET, so 3 AM local is the deepest-quiet
+ * hour and results are ready when ET ops staff arrive in the morning.
+ * `America/New_York` (not raw "EST") is the IANA identifier — DST is
+ * handled automatically, so the cron correctly fires at 3 AM local
+ * year-round (7 or 8 AM UTC depending on the season).
+ *
+ * For each of the 6 registered detectors, scans the past 24h of audit
+ * data and hands each candidate to the writer. Failures inside a single
+ * detector are logged and never abort the whole run — one detector's bad
+ * query cannot starve the others.
  *
  * HIPAA §164.308(a)(1)(ii)(D) Information System Activity Review.
  *
@@ -33,7 +40,9 @@ export class AuditExceptionReportService {
     private readonly cls: ClsService,
   ) {}
 
-  @Cron('0 3 * * *') // 03:00 UTC daily
+  // 03:00 America/New_York daily — DST-aware via IANA timezone. See class
+  // docstring for the rationale (ET pilot, results-before-morning-shift).
+  @Cron('0 3 * * *', { timeZone: 'America/New_York' })
   async scheduledRun() {
     return runAsCronActor(this.cls, 'cron-audit-exception-report', async () => {
       const summary = await this.run()
@@ -46,7 +55,7 @@ export class AuditExceptionReportService {
   /**
    * Runs one scan cycle. Exposed (not private) so the dev test-control
    * endpoint or an ops trigger can fire the scan without waiting for
-   * 03:00 UTC.
+   * 03:00 ET.
    */
   async run(now: Date = new Date()): Promise<{
     created: number

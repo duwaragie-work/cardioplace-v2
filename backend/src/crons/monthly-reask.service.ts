@@ -6,6 +6,7 @@ import { EMAIL_TEMPLATE_VERSION, medicationReaskEmailHtml } from '../email/email
 import { EmailService } from '../email/email.service.js'
 import { NotificationChannel, EnrollmentStatus, AccountStatus } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { isWithinQuietHours } from './daily-reminder/helpers.js'
 
 const REASK_TITLE = 'Confirm your medications'
 const REASK_BODY =
@@ -61,6 +62,13 @@ export class MonthlyReaskService {
         id: true,
         email: true,
         name: true,
+        // N6 (2026-07-13) — pull quiet-hours fields so we can suppress the
+        // re-ask during the patient's local sleep window. The re-ask is a
+        // non-urgent operational nudge; it can wait until the next scan
+        // outside quiet hours.
+        timezone: true,
+        quietHoursStart: true,
+        quietHoursEnd: true,
         patientMedications: {
           where: { discontinuedAt: null },
           select: {
@@ -75,6 +83,21 @@ export class MonthlyReaskService {
     for (const p of patients) {
       const lastTouch = this.latestTouch(p.patientMedications)
       if (lastTouch > reaskCutoff) continue // still fresh
+
+      // N6 (2026-07-13) — respect the patient's quiet-hours window. The next
+      // day's scan retries; no in-cron re-scheduling.
+      if (
+        isWithinQuietHours(
+          {
+            quietHoursStart: p.quietHoursStart,
+            quietHoursEnd: p.quietHoursEnd,
+            timezone: p.timezone,
+          },
+          now,
+        )
+      ) {
+        continue
+      }
 
       const recent = await this.prisma.notification.findFirst({
         where: {

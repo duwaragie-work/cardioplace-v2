@@ -112,7 +112,14 @@ test.describe('Spec 66 — admin MFA (TOTP)', () => {
     await page.locator(byTestId(T.mfa.adminChallengeCode)).fill('000000')
     await page.locator(byTestId(T.mfa.adminChallengeVerify)).click()
 
-    await expect(page.locator('[role="alert"]')).toBeVisible({ timeout: 15_000 })
+    // Next.js 16 injects a page-level `<div role="alert" aria-live="assertive"
+    // id="__next-route-announcer__">` for route-change screen-reader
+    // announcements — a bare `[role="alert"]` selector matches BOTH that
+    // hidden announcer AND our error banner and trips Playwright's strict
+    // mode. Filter to the visible error text so we hit only the toast.
+    await expect(
+      page.locator('[role="alert"]').filter({ hasText: /invalid/i }),
+    ).toBeVisible({ timeout: 15_000 })
     await expect(page).toHaveURL(/\/sign-in\/mfa-challenge/)
   })
 

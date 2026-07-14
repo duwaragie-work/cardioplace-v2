@@ -3181,6 +3181,11 @@ export class AuthService {
         communicationPreference: true,
         preferredLanguage: true,
         timezone: true,
+        // N8 (2026-07-13) — expose the reminder prefs in the round-trip so
+        // the frontend can render optimistic UI without a follow-up GET.
+        reminderTime: true,
+        quietHoursStart: true,
+        quietHoursEnd: true,
         onboardingStatus: true,
       },
     })
@@ -3200,6 +3205,11 @@ export class AuthService {
       patch.preferredLanguage = dto.preferredLanguage
     if (dto.communicationPreference !== undefined)
       patch.communicationPreference = dto.communicationPreference
+    // N8 (2026-07-13) — Reminder & Engagement preferences.
+    if (dto.reminderTime !== undefined) patch.reminderTime = dto.reminderTime
+    if (dto.quietHoursStart !== undefined)
+      patch.quietHoursStart = dto.quietHoursStart
+    if (dto.quietHoursEnd !== undefined) patch.quietHoursEnd = dto.quietHoursEnd
 
     return patch
   }
@@ -3230,6 +3240,13 @@ export class AuthService {
         communicationPreference: true,
         preferredLanguage: true,
         timezone: true,
+        // N8 (2026-07-13) — Reminder & Engagement preferences. Frontend reads
+        // these to pre-fill the RemindersModal on first render so a user who
+        // never opened the modal still sees their defaults ("09:00" / "22:00"
+        // / "07:00").
+        reminderTime: true,
+        quietHoursStart: true,
+        quietHoursEnd: true,
         createdAt: true,
       },
     })
@@ -3304,6 +3321,12 @@ export class AuthService {
       communicationPreference: user.communicationPreference,
       preferredLanguage: user.preferredLanguage,
       timezone: user.timezone,
+      // N8 (2026-07-13) — Reminder & Engagement preferences. The Prisma
+      // `select` above pulls these; the Playwright PATCH+GET round-trip
+      // spec caught the omission from this response shape.
+      reminderTime: user.reminderTime,
+      quietHoursStart: user.quietHoursStart,
+      quietHoursEnd: user.quietHoursEnd,
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
       // MFA status (additive) — drives the profile Security pill.

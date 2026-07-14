@@ -33,7 +33,7 @@ describe('runAsCronActor', () => {
     setSystemPrincipalRegistry(null)
     const cls = realCls()
 
-    const seen = await runAsCronActor(cls, 'cron-gap-alert', async () => ({
+    const seen = await runAsCronActor(cls, 'cron-daily-reminder', async () => ({
       actorId: cls.get('actorId'),
       actorType: cls.get('actorType'),
       systemActorLabel: cls.get('systemActorLabel'),
@@ -44,26 +44,26 @@ describe('runAsCronActor', () => {
     expect(seen).toEqual({
       actorId: null,
       actorType: 'SYSTEM_ACTOR',
-      systemActorLabel: 'cron-gap-alert',
+      systemActorLabel: 'cron-daily-reminder',
       ip: null,
       userAgent: null,
     })
   })
 
   it('warmed registry → resolves the system principal actorId, keeps SYSTEM_ACTOR + original label', async () => {
-    setSystemPrincipalRegistry(new Map([['gap-alert', 'sys-gap-id']]))
+    setSystemPrincipalRegistry(new Map([['daily-reminder', 'sys-daily-id']]))
     const cls = realCls()
 
-    const seen = await runAsCronActor(cls, 'cron-gap-alert', async () => ({
+    const seen = await runAsCronActor(cls, 'cron-daily-reminder', async () => ({
       actorId: cls.get('actorId'),
       actorType: cls.get('actorType'),
       systemActorLabel: cls.get('systemActorLabel'),
     }))
 
     expect(seen).toEqual({
-      actorId: 'sys-gap-id',
+      actorId: 'sys-daily-id',
       actorType: 'SYSTEM_ACTOR',
-      systemActorLabel: 'cron-gap-alert',
+      systemActorLabel: 'cron-daily-reminder',
     })
     setSystemPrincipalRegistry(null) // reset for other tests
   })

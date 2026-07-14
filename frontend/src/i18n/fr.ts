@@ -666,6 +666,19 @@ const fr: Record<TranslationKey, string> = {
   'profile.combinationPill': '2-en-1',
   'profile.reviewingChanges': 'Votre équipe soignante examine vos dernières modifications. Cela prend généralement 48 à 72 heures.',
   'profile.fieldsNeedRecheck': 'Votre équipe soignante vous demande de revérifier : {fields}. Appuyez sur Modifier dans cette section pour confirmer ou mettre à jour.',
+  // ─── Reminders (N8/N10, 2026-07-13) ────────────────────────────────────────
+  'profile.reminders.heading': 'Rappels',
+  'profile.reminders.editHeading': 'Modifier les rappels',
+  'profile.reminders.dailyTime': 'Heure du rappel quotidien',
+  'profile.reminders.quietHoursStart': 'Début des heures de silence',
+  'profile.reminders.quietHoursEnd': 'Fin des heures de silence',
+  'profile.reminders.quietHoursHeading': 'Heures de silence (pas de rappels pendant cette période)',
+  'profile.reminders.startLabel': 'Début',
+  'profile.reminders.endLabel': 'Fin',
+  'profile.reminders.emergencyDisclaimer': "Les alertes de santé d'urgence seront toujours transmises, même pendant les heures de silence.",
+  'profile.reminders.saveButton': 'Enregistrer',
+  'profile.reminders.savingButton': 'Enregistrement…',
+  'profile.reminders.cancelButton': 'Annuler',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'Mes Lectures',
@@ -962,6 +975,13 @@ const fr: Record<TranslationKey, string> = {
   'onboarding.selectPref': 'Sélectionnez votre préférence',
   'onboarding.textFirst': 'Texte en Premier',
   'onboarding.audioFirst': 'Audio en Premier',
+  // ─── Reminders (N8/N10, 2026-07-13) ───────────────────────────────────────
+  'onboarding.reminders.timeLabel': 'À quelle heure souhaitez-vous votre rappel quotidien ?',
+  'onboarding.reminders.timeAudio': 'Quelle heure de la journée vous convient le mieux pour votre rappel ?',
+  'onboarding.reminders.quietStartLabel': 'Début des heures de silence',
+  'onboarding.reminders.quietEndLabel': 'Fin des heures de silence',
+  'onboarding.reminders.quietHoursHeading': 'Heures de silence (pas de rappels pendant cette période)',
+  'onboarding.reminders.emergencyDisclaimer': "Les alertes d'urgence sont toujours transmises, même pendant les heures de silence.",
   'onboarding.invalidDob': 'Veuillez entrer une date de naissance valide.',
   'onboarding.continue': 'Continuer',
   'onboarding.skip': 'Passer pour le moment',

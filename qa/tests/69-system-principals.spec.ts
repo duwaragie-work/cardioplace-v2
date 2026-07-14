@@ -14,7 +14,7 @@ import { API_BASE_URL } from '../playwright.config.js'
  * principals seed unconditionally). If they aren't seeded, both assertions
  * still hold trivially — the security property is what's under test.
  */
-const SYSTEM_EMAIL = 'system-gap-alert@internal.cardioplace.test'
+const SYSTEM_EMAIL = 'system-daily-reminder@internal.cardioplace.test'
 
 test.describe('Spec 69 — system principals', () => {
   test('69.1 — a system-principal email cannot obtain a session', async () => {
