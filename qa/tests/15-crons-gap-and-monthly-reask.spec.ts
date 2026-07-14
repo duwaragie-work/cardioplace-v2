@@ -87,7 +87,16 @@ test.describe('Monthly re-ask cron (30d trigger)', () => {
       test.skip(true, 'No active meds for Aisha — skip')
     }
 
-    const result = await tc.runMonthlyReaskScan(new Date())
+    // N6 (2026-07-13) — the monthly-reask cron now suppresses re-asks during
+    // the patient's quiet hours (default 22:00–07:00 America/New_York for
+    // seeded patients). Passing `new Date()` makes the test dependent on
+    // CI wall-clock time: any run that lands the scan between 03:00–12:00 UTC
+    // maps to 22:00–07:00 ET and returns reasked=0 correctly. Pin the scan to
+    // 14:00 UTC (≈ 10:00 ET) — safely outside every seeded patient's default
+    // quiet-hours window — so the cron actually re-asks Aisha.
+    const scanAt = new Date()
+    scanAt.setUTCHours(14, 0, 0, 0)
+    const result = await tc.runMonthlyReaskScan(scanAt)
     expect(result.reasked).toBeGreaterThanOrEqual(1)
 
     const notes = await tc.listNotifications(u.id)
