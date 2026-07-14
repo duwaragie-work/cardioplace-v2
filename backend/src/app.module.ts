@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { EventEmitterModule } from '@nestjs/event-emitter'
 import { ThrottlerModule } from '@nestjs/throttler'
+import { validateEnvSecrets } from './common/config/secret-guard.js'
 import { AppController } from './app.controller.js'
 import { AppService } from './app.service.js'
 import { AuthModule } from './auth/auth.module.js'
@@ -45,7 +46,11 @@ const TEST_CONTROL_MODULES = [TestControlModule]
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    // `validate` refuses to boot on a placeholder / all-zero / low-entropy secret
+    // (§164.312(d)). Hung here rather than in main.ts so it also fires in every
+    // test that boots AppModule — a permanent regression guard, not just a
+    // deploy-time check.
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnvSecrets }),
 
     EventEmitterModule.forRoot({
       wildcard: false,

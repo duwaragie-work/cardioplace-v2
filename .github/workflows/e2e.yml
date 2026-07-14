@@ -53,15 +53,21 @@ jobs:
     env:
       # Backend
       DATABASE_URL: postgresql://cardioplace:cardioplace@localhost:5432/cardioplace_e2e
-      JWT_SECRET: ci-jwt-secret
-      JWT_ACCESS_SECRET: ci-jwt-access-secret
+      # CI-only throwaway values, randomly generated. They must be REAL random
+      # values, not readable placeholders: the boot guard
+      # (backend/src/common/config/secret-guard.ts) refuses to start on anything
+      # that looks like a placeholder, and every e2e spec boots AppModule.
+      JWT_SECRET: SCRUBBED-ROTATED-CI-SECRET
+      JWT_ACCESS_SECRET: SCRUBBED-ROTATED-CI-SECRET
       JWT_ACCESS_EXPIRES_IN: 15m
-      JWT_REFRESH_SECRET: ci-jwt-refresh-secret
+      JWT_REFRESH_SECRET: SCRUBBED-ROTATED-CI-SECRET
       JWT_REFRESH_EXPIRES_IN: 30d
       # MFA (TOTP) — EncryptionService requires a 32-byte key as 64 hex chars
       # (^[0-9a-fA-F]{64}$). Without it every mfa/enroll/complete returns 500
       # (specs 66/66b). CI-only throwaway key; prod sets a real secret.
-      MFA_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+      # Was '0123456789abcdef' x4 — format-valid and maximal Shannon entropy, but
+      # a repeated 16-char unit. The boot guard's repeat check rejects it.
+      MFA_ENCRYPTION_KEY: 'SCRUBBED-ROTATED-CI-SECRET'
       WEB_APP_URL: http://localhost:3000,http://localhost:3001
       ADMIN_BASE_URL: http://localhost:3001
       COOKIE_SAME_SITE: lax
@@ -83,7 +89,7 @@ jobs:
       DRUG_ENRICHMENT_ENABLED: 'false'
       CHAT_V2_PROMPT_ENABLED: 'false'
       ENABLE_TEST_CONTROL: 'true'
-      TEST_CONTROL_SECRET: ci-test-control-secret
+      TEST_CONTROL_SECRET: SCRUBBED-ROTATED-CI-SECRET
       NODE_ENV: test
       # Frontend
       NEXT_PUBLIC_API_URL: http://localhost:4000
