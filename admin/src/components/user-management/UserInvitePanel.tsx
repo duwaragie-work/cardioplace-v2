@@ -19,21 +19,24 @@
 // whenever filters / pagination change, or after any mutation.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, ChevronDown, Search, Users, X } from 'lucide-react';
+import { Building2, ChevronDown, RefreshCw, Search, Users, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
+  canManageUsers,
   invitableRoles,
   isCoordinatorOnly,
+  isMedicalDirectorOnly,
+  isOrgWideAdmin,
   type UserRole,
 } from '@/lib/roleGates';
 import {
   type AccountStatus,
   type CoordinatorPatientRow,
   deactivateUser,
+  permanentCloseUser,
   INVITE_PENDING,
   listUsers,
-  reactivateUser,
   resendInvite,
   revokeInvite,
   type UserListResponse,
@@ -47,7 +50,9 @@ import { canResetUserMfa } from '@/lib/roleGates';
 import BulkInviteInline from './BulkInviteInline';
 import CSVUploadCard from './CSVUploadCard';
 import DeactivateConfirmModal from './DeactivateConfirmModal';
+import PermanentCloseConfirmModal from './PermanentCloseConfirmModal';
 import InviteUserModal, { type PracticeOption } from './InviteUserModal';
+import ReactivateModal from './ReactivateModal';
 import ResetMfaModal from './ResetMfaModal';
 import UsersList from './UsersList';
 
@@ -72,9 +77,15 @@ type AffordanceMode = 'none' | 'bulk' | 'csv';
 
 export default function UserInvitePanel() {
   const { t } = useLanguage();
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, activePractice } = useAuth();
 
   const coordinatorView = isCoordinatorOnly(user);
+  // Write authority — invite CTAs + row actions. PROVIDER is read-only: they
+  // view the roster (scoped to their active practice) but cannot invite or act.
+  const canManage = canManageUsers(user);
+  // Org-wide admins (SUPER / OPS) get the cross-practice filter + free practice
+  // pick on invite. Scoped roles are locked to their active practice.
+  const orgWide = isOrgWideAdmin(user);
   const callerInvitable = useMemo(() => invitableRoles(user), [user]);
 
   // ─── Filters ─────────────────────────────────────────────────────────────
@@ -183,6 +194,12 @@ export default function UserInvitePanel() {
     useState<PendingResetMfa | null>(null);
   const [pendingResetBiometric, setPendingResetBiometric] =
     useState<PendingResetBiometric | null>(null);
+  const [pendingClose, setPendingClose] = useState<{
+    id: string;
+    name: string;
+    displayId: string;
+  } | null>(null);
+  const [reactivateTarget, setReactivateTarget] = useState<UserRow | null>(null);
   const callerCanResetMfa = canResetUserMfa(user);
 
   async function handleResend(inviteId: string) {
@@ -225,20 +242,31 @@ export default function UserInvitePanel() {
     }
   }
 
-  async function handleReactivate(id: string) {
-    setPendingRowId(id);
-    try {
-      await reactivateUser(id);
-      showToast(t('userManagement.toast.reactivated'));
-      await refresh();
-    } catch (e) {
-      showToast(
-        e instanceof Error ? e.message : 'Could not reactivate user.',
-        'error',
-      );
-    } finally {
-      setPendingRowId(null);
-    }
+  // Reactivation is now a deliberate, scoped re-grant (HIPAA §164.308(a)(4)):
+  // clicking Reactivate opens a modal to choose the role(s) rather than firing
+  // the API immediately. Resolve the full row so the modal can prefill the
+  // prior role · practice. Coordinator patient rows carry no roles — build a
+  // minimal target and let the modal collect the role (practice is their own).
+  function handleReactivate(id: string) {
+    const data = (response?.data ?? []) as Array<
+      UserRow | CoordinatorPatientRow
+    >;
+    const found = data.find((r) => r.id === id);
+    if (!found) return;
+    const target: UserRow =
+      'roles' in found
+        ? (found as UserRow)
+        : {
+            id: found.id,
+            name: found.name,
+            email: found.email ?? null,
+            displayId: null,
+            roles: [],
+            accountStatus: 'DEACTIVATED',
+            createdAt: '',
+            practiceId: response?.scopePractice?.id ?? null,
+          };
+    setReactivateTarget(target);
   }
 
   async function handleResetMfa(reason: string) {
@@ -294,6 +322,24 @@ export default function UserInvitePanel() {
         'error',
       );
       throw e; // re-throw so the modal stays open + shows the error
+    } finally {
+      setPendingRowId(null);
+    }
+  }
+
+  async function handleClose(confirmDisplayId: string, reason: string | undefined) {
+    if (!pendingClose) return;
+    setPendingRowId(pendingClose.id);
+    try {
+      await permanentCloseUser(pendingClose.id, confirmDisplayId, reason);
+      showToast(t('userManagement.action.closePermanently'));
+      await refresh();
+    } catch (e) {
+      showToast(
+        e instanceof Error ? e.message : 'Could not close account.',
+        'error',
+      );
+      throw e; // keep the modal open so the error shows
     } finally {
       setPendingRowId(null);
     }
@@ -367,13 +413,21 @@ export default function UserInvitePanel() {
     [t],
   );
 
-  // Locked role/practice for COORDINATOR — backend resolves practiceId
-  // server-side so we don't need to send one. Bulk + CSV components
-  // still receive a `lockedRole='PATIENT'` so the role column collapses.
-  const lockedRole = coordinatorView ? ('PATIENT' as UserRole) : undefined;
-  // For COORDINATOR, the practiceId is implicit (server-side) — no
-  // value passed; UI just doesn't surface the field.
-  const lockedPracticeId = undefined;
+  // COORDINATOR no longer has a locked role — they can invite patients,
+  // providers, AND medical directors into their own practice, so they get the
+  // normal role picker (scoped to invitableRoles(): PATIENT / PROVIDER /
+  // MEDICAL_DIRECTOR). The practice stays implicit: inviteRequiresPractice()
+  // is false for coordinators so no picker is shown, and the backend
+  // auto-fills their PracticeCoordinator.practiceId + scope-checks it.
+  const lockedRole = undefined;
+  // MED_DIR invites are locked to the active/selected practice (they head one
+  // at a time; to invite into another they switch practice via the header).
+  // COORDINATOR practice stays implicit (backend auto-fills from their
+  // PracticeCoordinator). OPS / SUPER pick freely. (2026-07-01)
+  const lockedPracticeId =
+    isMedicalDirectorOnly(user) && activePractice?.id
+      ? activePractice.id
+      : undefined;
 
   return (
     <div className="max-w-[1200px] mx-auto px-4 md:px-8 py-6 space-y-5">
@@ -426,37 +480,39 @@ export default function UserInvitePanel() {
           </div>
         </div>
 
-        {/* Primary CTAs — under the title on small, right of title on lg+. */}
-        <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap lg:shrink-0 lg:justify-end">
-          <button
-            type="button"
-            data-testid="admin-users-invite-single"
-            onClick={() => setInviteOpen(true)}
-            className="btn-admin-primary"
-          >
-            {coordinatorView
-              ? t('userManagement.invitePatientCta')
-              : t('userManagement.inviteSingleCta')}
-          </button>
-          <button
-            type="button"
-            data-testid="admin-users-bulk-toggle"
-            onClick={() => setMode((m) => (m === 'bulk' ? 'none' : 'bulk'))}
-            aria-pressed={mode === 'bulk'}
-            className="btn-admin-secondary"
-          >
-            {t('userManagement.addMultipleCta')}
-          </button>
-          <button
-            type="button"
-            data-testid="admin-users-csv-toggle"
-            onClick={() => setMode((m) => (m === 'csv' ? 'none' : 'csv'))}
-            aria-pressed={mode === 'csv'}
-            className="btn-admin-secondary"
-          >
-            {t('userManagement.uploadCsvCta')}
-          </button>
-        </div>
+        {/* Primary CTAs — under the title on small, right of title on lg+.
+            Hidden entirely for read-only viewers (PROVIDER): they can see the
+            roster but cannot invite. */}
+        {canManage && (
+          <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap lg:shrink-0 lg:justify-end">
+            <button
+              type="button"
+              data-testid="admin-users-invite-single"
+              onClick={() => setInviteOpen(true)}
+              className="btn-admin-primary"
+            >
+              {t('userManagement.inviteSingleCta')}
+            </button>
+            <button
+              type="button"
+              data-testid="admin-users-bulk-toggle"
+              onClick={() => setMode((m) => (m === 'bulk' ? 'none' : 'bulk'))}
+              aria-pressed={mode === 'bulk'}
+              className="btn-admin-secondary"
+            >
+              {t('userManagement.addMultipleCta')}
+            </button>
+            <button
+              type="button"
+              data-testid="admin-users-csv-toggle"
+              onClick={() => setMode((m) => (m === 'csv' ? 'none' : 'csv'))}
+              aria-pressed={mode === 'csv'}
+              className="btn-admin-secondary"
+            >
+              {t('userManagement.uploadCsvCta')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
@@ -472,11 +528,10 @@ export default function UserInvitePanel() {
           setPracticeFilter('ALL');
           setSearch('');
         };
-        // Practice filter is only meaningful for OPS / SUPER — coordinator
-        // is locked to their own practice server-side, so showing them a
-        // picker would be misleading.
-        const showPracticeFilter =
-          !coordinatorView && practices.length > 0;
+        // Practice filter is only meaningful for org-wide admins (OPS / SUPER).
+        // Scoped roles (COORDINATOR / MED_DIR / PROVIDER) are locked to their
+        // active practice server-side, so a picker would be misleading.
+        const showPracticeFilter = orgWide && practices.length > 0;
 
         return (
           <div
@@ -582,6 +637,27 @@ export default function UserInvitePanel() {
                   activePalette="primary-light"
                 />
               )}
+
+              {/* Manual refresh — re-fetches the current user/invite list so a
+                  just-sent invite or status change shows without a full reload. */}
+              <button
+                type="button"
+                onClick={() => void refresh()}
+                disabled={loading}
+                aria-label={t('common.refresh')}
+                title={t('common.refresh')}
+                data-testid="admin-users-refresh"
+                className="shrink-0 h-9 px-3 inline-flex items-center gap-1.5 rounded-lg text-[12px] font-semibold border bg-white hover:bg-[var(--brand-primary-purple-light)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                style={{
+                  color: 'var(--brand-primary-purple)',
+                  borderColor: 'var(--brand-border)',
+                }}
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
+                />
+                <span className="hidden sm:inline">{t('common.refresh')}</span>
+              </button>
             </div>
           </div>
         );
@@ -633,6 +709,7 @@ export default function UserInvitePanel() {
       {/* Users + invites table */}
       <UsersList
         coordinatorView={coordinatorView}
+        canManage={canManage}
         response={response}
         loading={loading}
         page={page}
@@ -643,6 +720,13 @@ export default function UserInvitePanel() {
           setPendingDeactivate({
             id: row.id,
             name: row.name ?? row.email ?? 'this user',
+          })
+        }
+        onCloseClick={(row: UserRow) =>
+          setPendingClose({
+            id: row.id,
+            name: row.name ?? row.email ?? 'this user',
+            displayId: row.displayId ?? '',
           })
         }
         onResetMfaClick={
@@ -678,11 +762,29 @@ export default function UserInvitePanel() {
         lockedRole={lockedRole}
         lockedPracticeId={lockedPracticeId}
       />
+      <ReactivateModal
+        open={!!reactivateTarget}
+        target={reactivateTarget}
+        onClose={() => setReactivateTarget(null)}
+        onReactivated={() => {
+          showToast(t('userManagement.toast.reactivated'));
+          refresh();
+        }}
+        practices={practices}
+        lockedPracticeId={lockedPracticeId}
+      />
       <DeactivateConfirmModal
         open={!!pendingDeactivate}
         name={pendingDeactivate?.name ?? ''}
         onClose={() => setPendingDeactivate(null)}
         onConfirm={handleDeactivate}
+      />
+      <PermanentCloseConfirmModal
+        open={!!pendingClose}
+        name={pendingClose?.name ?? ''}
+        displayId={pendingClose?.displayId ?? ''}
+        onClose={() => setPendingClose(null)}
+        onConfirm={handleClose}
       />
       <ResetMfaModal
         open={!!pendingResetMfa}

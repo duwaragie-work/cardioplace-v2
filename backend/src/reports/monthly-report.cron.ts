@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Cron } from '@nestjs/schedule'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { EmailService } from '../email/email.service.js'
-import { monthlyReportEmailHtml } from '../email/email-templates.js'
+import { EMAIL_TEMPLATE_VERSION, monthlyReportEmailHtml } from '../email/email-templates.js'
 import type { Prisma } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import {
@@ -32,12 +34,15 @@ export class MonthlyReportCron {
     private readonly reports: ReportsService,
     private readonly email: EmailService,
     private readonly config: ConfigService,
+    private readonly cls: ClsService,
   ) {}
 
   @Cron('0 6 1 * *') // 06:00 UTC, day 1 of each month
   async scheduledRun() {
-    const count = await this.run()
-    this.logger.log(`Monthly report cron complete: ${count} practices`)
+    return runAsCronActor(this.cls, 'cron-monthly-report', async () => {
+      const count = await this.run()
+      this.logger.log(`Monthly report cron complete: ${count} practices`)
+    })
   }
 
   /**
@@ -130,6 +135,21 @@ export class MonthlyReportCron {
             meanResolveSeconds: report.overall.meanResolveSeconds,
             reportUrl,
           }),
+          {
+            // N6 — practice-wide aggregate report to a provider. Subject is the
+            // practice, not a single patient; patientUserId stays null.
+            template: 'monthly_report',
+            templateVersion: EMAIL_TEMPLATE_VERSION,
+            patientUserId: null,
+            metadata: {
+              practiceId: practice.id,
+              monthYear,
+              monthLabel,
+              totalAlerts: report.overall.totalAlerts,
+              escalatedPct: report.overall.escalatedPct,
+              ackInWindowPct: report.overall.acknowledgedInWindowPct,
+            },
+          },
         )
       } catch (err) {
         this.logger.error(

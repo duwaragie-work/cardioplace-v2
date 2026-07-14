@@ -9,7 +9,7 @@
 import Link from 'next/link';
 import { Shield } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
-import { canManageUsers } from '@/lib/roleGates';
+import { canViewUsers } from '@/lib/roleGates';
 import UserInvitePanel from '@/components/user-management/UserInvitePanel';
 
 export default function UsersPage() {
@@ -18,7 +18,7 @@ export default function UsersPage() {
   if (isLoading) return null;
   if (!user) return null;
 
-  if (!canManageUsers(user)) {
+  if (!canViewUsers(user)) {
     return (
       <div
         className="h-full flex items-center justify-center"
@@ -48,7 +48,7 @@ export default function UsersPage() {
             className="text-sm mb-4"
             style={{ color: 'var(--brand-text-muted)' }}
           >
-            You need Coordinator, HEALPLACE OPS, or Super Admin access to manage users.
+            You need Provider, Coordinator, Medical Director, HEALPLACE OPS, or Super Admin access to view users.
           </p>
           <Link
             href="/dashboard"

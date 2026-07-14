@@ -6,16 +6,18 @@
 // where the invite rows carry the synthetic INVITE_PENDING status and
 // "Resend / Revoke" actions instead of "Deactivate".
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
   KeyRound,
   Loader2,
+  MoreVertical,
   Send,
   ShieldOff,
   Trash2,
   Undo2,
+  UserX,
 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
@@ -26,6 +28,7 @@ import {
 } from '@/lib/services/user-management.service';
 import {
   canDeactivateUser,
+  canPermanentCloseUsers,
   canResetUserMfa,
   type UserRole,
 } from '@/lib/roleGates';
@@ -36,6 +39,10 @@ import { RoleBadge, StatusBadge } from './badges';
 interface Props {
   /** Whether the caller is a COORDINATOR (collapsed columns + status text). */
   coordinatorView: boolean;
+  /** Whether the caller can perform write actions (invite/deactivate/close/
+   *  resend/revoke). False for read-only PROVIDER — the row action menu is
+   *  suppressed entirely. Defaults to true for backward compatibility. */
+  canManage?: boolean;
   /** Backend payload from `listUsers`. */
   response: UserListResponse | null;
   loading: boolean;
@@ -44,6 +51,9 @@ interface Props {
   practices: PracticeOption[];
   onPageChange: (next: number) => void;
   onDeactivateClick: (row: UserRow | CoordinatorPatientRow) => void;
+  /** Open the permanent-close (tombstone) modal for a user row. Omitted when
+   *  the caller can't act — the action then never renders. */
+  onCloseClick?: (row: UserRow) => void;
   /** Open the MFA-reset modal for a staff row. Omitted when the caller can't
    *  reset MFA — the action then never renders. */
   onResetMfaClick?: (row: { id: string; name: string }) => void;
@@ -67,7 +77,7 @@ interface CombinedRow {
    *  Empty for invite rows (they don't have an account yet). */
   targetRoles: string[];
   practiceId: string | null;
-  status: 'ACTIVE' | 'BLOCKED' | 'SUSPENDED' | 'DEACTIVATED' | 'INVITE_PENDING';
+  status: 'ACTIVE' | 'BLOCKED' | 'SUSPENDED' | 'DEACTIVATED' | 'CLOSED' | 'INVITE_PENDING';
   invitedAt: string | null;
   /** True only for activated users with an enrolled TOTP authenticator. */
   mfaEnrolled: boolean;
@@ -109,8 +119,122 @@ function formatDate(s: string | null): string {
   }
 }
 
+// A single row's action set, collapsed into a 3-dots (kebab) menu so the
+// Actions column stays one narrow, consistent width no matter how many
+// actions a row qualifies for.
+type MenuItem = {
+  key: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  danger?: boolean;
+  onClick: () => void;
+};
+
+function ActionsMenu({
+  items,
+  pending,
+  testId,
+}: {
+  items: MenuItem[];
+  pending: boolean;
+  testId: string;
+}) {
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  // Flip the menu above the button when there isn't enough room below — else
+  // it spills past the overflow-x-auto table container and forces a scrollbar.
+  const [openUp, setOpenUp] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  function toggle() {
+    setOpen((v) => {
+      const next = !v;
+      if (next && ref.current) {
+        const rect = ref.current.getBoundingClientRect();
+        const estimatedHeight = items.length * 44 + 16;
+        setOpenUp(window.innerHeight - rect.bottom < estimatedHeight);
+      }
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  if (items.length === 0) {
+    return (
+      <span className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }}>
+        —
+      </span>
+    );
+  }
+
+  return (
+    <div className="relative inline-block text-left" ref={ref}>
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={pending}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={t('userManagement.action.menu')}
+        data-testid={`admin-user-actions-${testId}`}
+        className="w-8 h-8 inline-flex items-center justify-center rounded-lg hover:bg-gray-100 cursor-pointer disabled:opacity-50"
+        style={{ color: 'var(--brand-text-muted)' }}
+      >
+        {pending ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        ) : (
+          <MoreVertical className="w-4 h-4" />
+        )}
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className={`absolute right-0 z-30 w-52 bg-white rounded-xl overflow-hidden py-1 ${
+            openUp ? 'bottom-full mb-1' : 'top-full mt-1'
+          }`}
+          style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.12)', border: '1px solid var(--brand-border)' }}
+        >
+          {items.map((it) => (
+            <button
+              key={it.key}
+              type="button"
+              role="menuitem"
+              data-testid={`admin-user-action-${it.key}-${testId}`}
+              onClick={() => {
+                setOpen(false);
+                it.onClick();
+              }}
+              className="w-full text-left px-4 py-2.5 text-[13px] font-medium inline-flex items-center gap-2.5 hover:bg-gray-50 cursor-pointer"
+              style={{ color: it.danger ? 'var(--brand-alert-red)' : 'var(--brand-text-primary)' }}
+            >
+              <it.icon className="w-3.5 h-3.5" />
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function UsersList({
   coordinatorView,
+  canManage = true,
   response,
   loading,
   page,
@@ -118,6 +242,7 @@ export default function UsersList({
   practices,
   onPageChange,
   onDeactivateClick,
+  onCloseClick,
   onResetMfaClick,
   onResetBiometricClick,
   onReactivate,
@@ -188,9 +313,10 @@ export default function UsersList({
     await onRevokeInvite(inviteId);
     setLiveMsg(t('userManagement.toast.revoked'));
   }
-  async function handleReactivate(id: string) {
-    await onReactivate(id);
-    setLiveMsg(t('userManagement.toast.reactivated'));
+  function handleReactivate(id: string) {
+    // Opens the reactivation modal in the parent (the deliberate re-grant flow);
+    // the parent announces success after the modal submits.
+    onReactivate(id);
   }
 
   const total = response?.total ?? 0;
@@ -226,23 +352,25 @@ export default function UsersList({
               >
                 {t('userManagement.field.email')}
               </th>
+              {/* Role is shown for everyone now — a coordinator manages their
+                  practice's patients, providers, and medical directors, so they
+                  need to tell them apart. Practice column stays hidden for
+                  coordinators (single, implicit practice). */}
+              <th
+                scope="col"
+                className="text-left px-5 py-3 text-[10px] font-bold uppercase tracking-wider"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('userManagement.field.role')}
+              </th>
               {!coordinatorView && (
-                <>
-                  <th
-                    scope="col"
-                    className="text-left px-5 py-3 text-[10px] font-bold uppercase tracking-wider"
-                    style={{ color: 'var(--brand-text-muted)' }}
-                  >
-                    {t('userManagement.field.role')}
-                  </th>
-                  <th
-                    scope="col"
-                    className="text-left px-5 py-3 text-[10px] font-bold uppercase tracking-wider"
-                    style={{ color: 'var(--brand-text-muted)' }}
-                  >
-                    {t('userManagement.field.practice')}
-                  </th>
-                </>
+                <th
+                  scope="col"
+                  className="text-left px-5 py-3 text-[10px] font-bold uppercase tracking-wider"
+                  style={{ color: 'var(--brand-text-muted)' }}
+                >
+                  {t('userManagement.field.practice')}
+                </th>
               )}
               <th
                 scope="col"
@@ -271,7 +399,7 @@ export default function UsersList({
             {loading && (
               <tr>
                 <td
-                  colSpan={coordinatorView ? 5 : 7}
+                  colSpan={coordinatorView ? 6 : 7}
                   className="px-5 py-8 text-center text-[12px]"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
@@ -284,7 +412,7 @@ export default function UsersList({
             {!loading && combined.length === 0 && (
               <tr>
                 <td
-                  colSpan={coordinatorView ? 5 : 7}
+                  colSpan={coordinatorView ? 6 : 7}
                   className="px-5 py-12 text-center text-[13px]"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
@@ -299,12 +427,32 @@ export default function UsersList({
               combined.map((row) => {
                 const isPending = pendingRowId === row.id;
                 const isSelf = caller?.id === row.id;
+                // Coordinators manage people through invites (send / cancel on
+                // pending rows), not by deactivating active users — so they get
+                // no deactivate/reactivate ("delete") button on active rows.
+                // canDeactivateUser already encodes the full matrix (incl.
+                // COORDINATOR → own-practice patients), so no extra
+                // coordinatorView gate — that was wrongly hiding the action for
+                // coordinators on the desktop table (mobile already allowed it).
                 const canAct =
-                  !isSelf && canDeactivateUser(caller, row.targetRoles);
+                  !isSelf && canManage && canDeactivateUser(caller, row.targetRoles);
                 const showDeactivate =
                   row.kind === 'user' && row.status === 'ACTIVE' && canAct;
                 const showReactivate =
                   row.kind === 'user' && row.status === 'DEACTIVATED' && canAct;
+                // Permanent close — irreversible tombstone, org-level authority
+                // (SUPER_ADMIN + HEALPLACE_OPS only per ACCESS_SCOPE §8;
+                // COORDINATOR walked back #114, MED_DIR never had it). Also
+                // requires a row the caller can act on, a DisplayID for the
+                // typed-confirmation gate, and an ACTIVE/DEACTIVATED status.
+                // Never on CLOSED / invites.
+                const showClose =
+                  row.kind === 'user' &&
+                  canAct &&
+                  canPermanentCloseUsers(caller) &&
+                  (row.status === 'ACTIVE' || row.status === 'DEACTIVATED') &&
+                  !!(row.raw as UserRow).displayId &&
+                  !!onCloseClick;
                 // MFA reset — staff (non-patient) rows only, never self, and
                 // only when the caller is authorized (SUPER_ADMIN / OPS).
                 const isStaffTarget =
@@ -328,12 +476,6 @@ export default function UsersList({
                   row.biometricEnrolled &&
                   callerCanResetMfa &&
                   !!onResetBiometricClick;
-                const showUserDash =
-                  row.kind === 'user' &&
-                  !showDeactivate &&
-                  !showReactivate &&
-                  !showResetMfa &&
-                  !showResetBiometric;
                 return (
                   <tr
                     key={`${row.kind}-${row.id}`}
@@ -353,21 +495,19 @@ export default function UsersList({
                         {row.email}
                       </span>
                     </td>
+                    <td className="px-5 py-3.5">
+                      {row.role ? (
+                        <RoleBadge role={row.role as UserRole} />
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     {!coordinatorView && (
-                      <>
-                        <td className="px-5 py-3.5">
-                          {row.role ? (
-                            <RoleBadge role={row.role as UserRole} />
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td className="px-5 py-3.5 text-[12px]">
-                          {row.practiceId
-                            ? practiceById.get(row.practiceId) ?? '—'
-                            : '—'}
-                        </td>
-                      </>
+                      <td className="px-5 py-3.5 text-[12px]">
+                        {row.practiceId
+                          ? practiceById.get(row.practiceId) ?? '—'
+                          : '—'}
+                      </td>
                     )}
                     <td className="px-5 py-3.5">
                       <StatusBadge status={row.status} />
@@ -379,137 +519,76 @@ export default function UsersList({
                       {formatDate(row.invitedAt)}
                     </td>
                     <td className="px-5 py-3.5 text-right">
-                      <div className="inline-flex items-center gap-1.5">
-                        {row.kind === 'invite' && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleResend(row.id)}
-                              disabled={isPending}
-                              aria-label={t('userManagement.action.resend')}
-                              title={t('userManagement.action.resend')}
-                              data-testid={`admin-user-resend-${row.email}`}
-                              className="w-8 h-8 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-primary-purple-light)] cursor-pointer disabled:opacity-50"
-                              style={{ color: 'var(--brand-primary-purple)' }}
-                            >
-                              {isPending ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <Send className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRevoke(row.id)}
-                              disabled={isPending}
-                              aria-label={t('userManagement.action.revoke')}
-                              title={t('userManagement.action.revoke')}
-                              data-testid={`admin-user-revoke-${row.email}`}
-                              className="w-8 h-8 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-alert-red-light)] cursor-pointer disabled:opacity-50"
-                              style={{ color: 'var(--brand-alert-red)' }}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </>
-                        )}
-                        {showDeactivate && (
-                          <button
-                            type="button"
-                            onClick={() =>
+                      {(() => {
+                        const items: MenuItem[] = [];
+                        if (canManage && row.kind === 'invite') {
+                          items.push({
+                            key: 'resend',
+                            label: t('userManagement.action.resend'),
+                            icon: Send,
+                            onClick: () => handleResend(row.id),
+                          });
+                          items.push({
+                            key: 'revoke',
+                            label: t('userManagement.action.revoke'),
+                            icon: Trash2,
+                            danger: true,
+                            onClick: () => handleRevoke(row.id),
+                          });
+                        }
+                        if (showDeactivate)
+                          items.push({
+                            key: 'deactivate',
+                            label: t('userManagement.action.deactivate'),
+                            icon: ShieldOff,
+                            danger: true,
+                            onClick: () =>
                               onDeactivateClick(
                                 row.raw as UserRow | CoordinatorPatientRow,
-                              )
-                            }
-                            disabled={isPending}
-                            aria-label={t('userManagement.action.deactivate')}
-                            data-testid={`admin-user-deactivate-${row.email}`}
-                            className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold hover:bg-[var(--brand-alert-red-light)] cursor-pointer disabled:opacity-50"
-                            style={{
-                              color: 'var(--brand-alert-red)',
-                              border: '1px solid var(--brand-alert-red)',
-                            }}
-                          >
-                            <ShieldOff className="w-3 h-3" />
-                            {t('userManagement.action.deactivate')}
-                          </button>
-                        )}
-                        {showReactivate && (
-                          <button
-                            type="button"
-                            onClick={() => handleReactivate(row.id)}
-                            disabled={isPending}
-                            aria-label={t('userManagement.action.reactivate')}
-                            data-testid={`admin-user-reactivate-${row.email}`}
-                            className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold hover:bg-[var(--brand-primary-purple-light)] cursor-pointer disabled:opacity-50"
-                            style={{
-                              color: 'var(--brand-primary-purple)',
-                              border: '1px solid var(--brand-primary-purple)',
-                            }}
-                          >
-                            {isPending ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <>
-                                <Undo2 className="w-3 h-3" />
-                                {t('userManagement.action.reactivate')}
-                              </>
-                            )}
-                          </button>
-                        )}
-                        {showResetMfa && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onResetMfaClick?.({ id: row.id, name: row.name })
-                            }
-                            disabled={isPending}
-                            aria-label="Reset two-factor authentication"
-                            title="Reset two-factor authentication"
-                            data-testid={`admin-user-reset-mfa-${row.email}`}
-                            className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
-                            style={{
-                              color: 'var(--brand-warning-amber, #B45309)',
-                              border:
-                                '1px solid var(--brand-warning-amber, #B45309)',
-                            }}
-                          >
-                            <KeyRound className="w-3 h-3" />
-                            Reset MFA
-                          </button>
-                        )}
-                        {showResetBiometric && (
-                          <button
-                            type="button"
-                            onClick={() =>
+                              ),
+                          });
+                        if (showReactivate)
+                          items.push({
+                            key: 'reactivate',
+                            label: t('userManagement.action.reactivate'),
+                            icon: Undo2,
+                            onClick: () => handleReactivate(row.id),
+                          });
+                        if (showClose)
+                          items.push({
+                            key: 'close',
+                            label: t('userManagement.action.closePermanently'),
+                            icon: UserX,
+                            danger: true,
+                            onClick: () => onCloseClick?.(row.raw as UserRow),
+                          });
+                        if (showResetMfa)
+                          items.push({
+                            key: 'reset-mfa',
+                            label: 'Reset MFA',
+                            icon: KeyRound,
+                            onClick: () =>
+                              onResetMfaClick?.({ id: row.id, name: row.name }),
+                          });
+                        if (showResetBiometric)
+                          items.push({
+                            key: 'reset-biometric',
+                            label: 'Reset biometric',
+                            icon: KeyRound,
+                            onClick: () =>
                               onResetBiometricClick?.({
                                 id: row.id,
                                 name: row.name,
-                              })
-                            }
-                            disabled={isPending}
-                            aria-label="Reset biometric sign-in"
-                            title="Reset biometric sign-in"
-                            data-testid={`admin-user-reset-biometric-${row.email}`}
-                            className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
-                            style={{
-                              color: 'var(--brand-warning-amber, #B45309)',
-                              border:
-                                '1px solid var(--brand-warning-amber, #B45309)',
-                            }}
-                          >
-                            <KeyRound className="w-3 h-3" />
-                            Reset biometric
-                          </button>
-                        )}
-                        {showUserDash && (
-                          <span
-                            className="text-[11px]"
-                            style={{ color: 'var(--brand-text-muted)' }}
-                          >
-                            —
-                          </span>
-                        )}
-                      </div>
+                              }),
+                          });
+                        return (
+                          <ActionsMenu
+                            items={items}
+                            pending={isPending}
+                            testId={row.email ?? row.id}
+                          />
+                        );
+                      })()}
                     </td>
                   </tr>
                 );
@@ -546,11 +625,19 @@ export default function UsersList({
             const isPending = pendingRowId === row.id;
             const isSelf = caller?.id === row.id;
             const canAct =
-              !isSelf && canDeactivateUser(caller, row.targetRoles);
+              !isSelf && canManage && canDeactivateUser(caller, row.targetRoles);
             const showDeactivate =
               row.kind === 'user' && row.status === 'ACTIVE' && canAct;
             const showReactivate =
               row.kind === 'user' && row.status === 'DEACTIVATED' && canAct;
+            // Permanent close — org-level only (SUPER + OPS); see desktop block.
+            const showClose =
+              row.kind === 'user' &&
+              canAct &&
+              canPermanentCloseUsers(caller) &&
+              (row.status === 'ACTIVE' || row.status === 'DEACTIVATED') &&
+              !!(row.raw as UserRow).displayId &&
+              !!onCloseClick;
             const isStaffTarget =
               row.targetRoles.length > 0 &&
               !row.targetRoles.every((r) => r === 'PATIENT');
@@ -571,6 +658,66 @@ export default function UsersList({
               row.biometricEnrolled &&
               callerCanResetMfa &&
               !!onResetBiometricClick;
+
+            // Build the card's action set once, so the kebab can live in the
+            // top-right corner beside the status pill.
+            const items: MenuItem[] = [];
+            if (canManage && row.kind === 'invite') {
+              items.push({
+                key: 'resend',
+                label: t('userManagement.action.resend'),
+                icon: Send,
+                onClick: () => handleResend(row.id),
+              });
+              items.push({
+                key: 'revoke',
+                label: t('userManagement.action.revoke'),
+                icon: Trash2,
+                danger: true,
+                onClick: () => handleRevoke(row.id),
+              });
+            }
+            if (showDeactivate)
+              items.push({
+                key: 'deactivate',
+                label: t('userManagement.action.deactivate'),
+                icon: ShieldOff,
+                danger: true,
+                onClick: () =>
+                  onDeactivateClick(row.raw as UserRow | CoordinatorPatientRow),
+              });
+            if (showReactivate)
+              items.push({
+                key: 'reactivate',
+                label: t('userManagement.action.reactivate'),
+                icon: Undo2,
+                onClick: () => handleReactivate(row.id),
+              });
+            if (showClose)
+              items.push({
+                key: 'close',
+                label: t('userManagement.action.closePermanently'),
+                icon: UserX,
+                danger: true,
+                onClick: () => onCloseClick?.(row.raw as UserRow),
+              });
+            if (showResetMfa)
+              items.push({
+                key: 'reset-mfa',
+                label: 'Reset MFA',
+                icon: KeyRound,
+                onClick: () =>
+                  onResetMfaClick?.({ id: row.id, name: row.name }),
+              });
+            if (showResetBiometric)
+              items.push({
+                key: 'reset-biometric',
+                label: 'Reset biometric',
+                icon: KeyRound,
+                onClick: () =>
+                  onResetBiometricClick?.({ id: row.id, name: row.name }),
+              });
+
             return (
               <div
                 key={`card-${row.kind}-${row.id}`}
@@ -597,15 +744,23 @@ export default function UsersList({
                       {row.email}
                     </p>
                   </div>
-                  <div className="shrink-0">
+                  <div className="shrink-0 flex items-center gap-1">
                     <StatusBadge status={row.status} />
+                    {items.length > 0 && (
+                      <ActionsMenu
+                        items={items}
+                        pending={isPending}
+                        testId={`${row.email ?? row.id}-card`}
+                      />
+                    )}
                   </div>
                 </div>
 
-                {/* Meta row: role · practice · invited */}
-                {(!coordinatorView || row.invitedAt) && (
+                {/* Meta row: role · practice · invited. Role shows for
+                    coordinators too; practice stays hidden for them. */}
+                {(row.role || (!coordinatorView && row.practiceId) || row.invitedAt) && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
-                    {!coordinatorView && row.role && (
+                    {row.role && (
                       <RoleBadge role={row.role as UserRole} />
                     )}
                     {!coordinatorView && row.practiceId && (
@@ -621,129 +776,6 @@ export default function UsersList({
                   </div>
                 )}
 
-                {/* Action row — only when there's an action available */}
-                {(row.kind === 'invite' ||
-                  showDeactivate ||
-                  showReactivate ||
-                  showResetMfa ||
-                  showResetBiometric) && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {row.kind === 'invite' && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleResend(row.id)}
-                          disabled={isPending}
-                          data-testid={`admin-user-resend-card-${row.email}`}
-                          className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold hover:bg-[var(--brand-primary-purple-light)] cursor-pointer disabled:opacity-50"
-                          style={{
-                            color: 'var(--brand-primary-purple)',
-                            border: '1px solid var(--brand-primary-purple)',
-                          }}
-                        >
-                          {isPending ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Send className="w-3 h-3" />
-                          )}
-                          {t('userManagement.action.resend')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRevoke(row.id)}
-                          disabled={isPending}
-                          data-testid={`admin-user-revoke-card-${row.email}`}
-                          className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold hover:bg-[var(--brand-alert-red-light)] cursor-pointer disabled:opacity-50"
-                          style={{
-                            color: 'var(--brand-alert-red)',
-                            border: '1px solid var(--brand-alert-red)',
-                          }}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          {t('userManagement.action.revoke')}
-                        </button>
-                      </>
-                    )}
-                    {showDeactivate && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onDeactivateClick(
-                            row.raw as UserRow | CoordinatorPatientRow,
-                          )
-                        }
-                        disabled={isPending}
-                        data-testid={`admin-user-deactivate-card-${row.email}`}
-                        className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold hover:bg-[var(--brand-alert-red-light)] cursor-pointer disabled:opacity-50"
-                        style={{
-                          color: 'var(--brand-alert-red)',
-                          border: '1px solid var(--brand-alert-red)',
-                        }}
-                      >
-                        <ShieldOff className="w-3 h-3" />
-                        {t('userManagement.action.deactivate')}
-                      </button>
-                    )}
-                    {showReactivate && (
-                      <button
-                        type="button"
-                        onClick={() => handleReactivate(row.id)}
-                        disabled={isPending}
-                        data-testid={`admin-user-reactivate-card-${row.email}`}
-                        className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold hover:bg-[var(--brand-primary-purple-light)] cursor-pointer disabled:opacity-50"
-                        style={{
-                          color: 'var(--brand-primary-purple)',
-                          border: '1px solid var(--brand-primary-purple)',
-                        }}
-                      >
-                        {isPending ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Undo2 className="w-3 h-3" />
-                        )}
-                        {t('userManagement.action.reactivate')}
-                      </button>
-                    )}
-                    {showResetMfa && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onResetMfaClick?.({ id: row.id, name: row.name })
-                        }
-                        disabled={isPending}
-                        data-testid={`admin-user-reset-mfa-card-${row.email}`}
-                        className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
-                        style={{
-                          color: 'var(--brand-warning-amber, #B45309)',
-                          border:
-                            '1px solid var(--brand-warning-amber, #B45309)',
-                        }}
-                      >
-                        <KeyRound className="w-3 h-3" />
-                        Reset MFA
-                      </button>
-                    )}
-                    {showResetBiometric && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onResetBiometricClick?.({ id: row.id, name: row.name })
-                        }
-                        disabled={isPending}
-                        data-testid={`admin-user-reset-biometric-card-${row.email}`}
-                        className="shrink-0 whitespace-nowrap h-8 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
-                        style={{
-                          color: 'var(--brand-warning-amber, #B45309)',
-                          border:
-                            '1px solid var(--brand-warning-amber, #B45309)',
-                        }}
-                      >
-                        <KeyRound className="w-3 h-3" />
-                        Reset biometric
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
             );
           })}

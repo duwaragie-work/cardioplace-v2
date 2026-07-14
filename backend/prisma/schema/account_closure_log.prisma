@@ -1,0 +1,39 @@
+// Append-only audit trail for account-lifecycle transitions (phase/28):
+// deactivate, reactivate, and permanent-close. The mutable state lives on the
+// User row (accountStatus, tombstonedAt, tokenVersion); THIS table is the
+// immutable history an auditor reads — one row per action, never updated.
+//
+// HIPAA §164.308(a)(1)(ii)(D) / §164.316 — who did what, to whom, when, why.
+// Snapshots displayId + role at write time so the record stays meaningful even
+// after the affected User is tombstoned and its PII anonymised.
+model AccountClosureLog {
+  id              String   @id @default(ulid())
+  // Affected account. SetNull (not Cascade) so the audit row survives even if
+  // the User is ever hard-removed — the displayId snapshot preserves identity.
+  userId          String?
+  // Snapshot of the affected account's public handle at action time.
+  displayId       String?
+  // DEACTIVATE | REACTIVATE | PERMANENT_CLOSE
+  action          String
+  // Actor who performed it: an admin's id, or the user's own id for a patient
+  // self-service action. Scalar (not a relation) — actors and subjects can
+  // both be tombstoned independently.
+  performedById   String?
+  performedByRole String?
+  // true = the account holder acted on their own account (patient self-service);
+  // false = an admin/coordinator acted on someone else.
+  selfService     Boolean  @default(false)
+  reason          String?
+  // Roles / assignments captured at the time (mirrors User.terminationSnapshot)
+  // so the audit is self-contained.
+  snapshot        Json?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}

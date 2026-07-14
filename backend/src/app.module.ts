@@ -22,10 +22,15 @@ import { ProviderModule } from './provider/provider.module.js'
 import { EmailModule } from './email/email.module.js'
 import { VoiceModule } from './voice/voice.module.js'
 import { CommonModule } from './common/common.module.js'
+import { CardioplaceClsModule } from './common/cls/cls.module.js'
+import { AccessLogModule } from './access-log/access-log.module.js'
 import { OcrModule } from './ocr/ocr.module.js'
 import { DrugEnrichmentModule } from './drug-enrichment/drug-enrichment.module.js'
 import { CaregiverModule } from './caregiver/caregiver.module.js'
+import { PushModule } from './push/push.module.js'
 import { SmsModule } from './sms/sms.module.js'
+import { SupportModule } from './support/support.module.js'
+import { WorklistModule } from './worklist/worklist.module.js'
 import { TestControlModule } from './test-control/test-control.module.js'
 
 // Dev-only test-control endpoints (Playwright cron + escalation drivers).
@@ -62,8 +67,10 @@ const TEST_CONTROL_MODULES = [TestControlModule]
       },
     ]),
 
+    CardioplaceClsModule,
     CommonModule,
     PrismaModule,
+    AccessLogModule,
     EmailModule,
     AuthModule,
     KnowledgebaseModule,
@@ -82,6 +89,9 @@ const TEST_CONTROL_MODULES = [TestControlModule]
     DrugEnrichmentModule,
     CaregiverModule,
     SmsModule,
+    SupportModule,
+    WorklistModule,
+    PushModule,
     ...TEST_CONTROL_MODULES,
   ],
   controllers: [AppController],

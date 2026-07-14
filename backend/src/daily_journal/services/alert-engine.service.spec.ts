@@ -4,7 +4,16 @@ import { EventEmitter2 } from '@nestjs/event-emitter'
 import { ProfileNotFoundException, type ResolvedContext } from '@cardioplace/shared'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
+import { ClsService } from 'nestjs-cls'
 import { AlertEngineService } from './alert-engine.service.js'
+
+// runAsCronActor wraps the @OnEvent handlers in cls.run — a pass-through stub
+// suffices for the unit tests, which drive evaluate() directly.
+const clsStub = {
+  run: (fn: () => unknown) => fn(),
+  set: () => undefined,
+  get: () => null,
+} as unknown as ClsService
 import { OutputGeneratorService } from './output-generator.service.js'
 import { ProfileResolverService } from './profile-resolver.service.js'
 import { SessionAveragerService } from './session-averager.service.js'
@@ -119,6 +128,9 @@ describe('AlertEngineService (orchestrator)', () => {
           escalated: false,
         }),
         updateMany: (jest.fn() as jest.Mock<any>).mockResolvedValue({ count: 0 }),
+        // Gap 1 fix (2026-07-13) — used by handleEntryCreated to count alerts
+        // after evaluate() so it can emit ENTRY_EVALUATED with `alertsFired`.
+        count: (jest.fn() as jest.Mock<any>).mockResolvedValue(0),
       },
       journalEntry: {
         findFirst: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
@@ -172,6 +184,7 @@ describe('AlertEngineService (orchestrator)', () => {
         { provide: ProfileResolverService, useValue: profileResolver },
         { provide: SessionAveragerService, useValue: sessionAverager },
         { provide: OutputGeneratorService, useValue: outputGenerator },
+        { provide: ClsService, useValue: clsStub },
       ],
     }).compile()
     service = module.get<AlertEngineService>(AlertEngineService)
@@ -1069,6 +1082,228 @@ describe('AlertEngineService (orchestrator)', () => {
       expect(prisma.deviationAlert.update).not.toHaveBeenCalled()
       expect(prisma.deviationAlert.updateMany).not.toHaveBeenCalled()
       expect(prisma.deviationAlert.create).not.toHaveBeenCalled()
+    })
+  })
+
+  // ─── Gap 1 fix (2026-07-13) — ENTRY_EVALUATED emission ─────────────────────
+  describe('handleEntryCreated → ENTRY_EVALUATED emission', () => {
+    it('emits ENTRY_EVALUATED with alertsFired=false when no alert rows exist', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 118, diastolicBP: 76 }),
+      )
+      prisma.deviationAlert.count.mockResolvedValue(0)
+
+      await service.handleEntryCreated({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 72,
+        weight: null,
+        sessionId: null,
+      })
+
+      const evaluatedCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === JOURNAL_EVENTS.ENTRY_EVALUATED,
+      )
+      expect(evaluatedCall).toBeDefined()
+      const payload = evaluatedCall![1] as { alertsFired: boolean; alertCount: number }
+      expect(payload.alertsFired).toBe(false)
+      expect(payload.alertCount).toBe(0)
+    })
+
+    it('emits ENTRY_EVALUATED with alertsFired=true when alert rows exist for the entry', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(
+        baseSession({ systolicBP: 118, diastolicBP: 76, pulse: 115 }),
+      )
+      // Pretend evaluate produced 1 alert (e.g. AFib HR).
+      prisma.deviationAlert.count.mockResolvedValue(1)
+
+      await service.handleEntryCreated({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 115,
+        weight: null,
+        sessionId: null,
+      })
+
+      const evaluatedCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === JOURNAL_EVENTS.ENTRY_EVALUATED,
+      )
+      expect(evaluatedCall).toBeDefined()
+      const payload = evaluatedCall![1] as { alertsFired: boolean; alertCount: number }
+      expect(payload.alertsFired).toBe(true)
+      expect(payload.alertCount).toBe(1)
+    })
+
+    it('defaults alertsFired=true when the count query itself fails (safety invariant)', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(baseSession())
+      prisma.deviationAlert.count.mockRejectedValue(new Error('DB unreachable'))
+
+      await service.handleEntryCreated({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 72,
+        weight: null,
+        sessionId: null,
+      })
+
+      const evaluatedCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === JOURNAL_EVENTS.ENTRY_EVALUATED,
+      )
+      expect(evaluatedCall).toBeDefined()
+      const payload = evaluatedCall![1] as { alertsFired: boolean }
+      expect(payload.alertsFired).toBe(true)
+    })
+
+    it('propagates the FULL payload (userId, entryId, BP, pulse, weight, sessionId, alertCount)', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(baseSession())
+      prisma.deviationAlert.count.mockResolvedValue(0)
+
+      const input = {
+        userId: 'user-1',
+        entryId: 'entry-abc',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 72,
+        weight: 75.5,
+        sessionId: 'session-xyz',
+      }
+      await service.handleEntryCreated(input)
+
+      const evaluatedCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === JOURNAL_EVENTS.ENTRY_EVALUATED,
+      )
+      const payload = evaluatedCall![1] as Record<string, unknown>
+      expect(payload).toMatchObject(input)
+      expect(payload.alertsFired).toBe(false)
+      expect(payload.alertCount).toBe(0)
+    })
+
+    it('emits ENTRY_EVALUATED exactly ONCE per handleEntryCreated call (no double-fire)', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(baseSession())
+      prisma.deviationAlert.count.mockResolvedValue(2)
+
+      await service.handleEntryCreated({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 72,
+        weight: null,
+        sessionId: null,
+      })
+
+      const evaluatedCalls = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === JOURNAL_EVENTS.ENTRY_EVALUATED,
+      )
+      expect(evaluatedCalls).toHaveLength(1)
+    })
+
+    it('BOTH evaluate() throws AND count throws → alertsFired=true (compound failure default)', async () => {
+      sessionAverager.averageForEntry.mockRejectedValue(new Error('evaluate crashed'))
+      prisma.deviationAlert.count.mockRejectedValue(new Error('count crashed'))
+
+      await service.handleEntryCreated({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 72,
+        weight: null,
+        sessionId: null,
+      })
+
+      const evaluatedCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === JOURNAL_EVENTS.ENTRY_EVALUATED,
+      )
+      const payload = evaluatedCall![1] as { alertsFired: boolean; alertCount: number }
+      expect(payload.alertsFired).toBe(true)
+      // count-throw defaults alertCount=1 (safety invariant), and
+      // evaluationFailed=true also forces alertsFired=true.
+      expect(payload.alertCount).toBe(1)
+    })
+
+    it('count returning >1 propagates through the payload untouched', async () => {
+      sessionAverager.averageForEntry.mockResolvedValue(baseSession())
+      prisma.deviationAlert.count.mockResolvedValue(7)
+
+      await service.handleEntryCreated({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 72,
+        weight: null,
+        sessionId: null,
+      })
+
+      const evaluatedCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === JOURNAL_EVENTS.ENTRY_EVALUATED,
+      )
+      const payload = evaluatedCall![1] as { alertsFired: boolean; alertCount: number }
+      expect(payload.alertsFired).toBe(true)
+      expect(payload.alertCount).toBe(7)
+    })
+
+    it('count query filters by journalEntryId (not by userId or measuredAt)', async () => {
+      // Regression guard: if someone changes the query to filter by userId
+      // instead of journalEntryId, an old alert on the same patient would
+      // incorrectly poison the current entry's alertsFired flag.
+      sessionAverager.averageForEntry.mockResolvedValue(baseSession())
+      prisma.deviationAlert.count.mockResolvedValue(0)
+
+      await service.handleEntryCreated({
+        userId: 'user-1',
+        entryId: 'entry-under-test',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 72,
+        weight: null,
+        sessionId: null,
+      })
+
+      expect(prisma.deviationAlert.count).toHaveBeenCalledWith({
+        where: { journalEntryId: 'entry-under-test' },
+      })
+    })
+
+    it('emits ENTRY_EVALUATED even when evaluate throws (never leaves the listener orphaned)', async () => {
+      sessionAverager.averageForEntry.mockRejectedValue(new Error('boom'))
+      prisma.deviationAlert.count.mockResolvedValue(0)
+
+      await service.handleEntryCreated({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        measuredAt: new Date('2026-07-13T13:00:00Z'),
+        systolicBP: 118,
+        diastolicBP: 76,
+        pulse: 72,
+        weight: null,
+        sessionId: null,
+      })
+
+      const evaluatedCalls = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === JOURNAL_EVENTS.ENTRY_EVALUATED,
+      )
+      // Even though evaluate() threw, the emission still fires so downstream
+      // listeners (LoggedConfirmationListener) run — with the safety-default
+      // alertsFired=true.
+      expect(evaluatedCalls).toHaveLength(1)
+      const payload = evaluatedCalls[0][1] as { alertsFired: boolean }
+      expect(payload.alertsFired).toBe(true)
     })
   })
 })

@@ -31,10 +31,13 @@ function mockPrisma() {
 
 function makeService(prisma: ReturnType<typeof mockPrisma>) {
   // Only `prisma` is exercised by the §H methods — cron/escalation deps are
-  // unused, so empty stubs are sufficient for a unit spec. The fifth arg
-  // is `medicationHoldEscalation`, added on dev; same empty-stub pattern.
+  // unused, so empty stubs are sufficient for a unit spec. The sixth arg
+  // is `auditExceptionReport` (added by N7); the fifth is
+  // `medicationHoldEscalation` — same empty-stub pattern for every non-prisma
+  // dep the tested methods don't touch.
   return new TestControlService(
     prisma as never,
+    {} as never,
     {} as never,
     {} as never,
     {} as never,

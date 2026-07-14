@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common'
 import { Public } from '../auth/decorators/public.decorator.js'
 import { TestControlService } from './test-control.service.js'
+import { EmailService } from '../email/email.service.js'
 
 /**
  * Dev-only test-control endpoints. Mounted ONLY when ENABLE_TEST_CONTROL=true
@@ -78,14 +79,15 @@ export class TestControlController {
     return this.svc.fireEscalationT0(body.alertId)
   }
 
-  @Post('cron/gap-alert/run')
+  // N3 (2026-07-13) — gap-alert cron deleted, superseded by daily-reminder.
+  @Post('cron/daily-reminder/run')
   @HttpCode(200)
-  async runGapAlert(
+  async runDailyReminder(
     @Headers('x-test-control-secret') secret: string,
     @Body() body: { now?: string },
   ) {
     this.assertAuthorized(secret)
-    return this.svc.runGapAlertScan(body?.now ? new Date(body.now) : new Date())
+    return this.svc.runDailyReminderScan(body?.now ? new Date(body.now) : new Date())
   }
 
   @Post('cron/monthly-reask/run')
@@ -111,6 +113,113 @@ export class TestControlController {
     return this.svc.runMedicationHoldEscalationScan(
       body?.now ? new Date(body.now) : new Date(),
     )
+  }
+
+  // N7 — drive the audit-exception-report cron on demand. Playwright uses this
+  // to seed a pattern, run the scan synchronously, then assert AuditException
+  // rows landed with the expected detectorId/severity/evidence.
+  @Post('cron/audit-exception-report/run')
+  @HttpCode(200)
+  async runAuditExceptionReport(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { now?: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.runAuditExceptionReportScan(
+      body?.now ? new Date(body.now) : new Date(),
+    )
+  }
+
+  // ─── N4/N5/N6/N7 Playwright verification helpers ───────────────────────
+  @Get('audit/user-by-email')
+  async findUserByEmail(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('email') email: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.findUserByEmail(email)
+  }
+
+  @Get('audit/access-log/count')
+  async countAccessLog(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('actorId') actorId?: string,
+    @Query('modelName') modelName?: string,
+    @Query('sinceIso') sinceIso?: string,
+  ) {
+    this.assertAuthorized(secret)
+    const count = await this.svc.countAccessLog({
+      actorId,
+      modelName,
+      since: sinceIso ? new Date(sinceIso) : undefined,
+    })
+    return { count }
+  }
+
+  @Get('audit/email-disclosure-log/latest')
+  async latestEmailDisclosure(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('recipientEmail') recipientEmail: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.latestEmailDisclosureForRecipient(recipientEmail)
+  }
+
+  @Get('audit/profile-verification-log/latest')
+  async latestProfileVerificationLog(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('userId') userId: string,
+    @Query('changeType') changeType: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.latestProfileVerificationLog({ userId, changeType })
+  }
+
+  @Get('audit/audit-exception/by-actor')
+  async auditExceptionByActor(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('actorId') actorId: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.findAuditExceptionByActor(actorId)
+  }
+
+  @Post('seed/access-log-batch')
+  @HttpCode(200)
+  async seedAccessLogBatch(
+    @Headers('x-test-control-secret') secret: string,
+    @Body()
+    body: {
+      actorId: string
+      actorType: 'USER' | 'SYSTEM_ACTOR'
+      action: 'READ' | 'WRITE' | 'DELETE'
+      modelName: string
+      count: number
+      spreadMinutes: number
+    },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.seedAccessLogBatch(body)
+  }
+
+  @Post('audit/access-log/clear-actor')
+  @HttpCode(200)
+  async clearAccessLogForActor(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { actorId: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearAccessLogForActor(body.actorId)
+  }
+
+  @Post('audit/audit-exception/clear-by-prefix')
+  @HttpCode(200)
+  async clearAuditExceptionsByPrefix(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { prefix: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.clearAuditExceptionsByIdempotencyPrefix(body.prefix)
   }
 
   // ─── Time advancement ───────────────────────────────────────────────────
@@ -576,6 +685,27 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     return this.svc.findUser(email)
+  }
+
+  // ─── Captured emails (spec 4Z — email-no-PHI) ─────────────────────────────
+  // CI SMTP is a dummy that never delivers, so specs can't read a real inbox.
+  // EmailService captures the rendered mail in a non-prod in-memory buffer;
+  // these endpoints let a Playwright spec read (and reset) it.
+  @Get('emails')
+  getEmails(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('to') to?: string,
+  ) {
+    this.assertAuthorized(secret)
+    return EmailService.getCapturedEmails(to)
+  }
+
+  @Post('emails/clear')
+  @HttpCode(200)
+  clearEmails(@Headers('x-test-control-secret') secret: string) {
+    this.assertAuthorized(secret)
+    EmailService.clearCapturedEmails()
+    return { ok: true }
   }
 
   // ─── Invite + magic-link token minting (specs 36/37/40) ───────────────────

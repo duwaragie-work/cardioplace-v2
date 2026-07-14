@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service.js'
-import { GapAlertService } from '../crons/gap-alert.service.js'
+import { AuditExceptionReportService } from '../crons/audit-exception-report.service.js'
+import { DailyReminderService, type DailyReminderScanSummary } from '../crons/daily-reminder.service.js'
 import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
@@ -21,10 +22,16 @@ export class TestControlService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gapAlerts: GapAlertService,
+    // N3 (2026-07-13) — gap-alert is replaced by daily-reminder. Test-control
+    // now drives the new cron; the qa helper's old runGapAlert() call is
+    // rewired to hit runDailyReminderScan() below.
+    private readonly dailyReminder: DailyReminderService,
     private readonly monthlyReask: MonthlyReaskService,
     private readonly escalation: EscalationService,
     private readonly medicationHoldEscalation: MedicationHoldEscalationService,
+    // N7 (2026-07-11) — Playwright coverage for the audit-exception-report
+    // cron. Same pattern as the other cron drivers above.
+    private readonly auditExceptionReport: AuditExceptionReportService,
   ) {}
 
   // ─── Cron drivers ───────────────────────────────────────────────────────
@@ -46,9 +53,13 @@ export class TestControlService {
     return { ok: true }
   }
 
-  async runGapAlertScan(now: Date): Promise<{ scanned: number; nudged: number }> {
-    const sent = await this.gapAlerts.runScan(now)
-    return { scanned: 1, nudged: sent }
+  /**
+   * N3/N2 (2026-07-13) — runs one cycle of the daily-reminder cron. Replaces
+   * the deleted runGapAlertScan(). Returns the full summary so specs can
+   * assert on tier-selection + care-team fan-out counts, not just totals.
+   */
+  async runDailyReminderScan(now: Date): Promise<DailyReminderScanSummary> {
+    return this.dailyReminder.runScan(now)
   }
 
   async runMonthlyReaskScan(now: Date): Promise<{ scanned: number; reasked: number }> {
@@ -61,6 +72,164 @@ export class TestControlService {
   ): Promise<{ scanned: number; rungsFired: number }> {
     const fired = await this.medicationHoldEscalation.runScan(now)
     return { scanned: 1, rungsFired: fired }
+  }
+
+  /**
+   * N7 — audit exception-report cron driver. Playwright + smoke tests fire
+   * this to trigger the daily scan on demand rather than waiting for 03:00 ET.
+   * Delegates to `AuditExceptionReportService.run(now)` which iterates every
+   * detector and upserts one AuditException row per candidate.
+   */
+  async runAuditExceptionReportScan(now: Date): Promise<{
+    scanned: number
+    created: number
+    updated: number
+    stickySkipped: number
+    failedDetectors: number
+  }> {
+    const summary = await this.auditExceptionReport.run(now)
+    return { scanned: 1, ...summary }
+  }
+
+  // ─── N4/N5/N6/N7 audit-read helpers ────────────────────────────────────
+  // Thin read-only surfaces over the audit tables so Playwright can verify a
+  // UI action produced the expected audit row. Dev-only — guarded by the
+  // test-control secret / ENABLE_TEST_CONTROL flag at the controller layer.
+
+  async findUserByEmail(email: string): Promise<{ id: string } | null> {
+    return this.prisma.user.findUnique({ where: { email }, select: { id: true } })
+  }
+
+  async countAccessLog(filter: {
+    actorId?: string
+    modelName?: string
+    since?: Date
+  }): Promise<number> {
+    return this.prisma.accessLog.count({
+      where: {
+        ...(filter.actorId ? { actorId: filter.actorId } : {}),
+        ...(filter.modelName ? { modelName: filter.modelName } : {}),
+        ...(filter.since ? { createdAt: { gte: filter.since } } : {}),
+      },
+    })
+  }
+
+  async latestEmailDisclosureForRecipient(email: string): Promise<{
+    id: string
+    template: string
+    purpose: string
+    recipientCategory: string
+    briefDescription: string
+    bodyHash: string
+    sentAt: Date
+  } | null> {
+    return this.prisma.emailDisclosureLog.findFirst({
+      where: { recipientEmail: email },
+      orderBy: { sentAt: 'desc' },
+      select: {
+        id: true,
+        template: true,
+        purpose: true,
+        recipientCategory: true,
+        briefDescription: true,
+        bodyHash: true,
+        sentAt: true,
+      },
+    })
+  }
+
+  async latestProfileVerificationLog(filter: {
+    userId: string
+    changeType: string
+  }): Promise<{
+    id: string
+    previousValue: unknown
+    newValue: unknown
+    changedBy: string
+    changedByRole: string
+  } | null> {
+    return this.prisma.profileVerificationLog.findFirst({
+      where: {
+        userId: filter.userId,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        changeType: filter.changeType as any,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        previousValue: true,
+        newValue: true,
+        changedBy: true,
+        changedByRole: true,
+      },
+    })
+  }
+
+  async findAuditExceptionByActor(actorId: string): Promise<{
+    id: string
+    detectorId: string
+    severity: string
+    status: string
+    idempotencyKey: string
+    evidence: unknown
+  } | null> {
+    // Evidence is a JSON column; filter via Prisma's `path` operator.
+    return this.prisma.auditException.findFirst({
+      where: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        evidence: { path: ['actorId'], equals: actorId } as any,
+      },
+      select: {
+        id: true,
+        detectorId: true,
+        severity: true,
+        status: true,
+        idempotencyKey: true,
+        evidence: true,
+      },
+    })
+  }
+
+  /**
+   * Seed N synthetic AccessLog rows for a given actor spread across a time
+   * window. Used by N7 Playwright spec to trip BULK_PHI_READ without waiting
+   * for real UI traffic.
+   */
+  async seedAccessLogBatch(input: {
+    actorId: string
+    actorType: 'USER' | 'SYSTEM_ACTOR'
+    action: 'READ' | 'WRITE' | 'DELETE'
+    modelName: string
+    count: number
+    spreadMinutes: number
+  }): Promise<{ inserted: number }> {
+    const now = new Date()
+    const spreadMs = input.spreadMinutes * 60_000
+    const stepMs = input.count > 1 ? spreadMs / input.count : 0
+    const rows = Array.from({ length: input.count }, (_, i) => ({
+      actorId: input.actorId,
+      actorType: input.actorType,
+      action: input.action,
+      modelName: input.modelName,
+      recordId: `pw-seed-${input.actorId}-${i}`,
+      createdAt: new Date(now.getTime() - spreadMs + i * stepMs),
+    }))
+    await this.prisma.accessLog.createMany({ data: rows })
+    return { inserted: rows.length }
+  }
+
+  async clearAccessLogForActor(actorId: string): Promise<{ deleted: number }> {
+    const result = await this.prisma.accessLog.deleteMany({ where: { actorId } })
+    return { deleted: result.count }
+  }
+
+  async clearAuditExceptionsByIdempotencyPrefix(
+    prefix: string,
+  ): Promise<{ deleted: number }> {
+    const result = await this.prisma.auditException.deleteMany({
+      where: { idempotencyKey: { contains: prefix } },
+    })
+    return { deleted: result.count }
   }
 
   // ─── Time advancement ───────────────────────────────────────────────────
@@ -222,11 +391,11 @@ export class TestControlService {
   }
 
   /**
-   * Backdate a User's `updatedAt`. The gap-alert cron uses
-   * `User.updatedAt <= cutoff` as the "enrollment completed ≥48h ago" proxy
-   * (see backend/src/crons/gap-alert.service.ts:51); resetUser doesn't touch
-   * the user row so without this helper the candidate filter never matches a
-   * just-seeded patient. Raw SQL is required because Prisma's `@updatedAt`
+   * Backdate a User's `updatedAt`. Historically used by the deleted gap-alert
+   * cron's "enrollment completed ≥48h ago" candidate filter. The daily-reminder
+   * cron (N2) does NOT use updatedAt in its filter, but this helper is left in
+   * place because other test paths (monthly-reask ripple flag, seed sanity
+   * checks) still rely on it. Raw SQL is required because Prisma's `@updatedAt`
    * decorator overrides any value passed via `update()`.
    */
   async backdateUserUpdatedAt(userId: string, deltaSeconds: number): Promise<void> {
@@ -878,6 +1047,7 @@ export class TestControlService {
           title: `Test notification ${i}`,
           body: `Seeded test notification ${i}.`,
           tips: [],
+          dispatchTrigger: 'SYSTEM_SEED',
         },
       })
     }
@@ -1143,9 +1313,9 @@ export class TestControlService {
   // ─── Invite + magic-link token minting (specs 36/37/40) ───────────────────
   //
   // Both UserInvite and MagicLink persist only a SHA-256 hash of the raw
-  // token — the raw value is e-mailed and never stored. In CI the Resend key
-  // is a dummy, so a Playwright spec can never read the e-mail to recover the
-  // token. These two helpers mint a row directly and RETURN the raw token,
+  // token — the raw value is e-mailed and never stored. In CI the SMTP
+  // credentials are a dummy, so a Playwright spec can never read the e-mail to
+  // recover the token. These two helpers mint a row directly and RETURN the raw token,
   // hashing it exactly the way auth.service.ts does so the real production
   // accept/verify endpoints (which the specs drive) accept it unchanged.
 

@@ -39,6 +39,8 @@ const BACKEND_MSG_KEY_MAP: Record<string, TranslationKey> = {
   'Verification failed': 'register.verificationFailed',
   'Account is suspended': 'register.accountSuspended',
   'Account is blocked': 'register.accountBlocked',
+  'Account is deactivated': 'register.accountDeactivated',
+  'Account is closed': 'register.accountClosed',
 };
 
 function backendMsgToKey(msg: string | undefined): TranslationKey | null {
@@ -540,6 +542,16 @@ export default function RegisterPage() {
                     {t('register.privacyPolicy')}
                   </a>
                   .
+                </p>
+                {/* Locked out — public support form (no auth required). */}
+                <p className="text-center mt-3">
+                  <a
+                    href={`/support/locked-out${emailTrimmed ? `?email=${encodeURIComponent(emailTrimmed)}` : ''}`}
+                    data-testid="signin-need-help"
+                    className="text-[0.6875rem] lg:text-xs font-medium text-[#7B00E0] hover:underline"
+                  >
+                    Need help signing in?
+                  </a>
                 </p>
                 {/* A2 — privacy assurance + A1 — medical disclaimer.
                     Mobile-only here: on md+ the right info panel is visible and

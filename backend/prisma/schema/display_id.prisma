@@ -1,0 +1,61 @@
+// Human-readable, prefixed, permanent identifiers for every User account.
+// Issued once at account creation. Locked forever — even on deactivation or
+// future hard-delete, the value row survives in this ledger so the same
+// string can never be re-issued.
+//
+// Format: CP-PAT-XXXXXXX-C  (patient) or CP-STF-XXXXXXX-C  (staff)
+// where X = Crockford base32 (no I L O U), C = Luhn-mod-32 check char.
+// See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md for the full spec.
+
+model DisplayId {
+  // Canonical (hyphen-stripped, uppercased) form, e.g. "CPPATK8M2R4N7".
+  // Primary key — once inserted, immutable. A Postgres trigger rejects any
+  // UPDATE of this column; application code never has a path to mutate it.
+  value String @id
+
+  // Hyphenated human-display form, e.g. "CP-PAT-K8M2R4N-7". Derivable from
+  // `value` but cached here so reads don't have to re-insert separators.
+  display String @unique
+
+  // PATIENT or STAFF — the only two populations. Class is the INITIAL
+  // population class, not current role array; a patient who later joins
+  // staff keeps their CP-PAT-... ID.
+  class DisplayIdClass
+
+  // Live owner. NULL once tombstoned (User hard-deleted, which currently
+  // never happens — `accountStatus = DEACTIVATED` is the soft state). The
+  // unique constraint on `value` is the lock-forever guarantee: tombstoned
+  // IDs and live IDs share the same namespace.
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  issuedAt     DateTime  @default(now())
+  tombstonedAt DateTime?
+
+  // Audit hint — which code path issued this ID.
+  // Allowed: "otp" | "magic_link" | "google_oauth" | "invite_accept" | "backfill"
+  issuedVia String
+
+  @@index([class, issuedAt])
+}
+
+enum DisplayIdClass {
+  PATIENT
+  STAFF
+  // System-principal registry rows (audit, 2026-07-03). Format CP-SYS-XXXXXXX-C.
+  // Never a real person — issued only by the system-principal seed.
+  SYSTEM
+}
+
+// Append-only collision log. If this table grows fast in production, the
+// random namespace is closer to exhaustion than expected — cheap ops signal.
+model DisplayIdCollisionLog {
+  id             String         @id @default(ulid())
+  attemptedValue String
+  class          DisplayIdClass
+  attempts       Int
+  resolvedValue  String
+  createdAt      DateTime       @default(now())
+
+  @@index([createdAt])
+}

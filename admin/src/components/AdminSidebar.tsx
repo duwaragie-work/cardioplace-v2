@@ -18,10 +18,16 @@ import {
   UserPlus,
   ClipboardList,
   Settings,
+  LifeBuoy,
+  FileSearch,
+  ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import {
-  canManageUsers,
+  canManageSupport,
+  canManageAudit,
+  canReviewWorklist,
+  canViewUsers,
   canViewReports,
   isCoordinatorOnly,
 } from '@/lib/roleGates';
@@ -59,24 +65,29 @@ const PRIMARY_NAV: NavItem[] = [
     label: 'Patients',
     icon: Users,
     matchPrefix: true,
-    show: (roles) => !isCoordinatorOnly(roles),
+    // Visible to everyone incl. COORDINATOR — coordinators get a restricted,
+    // no-clinical roster + care-team assignment view (page-level branch).
   },
   {
     href: '/practices',
     label: 'Practices',
     icon: Building2,
     matchPrefix: true,
-    show: (roles) => !isCoordinatorOnly(roles),
+    // COORDINATOR sees Practices too — read-only view of their own practice +
+    // staff (backend scopes it; CRUD buttons are OPS/SUPER-only). Dashboard /
+    // Patients stay hidden for them (clinical surfaces).
+    show: () => true,
   },
   // phase/23 — user management. Visible to COORDINATOR, HEALPLACE_OPS,
-  // SUPER_ADMIN (controller-level @Roles on the backend). Anyone else
-  // (PROVIDER / MEDICAL_DIRECTOR) doesn't see the item.
+  // SUPER_ADMIN, MEDICAL_DIRECTOR, and PROVIDER (2026-07-01). PROVIDER is
+  // read-only (sees their active practice's roster, no invite / actions);
+  // everyone else manages. All scoped server-side to the active practice.
   {
     href: '/users',
     label: 'Users',
     icon: UserPlus,
     matchPrefix: true,
-    show: (roles) => canManageUsers(roles),
+    show: (roles) => canViewUsers(roles),
   },
   // phase/24 — monthly practice analytics. Oversight surface — visible
   // to MEDICAL_DIRECTOR (scoped to own practice), HEALPLACE_OPS, and
@@ -98,6 +109,32 @@ const SECONDARY_NAV: NavItem[] = [
     label: 'Alerts',
     icon: Bell,
     show: (roles) => !isCoordinatorOnly(roles),
+  },
+  // Support ticket queue — HEALPLACE_OPS + SUPER_ADMIN only.
+  {
+    href: '/support',
+    label: 'Support',
+    icon: LifeBuoy,
+    matchPrefix: true,
+    show: (roles) => canManageSupport(roles),
+  },
+  // HIPAA audit-review console (§164.312(b) L2) — HEALPLACE_OPS + SUPER_ADMIN
+  // only. Opening it also requires a Rules-of-Behavior ack (L1 AuditAccessGate).
+  {
+    href: '/audit',
+    label: 'Audit',
+    icon: FileSearch,
+    matchPrefix: true,
+    show: (roles) => canManageAudit(roles),
+  },
+  // L3 reviewer worklist — triage N7 audit exceptions + security incidents.
+  // HEALPLACE_OPS + SUPER_ADMIN only; also ROB-gated (AuditAccessGate).
+  {
+    href: '/worklist',
+    label: 'Worklist',
+    icon: ShieldAlert,
+    matchPrefix: true,
+    show: (roles) => canReviewWorklist(roles),
   },
   // Account-level settings (security / 2FA today). Available to every
   // signed-in staff role, including COORDINATOR.

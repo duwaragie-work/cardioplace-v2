@@ -7,9 +7,15 @@ import {
 } from '../../chat/emergency-events.js'
 import { RULE_IDS } from '@cardioplace/shared'
 import { Cron } from '@nestjs/schedule'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../../common/cls/cron-actor.util.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
-import { caregiverEmailHtml } from '../../email/email-templates.js'
+import { EMAIL_TEMPLATE_VERSION, caregiverEmailHtml } from '../../email/email-templates.js'
+import type {
+  EmailTemplateName,
+  RecipientCategoryName,
+} from '../../email/email-templates.registry.js'
 import { SmsService } from '../../sms/sms.service.js'
 import { withDeadlockRetry } from '../../common/deadlock-retry.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
@@ -43,6 +49,7 @@ import {
   type BusinessHoursConfig,
 } from '../utils/business-hours.js'
 import { wasEverEnrolled } from '../../practice/enrollment-helpers.js'
+import type { NotificationTrigger } from '../../generated/prisma/enums.js'
 
 /**
  * Cluster 7 A.6 — rules whose primary delivery channel is the caregiver
@@ -87,6 +94,7 @@ export class EscalationService {
     private readonly emailService: EmailService,
     private readonly smsService: SmsService,
     config: ConfigService,
+    private readonly cls: ClsService,
   ) {
     // Used by escalation emails to deep-link recipients into the right app.
     // Provider/admin recipients → admin app (/patients/{userId}?alert={id});
@@ -99,12 +107,11 @@ export class EscalationService {
       .get<string>('PATIENT_BASE_URL', 'http://localhost:3000')
       .replace(/\/+$/, '')
 
-    // 2026-06-07 user-flagged — a localhost URL leaked into a Resend email
+    // 2026-06-07 user-flagged — a localhost URL leaked into an outbound email
     // would (a) be unclickable for recipients, (b) trigger spam-filter
-    // mismatched-domain heuristics that Resend specifically warns about.
-    // Loud warning at boot if NODE_ENV is production but the URLs still
-    // contain localhost — catches a missed deploy-time env var without
-    // breaking local dev.
+    // mismatched-domain heuristics. Loud warning at boot if NODE_ENV is
+    // production but the URLs still contain localhost — catches a missed
+    // deploy-time env var without breaking local dev.
     const nodeEnv = config.get<string>('NODE_ENV', 'development')
     if (nodeEnv === 'production') {
       for (const [name, url] of [
@@ -114,9 +121,9 @@ export class EscalationService {
         if (url.includes('localhost') || url.includes('127.0.0.1')) {
           this.logger.error(
             `${name} is set to "${url}" in production. Escalation emails will ` +
-              `contain unclickable localhost links and will likely trip Resend ` +
+              `contain unclickable localhost links and will likely trip ` +
               `spam filters (domain-URL mismatch). Set this env var to the ` +
-              `production domain (e.g. https://app.cardioplace.ai) before ` +
+              `production domain (e.g. https://cardioplace.ai) before ` +
               `the next deploy.`,
           )
         }
@@ -194,7 +201,12 @@ export class EscalationService {
         switch (caregiver.notifyChannel) {
           case 'EMAIL':
             if (caregiver.email) {
-              await this.emailService.sendEmail(caregiver.email, subject, body)
+              await this.emailService.sendEmail(caregiver.email, subject, body, {
+                template: 'emergency_dispatch_caregiver',
+                templateVersion: EMAIL_TEMPLATE_VERSION,
+                patientUserId: payload.userId,
+                metadata: { caregiverId: caregiver.id },
+              })
             }
             break
           case 'SMS':
@@ -211,6 +223,11 @@ export class EscalationService {
                   channel: 'DASHBOARD',
                   title: subject,
                   body,
+                  // EMERGENCY_FLAGGED, not ALERT_*: this chat/voice emergency
+                  // page has no DeviationAlert backing (EmergencyEvent only), so
+                  // it never appears in the Alerts stream — it MUST stay visible
+                  // in the care team's bell. See project_notification_tab_split.
+                  dispatchTrigger: 'EMERGENCY_FLAGGED',
                 },
               })
             }
@@ -247,6 +264,9 @@ export class EscalationService {
             channel: 'DASHBOARD',
             title: subject,
             body,
+            // EMERGENCY_FLAGGED, not ALERT_*: no DeviationAlert backing, so this
+            // must stay visible in the provider's bell (not hidden as alert-class).
+            dispatchTrigger: 'EMERGENCY_FLAGGED',
           },
         })
       } catch (err) {
@@ -264,6 +284,12 @@ export class EscalationService {
 
   @Cron('*/15 * * * *')
   async handleCron(): Promise<void> {
+    return runAsCronActor(this.cls, 'cron-escalation-ladder', () =>
+      this.handleCronImpl(),
+    )
+  }
+
+  private async handleCronImpl(): Promise<void> {
     // Managed Prisma Postgres occasionally hands the pool a stale connection
     // (server hung up while idle) — first query throws "Server has closed
     // the connection" / P1017. node-postgres evicts the bad socket on that
@@ -1084,6 +1110,17 @@ export class EscalationService {
   }): Promise<void> {
     const { alert, step, recipientIds, recipientRoles, eventId } = args
 
+    // Trigger keys the bell-vs-alerts tab split. These ladder rows carry
+    // `alertId` and render in the Alerts stream, so they are the alert-class
+    // triggers the bell hides: T+0 is the alert's first dispatch (ALERT_CREATED),
+    // later steps are ALERT_ESCALATION, and a resolution dispatch is
+    // ALERT_RESOLVED. See project_notification_tab_split_2026_06_04.
+    const dispatchTrigger: NotificationTrigger = args.triggeredByResolution
+      ? 'ALERT_RESOLVED'
+      : step.step === 'T0'
+        ? 'ALERT_CREATED'
+        : 'ALERT_ESCALATION'
+
     // Role ↔ recipientId pairing is 1:1 by position. getRecipientUserIds
     // preserves order.
     for (let i = 0; i < recipientIds.length; i++) {
@@ -1125,6 +1162,7 @@ export class EscalationService {
               title,
               body,
               tips: [],
+              dispatchTrigger,
             },
           })
           .catch((err: unknown) => {
@@ -1151,7 +1189,27 @@ export class EscalationService {
                 afterHours: args.afterHours,
                 now: args.now,
               })
-              await this.emailService.sendEmail(email, rendered.subject, rendered.html)
+              // N6 extension — collapse per-(tier, role) template strings to
+              // one of the 3 tier-scoped registry templates. Tier + role are
+              // preserved in metadata for regulatory queries; recipientCategory
+              // is overridden per role so the disclosure trail records exactly
+              // who received it (PATIENT vs PROVIDER vs CAREGIVER).
+              const escalationTemplate: EmailTemplateName =
+                escalationTemplateForTier(alert.tier)
+              await this.emailService.sendEmail(email, rendered.subject, rendered.html, {
+                template: escalationTemplate,
+                templateVersion: EMAIL_TEMPLATE_VERSION,
+                patientUserId: alert.userId,
+                recipientCategoryOverride: recipientCategoryForRole(role),
+                metadata: {
+                  alertId: alert.id,
+                  escalationEventId: eventId,
+                  ladderStep: step.step,
+                  role,
+                  tier: alert.tier ?? 'UNKNOWN',
+                  ruleId: alert.ruleId,
+                },
+              })
             }
           }
         }
@@ -1279,7 +1337,7 @@ export class EscalationService {
   /**
    * Gap 5 — caregiver dispatch. For each consented, active caregiver on a
    * real channel, delivers the signed-off caregiverMessage (Minimum Necessary
-   * — no other PHI) via their channel: EMAIL (Resend), DASHBOARD (account
+   * — no other PHI) via their channel: EMAIL (SMTP), DASHBOARD (account
    * caregiver inbox), or SMS (NoopSmsService until a provider is wired). A
    * CaregiverDispatchLog row (unique on alert+caregiver+channel) makes re-fired
    * alerts idempotent. Gated behind CAREGIVER_DISPATCH_ENABLED so production
@@ -1324,6 +1382,12 @@ export class EscalationService {
               caregiver.email,
               `Cardioplace — a health update about ${patientDisplayName}`,
               caregiverEmailHtml(caregiver.name, message),
+              {
+                template: 'caregiver_alert',
+                templateVersion: EMAIL_TEMPLATE_VERSION,
+                patientUserId: alert.userId,
+                metadata: { alertId: alert.id, caregiverId: caregiver.id },
+              },
             )
             delivered = true
             break
@@ -1338,6 +1402,7 @@ export class EscalationService {
                 channel: 'DASHBOARD',
                 title: 'Caregiver update',
                 body: message,
+                dispatchTrigger: 'CAREGIVER_UPDATE',
               },
             })
             delivered = true
@@ -1556,6 +1621,7 @@ const ALERT_INCLUDE = {
       id: true,
       name: true,
       email: true,
+      displayId: true,
       dateOfBirth: true,
       enrollmentStatus: true,
       providerAssignmentAsPatient: {
@@ -1607,6 +1673,11 @@ interface AlertRow {
     id: string
     name: string | null
     email: string | null
+    // Permanent human-readable identifier (CP-PAT-... / CP-STF-...).
+    // Surfaced in the email subject for staff recipients so they can
+    // cross-reference with their own systems. See
+    // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+    displayId: string | null
     dateOfBirth: Date | null
     // Layer B dispatch gate — escalation only fires for patients the admin
     // has passed through the 4-piece enrollment gate (assignment + practice
@@ -1677,9 +1748,12 @@ function escalationEmailBody(args: {
   const isPatient = role === 'PATIENT'
 
   // Subject — patient-role emails keep the friendly, non-alarming title.
+  // Staff subjects carry NO patient identifier (HIPAA Minimum Necessary
+  // §164.502(b) — passes the lockscreen test). The patient is referenced by
+  // the non-PHI displayId inside the body only.
   const subject = isPatient
     ? patientSubject(alert.tier)
-    : `[${humanStep(step)} ${tierLabel}] ${patientName} — ${practiceName}`
+    : `[Cardioplace] ${tierLabel} - ${practiceName}`
 
   const stepPill = `${humanStep(step)}${afterHours ? ' (after-hours queued)' : ''}`
   const ackFooter = ackFooterFor(alert.tier)
@@ -1736,12 +1810,23 @@ function escalationEmailBody(args: {
   const createdLine = `<div style="margin-top:6px;font-size:12px;color:#6b7280">Alert created: <strong>${escapeHtml(createdLocal)}</strong> <span style="color:#9ca3af">(${escapeHtml(createdUtc)})</span></div>`
 
   // Footer with stable IDs so anyone replying via phone or Slack can
-  // reference exactly which alert / patient.
-  const idFooter = `<div style="margin-top:18px;font-size:11px;color:#9ca3af;font-family:ui-monospace,SFMono-Regular,monospace">Alert ID: ${escapeHtml(alert.id)} &middot; Patient ID: ${escapeHtml(alert.userId)}</div>`
+  // reference exactly which alert / patient. Prefer the human-readable
+  // displayId when present (CP-PAT-...); fall back to the ULID. The
+  // displayId is the cross-system handle clinicians actually want to use.
+  const patientRefId = alert.user.displayId
+    ? formatDisplayIdForView(alert.user.displayId)
+    : alert.userId
+  const idFooter = `<div style="margin-top:18px;font-size:11px;color:#9ca3af;font-family:ui-monospace,SFMono-Regular,monospace">Alert ID: ${escapeHtml(alert.id)} &middot; Patient ID: ${escapeHtml(patientRefId)}</div>`
 
-  // Header / clinical / detail / action / footer blocks. Keep inline styles
-  // — most email clients strip <style> tags.
-  const html = `<html><body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:auto;padding:24px;color:#111827">
+  // Standardized HIPAA confidentiality footer — rendered on BOTH the patient
+  // and the provider/MD/Ops emails (one definition, one place to update).
+  const confidentialityFooter = `<hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb"/>
+  <p style="font-size:11px;color:#9ca3af">Sent by Cardioplace escalation service. Do not reply to this email. This email may contain protected health information. If you received it in error, please notify the sender and delete it without forwarding or printing.</p>`
+
+  // Patient recipients are the data subject — they see their own reading and
+  // clinical message (their own data, not a PHI disclosure). Keep this body
+  // exactly as before.
+  const patientHtml = `<html><body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:auto;padding:24px;color:#111827">
   <div style="border-left:4px solid ${tierColor};padding:16px 20px;background:#f9fafb;border-radius:6px">
     <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${tierColor}">${escapeHtml(tierLabel)} &middot; ${escapeHtml(stepPill)}</div>
     <div style="font-size:20px;font-weight:700;margin-top:6px;color:#111827">${escapeHtml(patientName)}</div>
@@ -1758,9 +1843,31 @@ function escalationEmailBody(args: {
   <div style="margin-top:22px"><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:11px 20px;background:${tierColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">${escapeHtml(ctaLabel)}</a></div>
   ${ackFooter ? `<div style="margin-top:18px;padding:12px 14px;background:#fef3c7;border-radius:6px;font-size:12.5px;color:#78350f"><strong>Acknowledgment expected.</strong> ${escapeHtml(ackFooter)}</div>` : ''}
   ${idFooter}
-  <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb"/>
-  <p style="font-size:11px;color:#9ca3af">Sent by Cardioplace escalation service. Do not reply to this email.</p>
+  ${confidentialityFooter}
 </body></html>`
+
+  // Provider / MD / Ops recipients get the HIPAA "notify-and-link" body:
+  // NO patient PHI (no name, email, DOB, age, BP/pulse/position, clinical
+  // narrative, or rule metadata) — only the alert tier, practice, ack window,
+  // the non-PHI displayId reference, and a dashboard deep-link. Minimum
+  // Necessary §164.502(b); see the HIPAA-sprint email-refactor appendix.
+  const providerHtml = `<html><body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:auto;padding:24px;color:#111827">
+  <div style="border-left:4px solid ${tierColor};padding:16px 20px;background:#f9fafb;border-radius:6px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${tierColor}">${escapeHtml(tierLabel)} &middot; ${escapeHtml(stepPill)}</div>
+    <div style="font-size:15px;margin-top:8px;color:#111827">You have a new <strong>${escapeHtml(tierLabel)}</strong> alert from a patient in your practice.</div>
+  </div>
+  ${recipientBanner}
+  <div style="margin-top:18px;font-size:13.5px;color:#374151;line-height:1.7">
+    <div>Practice: <strong>${escapeHtml(practiceName)}</strong></div>
+    ${ackFooter ? `<div>Acknowledgment expected: <strong>${escapeHtml(ackFooter)}</strong></div>` : ''}
+    <div>Patient reference ID: <strong>${escapeHtml(patientRefId)}</strong></div>
+  </div>
+  <div style="margin-top:22px"><a href="${escapeAttr(dashboardUrl)}" style="display:inline-block;padding:11px 20px;background:${tierColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">${escapeHtml(ctaLabel)}</a></div>
+  ${idFooter}
+  ${confidentialityFooter}
+</body></html>`
+
+  const html = isPatient ? patientHtml : providerHtml
 
   return { subject, html }
 }
@@ -1841,6 +1948,16 @@ function ageFromDob(dob: Date | null, now: Date): number | null {
   if (ms < 0) return null
   const years = ms / (365.25 * 24 * 3600 * 1000)
   return Math.floor(years)
+}
+
+// Formats a canonical display ID ("CPPATK8M2R4N7") with hyphens for human
+// display ("CP-PAT-K8M2R4N-7"). Defensive: if input is already hyphenated
+// or off the expected length, returns it verbatim. Mirrors the formatter
+// in DisplayIdService (kept local to avoid cross-module dependency from
+// the escalation pipeline into the users module).
+function formatDisplayIdForView(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`
 }
 
 function tierLabelFor(tier: string | null): string {
@@ -1949,3 +2066,39 @@ export { TIER_1_LADDER }
 // Re-export the email-body helper so spec files can render and assert on the
 // output directly without spinning up the full Nest TestingModule.
 export { escalationEmailBody }
+
+// N6 extension — map the ladder's RecipientRole onto the EmailDisclosureLog
+// `recipientCategory` bucket. Kept adjacent to the escalation dispatch site
+// so a role added to the ladder can never silently miss the disclosure trail
+// (the compile-time exhaustiveness check catches it).
+function recipientCategoryForRole(role: RecipientRole): RecipientCategoryName {
+  switch (role) {
+    case 'PATIENT':
+      return 'PATIENT'
+    case 'CAREGIVER':
+      return 'CAREGIVER'
+    case 'PRIMARY_PROVIDER':
+    case 'BACKUP_PROVIDER':
+      return 'PROVIDER'
+    case 'MEDICAL_DIRECTOR':
+      return 'MEDICAL_DIRECTOR'
+    case 'HEALPLACE_OPS':
+      return 'HEALPLACE_OPS'
+  }
+}
+
+// N6 extension — map the DeviationAlert tier string onto one of the 3
+// tier-scoped registry templates. Same collapse rule as `ladderForTier`:
+//   • TIER_1_*, BP_LEVEL_1_* → escalation_tier_1_staff
+//   • TIER_2_*, BP_LEVEL_2   → escalation_tier_2_staff
+//   • TIER_3_*               → escalation_tier_3_staff
+// Unknown/null tier defaults to tier 1 (safer to over-report than under-).
+// The raw tier is preserved separately in the disclosure metadata.
+function escalationTemplateForTier(tier: string | null): EmailTemplateName {
+  if (!tier) return 'escalation_tier_1_staff'
+  if (tier.startsWith('TIER_3')) return 'escalation_tier_3_staff'
+  if (tier.startsWith('TIER_2') || tier === 'BP_LEVEL_2') {
+    return 'escalation_tier_2_staff'
+  }
+  return 'escalation_tier_1_staff'
+}

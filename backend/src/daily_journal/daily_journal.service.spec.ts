@@ -883,22 +883,30 @@ describe('DailyJournalService', () => {
     })
   })
 
-  // ─── H5 G.4 — bell visibility filter (read-side; #80 EMAIL + alert-linked PUSH) ──
-  describe('getNotifications / unread-count bell filter (G.4 + #80)', () => {
+  // ─── Bell visibility filter — keyed off dispatchTrigger, not nullable alertId ──
+  describe('getNotifications / unread-count bell filter (dispatchTrigger tab-split)', () => {
     // The bell LIST + unread COUNT must both exclude (a) EMAIL outbound rows
-    // (#80) and (b) alert-linked PUSH rows (G.4 — escalation T+0 mirror). The
-    // write path is untouched; this is a READ-side query predicate.
+    // (#80) and (b) alert-class triggers (ALERT_CREATED/ESCALATION/RESOLVED),
+    // which already render in the Alerts stream. This keys off dispatchTrigger,
+    // NOT the old `alertId != null AND PUSH` heuristic — that heuristic leaked
+    // once a DeviationAlert cascade nulled alertId (journal-entry delete ->
+    // onDelete:SetNull). Write path untouched; READ-side query predicate.
+    // Regression guard: project_notification_tab_split_2026_06_04.
+    const ALERT_TRIGGERS = ['ALERT_CREATED', 'ALERT_ESCALATION', 'ALERT_RESOLVED']
+
     function expectBellExclusions(where: any) {
       expect(where.userId).toBe('u1')
       expect(where.AND).toEqual(
         expect.arrayContaining([
           { channel: { not: 'EMAIL' } },
-          { NOT: { AND: [{ alertId: { not: null } }, { channel: 'PUSH' }] } },
+          { dispatchTrigger: { notIn: expect.arrayContaining(ALERT_TRIGGERS) } },
         ]),
       )
+      // The fragile nullable-alertId heuristic is gone — trigger decides now.
+      expect(JSON.stringify(where)).not.toContain('alertId')
     }
 
-    it('getNotifications excludes EMAIL + alert-linked PUSH at the query', async () => {
+    it('getNotifications excludes EMAIL + ALERT_* triggers at the query', async () => {
       mockPrisma.notification.findMany.mockResolvedValueOnce([])
       await service.getNotifications('u1')
       const where = mockPrisma.notification.findMany.mock.calls[0][0].where
@@ -913,12 +921,13 @@ describe('DailyJournalService', () => {
       expectBellExclusions(where)
     })
 
-    it('system-action PUSH (alertId null) is NOT excluded — only alert-linked PUSH is', () => {
-      // The exclusion is scoped to alertId != null AND channel = PUSH, so a
-      // med-hold / threshold / profile-reject PUSH (alertId null) stays in the bell.
-      const clause = { NOT: { AND: [{ alertId: { not: null } }, { channel: 'PUSH' }] } }
-      // Sanity: the predicate requires BOTH alertId-present AND channel=PUSH to drop.
-      expect(clause.NOT.AND).toEqual([{ alertId: { not: null } }, { channel: 'PUSH' }])
+    it('action/system triggers stay visible — only the three ALERT_* triggers are hidden', () => {
+      // A null-alertId action row (CARE_TEAM_UPDATE, SYSTEM_CRON) and an
+      // EMERGENCY_FLAGGED page (no DeviationAlert backing) must NOT be excluded.
+      expect(ALERT_TRIGGERS).not.toContain('CARE_TEAM_UPDATE')
+      expect(ALERT_TRIGGERS).not.toContain('EMERGENCY_FLAGGED')
+      expect(ALERT_TRIGGERS).not.toContain('SYSTEM_CRON')
+      expect(ALERT_TRIGGERS).toHaveLength(3)
     })
   });
 
@@ -1332,12 +1341,12 @@ describe('DailyJournalService', () => {
       expect(mockPrisma.profileVerificationLog.create).not.toHaveBeenCalled()
     })
 
-    it('DELETE (patient) → audit row written BEFORE the row is removed', async () => {
+    it('DELETE (patient) → SOFT-delete (deletedAt stamped, never hard-deleted) + audit written BEFORE it', async () => {
       mockPrisma.journalEntry.findFirst
         .mockResolvedValueOnce(fullRow()) // ownership + snapshot fetch
         .mockResolvedValueOnce(null) // findSessionReevalAnchor — no sibling
       mockPrisma.profileVerificationLog.create.mockResolvedValueOnce({})
-      mockPrisma.journalEntry.delete.mockResolvedValueOnce({})
+      mockPrisma.journalEntry.update.mockResolvedValueOnce({})
 
       await service.delete('u1', 'e1')
 
@@ -1347,12 +1356,19 @@ describe('DailyJournalService', () => {
         fieldPath: 'journal_entry.deleted',
         newValue: Prisma.JsonNull,
       })
-      // Snapshot captured the state being destroyed.
+      // Snapshot captured the state at delete time.
       expect(audit.data.previousValue).toMatchObject({ entryId: 'e1', systolicBP: 140 })
-      // The audit write strictly precedes the destructive delete.
+      // L5: the reading is SOFT-deleted (deletedAt stamped), NEVER hard-deleted
+      // — so its fired DeviationAlert + escalations survive (no FK cascade).
+      expect(mockPrisma.journalEntry.update).toHaveBeenCalledWith({
+        where: { id: 'e1' },
+        data: { deletedAt: expect.any(Date) },
+      })
+      expect(mockPrisma.journalEntry.delete).not.toHaveBeenCalled()
+      // The audit write strictly precedes the soft-delete.
       const auditOrder = mockPrisma.profileVerificationLog.create.mock.invocationCallOrder[0]
-      const deleteOrder = mockPrisma.journalEntry.delete.mock.invocationCallOrder[0]
-      expect(auditOrder).toBeLessThan(deleteOrder)
+      const updateOrder = mockPrisma.journalEntry.update.mock.invocationCallOrder[0]
+      expect(auditOrder).toBeLessThan(updateOrder)
     })
 
     it('DELETE (patient) with surviving session sibling → emits ENTRY_UPDATED (context refresh only; engine does not re-eval per CTO 2026-06-09)', async () => {
@@ -1369,7 +1385,7 @@ describe('DailyJournalService', () => {
           weight: null,
         })
       mockPrisma.profileVerificationLog.create.mockResolvedValueOnce({})
-      mockPrisma.journalEntry.delete.mockResolvedValueOnce({})
+      mockPrisma.journalEntry.update.mockResolvedValueOnce({})
 
       await service.delete('u1', 'e1')
 
@@ -1380,7 +1396,7 @@ describe('DailyJournalService', () => {
     it('DELETE (admin) → ADMIN_READING_DELETED; NO re-eval emit, anchor lookup skipped', async () => {
       mockPrisma.journalEntry.findFirst.mockResolvedValueOnce(fullRow())
       mockPrisma.profileVerificationLog.create.mockResolvedValueOnce({})
-      mockPrisma.journalEntry.delete.mockResolvedValueOnce({})
+      mockPrisma.journalEntry.update.mockResolvedValueOnce({})
 
       await service.delete('u1', 'e1', ADMIN)
 
@@ -1401,6 +1417,7 @@ describe('DailyJournalService', () => {
       await expect(service.delete('u1', 'someone-elses-entry', ADMIN)).rejects.toThrow(
         'Journal entry not found',
       )
+      expect(mockPrisma.journalEntry.update).not.toHaveBeenCalled()
       expect(mockPrisma.journalEntry.delete).not.toHaveBeenCalled()
       expect(mockPrisma.profileVerificationLog.create).not.toHaveBeenCalled()
     })

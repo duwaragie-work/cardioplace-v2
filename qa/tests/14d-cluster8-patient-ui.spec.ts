@@ -561,15 +561,25 @@ test.describe('Cluster 8 §D-PATIENT — brady surveillance "patient sees nothin
         'patient must NOT see an emergency screen for a Tier 3 surveillance row',
       ).toBe(false)
 
-      // Notifications inbox: no new row for the surveillance alert. The
+      // Notifications inbox: no new ALERT row for the surveillance rule. The
       // engine writes Notification rows for alerts with non-empty
       // patientMessage; surveillance has an empty patient message, so the
-      // notifications count must NOT grow.
+      // alert-notification count must NOT grow.
+      //
+      // N7 (2026-07-13) — LoggedConfirmationListener writes a `'Logged ✓'`
+      // PUSH on every entry. That row is a routing-confirmation for the
+      // patient's own successful log, not an alert leak, so it's excluded
+      // from this count. Test's clinical intent is unchanged: a Tier 3
+      // physician-only surveillance row must produce zero PATIENT-FACING
+      // ALERT notifications.
       const notifsAfter = await tc.listNotifications(userId)
+      const isAlertNotif = (n: { title: string }) => n.title !== 'Logged ✓'
+      const alertsBefore = notifsBefore.filter(isAlertNotif).length
+      const alertsAfter = notifsAfter.filter(isAlertNotif).length
       expect(
-        notifsAfter.length,
-        `surveillance must not add a patient notification (before=${notifsBefore.length}, after=${notifsAfter.length})`,
-      ).toBe(notifsBefore.length)
+        alertsAfter,
+        `surveillance must not add a patient alert notification (before=${alertsBefore}, after=${alertsAfter}; total notifs before=${notifsBefore.length} after=${notifsAfter.length})`,
+      ).toBe(alertsBefore)
     } finally {
       await tc.dispose()
     }

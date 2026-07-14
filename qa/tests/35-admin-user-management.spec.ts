@@ -6,16 +6,41 @@ import { newTestControl } from '../helpers/test-control.js'
 import { ADMINS, SEED_PRACTICE_ID } from '../helpers/accounts.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 import { byTestId, T } from '../helpers/selectors.js'
+import type { Page } from '@playwright/test'
+
+// phase/28 — per-row actions moved behind a 3-dots kebab. These helpers open
+// the menu and click / assert an item, retrying the whole open+act so a
+// list refetch (which re-renders the row and closes the menu) can't flake.
+async function menuClick(page: Page, email: string, key: string): Promise<void> {
+  await expect(async () => {
+    await page.locator(byTestId(T.adminUsers.actionsMenu(email))).click()
+    await page
+      .locator(byTestId(T.adminUsers.action(key, email)))
+      .click({ timeout: 2_000 })
+  }).toPass({ timeout: 20_000 })
+}
+
+async function menuHasItem(page: Page, email: string, key: string): Promise<void> {
+  await expect(async () => {
+    await page.locator(byTestId(T.adminUsers.actionsMenu(email))).click()
+    await expect(
+      page.locator(byTestId(T.adminUsers.action(key, email))),
+    ).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 20_000 })
+}
 
 /**
  * Spec 35 — admin user management (/users, phase/23).
  *
  * Surface map (from admin/src/components/user-management/*):
- *   • Gate: COORDINATOR / HEALPLACE_OPS / SUPER_ADMIN (canManageUsers).
- *     Everyone else gets the `admin-users-access-denied` 403 card.
+ *   • View gate (canViewUsers): COORDINATOR / HEALPLACE_OPS / SUPER_ADMIN /
+ *     MEDICAL_DIRECTOR / PROVIDER. Only PATIENT gets the 403 card.
+ *   • Manage gate (canManageUsers): the above minus PROVIDER — PROVIDER is
+ *     read-only (no invite CTA / row actions). See 2026-07-01 access-scope patch.
  *   • SUPER_ADMIN / OPS see the full list + role/status/practice filters.
- *   • COORDINATOR sees a patients-only variant: NO role filter, a practice
- *     badge, and an "invite patient" CTA.
+ *   • COORDINATOR sees their own-practice variant: NO role filter (single
+ *     practice), a practice badge, and an invite CTA. The list now includes
+ *     that practice's patients, providers, and medical directors.
  *   • Rows + per-row action buttons are keyed by EMAIL.
  *
  * Read-only assertions run ungated. The invite + deactivate/reactivate write
@@ -78,7 +103,7 @@ test.describe('Spec 35 — admin user management', () => {
     ).toHaveCount(0)
   })
 
-  test('35.4 — COORDINATOR gets the patients-only variant (no role filter)', async ({
+  test('35.4 — COORDINATOR gets their own-practice variant (no role filter)', async ({
     page,
   }) => {
     test.setTimeout(90_000)
@@ -90,8 +115,9 @@ test.describe('Spec 35 — admin user management', () => {
       /\/(dashboard|users|patients)/,
     )
     await page.goto(`${ADMIN_BASE_URL}/users`)
-    // The invite-patient CTA + search render; the role filter does NOT (the
-    // coordinator only ever sees patients of their own practice).
+    // The invite CTA + search render; the role filter does NOT (the coordinator
+    // is scoped to a single practice, so a cross-practice/role picker is moot —
+    // they still see that practice's patients, providers, and medical directors).
     await expect(page.locator(byTestId(T.adminUsers.inviteSingle))).toBeVisible({
       timeout: 25_000,
     })
@@ -103,20 +129,36 @@ test.describe('Spec 35 — admin user management', () => {
     ).toBeVisible()
   })
 
-  test('35.5 — PROVIDER + MEDICAL_DIRECTOR are denied /users', async ({
+  test('35.5 — PROVIDER + MEDICAL_DIRECTOR can reach /users (2026-07-01)', async ({
     page,
   }) => {
     test.setTimeout(90_000)
+    // Access-scope patch: MED_DIR gained practice-scoped roster management and
+    // PROVIDER gained read-only roster access. Neither sees the 403 card now.
+    // MED_DIR is a manager (invite CTA present); PROVIDER is read-only (no CTA).
+    // Finer behavior is pinned in specs 70 + 71.
     for (const persona of [ADMINS.primaryProvider, ADMINS.medicalDirector]) {
       // Clear the prior persona's session, else /sign-in redirects straight to
       // /dashboard (already authed) and the email field never renders.
       await page.context().clearCookies()
       await signInAdmin(page, persona.email, ADMIN_BASE_URL)
       await page.goto(`${ADMIN_BASE_URL}/users`)
+      // Roster chrome renders; the 403 card does NOT.
+      await expect(
+        page.locator(byTestId(T.adminUsers.search)),
+        `${persona.email} should see the roster`,
+      ).toBeVisible({ timeout: 25_000 })
       await expect(
         page.locator(byTestId(T.adminUsers.accessDenied)),
-        `${persona.email} should see the 403 card`,
-      ).toBeVisible({ timeout: 25_000 })
+        `${persona.email} should NOT see the 403 card`,
+      ).toHaveCount(0)
+      // MED_DIR manages (invite CTA visible); PROVIDER is read-only (no CTA).
+      const inviteCta = page.locator(byTestId(T.adminUsers.inviteSingle))
+      if (persona.email === ADMINS.medicalDirector.email) {
+        await expect(inviteCta).toBeVisible()
+      } else {
+        await expect(inviteCta).toHaveCount(0)
+      }
     }
   })
 
@@ -184,8 +226,8 @@ test.describe('Spec 35 — admin user management', () => {
       timeout: 15_000,
     })
 
-    // Deactivate → confirm modal → reason → confirm.
-    await page.locator(byTestId(T.adminUsers.deactivate(email))).click()
+    // Deactivate → kebab item → confirm modal → reason → confirm.
+    await menuClick(page, email, 'deactivate')
     await expect(
       page.locator(byTestId(T.adminUsers.deactivateModal)),
     ).toBeVisible({ timeout: 15_000 })
@@ -193,16 +235,24 @@ test.describe('Spec 35 — admin user management', () => {
       .locator(byTestId(T.adminUsers.deactivateReason))
       .fill('QA automated deactivation')
     await page.locator(byTestId(T.adminUsers.deactivateConfirm)).click()
-
-    // Row flips to offering Reactivate.
+    // Modal closes only after the list has refetched → the row is now fresh.
     await expect(
-      page.locator(byTestId(T.adminUsers.reactivate(email))),
-    ).toBeVisible({ timeout: 15_000 })
+      page.locator(byTestId(T.adminUsers.deactivateModal)),
+    ).toHaveCount(0, { timeout: 15_000 })
 
-    // Reactivate → row flips back to offering Deactivate.
-    await page.locator(byTestId(T.adminUsers.reactivate(email))).click()
+    // Kebab now offers Reactivate → opens the scoped re-grant modal (no longer
+    // a one-click action; HIPAA §164.308(a)(4)). The prior role (PATIENT) is
+    // prefilled as "same role" — accept it and submit.
+    await menuClick(page, email, 'reactivate')
     await expect(
-      page.locator(byTestId(T.adminUsers.deactivate(email))),
+      page.locator('[data-testid="admin-reactivate-modal"]'),
     ).toBeVisible({ timeout: 15_000 })
+    await page.locator('[data-testid="admin-reactivate-submit"]').click()
+    await expect(
+      page.locator('[data-testid="admin-reactivate-modal"]'),
+    ).toHaveCount(0, { timeout: 15_000 })
+
+    // After reactivate, the kebab offers Deactivate again.
+    await menuHasItem(page, email, 'deactivate')
   })
 })

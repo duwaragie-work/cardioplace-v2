@@ -32,7 +32,10 @@ export class TestControl {
   }
 
   private async post<T = unknown>(path: string, body: unknown = {}): Promise<T> {
-    const res = await this.ctx.post(path, { data: body })
+    // N7 audit-exception scan can take 30–60s on a real DB (150-row seed +
+    // 6 detector queries + upserts). Default 30s Playwright API timeout was
+    // sufficient for the other cron drivers; bump for the audit-exception one.
+    const res = await this.ctx.post(path, { data: body, timeout: 120_000 })
     if (!res.ok()) {
       throw new Error(
         `[test-control] POST ${path} failed ${res.status()}: ${await res.text()}`,
@@ -48,7 +51,12 @@ export class TestControl {
         `[test-control] GET ${path} failed ${res.status()}: ${await res.text()}`,
       )
     }
-    return res.json() as Promise<T>
+    // NestJS returns an empty body when the handler returns null — tolerate
+    // this by treating empty responses as `null`. Otherwise res.json() throws
+    // SyntaxError on empty input.
+    const text = await res.text()
+    if (!text) return null as T
+    return JSON.parse(text) as T
   }
 
   // ─── Health ─────────────────────────────────────────────────────────────
@@ -78,9 +86,24 @@ export class TestControl {
     await this.post('test-control/escalation/fire-t0', { alertId })
   }
 
-  /** Run the gap-alert scanner. 48h trigger, 24h idempotency. */
-  async runGapAlertScan(now?: Date): Promise<{ scanned: number; nudged: number }> {
-    return this.post('test-control/cron/gap-alert/run', {
+  /**
+   * Run the daily-reminder scanner (N2, 2026-07-13). Replaces the deleted
+   * runGapAlertScan helper — every-30-min scan, per-user reminderTime slot,
+   * quiet-hours + already-logged-today suppression, escalating tone Day 1/2/3+,
+   * care-team dispatch on every 3-day multiple.
+   *
+   * Returns the full DailyReminderScanSummary so specs can assert on
+   * dispatched vs. skipped counts, not just a running total.
+   */
+  async runDailyReminderScan(now?: Date): Promise<{
+    dispatched: number
+    skippedLoggedToday: number
+    skippedQuietHours: number
+    skippedNotSlot: number
+    skippedIdempotent: number
+    careTeamAlerts: number
+  }> {
+    return this.post('test-control/cron/daily-reminder/run', {
       now: (now ?? new Date()).toISOString(),
     })
   }
@@ -103,6 +126,102 @@ export class TestControl {
     return this.post('test-control/cron/medication-hold-escalation/run', {
       now: (now ?? new Date()).toISOString(),
     })
+  }
+
+  /**
+   * N7 — run the audit-exception-report scanner once. Iterates every detector
+   * over the past 24h of audit data, upserts AuditException rows per candidate.
+   * Bypasses the 03:00 ET schedule so Playwright can seed a pattern → trigger
+   * → assert in one test.
+   */
+  async runAuditExceptionReportScan(now?: Date): Promise<{
+    scanned: number
+    created: number
+    updated: number
+    stickySkipped: number
+    failedDetectors: number
+  }> {
+    return this.post('test-control/cron/audit-exception-report/run', {
+      now: (now ?? new Date()).toISOString(),
+    })
+  }
+
+  // ─── N4/N5/N6/N7 audit-read + seed helpers ─────────────────────────────
+  async findUserByEmail(email: string): Promise<{ id: string } | null> {
+    return this.get(`test-control/audit/user-by-email?email=${encodeURIComponent(email)}`)
+  }
+
+  async countAccessLog(filter: {
+    actorId?: string
+    modelName?: string
+    sinceIso?: string
+  }): Promise<{ count: number }> {
+    const q = new URLSearchParams()
+    if (filter.actorId) q.set('actorId', filter.actorId)
+    if (filter.modelName) q.set('modelName', filter.modelName)
+    if (filter.sinceIso) q.set('sinceIso', filter.sinceIso)
+    return this.get(`test-control/audit/access-log/count?${q.toString()}`)
+  }
+
+  async latestEmailDisclosure(recipientEmail: string): Promise<{
+    id: string
+    template: string
+    purpose: string
+    recipientCategory: string
+    briefDescription: string
+    bodyHash: string
+    sentAt: string
+  } | null> {
+    return this.get(
+      `test-control/audit/email-disclosure-log/latest?recipientEmail=${encodeURIComponent(recipientEmail)}`,
+    )
+  }
+
+  async latestProfileVerificationLog(filter: {
+    userId: string
+    changeType: string
+  }): Promise<{
+    id: string
+    previousValue: unknown
+    newValue: unknown
+    changedBy: string
+    changedByRole: string
+  } | null> {
+    return this.get(
+      `test-control/audit/profile-verification-log/latest?userId=${encodeURIComponent(filter.userId)}&changeType=${filter.changeType}`,
+    )
+  }
+
+  async findAuditExceptionByActor(actorId: string): Promise<{
+    id: string
+    detectorId: string
+    severity: string
+    status: string
+    idempotencyKey: string
+    evidence: unknown
+  } | null> {
+    return this.get(
+      `test-control/audit/audit-exception/by-actor?actorId=${encodeURIComponent(actorId)}`,
+    )
+  }
+
+  async seedAccessLogBatch(input: {
+    actorId: string
+    actorType: 'USER' | 'SYSTEM_ACTOR'
+    action: 'READ' | 'WRITE' | 'DELETE'
+    modelName: string
+    count: number
+    spreadMinutes: number
+  }): Promise<{ inserted: number }> {
+    return this.post('test-control/seed/access-log-batch', input)
+  }
+
+  async clearAccessLogForActor(actorId: string): Promise<{ deleted: number }> {
+    return this.post('test-control/audit/access-log/clear-actor', { actorId })
+  }
+
+  async clearAuditExceptionsByPrefix(prefix: string): Promise<{ deleted: number }> {
+    return this.post('test-control/audit/audit-exception/clear-by-prefix', { prefix })
   }
 
   // ─── Time advancement ───────────────────────────────────────────────────
@@ -601,6 +720,24 @@ export class TestControl {
     markUsed?: boolean
   }): Promise<{ token: string }> {
     return this.post('test-control/magic-link/issue', args)
+  }
+
+  // ─── Captured emails (spec 4Z — email-no-PHI) ─────────────────────────────
+  /**
+   * Read the backend's in-memory captured emails. CI SMTP is a dummy that
+   * never delivers, so EmailService captures the rendered mail in a non-prod
+   * buffer; this is the only way a spec can inspect what WOULD be sent.
+   */
+  async getCapturedEmails(
+    to?: string,
+  ): Promise<Array<{ to: string; subject: string; html: string; sentAt: string }>> {
+    const q = to ? `?to=${encodeURIComponent(to)}` : ''
+    return this.get(`test-control/emails${q}`)
+  }
+
+  /** Clear the captured-email buffer (call before triggering a send). */
+  async clearCapturedEmails(): Promise<{ ok: true }> {
+    return this.post('test-control/emails/clear')
   }
 
   async dispose(): Promise<void> {

@@ -1,8 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { EventEmitter2 } from '@nestjs/event-emitter'
+import { ClsService } from 'nestjs-cls'
 import { PrismaClient } from '../generated/prisma/client.js'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
+import { accessLogExtension } from '../common/prisma-extensions/access-log.extension.js'
+import { pushDispatchExtension } from '../common/prisma-extensions/push-dispatch.extension.js'
+import { softDeleteJournalEntryExtension } from '../common/prisma-extensions/soft-delete.extension.js'
 
 /**
  * Prisma error codes that indicate a stale or closed connection — usually
@@ -18,12 +23,52 @@ const RETRYABLE_PRISMA_CODES: ReadonlySet<string> = new Set([
   'P2028', // Transaction API error / failed to start
 ])
 
+/**
+ * HIPAA §164.312(e)(2)(ii) (transmission security) — classify the DB
+ * connection's transport from DATABASE_URL for the boot-time TLS audit line.
+ * Pure + exported so the classification paths are unit-testable without
+ * standing up a connection (Humaira N3 / 164.312-T21).
+ *
+ *   • 'prisma-postgres' — managed Prisma Postgres, which enforces
+ *     sslmode=require by default and refuses plaintext connections at the
+ *     driver level (Lakshitha's encryption report, 2026-06-24). Always TLS.
+ *   • 'sslmode'         — an explicit sslmode=require / sslmode=verify-* in
+ *     the connection string.
+ *   • 'missing-prod'    — no TLS signal AND NODE_ENV=production → the caller
+ *     must refuse to start.
+ *   • 'missing-dev'     — no TLS signal outside production (local dev) → warn
+ *     only.
+ */
+export type DbTlsClassification =
+  | 'prisma-postgres'
+  | 'sslmode'
+  | 'missing-prod'
+  | 'missing-dev'
+
+export function classifyDbTls(
+  url: string,
+  nodeEnv: string | undefined,
+): DbTlsClassification {
+  const isPrismaPostgres =
+    url.includes('db.prisma.io') || url.includes('pooled.db.prisma.io')
+  const hasSslMode = /sslmode=require|sslmode=verify/i.test(url)
+
+  if (isPrismaPostgres) return 'prisma-postgres'
+  if (hasSslMode) return 'sslmode'
+  if (nodeEnv === 'production') return 'missing-prod'
+  return 'missing-dev'
+}
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
   private readonly logger = new Logger(PrismaService.name)
   private readonly configService: ConfigService
 
-  constructor(configService: ConfigService) {
+  constructor(
+    configService: ConfigService,
+    cls: ClsService,
+    eventEmitter: EventEmitter2,
+  ) {
     const dbUrl = configService.get<string>('DATABASE_URL')!
     const isAccelerate = dbUrl.startsWith('prisma://')
 
@@ -58,6 +103,58 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     }
 
     this.configService = configService
+
+    // ── PHI audit trail wiring (Humaira N8 / 164.312-T7) ──────────────────
+    // `$extends` returns a NEW client rather than mutating `this`, but this
+    // service is injected as a class into 54 call sites that all do
+    // `this.prisma.<model>.<op>()` directly. To audit every one of them with
+    // zero call-site changes, build the extended (audited) client here and
+    // return a Proxy that routes the QUERY surface to it while keeping this
+    // class's own members (lifecycle hooks + withConnectionRetry) and the
+    // connection primitives on the base instance.
+    //
+    // The extension is handed the base `this` as its write client, so its
+    // AccessLog inserts never re-enter the extension (no recursion).
+    //
+    // Chained (2026-07-06, HIPAA L5): the soft-delete filter injects
+    // `deletedAt: null` into every top-level JournalEntry read so soft-deleted
+    // readings drop out of lists / averages / reports. It composes with the
+    // audit extension — both wrap each JournalEntry operation.
+    // push-dispatch (Task 1): wraps `notification.create` to emit a fire-and-
+    // forget event for PUSH-channel rows → WebPushService sends the browser
+    // push. Chained last; its emit runs AFTER the audit write and never throws.
+    const extended = this.$extends(accessLogExtension(cls, this))
+      .$extends(softDeleteJournalEntryExtension())
+      .$extends(pushDispatchExtension(eventEmitter))
+
+    // Members that must resolve to THIS class instance, never the extended
+    // client: our prototype methods (onModuleInit, withConnectionRetry) and
+    // instance fields (logger, configService). Without this guard they'd match
+    // the lowercase-model heuristic below and wrongly route to `extended`.
+    const ownMembers = new Set<string>([
+      ...Object.getOwnPropertyNames(PrismaService.prototype),
+      'logger',
+      'configService',
+    ])
+
+    return new Proxy(this, {
+      get(target, prop, receiver) {
+        if (typeof prop === 'string' && !ownMembers.has(prop)) {
+          // Route to the audited client for:
+          //   • `$transaction` — so query auditing propagates into interactive
+          //     transactions (writes inside `tx.<model>` are logged too).
+          //   • model accessors — lowercase first char, not `$`-prefixed
+          //     (`user`, `journalEntry`, …). All other `$`-prefixed primitives
+          //     ($connect/$disconnect/$on/$queryRaw/$executeRaw) and internal
+          //     `_`-prefixed props fall through to the base instance.
+          if (prop === '$transaction' || (/^[a-z]/.test(prop) && !prop.startsWith('$'))) {
+            const value = (extended as Record<string, unknown>)[prop]
+            return typeof value === 'function' ? value.bind(extended) : value
+          }
+        }
+        return Reflect.get(target, prop, receiver)
+      },
+    })
   }
 
   async onModuleInit() {
@@ -71,6 +168,33 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       throw err
     }
     console.log('✅ Database connected')
+
+    // HIPAA §164.312(e)(2)(ii) — audit evidence that the running instance is
+    // actually TLS-connected. Prisma Postgres enforces sslmode=require by
+    // default and refuses plaintext connections; this line records that fact
+    // so compliance reviews can point at a log rather than infer it. In
+    // production a DATABASE_URL with no TLS signal at all is a hard stop.
+    switch (classifyDbTls(dbUrl, this.configService.get<string>('NODE_ENV'))) {
+      case 'prisma-postgres':
+        this.logger.log(
+          '🔐 Database connection: Prisma Postgres (TLS mandatory, always-on)',
+        )
+        break
+      case 'sslmode':
+        this.logger.log(
+          '🔐 Database connection: sslmode=require present in DATABASE_URL',
+        )
+        break
+      case 'missing-prod':
+        throw new Error(
+          'DATABASE_URL missing sslmode=require in production — refusing to start',
+        )
+      case 'missing-dev':
+        this.logger.warn(
+          '⚠️  Database connection: no sslmode in DATABASE_URL (local dev only)',
+        )
+        break
+    }
 
     try {
       const enableVectorIndexSetup =

@@ -19,7 +19,7 @@ const CTX = { userId: 'user-1', timezone: 'America/New_York' }
 
 describe('VoiceToolsService.dispatch', () => {
   let service: VoiceToolsService
-  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock; hasActiveMedications: jest.Mock }
+  let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock; hasActiveMedications: jest.Mock; finalizeUnconfirmedEmergency: jest.Mock }
   let gemini: { extractBpFromImage: jest.Mock }
   let alertEngine: { evaluateAdHoc: jest.Mock }
   let intakeStatus: { getStatus: jest.Mock }
@@ -37,6 +37,9 @@ describe('VoiceToolsService.dispatch', () => {
       // signal. Default true so legacy assertions stay green; Bug 60 tests
       // can override per-case.
       hasActiveMedications: jest.fn(async () => true),
+      // Option D decline path calls this to flip the held AWAITING entry to
+      // UNCONFIRMED immediately.
+      finalizeUnconfirmedEmergency: jest.fn(async () => ({ id: 'awaiting-1', emergencyConfirmation: 'UNCONFIRMED' })),
     }
     gemini = { extractBpFromImage: jest.fn() }
     alertEngine = { evaluateAdHoc: jest.fn() }
@@ -303,7 +306,20 @@ describe('VoiceToolsService.dispatch', () => {
   // failure. Now each known exception gets a specific, actionable message so
   // the LLM knows what to fix on the next call.
 
-  it('Bug 32 — UnprocessableEntityException (transposed BP) → LLM gets re-ask guidance', async () => {
+  it('transposed BP (dbp >= sbp) is caught PRE-FLIGHT → strike-1 re-ask, create() never called', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 80, diastolic_bp: 120, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false, reason: 'IMPLAUSIBLE_READING' }))
+    expect((r.llmResponse as any).message).toMatch(/flipped/i)
+    expect((r.llmResponse as any).message).toMatch(/re-call submit_checkin/i)
+    // The pre-flight guard short-circuits before the backend is touched.
+    expect(dailyJournal.create).not.toHaveBeenCalled()
+  })
+
+  it('Bug 32 — backend UnprocessableEntityException (implausible-reading) → strike-2 escalation', async () => {
     const { UnprocessableEntityException } = await import('@nestjs/common')
     ;(dailyJournal.create as jest.Mock<any>).mockRejectedValue(
       new UnprocessableEntityException({
@@ -311,14 +327,139 @@ describe('VoiceToolsService.dispatch', () => {
         reason: "That reading doesn't look right.",
       }),
     )
+    // Valid (non-transposed) BP passes the pre-flight guard so the mocked
+    // backend rejection is what surfaces — exercising the strike-2 branch.
     const r = await service.dispatch(
       'submit_checkin',
-      { systolic_bp: 80, diastolic_bp: 120, medication_taken: true },
+      { systolic_bp: 138, diastolic_bp: 85, medication_taken: true },
       CTX,
     )
     expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false }))
-    expect((r.llmResponse as any).message).toMatch(/transposed/i)
+    expect((r.llmResponse as any).message).toMatch(/still getting/i)
     expect((r.llmResponse as any).message).toMatch(/re-call submit_checkin/i)
+  })
+
+  // ─── Option D — emergency-range retake-to-confirm (voice parity) ──────────
+
+  it('Option D — emergency-range, NO symptoms → beginEmergencyConfirmation auto-detected', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({ id: 'e1' } as never)
+    await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 190, diastolic_bp: 122, medication_taken: true, symptoms: [] },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1]
+    expect(dto.beginEmergencyConfirmation).toBe(true)
+  })
+
+  it('Option D — emergency-range WITH override symptom → NOT held (symptom-override path)', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({ id: 'e1' } as never)
+    await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 190, diastolic_bp: 122, medication_taken: true, chest_pain_or_dyspnea: true },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1]
+    expect(dto.beginEmergencyConfirmation).toBe(false)
+  })
+
+  it('Option D — confirmatory reading threads confirmsEntryId and is never re-held', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({ id: 'e2' } as never)
+    await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 188, diastolic_bp: 121, medication_taken: true, confirms_entry_id: 'awaiting-1', close_session: true },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1]
+    expect(dto.confirmsEntryId).toBe('awaiting-1')
+    expect(dto.beginEmergencyConfirmation).toBe(false)
+    expect(dto.closeSession).toBe(true)
+  })
+
+  it('editable window — a single non-emergency reading defers (closeSession=false) and surfaces deferred + entry_id', async () => {
+    const future = new Date(Date.now() + 5 * 60 * 1000).toISOString()
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({
+      data: { id: 'held-1', engineEvaluationDeferredUntil: future },
+    } as never)
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: true, symptoms: [] },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1]
+    expect(dto.closeSession).toBe(false)
+    expect((r.llmResponse as any).deferred).toBe(true)
+    expect((r.llmResponse as any).entry_id).toBe('held-1')
+    expect((r.llmResponse as any).editable_until).toBe(future)
+    // The checkin_saved event carries the deadline so the voice card can render
+    // the countdown badge.
+    const savedEvent = r.events.find((e) => e.kind === 'checkin_saved') as any
+    expect(savedEvent?.payload?.editableUntil).toBe(future)
+    expect(savedEvent?.payload?.entryId).toBe('held-1')
+  })
+
+  it('editable window — close_session:true on a BARE single reading is FORCE-DEFERRED to false', async () => {
+    ;(dailyJournal.create as jest.Mock<any>).mockResolvedValue({ data: { id: 'x1' } } as never)
+    await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: true, symptoms: [], close_session: true },
+      CTX,
+    )
+    const dto = (dailyJournal.create as jest.Mock).mock.calls[0][1]
+    expect(dto.closeSession).toBe(false)
+  })
+
+  it('Option D — decline_confirmation flips the AWAITING entry, creates NO new entry', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { decline_confirmation: true, confirms_entry_id: 'awaiting-1' },
+      CTX,
+    )
+    expect(dailyJournal.finalizeUnconfirmedEmergency).toHaveBeenCalledWith('user-1', 'awaiting-1')
+    expect(dailyJournal.create).not.toHaveBeenCalled()
+    expect((r.llmResponse as any).declined).toBe(true)
+  })
+
+  it('Option D — decline_confirmation without confirms_entry_id is rejected', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { decline_confirmation: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false, reason: 'DECLINE_WITHOUT_ID' }))
+    expect(dailyJournal.finalizeUnconfirmedEmergency).not.toHaveBeenCalled()
+  })
+
+  // ─── Pre-flight range guards ──────────────────────────────────────────────
+
+  it('pulse out of range (30-220) → re-ask, create() not called', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, pulse: 300, medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false, reason: 'PULSE_OUT_OF_RANGE' }))
+    expect(dailyJournal.create).not.toHaveBeenCalled()
+  })
+
+  it('weight out of range → unit-aware re-ask, create() not called', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, weight: 5, weight_unit: 'KG', medication_taken: true },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false, reason: 'WEIGHT_OUT_OF_RANGE' }))
+    expect(dailyJournal.create).not.toHaveBeenCalled()
+  })
+
+  it('future entry_date → rejected, create() not called', async () => {
+    const r = await service.dispatch(
+      'submit_checkin',
+      { systolic_bp: 130, diastolic_bp: 80, medication_taken: true, entry_date: '2099-01-01' },
+      CTX,
+    )
+    expect(r.llmResponse).toEqual(expect.objectContaining({ saved: false, reason: 'FUTURE_DATE' }))
+    expect(dailyJournal.create).not.toHaveBeenCalled()
   })
 
   it('Bug 32 — ConflictException (duplicate timestamp) → LLM gets "ask for the time" guidance', async () => {
@@ -1119,6 +1260,19 @@ describe('mapVoiceSymptomsToFlags', () => {
 describe('VoiceToolsService.dispatch — Bug 56 (symptom auto-map + dedupe)', () => {
   let service: VoiceToolsService
   let dailyJournal: { create: jest.Mock; findAll: jest.Mock; findOne: jest.Mock; update: jest.Mock; delete: jest.Mock; hasActiveMedications: jest.Mock }
+
+  // These tests use `entry_date: '2026-06-12'`. submitCheckin has a 30-day
+  // STALE_READING guard (voice-tools.service.ts) that rejects entries older
+  // than 30 days from Date.now() — so with real wall-clock time these tests
+  // start failing on 2026-07-13 with `mock.calls[0]` undefined (the mock is
+  // never invoked). Pin the clock inside the entry's freshness window so the
+  // suite stays deterministic and doesn't decay.
+  beforeEach(() => {
+    jest.useFakeTimers({ now: new Date('2026-06-13T12:00:00Z'), doNotFake: ['setImmediate'] })
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+  })
 
   beforeEach(async () => {
     dailyJournal = {

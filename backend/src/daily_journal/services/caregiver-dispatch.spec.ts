@@ -2,6 +2,7 @@ import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
 import { ConfigService } from '@nestjs/config'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import { ClsService } from 'nestjs-cls'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
 import { SmsService } from '../../sms/sms.service.js'
@@ -123,6 +124,14 @@ describe('EscalationService — caregiver dispatch (Gap 5)', () => {
           provide: ConfigService,
           useValue: { get: (_k: string, fb?: string) => fb ?? undefined },
         },
+        {
+          provide: ClsService,
+          useValue: {
+            run: (fn: () => unknown) => fn(),
+            set: () => undefined,
+            get: () => null,
+          },
+        },
       ],
     }).compile()
 
@@ -222,7 +231,12 @@ describe('EscalationService — caregiver dispatch (Gap 5)', () => {
     expect(prisma.notification.create).toHaveBeenCalledTimes(1)
     const data = prisma.notification.create.mock.calls[0][0].data
     expect(data).toEqual(
-      expect.objectContaining({ userId: 'cg-user-9', channel: 'DASHBOARD' }),
+      expect.objectContaining({
+        userId: 'cg-user-9',
+        channel: 'DASHBOARD',
+        // Caregiver alert notice → visible in the caregiver bell (not ALERT_*).
+        dispatchTrigger: 'CAREGIVER_UPDATE',
+      }),
     )
     expect(email.sendEmail).not.toHaveBeenCalled()
   })

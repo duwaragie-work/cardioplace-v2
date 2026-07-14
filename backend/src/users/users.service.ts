@@ -9,12 +9,15 @@ import {
 import { ConfigService } from '@nestjs/config'
 import { createHash, randomBytes } from 'crypto'
 import { EmailService } from '../email/email.service.js'
-import { activationEmailHtml, roleLabel } from '../email/email-templates.js'
+import { EMAIL_TEMPLATE_VERSION, activationEmailHtml, roleLabel } from '../email/email-templates.js'
 import type { Prisma } from '../generated/prisma/client.js'
 import { AccountStatus, UserRole } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { AccountLifecycleService } from './account-lifecycle.service.js'
 import type { BulkInviteUserDto } from './dto/bulk-invite-user.dto.js'
 import type { DeactivateDto } from './dto/deactivate.dto.js'
+import type { PermanentCloseDto } from './dto/permanent-close.dto.js'
+import type { ReactivateDto } from './dto/reactivate.dto.js'
 import type { InviteUserDto } from './dto/invite-user.dto.js'
 import { type ListUsersQuery, UserListStatus } from './dto/list-users.query.js'
 
@@ -24,6 +27,10 @@ export interface Actor {
   id: string
   email: string | null
   roles: UserRole[]
+  /** The practice the session is acting as (JWT claim). When set, the user
+   *  roster + scoped views narrow to this practice only. Null/undefined for
+   *  org-wide roles (SUPER / OPS) and legacy sessions. */
+  activePracticeId?: string | null
 }
 
 export interface InviteContext {
@@ -77,6 +84,17 @@ const ROLES_REQUIRING_PRACTICE_FOR_SUPER: UserRole[] = [
   UserRole.PROVIDER,
 ]
 
+// Roles that own a practice-membership join row (PracticeProvider /
+// PracticeMedicalDirector / PracticeCoordinator). Reactivating INTO any of these
+// requires a `practiceId` so the membership can be created — regardless of the
+// caller's role (stricter than the invite matrix, which lets SUPER omit the
+// practice for MD). See account-lifecycle syncPracticeMembership.
+const PRACTICE_BOUND_ROLES: UserRole[] = [
+  UserRole.PROVIDER,
+  UserRole.MEDICAL_DIRECTOR,
+  UserRole.COORDINATOR,
+]
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name)
@@ -85,6 +103,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly emailService: EmailService,
+    private readonly lifecycle: AccountLifecycleService,
   ) {}
 
   // ─── Authorization helpers ────────────────────────────────────────────────
@@ -100,6 +119,25 @@ export class UsersService {
    * authorization matrix.
    */
   async assertCanInvite(
+    caller: Actor,
+    targetRole: UserRole,
+    practiceId: string | null,
+  ): Promise<void> {
+    // Invite and reactivation share ONE grant-authority matrix. `assertCanInvite`
+    // is kept as the invite-site name; both delegate to `assertCanGrantRole` so
+    // the matrix is defined exactly once (a second copy that drifted would be the
+    // privilege-escalation bug this design exists to prevent — HIPAA
+    // §164.308(a)(4)).
+    return this.assertCanGrantRole(caller, targetRole, practiceId)
+  }
+
+  /**
+   * The single source of truth for "may `caller` grant `targetRole` into
+   * `practiceId`?" — used by invite (`assertCanInvite`) AND reactivation
+   * (once per requested role). Throws ForbiddenException / BadRequestException
+   * on deny; returns silently on grant.
+   */
+  async assertCanGrantRole(
     caller: Actor,
     targetRole: UserRole,
     practiceId: string | null,
@@ -145,18 +183,60 @@ export class UsersService {
       return
     }
 
-    if (caller.roles.includes(UserRole.COORDINATOR)) {
-      // COORDINATOR can invite ONLY PATIENT — and only into their own
-      // practice. Reading PracticeCoordinator is the source of truth for
-      // "their" practice (one practice per coordinator by @unique).
-      if (targetRole !== UserRole.PATIENT) {
+    if (caller.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
+      // MED_DIR (2026-07-01) — practice-scoped admin authority. Invites into
+      // practices they head only (PracticeMedicalDirector, many-to-many).
+      // Allowed targets: PROVIDER, COORDINATOR, MEDICAL_DIRECTOR (peer MDs —
+      // a practice can have more than one), and PATIENT (they're the clinical
+      // owner of the practice's roster). NOT HEALPLACE_OPS / SUPER_ADMIN —
+      // org-level roles stay with OPS + SUPER. Placed before the COORDINATOR
+      // branch so an MD who also holds COORDINATOR gets the broader MD scope.
+      const mdAllowed: UserRole[] = [
+        UserRole.PROVIDER,
+        UserRole.COORDINATOR,
+        UserRole.MEDICAL_DIRECTOR,
+        UserRole.PATIENT,
+      ]
+      if (!mdAllowed.includes(targetRole)) {
         throw new ForbiddenException(
-          `COORDINATOR can only invite PATIENT users`,
+          `MEDICAL_DIRECTOR cannot invite a ${targetRole}`,
         )
       }
       if (!practiceId) {
         throw new BadRequestException(
-          `practiceId is required for PATIENT invites`,
+          `practiceId is required for MEDICAL_DIRECTOR invites`,
+        )
+      }
+      const headed = await this.prisma.practiceMedicalDirector.findMany({
+        where: { userId: caller.id },
+        select: { practiceId: true },
+      })
+      const headedIds = headed.map((p) => p.practiceId)
+      if (!headedIds.includes(practiceId)) {
+        throw new ForbiddenException(
+          'MEDICAL_DIRECTOR can only invite into practices they head',
+        )
+      }
+      return
+    }
+
+    if (caller.roles.includes(UserRole.COORDINATOR)) {
+      // COORDINATOR can invite PATIENT, PROVIDER, and MEDICAL_DIRECTOR — but
+      // ONLY into their own practice. PracticeCoordinator is the source of
+      // truth for "their" practice (one practice per coordinator by @unique).
+      // They cannot mint COORDINATOR / HEALPLACE_OPS / SUPER_ADMIN accounts
+      // (org-level / cross-practice roles stay with OPS + SUPER_ADMIN).
+      const coordinatorAllowed: UserRole[] = [
+        UserRole.PATIENT,
+        UserRole.PROVIDER,
+        UserRole.MEDICAL_DIRECTOR,
+      ]
+      if (!coordinatorAllowed.includes(targetRole)) {
+        throw new ForbiddenException(`COORDINATOR cannot invite a ${targetRole}`)
+      }
+      if (!practiceId) {
+        throw new BadRequestException(
+          `practiceId is required for COORDINATOR invites`,
         )
       }
       const own = await this.prisma.practiceCoordinator.findUnique({
@@ -168,7 +248,7 @@ export class UsersService {
       }
       if (own.practiceId !== practiceId) {
         throw new ForbiddenException(
-          'You can only invite patients into your own practice',
+          'You can only invite users into your own practice',
         )
       }
       return
@@ -206,6 +286,36 @@ export class UsersService {
       if (targetUser.roles.includes(UserRole.SUPER_ADMIN)) {
         throw new ForbiddenException(
           'HEALPLACE_OPS cannot deactivate a SUPER_ADMIN',
+        )
+      }
+      return
+    }
+
+    if (caller.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
+      // MED_DIR (2026-07-01) — practice-scoped. May deactivate/reactivate any
+      // staff member OR patient whose practice is one they head. Cannot touch
+      // org-level roles (SUPER_ADMIN / HEALPLACE_OPS). Placed before the
+      // COORDINATOR branch so an MD who also holds COORDINATOR gets MD scope.
+      if (targetUser.roles.includes(UserRole.SUPER_ADMIN)) {
+        throw new ForbiddenException(
+          'MEDICAL_DIRECTOR cannot deactivate a SUPER_ADMIN',
+        )
+      }
+      if (targetUser.roles.includes(UserRole.HEALPLACE_OPS)) {
+        throw new ForbiddenException(
+          'MEDICAL_DIRECTOR cannot deactivate HEALPLACE_OPS',
+        )
+      }
+      const headed = await this.prisma.practiceMedicalDirector.findMany({
+        where: { userId: caller.id },
+        select: { practiceId: true },
+      })
+      const headedIds = headed.map((p) => p.practiceId)
+      const targetPractices = await this.resolveTargetPractices(targetUser.id)
+      const overlap = targetPractices.some((p) => headedIds.includes(p))
+      if (!overlap) {
+        throw new ForbiddenException(
+          'MEDICAL_DIRECTOR can only act on users in practices they head',
         )
       }
       return
@@ -264,6 +374,40 @@ export class UsersService {
       select: { id: true },
     })
     if (!row) throw new NotFoundException(`Practice ${practiceId} not found`)
+  }
+
+  /**
+   * Union of every practice a user is tied to, across all four membership
+   * sources: staff paths (PracticeProvider / PracticeMedicalDirector /
+   * PracticeCoordinator) + the patient path (PatientProviderAssignment).
+   * Used by the MED_DIR branch of `assertCanDeactivate` to decide whether the
+   * target overlaps a practice the caller heads. De-duplicated.
+   */
+  private async resolveTargetPractices(userId: string): Promise<string[]> {
+    const [providers, mds, coordinator, assignment] = await Promise.all([
+      this.prisma.practiceProvider.findMany({
+        where: { userId },
+        select: { practiceId: true },
+      }),
+      this.prisma.practiceMedicalDirector.findMany({
+        where: { userId },
+        select: { practiceId: true },
+      }),
+      this.prisma.practiceCoordinator.findUnique({
+        where: { userId },
+        select: { practiceId: true },
+      }),
+      this.prisma.patientProviderAssignment.findUnique({
+        where: { userId },
+        select: { practiceId: true },
+      }),
+    ])
+    const ids = new Set<string>()
+    for (const p of providers) ids.add(p.practiceId)
+    for (const m of mds) ids.add(m.practiceId)
+    if (coordinator) ids.add(coordinator.practiceId)
+    if (assignment) ids.add(assignment.practiceId)
+    return Array.from(ids)
   }
 
   /**
@@ -658,19 +802,15 @@ export class UsersService {
     if (!target) throw new NotFoundException('User not found')
     await this.assertCanDeactivate(caller, target)
 
-    if (target.accountStatus === AccountStatus.DEACTIVATED) {
-      throw new BadRequestException('User is already deactivated')
-    }
-
-    const updated = await this.prisma.user.update({
-      where: { id: target.id },
-      data: { accountStatus: AccountStatus.DEACTIVATED },
-      select: {
-        id: true,
-        email: true,
-        roles: true,
-        accountStatus: true,
-      },
+    // Mechanics (status flip + session kill-switch + snapshot + audit) live in
+    // AccountLifecycleService, which also blocks the last-Super-Admin case and
+    // throws when the account is already deactivated / closed.
+    const updated = await this.lifecycle.deactivate(target.id, {
+      actorId: caller.id,
+      actorRoles: caller.roles,
+      selfService: false,
+      reason: dto.reason,
+      ctx,
     })
 
     await this.logEvent({
@@ -687,34 +827,50 @@ export class UsersService {
       success: true,
     })
 
-    return {
-      statusCode: 200,
-      message: 'User deactivated',
-      data: updated,
-    }
+    return { statusCode: 200, message: 'User deactivated', data: updated }
   }
 
-  async reactivate(caller: Actor, targetUserId: string, ctx?: InviteContext) {
+  async reactivate(
+    caller: Actor,
+    targetUserId: string,
+    dto: ReactivateDto,
+    ctx?: InviteContext,
+  ) {
     const target = await this.prisma.user.findUnique({
       where: { id: targetUserId },
       select: { id: true, email: true, roles: true, accountStatus: true },
     })
     if (!target) throw new NotFoundException('User not found')
+
+    // 1. Target scope — may the caller act on THIS user at all (practice
+    //    overlap for MED_DIR / COORDINATOR)? Same guard as deactivate.
     await this.assertCanDeactivate(caller, target)
 
-    if (target.accountStatus === AccountStatus.ACTIVE) {
-      throw new BadRequestException('User is already active')
+    // 2. HIPAA §164.308(a)(4) — reactivation is a deliberate, scoped re-grant.
+    //    Every requested role must pass the SAME grant-authority matrix as
+    //    invite; any failure aborts the whole reactivation (no partial grant).
+    //    This is what stops a COORDINATOR reviving someone as SUPER_ADMIN, or a
+    //    MED_DIR granting into a practice they don't head.
+    const needsPractice = dto.roles.some((r) =>
+      PRACTICE_BOUND_ROLES.includes(r),
+    )
+    if (needsPractice && !dto.practiceId) {
+      const bound = dto.roles.filter((r) => PRACTICE_BOUND_ROLES.includes(r))
+      throw new BadRequestException(
+        `practiceId is required to grant ${bound.join(', ')}`,
+      )
+    }
+    for (const role of dto.roles) {
+      await this.assertCanGrantRole(caller, role, dto.practiceId ?? null)
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id: target.id },
-      data: { accountStatus: AccountStatus.ACTIVE },
-      select: {
-        id: true,
-        email: true,
-        roles: true,
-        accountStatus: true,
-      },
+    const updated = await this.lifecycle.reactivate(target.id, {
+      actorId: caller.id,
+      actorRoles: caller.roles,
+      roles: dto.roles,
+      practiceId: dto.practiceId,
+      reason: dto.reason,
+      ctx,
     })
 
     await this.logEvent({
@@ -725,16 +881,135 @@ export class UsersService {
       userAgent: ctx?.userAgent,
       metadata: {
         targetUserId: updated.id,
-        targetRoles: updated.roles,
+        grantedRoles: updated.roles,
+        practiceId: dto.practiceId ?? null,
       },
       success: true,
     })
 
-    return {
-      statusCode: 200,
-      message: 'User reactivated',
-      data: updated,
+    return { statusCode: 200, message: 'User reactivated', data: updated }
+  }
+
+  /** Admin permanent-close — irreversible tombstone, gated by an anti-typo
+   *  DisplayID confirmation. Cannot be used on your own account. */
+  async permanentClose(
+    caller: Actor,
+    targetUserId: string,
+    dto: PermanentCloseDto,
+    ctx?: InviteContext,
+  ) {
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: {
+        id: true,
+        email: true,
+        displayId: true,
+        roles: true,
+        accountStatus: true,
+      },
+    })
+    if (!target) throw new NotFoundException('User not found')
+    if (caller.id === target.id) {
+      throw new ForbiddenException(
+        'You cannot permanently close your own account from the admin console',
+      )
     }
+    await this.assertCanDeactivate(caller, target)
+    if (dto.confirmDisplayId !== target.displayId) {
+      throw new BadRequestException(
+        'confirmDisplayId does not match the target account',
+      )
+    }
+
+    const result = await this.lifecycle.permanentClose(target.id, {
+      actorId: caller.id,
+      actorRoles: caller.roles,
+      selfService: false,
+      reason: dto.reason,
+      ctx,
+    })
+
+    await this.logEvent({
+      event: 'user_permanently_closed',
+      userId: caller.id,
+      identifier: target.email ?? undefined,
+      ipAddress: ctx?.ipAddress,
+      userAgent: ctx?.userAgent,
+      metadata: {
+        targetUserId: target.id,
+        targetRoles: target.roles,
+        reason: dto.reason ?? null,
+      },
+      success: true,
+    })
+
+    return { statusCode: 200, message: 'Account permanently closed', data: result }
+  }
+
+  /** Remove a single role from a staff account. Bumps the token version +
+   *  kills live sessions so the dropped privilege stops working immediately. */
+  async removeRole(
+    caller: Actor,
+    targetUserId: string,
+    role: UserRole,
+    ctx?: InviteContext,
+  ) {
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, email: true, roles: true, accountStatus: true },
+    })
+    if (!target) throw new NotFoundException('User not found')
+    // Removing a role is at least as privileged as deactivating the account.
+    await this.assertCanDeactivate(caller, target)
+    if (
+      role === UserRole.SUPER_ADMIN &&
+      !caller.roles.includes(UserRole.SUPER_ADMIN)
+    ) {
+      throw new ForbiddenException(
+        'Only a Super Admin can remove the Super Admin role',
+      )
+    }
+    if (!target.roles.includes(role)) {
+      throw new BadRequestException(`User does not have role ${role}`)
+    }
+    if (role === UserRole.SUPER_ADMIN) {
+      const others = await this.prisma.user.count({
+        where: {
+          id: { not: target.id },
+          roles: { has: UserRole.SUPER_ADMIN },
+          accountStatus: AccountStatus.ACTIVE,
+        },
+      })
+      if (others === 0) {
+        throw new ForbiddenException(
+          'Cannot remove the last active Super Admin role',
+        )
+      }
+    }
+
+    const nextRoles = target.roles.filter((r) => r !== role)
+    const updated = await this.prisma.user.update({
+      where: { id: target.id },
+      data: { roles: { set: nextRoles }, tokenVersion: { increment: 1 } },
+      select: { id: true, email: true, roles: true, accountStatus: true },
+    })
+    await this.lifecycle.revokeAllSessions(target.id)
+
+    await this.logEvent({
+      event: 'user_role_removed',
+      userId: caller.id,
+      identifier: updated.email ?? undefined,
+      ipAddress: ctx?.ipAddress,
+      userAgent: ctx?.userAgent,
+      metadata: {
+        targetUserId: updated.id,
+        removedRole: role,
+        remainingRoles: updated.roles,
+      },
+      success: true,
+    })
+
+    return { statusCode: 200, message: `Role ${role} removed`, data: updated }
   }
 
   // ─── List ─────────────────────────────────────────────────────────────────
@@ -744,33 +1019,66 @@ export class UsersService {
     const limit = query.limit ?? 50
     const skip = (page - 1) * limit
 
-    // Practice scope — COORDINATOR is locked to their own practice
-    // server-side regardless of what they send. Also pulled here so the
-    // response carries the practice name (the COORDINATOR caller can't
-    // list practices to resolve it client-side — that endpoint is
-    // gated to OPS/SUPER).
-    let practiceIdFilter: string | null | undefined
+    // Practice scope. Priority (widest first): OPS/SUPER unscoped →
+    // MEDICAL_DIRECTOR headed practices → COORDINATOR own practice →
+    // explicit query filter for the org-wide roles. Scoped roles are
+    // locked server-side regardless of what they send, and can never be
+    // widened past their memberships. `scopePracticeIds === null` means
+    // no practice filter (org-wide). Also pulled here so the response can
+    // carry the practice name for COORDINATOR (they can't list practices
+    // to resolve it client-side — that endpoint is gated to OPS/SUPER).
+    let scopePracticeIds: string[] | null = null
     let coordinatorScope: { id: string; name: string } | null = null
-    if (caller.roles.includes(UserRole.COORDINATOR)) {
-      const own = await this.prisma.practiceCoordinator.findUnique({
-        where: { userId: caller.id },
-        select: { practice: { select: { id: true, name: true } } },
-      })
-      if (!own) {
-        return {
-          statusCode: 200,
-          message: 'Users retrieved',
-          data: [],
-          page,
-          limit,
-          total: 0,
-          invites: [],
+
+    const isOrgWide =
+      caller.roles.includes(UserRole.SUPER_ADMIN) ||
+      caller.roles.includes(UserRole.HEALPLACE_OPS)
+
+    if (isOrgWide) {
+      // OPS / SUPER — unscoped; honor an explicit practice filter if sent.
+      if (query.practiceId) scopePracticeIds = [query.practiceId]
+    } else {
+      // Scoped roles (MED_DIR / PROVIDER / COORDINATOR) — the roster is limited
+      // to the practices they belong to, then narrowed to the ACTIVE (selected)
+      // practice carried on the session. A single-practice user is effectively
+      // already narrowed; a multi-practice user must switch practice (header
+      // dropdown) to see another practice's roster. Zero memberships → empty
+      // array → zero rows (safe). PROVIDER is read-only (controller GET @Roles);
+      // they see the roster but every write is blocked at the guard.
+      const membership = new Set<string>()
+      if (caller.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
+        const headed = await this.prisma.practiceMedicalDirector.findMany({
+          where: { userId: caller.id },
+          select: { practiceId: true },
+        })
+        for (const r of headed) membership.add(r.practiceId)
+      }
+      if (caller.roles.includes(UserRole.PROVIDER)) {
+        const memberOf = await this.prisma.practiceProvider.findMany({
+          where: { userId: caller.id },
+          select: { practiceId: true },
+        })
+        for (const r of memberOf) membership.add(r.practiceId)
+      }
+      if (caller.roles.includes(UserRole.COORDINATOR)) {
+        const own = await this.prisma.practiceCoordinator.findUnique({
+          where: { userId: caller.id },
+          select: { practice: { select: { id: true, name: true } } },
+        })
+        if (own) {
+          membership.add(own.practice.id)
+          coordinatorScope = { id: own.practice.id, name: own.practice.name }
         }
       }
-      practiceIdFilter = own.practice.id
-      coordinatorScope = { id: own.practice.id, name: own.practice.name }
-    } else if (query.practiceId) {
-      practiceIdFilter = query.practiceId
+      let ids = Array.from(membership)
+      // Narrow to the active/selected practice when the session carries one and
+      // it is a real membership — never widen past it (stale/forged claim is
+      // ignored). Single-practice users are unaffected (their active id equals
+      // their only membership).
+      if (caller.activePracticeId && ids.includes(caller.activePracticeId)) {
+        ids = [caller.activePracticeId]
+      }
+      scopePracticeIds = ids
     }
 
     // Build the User where-clause. The filters compose as AND of three
@@ -800,58 +1108,42 @@ export class UsersService {
       }
     }
 
-    if (caller.roles.includes(UserRole.COORDINATOR)) {
-      // COORDINATOR sees PATIENT users only — own practice's patients.
-      // Match by EITHER the full clinical assignment OR the invite back-
-      // reference: patients invited by the coordinator don't get a
-      // PatientProviderAssignment row at accept-time (it needs primary
-      // provider / backup / MD ids the invite flow doesn't carry), so
-      // without the OR they'd be invisible to the very coordinator who
-      // invited them until Provider Verify creates the real assignment.
-      userWhere.roles = { has: UserRole.PATIENT }
+    if (scopePracticeIds) {
+      // Practice-scoped roster — for an explicit OPS / SUPER practice filter
+      // AND for COORDINATOR (own practice) / MED_DIR (headed practices),
+      // locked above. Accept any of: a patient assigned to those practices,
+      // a patient invited into them (assignment-pending), or a staff member
+      // of them (provider, MD, coordinator memberships) — so the caller sees
+      // the patients PLUS the providers, medical directors, and coordinators.
+      // The invite back-reference matters because a patient invited by the
+      // coordinator has no PatientProviderAssignment until Provider Verify
+      // runs — without it they'd be invisible to the coordinator who invited
+      // them. An optional `query.role` further narrows the set (handled above).
+      // An empty array yields `{ in: [] }` → zero rows (safe deny).
       andGroups.push({
         OR: [
           {
             providerAssignmentAsPatient: {
-              is: { practiceId: practiceIdFilter as string },
+              is: { practiceId: { in: scopePracticeIds } },
             },
           },
           {
             userInviteCreated: {
-              is: { practiceId: practiceIdFilter as string },
-            },
-          },
-        ],
-      })
-    } else if (practiceIdFilter) {
-      // OPS / SUPER explicit practice filter — accept any of: a patient
-      // assigned to that practice, a patient invited into that practice
-      // (assignment-pending), or a staff member of that practice
-      // (provider, MD, coordinator memberships).
-      andGroups.push({
-        OR: [
-          {
-            providerAssignmentAsPatient: {
-              is: { practiceId: practiceIdFilter },
-            },
-          },
-          {
-            userInviteCreated: {
-              is: { practiceId: practiceIdFilter },
+              is: { practiceId: { in: scopePracticeIds } },
             },
           },
           {
             practiceProviderMemberships: {
-              some: { practiceId: practiceIdFilter },
+              some: { practiceId: { in: scopePracticeIds } },
             },
           },
           {
             practiceMedicalDirectorMemberships: {
-              some: { practiceId: practiceIdFilter },
+              some: { practiceId: { in: scopePracticeIds } },
             },
           },
           {
-            practiceCoordinator: { is: { practiceId: practiceIdFilter } },
+            practiceCoordinator: { is: { practiceId: { in: scopePracticeIds } } },
           },
         ],
       })
@@ -868,7 +1160,7 @@ export class UsersService {
       // Return just the invite list — no users.
       const invites = await this.fetchPendingInvites({
         caller,
-        practiceIdFilter,
+        practiceIds: scopePracticeIds,
         role: query.role,
         search: query.search,
       })
@@ -885,7 +1177,18 @@ export class UsersService {
     // INVITE_PENDING already handled + returned above; remaining values
     // are 1:1 with AccountStatus.
     if (query.status) {
+      // UserListStatus has no SYSTEM value, so a specific status filter can
+      // never surface a system-principal row.
       userWhere.accountStatus = query.status as AccountStatus
+    } else {
+      // Hide permanently-closed accounts by default — they're anonymized
+      // tombstones (no name/email/roles), so they'd render as blank, non-
+      // actionable rows. Their history lives in AccountClosureLog. An explicit
+      // ?status=CLOSED still fetches them if ever needed.
+      //
+      // Also hide SYSTEM principals (audit registry, 2026-07-03): reserved
+      // non-login rows that must never appear in the human user roster.
+      userWhere.accountStatus = { notIn: [AccountStatus.CLOSED, AccountStatus.SYSTEM] }
     }
 
     const [users, total] = await Promise.all([
@@ -898,6 +1201,7 @@ export class UsersService {
           id: true,
           email: true,
           name: true,
+          displayId: true,
           roles: true,
           accountStatus: true,
           createdAt: true,
@@ -916,11 +1220,24 @@ export class UsersService {
           // honest for accepted patient invites.
           providerAssignmentAsPatient: { select: { practiceId: true } },
           practiceCoordinator: { select: { practiceId: true } },
+          // When the roster is scoped to a practice (or the active/selected
+          // one), filter the many-to-many memberships to that scope so the
+          // flattened practice column reflects the practice the row matched on
+          // — NOT an arbitrary other practice the user also belongs to. A
+          // multi-practice provider viewed under practice B must show "B", not
+          // whichever membership happens to be first. Unscoped (OPS / SUPER)
+          // keeps the take-1 arbitrary primary membership.
           practiceProviderMemberships: {
+            where: scopePracticeIds
+              ? { practiceId: { in: scopePracticeIds } }
+              : undefined,
             select: { practiceId: true },
             take: 1,
           },
           practiceMedicalDirectorMemberships: {
+            where: scopePracticeIds
+              ? { practiceId: { in: scopePracticeIds } }
+              : undefined,
             select: { practiceId: true },
             take: 1,
           },
@@ -942,6 +1259,7 @@ export class UsersService {
       id: u.id,
       email: u.email,
       name: u.name,
+      displayId: u.displayId,
       roles: u.roles,
       accountStatus: u.accountStatus,
       createdAt: u.createdAt,
@@ -956,28 +1274,25 @@ export class UsersService {
         null,
     }))
 
-    // For COORDINATOR — strip everything except id, name, email, status.
-    // No clinical data, no roles other than 'patient'. `scopePractice`
-    // surfaces the coordinator's own practice (id + name) so the UI can
-    // show "Cedar Hill" in the header — the coordinator can't list
-    // practices to resolve the name client-side.
+    // COORDINATOR — return the same rich rows as OPS/SUPER (incl. roles) so the
+    // table can show the practice's patients, providers, medical directors, and
+    // the coordinator themselves. The set is already scoped to their practice
+    // by the where-clause. `scopePractice` surfaces the coordinator's own
+    // practice (id + name) for the header — they can't list practices to
+    // resolve the name client-side. Row-level actions stay restricted by the
+    // existing role checks (a coordinator can still only deactivate patients).
     if (caller.roles.includes(UserRole.COORDINATOR)) {
       return {
         statusCode: 200,
         message: 'Users retrieved',
-        data: withPractice.map((u) => ({
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          status: this.derivePatientStatus(u.accountStatus),
-        })),
+        data: withPractice,
         page,
         limit,
         total,
         invites: await this.fetchPendingInvites({
           caller,
-          practiceIdFilter,
-          role: UserRole.PATIENT,
+          practiceIds: scopePracticeIds,
+          role: query.role,
           search: query.search,
         }),
         scopePractice: coordinatorScope,
@@ -993,7 +1308,7 @@ export class UsersService {
       total,
       invites: await this.fetchPendingInvites({
         caller,
-        practiceIdFilter,
+        practiceIds: scopePracticeIds,
         role: query.role,
         search: query.search,
       }),
@@ -1002,7 +1317,7 @@ export class UsersService {
 
   private async fetchPendingInvites(params: {
     caller: Actor
-    practiceIdFilter: string | null | undefined
+    practiceIds: string[] | null
     role?: UserRole
     search?: string
   }) {
@@ -1011,7 +1326,7 @@ export class UsersService {
       revokedAt: null,
       expiresAt: { gt: new Date() },
     }
-    if (params.practiceIdFilter) where.practiceId = params.practiceIdFilter
+    if (params.practiceIds) where.practiceId = { in: params.practiceIds }
     if (params.role) where.role = params.role
     if (params.search) {
       const term = params.search.trim()
@@ -1022,10 +1337,11 @@ export class UsersService {
         ]
       }
     }
-    // COORDINATOR — patients only.
-    if (params.caller.roles.includes(UserRole.COORDINATOR)) {
-      where.role = UserRole.PATIENT
-    }
+    // COORDINATOR / MED_DIR are already scoped to their practice(s) via
+    // practiceIds above; they now manage patients, providers, AND medical
+    // directors, so we
+    // no longer force PATIENT-only here (the optional `role` param still
+    // narrows it when a role filter is applied).
 
     const invites = await this.prisma.userInvite.findMany({
       where,
@@ -1044,19 +1360,6 @@ export class UsersService {
   }
 
   // ─── Misc helpers ─────────────────────────────────────────────────────────
-
-  /**
-   * Status label used by the COORDINATOR-scoped patient list. Maps the
-   * raw AccountStatus enum down to the three buckets the front desk
-   * actually cares about.
-   */
-  private derivePatientStatus(
-    status: AccountStatus,
-  ): 'Active' | 'Deactivated' | 'Blocked' {
-    if (status === AccountStatus.DEACTIVATED) return 'Deactivated'
-    if (status === AccountStatus.ACTIVE) return 'Active'
-    return 'Blocked'
-  }
 
   private normalizeInvite(dto: InviteUserDto): NormalizedInvite {
     return {
@@ -1150,6 +1453,7 @@ export class UsersService {
 
   private async dispatchActivationEmail(params: {
     invite: {
+      id: string
       email: string
       name: string
       role: UserRole
@@ -1184,7 +1488,15 @@ export class UsersService {
         expiresAt: params.invite.expiresAt,
         invitedBy: params.inviterName,
       })
-      await this.emailService.sendEmail(params.invite.email, subject, html)
+      // N6 — invite activation email. No User row exists yet (that's what the
+      // invite creates on accept), so patientUserId is null. inviteId in
+      // metadata links this disclosure to the invite record.
+      await this.emailService.sendEmail(params.invite.email, subject, html, {
+        template: 'invite_activation',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: null,
+        metadata: { inviteId: params.invite.id, role: params.invite.role },
+      })
     } catch (err) {
       this.logger.error(
         `Failed to dispatch activation email to ${params.invite.email}`,

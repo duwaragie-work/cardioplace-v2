@@ -1,0 +1,107 @@
+// §164.528 accounting-of-disclosures for outbound email (Humaira Audit
+// Controls Technical n3, Necessary). One row per email that actually delivered
+// through EmailService.sendEmail — Resend or nodemailer resolved. Failed
+// deliveries do NOT write a row: auditing an email that never left the
+// building would be a lie in the disclosure trail.
+//
+// Deliberately NOT in PHI_MODELS (docs/EPHI_INVENTORY.md Table 3, non-PHI). It
+// IS the disclosure stream — auditing it would recurse, same rationale as
+// AccessLog / AuthLog / ContentAuditLog.
+//
+// senderType semantics mirror AccessLog:
+//   USER          senderPrincipal = req.user.id
+//   SYSTEM_ACTOR  senderPrincipal = system-principal User.id from
+//                 CRON_LABEL_TO_PRINCIPAL (system-principals.ts), e.g. the
+//                 escalation-ladder / gap-alert / monthly-* crons.
+//
+// patientUserId is nullable to accommodate two legitimate cases:
+//   1. Confirmed non-PHI sends (contact form → info@healplace.com), where the
+//      caller passes disclosure=null and no row is written.
+//   2. PHI-adjacent sends whose subject is a practice-wide aggregate rather
+//      than a single patient (monthly report to a provider).
+// FK ON DELETE SetNull mirrors PatientCaregiver — a hard-deleted patient
+// keeps their disclosure history for the required retention window.
+//
+// N6 extension (2026-07-11) — the minimal Day-4 shape satisfied §164.528
+// through proxies (subject line ≈ brief description; template name ≈ purpose).
+// This extension makes those §164.528 fields EXPLICIT, adds §164.312(c)
+// integrity fingerprinting, and structures recipient/sender attribution so a
+// regulator can answer the four accounting questions (date, recipient, PHI,
+// purpose) from one row without re-rendering the template.
+model EmailDisclosureLog {
+  id                    String             @id @default(ulid())
+  senderPrincipal       String
+  senderType            String // 'USER' | 'SYSTEM_ACTOR'
+  // N6 extension — activePracticeId at send time (CLS-carried). Nullable
+  // because SYSTEM_ACTOR sends outside a per-practice context have none.
+  senderPracticeContext String?
+  recipientEmail        String
+  // N6 extension — structured "who received it" bucket. Complements
+  // recipientEmail so accounting queries filter by role without joining User.
+  recipientCategory     RecipientCategory
+  patientUserId         String?
+  patient               User?              @relation(fields: [patientUserId], references: [id], onDelete: SetNull)
+  template              String // 'welcome' | 'escalation_tier_1_staff' | 'gap_alert' | ...
+  templateVersion       String // stamped from EMAIL_TEMPLATE_VERSION at send time
+  // N6 extension — explicit §164.528 "purpose of the disclosure". Derived
+  // from the template via the central registry; always populated.
+  purpose               DisclosurePurpose
+  // N6 extension — explicit §164.528 "brief description of the PHI
+  // disclosed". Structured, ≤200 chars, generated from disclosure metadata.
+  // NEVER contains patient name / DOB / narrative — those violate Minimum
+  // Necessary in the disclosure trail.
+  briefDescription      String
+  // N6 extension — SHA-256 hex of the rendered html body (§164.312(c)
+  // integrity). Proves what content went out without duplicating PHI at rest.
+  bodyHash              String
+  subject               String
+  sentAt                DateTime           @default(now())
+  metadata              Json?
+
+  @@index([patientUserId, sentAt])
+  @@index([recipientEmail, sentAt])
+  @@index([template, sentAt])
+  // N6 extension — new query paths for regulatory accounting.
+  @@index([purpose, sentAt])
+  @@index([recipientCategory, sentAt])
+  @@index([senderPracticeContext, sentAt])
+}
+
+// N6 extension — §164.528 "purpose of the disclosure". Categories mirror the
+// §164.502 permitted-use taxonomy so the disclosure trail maps cleanly onto
+// the regulation.
+//
+// N6 extension follow-up (2026-07-11) — the old `PATIENT_DIRECTED` value
+// blended two HIPAA-distinct categories (disclosure TO the patient under
+// §164.528(a)(1)(i) — exempt from accounting — vs. disclosure PER patient
+// authorization under §164.508 — accountable). Split into:
+//   • DIRECT_TO_PATIENT — the patient IS the recipient; accounting-exempt.
+//   • PATIENT_AUTHORIZED — the patient authorized a disclosure to a third
+//     party per §164.508; accountable.
+// Renamed via Postgres ALTER TYPE ... RENAME VALUE so existing rows carry
+// over cleanly.
+enum DisclosurePurpose {
+  TREATMENT
+  PAYMENT
+  HEALTHCARE_OPERATIONS
+  DIRECT_TO_PATIENT
+  PATIENT_AUTHORIZED
+  CARE_COORDINATION
+  REQUIRED_BY_LAW
+  OTHER
+}
+
+// N6 extension — structured "who received it" bucket. Enables one-shot
+// queries like "all TREATMENT disclosures to PROVIDER recipients in Q3"
+// without joining User + resolving the recipient email to a role.
+enum RecipientCategory {
+  PATIENT
+  CAREGIVER
+  PROVIDER
+  MEDICAL_DIRECTOR
+  COORDINATOR
+  HEALPLACE_OPS
+  SUPER_ADMIN
+  EXTERNAL_UNKNOWN
+  SYSTEM
+}

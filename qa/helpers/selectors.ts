@@ -591,6 +591,12 @@ export const T = {
     revoke: (email: string) => `admin-user-revoke-${email}`,
     deactivate: (email: string) => `admin-user-deactivate-${email}`,
     reactivate: (email: string) => `admin-user-reactivate-${email}`,
+    // phase/28 — per-row actions now live behind a 3-dots (kebab) menu.
+    // `actionsMenu` opens it; `action(key, email)` is a menu item where key ∈
+    // { deactivate | reactivate | close | reset-mfa | reset-biometric |
+    //   resend | revoke }.
+    actionsMenu: (email: string) => `admin-user-actions-${email}`,
+    action: (key: string, email: string) => `admin-user-action-${key}-${email}`,
 
     // Single-invite modal (InviteUserModal.tsx)
     inviteModal: 'admin-invite-user-modal',
@@ -749,6 +755,13 @@ export const T = {
     settingsAddAnotherDevice: 'settings-add-another-device',
     settingsRenameInput: 'settings-rename-input',
     settingsRegenerateCodes: 'settings-regenerate-codes',
+  },
+
+  // Patient notification settings (/settings)
+  //   frontend/src/components/cardio/NotificationSettings.tsx
+  notif: {
+    enable: 'settings-notif-enable',
+    disable: 'settings-notif-disable',
   },
 } as const
 

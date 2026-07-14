@@ -9,15 +9,23 @@ import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 import { createHash, randomBytes, randomInt } from 'crypto'
 import type { Profile } from 'passport-google-oauth20'
-import { POLICY_VERSION } from '@cardioplace/shared'
+import { POLICY_VERSION, TRAINING_ACK_VERSION } from '@cardioplace/shared'
 import { EmailService } from '../email/email.service.js'
-import { magicLinkEmailHtml, otpEmailHtml } from '../email/email-templates.js'
+import {
+  EMAIL_TEMPLATE_VERSION,
+  magicLinkEmailHtml,
+  otpEmailHtml,
+  welcomeEmailHtml,
+} from '../email/email-templates.js'
 import {
   AccountStatus,
+  DisplayIdClass,
   OnboardingStatus,
   UserRole,
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { writeAuditWithRetry } from '../common/audit/write-with-retry.js'
+import { DisplayIdService } from '../users/display-id.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
 import { MfaService } from './mfa.service.js'
@@ -281,7 +289,38 @@ export class AuthService {
     private geolocation: GeolocationService,
     private mfaService: MfaService,
     private webAuthnService: WebAuthnService,
+    private displayIdService: DisplayIdService,
   ) {}
+
+  /**
+   * Sends the one-shot welcome email after a User row is first created.
+   * Carries the patient's permanent display ID so they have it handy for
+   * support calls. Fire-and-forget — EmailService.sendEmail already
+   * swallows transport failures, so we don't await this on the auth path.
+   * See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §5.
+   */
+  private dispatchWelcomeEmail(user: {
+    id: string
+    email: string | null
+    name: string | null
+    displayId: string | null
+    roles: UserRole[]
+  }): void {
+    if (!user.email || !user.displayId) return
+    const formatted = DisplayIdService.formatForDisplay(user.displayId)
+    const isPatient = user.roles.includes(UserRole.PATIENT)
+    void this.emailService.sendEmail(
+      user.email,
+      'Welcome to Cardioplace — your account ID',
+      welcomeEmailHtml(user.name ?? '', formatted, isPatient),
+      {
+        template: 'welcome',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: user.id,
+        metadata: { hasDisplayId: true },
+      },
+    )
+  }
 
   // ─── Token Issuance ─────────────────────────────────────────────────────────
 
@@ -290,6 +329,13 @@ export class AuthService {
     activePracticeId?: string | null,
   ): Promise<string> {
     const expiresIn = this.config.get<string>('JWT_ACCESS_EXPIRES_IN', '15m')
+    // phase/28 — stamp the account's current tokenVersion so jwt.strategy can
+    // reject this token the instant the version is bumped (deactivate / close /
+    // role removal). One PK read at issue time (sign-in / refresh only).
+    const account = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { tokenVersion: true },
+    })
     // @ts-expect-error - NestJS JWT accepts string for expiresIn despite type definition
     return await this.jwtService.signAsync(
       {
@@ -300,6 +346,7 @@ export class AuthService {
         // PATIENT / no-practice users. Switching mints a fresh access
         // token so the FE picks up the new context immediately.
         activePracticeId: activePracticeId ?? null,
+        tokenVersion: account?.tokenVersion ?? 0,
       },
       { expiresIn },
     )
@@ -1572,6 +1619,12 @@ export class AuthService {
         target.email,
         'Your Cardioplace two-factor authentication was reset',
         mfaResetEmailHtml(target.name ?? null),
+        {
+          template: 'mfa_reset',
+          templateVersion: EMAIL_TEMPLATE_VERSION,
+          patientUserId: targetUserId,
+          metadata: { resetBy: actorId, reason },
+        },
       )
     }
     return {
@@ -1945,6 +1998,12 @@ export class AuthService {
         target.email,
         'Your Cardioplace biometric sign-in was reset',
         biometricResetEmailHtml(target.name ?? null),
+        {
+          template: 'biometric_reset',
+          templateVersion: EMAIL_TEMPLATE_VERSION,
+          patientUserId: targetUserId,
+          metadata: { resetBy: actorId, reason },
+        },
       )
     }
     return {
@@ -2220,28 +2279,38 @@ export class AuthService {
      *  events. */
     practiceContext?: string | null
   }): Promise<void> {
-    try {
-      await this.prisma.authLog.create({
-        data: {
-          event: params.event,
-          identifier: params.identifier ?? null,
-          userId: params.userId ?? null,
-          method: params.method ?? null,
-          deviceId: params.deviceId ?? null,
-          ipAddress: params.ipAddress ?? null,
-          userAgent: params.userAgent ?? null,
-          metadata: params.metadata
-            ? JSON.parse(JSON.stringify(params.metadata))
-            : null,
-          success: params.success,
-          errorCode: params.errorCode ?? null,
-          practiceContext: params.practiceContext ?? null,
-        },
-      })
-    } catch (error) {
-      // Never let logging failures break the auth flow
-      console.error('Failed to log auth event:', error)
-    }
+    // N1 (2026-07-08) — bounded retry + OTEL failure span. Was a swallowed
+    // try/catch; now writeAuditWithRetry gives us 3 attempts + a loud signal
+    // on exhaust (audit.write.failed span + structured JSON error) so an
+    // AuthLog write-outage becomes observable. Still fire-and-forget from the
+    // auth flow's perspective — the wrapper never rethrows, so a failed
+    // write never breaks sign-in.
+    await writeAuditWithRetry(
+      () =>
+        this.prisma.authLog.create({
+          data: {
+            event: params.event,
+            identifier: params.identifier ?? null,
+            userId: params.userId ?? null,
+            method: params.method ?? null,
+            deviceId: params.deviceId ?? null,
+            ipAddress: params.ipAddress ?? null,
+            userAgent: params.userAgent ?? null,
+            metadata: params.metadata
+              ? JSON.parse(JSON.stringify(params.metadata))
+              : null,
+            success: params.success,
+            errorCode: params.errorCode ?? null,
+            practiceContext: params.practiceContext ?? null,
+          },
+        }),
+      {
+        kind: 'auth-log',
+        event: params.event,
+        userId: params.userId ?? null,
+        identifier: params.identifier ?? null,
+      },
+    )
   }
 
   // ─── Policy / Consent Acknowledgment ─────────────────────────────────────────
@@ -2292,6 +2361,56 @@ export class AuthService {
       via: 'onboarding',
     })
     return { recorded: true }
+  }
+
+  // ─── Training / Rules-of-Behavior Acknowledgment (HIPAA L1, §164.312(b)) ──────
+  // Before the audit-review console (L2) lets a care-team reviewer in, they must
+  // acknowledge the Rules of Behavior. Recorded as a `training_acknowledged`
+  // event on the existing AuthLog audit trail — mirrors consent exactly, no new
+  // table / migration. Who (userId), when (createdAt), which ROB version
+  // (metadata.version), and IP / userAgent are all captured.
+
+  async recordTrainingAck(
+    userId: string,
+    context?: { ipAddress?: string; userAgent?: string },
+  ): Promise<{ recorded: boolean; version: string }> {
+    await this.logAuthEvent({
+      event: 'training_acknowledged',
+      userId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: {
+        policyType: 'RULES_OF_BEHAVIOR',
+        version: TRAINING_ACK_VERSION,
+        via: 'audit-console',
+      },
+      success: true,
+    })
+    return { recorded: true, version: TRAINING_ACK_VERSION }
+  }
+
+  // Whether the reviewer has acknowledged the CURRENT ROB version. Reads the
+  // latest `training_acknowledged` AuthLog event and compares its recorded
+  // version — a stale acknowledgment (older version) reports as un-acknowledged,
+  // so a ROB text change re-gates every reviewer.
+  async getTrainingAckStatus(
+    userId: string,
+  ): Promise<{ acknowledged: boolean; version: string; ackedAt: Date | null }> {
+    const latest = await this.prisma.authLog.findFirst({
+      where: { event: 'training_acknowledged', userId, success: true },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true, metadata: true },
+    })
+    const ackedVersion =
+      latest && typeof latest.metadata === 'object' && latest.metadata !== null
+        ? (latest.metadata as { version?: unknown }).version
+        : undefined
+    const acknowledged = ackedVersion === TRAINING_ACK_VERSION
+    return {
+      acknowledged,
+      version: TRAINING_ACK_VERSION,
+      ackedAt: acknowledged && latest ? latest.createdAt : null,
+    }
   }
 
   // ─── Timezone Auto-Update ───────────────────────────────────────────────────
@@ -2656,17 +2775,32 @@ export class AuthService {
       }
     }
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: email ?? null,
-        name: name ?? null,
-        isVerified: emailVerified,
-        roles: [UserRole.PATIENT],
-        accounts: {
-          create: { provider, providerId, email },
-        },
-      },
-    })
+    // Pre-generate the permanent DisplayId and include it in the User
+    // INSERT — Postgres checks User.displayId's NOT NULL constraint at
+    // INSERT-statement-end. The service handles collision retry around
+    // the whole step. See docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+    const user = await this.prisma.$transaction((tx) =>
+      this.displayIdService.issueForCreate(
+        tx,
+        DisplayIdClass.PATIENT,
+        'google_oauth',
+        (displayId) =>
+          tx.user.create({
+            data: {
+              email: email ?? null,
+              name: name ?? null,
+              isVerified: emailVerified,
+              roles: [UserRole.PATIENT],
+              displayId,
+              accounts: {
+                create: { provider, providerId, email },
+              },
+            },
+          }),
+      ),
+    )
+    // First-touch welcome email for the just-created social user.
+    this.dispatchWelcomeEmail(user)
     return user
   }
 
@@ -2709,6 +2843,23 @@ export class AuthService {
       where: { email: normalizedEmail },
       select: { accountStatus: true },
     })
+    // System-principal accounts (audit registry) can NEVER sign in. Return the
+    // generic success shape WITHOUT creating/sending an OTP — info-disclosure-
+    // safe (don't reveal the account exists or that it's a reserved system row).
+    // No OTP is ever minted, so the verify path can never succeed either.
+    if (existingUser && existingUser.accountStatus === AccountStatus.SYSTEM) {
+      await this.logAuthEvent({
+        event: 'otp_blocked',
+        identifier: normalizedEmail,
+        method: 'otp',
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'account_system_principal',
+      })
+      return { message: 'OTP sent successfully' }
+    }
     if (existingUser && existingUser.accountStatus !== AccountStatus.ACTIVE) {
       await this.logAuthEvent({
         event: 'otp_blocked',
@@ -2720,9 +2871,12 @@ export class AuthService {
         success: false,
         errorCode: 'account_not_active',
       })
-      throw new ForbiddenException(
-        `Account is ${existingUser.accountStatus.toLowerCase()}`,
-      )
+      // Silent success — return the happy-path shape WITHOUT generating or
+      // sending an OTP, so we never disclose to an unauthenticated requester
+      // that this email exists-but-is-inactive (info-disclosure). The block is
+      // still audited above; a non-ACTIVE user who somehow holds a valid code
+      // is still stopped at verifyOtp.
+      return { message: 'OTP sent successfully' }
     }
 
     // Check for recent OTP request (rate limiting)
@@ -2863,13 +3017,26 @@ export class AuthService {
     })
 
     if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          email: normalizedEmail,
-          isVerified: true,
-          roles: [UserRole.PATIENT],
-        },
-      })
+      // Pre-generate the permanent DisplayId and include it in the User
+      // INSERT — see docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+      user = await this.prisma.$transaction((tx) =>
+        this.displayIdService.issueForCreate(
+          tx,
+          DisplayIdClass.PATIENT,
+          'otp',
+          (displayId) =>
+            tx.user.create({
+              data: {
+                email: normalizedEmail,
+                isVerified: true,
+                roles: [UserRole.PATIENT],
+                displayId,
+              },
+            }),
+        ),
+      )
+      // First-touch welcome email — only fires on this new-user branch.
+      this.dispatchWelcomeEmail(user)
     } else if (!user.isVerified) {
       user = await this.prisma.user.update({
         where: { id: user.id },
@@ -3014,6 +3181,11 @@ export class AuthService {
         communicationPreference: true,
         preferredLanguage: true,
         timezone: true,
+        // N8 (2026-07-13) — expose the reminder prefs in the round-trip so
+        // the frontend can render optimistic UI without a follow-up GET.
+        reminderTime: true,
+        quietHoursStart: true,
+        quietHoursEnd: true,
         onboardingStatus: true,
       },
     })
@@ -3033,6 +3205,11 @@ export class AuthService {
       patch.preferredLanguage = dto.preferredLanguage
     if (dto.communicationPreference !== undefined)
       patch.communicationPreference = dto.communicationPreference
+    // N8 (2026-07-13) — Reminder & Engagement preferences.
+    if (dto.reminderTime !== undefined) patch.reminderTime = dto.reminderTime
+    if (dto.quietHoursStart !== undefined)
+      patch.quietHoursStart = dto.quietHoursStart
+    if (dto.quietHoursEnd !== undefined) patch.quietHoursEnd = dto.quietHoursEnd
 
     return patch
   }
@@ -3047,6 +3224,7 @@ export class AuthService {
       where: { id: userId },
       select: {
         id: true,
+        displayId: true,
         email: true,
         name: true,
         roles: true,
@@ -3062,6 +3240,13 @@ export class AuthService {
         communicationPreference: true,
         preferredLanguage: true,
         timezone: true,
+        // N8 (2026-07-13) — Reminder & Engagement preferences. Frontend reads
+        // these to pre-fill the RemindersModal on first render so a user who
+        // never opened the modal still sees their defaults ("09:00" / "22:00"
+        // / "07:00").
+        reminderTime: true,
+        quietHoursStart: true,
+        quietHoursEnd: true,
         createdAt: true,
       },
     })
@@ -3120,6 +3305,10 @@ export class AuthService {
 
     return {
       id: user.id,
+      // Permanent public-facing identifier (CP-PAT-... / CP-STF-...).
+      // Patients quote this on support calls. See
+      // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md.
+      displayId: user.displayId,
       email: user.email,
       name: user.name,
       roles: user.roles,
@@ -3132,6 +3321,12 @@ export class AuthService {
       communicationPreference: user.communicationPreference,
       preferredLanguage: user.preferredLanguage,
       timezone: user.timezone,
+      // N8 (2026-07-13) — Reminder & Engagement preferences. The Prisma
+      // `select` above pulls these; the Playwright PATCH+GET round-trip
+      // spec caught the omission from this response shape.
+      reminderTime: user.reminderTime,
+      quietHoursStart: user.quietHoursStart,
+      quietHoursEnd: user.quietHoursEnd,
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
       // MFA status (additive) — drives the profile Security pill.
@@ -3168,6 +3363,21 @@ export class AuthService {
       where: { email: normalizedEmail },
       select: { accountStatus: true },
     })
+    // System-principal accounts can never sign in. Generic success, no link
+    // minted — info-disclosure-safe (see sendOtp for the rationale).
+    if (existingUser && existingUser.accountStatus === AccountStatus.SYSTEM) {
+      await this.logAuthEvent({
+        event: 'magic_link_blocked',
+        identifier: normalizedEmail,
+        method: 'otp',
+        deviceId: context?.deviceId,
+        ipAddress: context?.ipAddress,
+        userAgent: context?.userAgent,
+        success: false,
+        errorCode: 'account_system_principal',
+      })
+      return { message: 'Magic link sent successfully' }
+    }
     if (existingUser && existingUser.accountStatus !== AccountStatus.ACTIVE) {
       await this.logAuthEvent({
         event: 'magic_link_blocked',
@@ -3179,9 +3389,10 @@ export class AuthService {
         success: false,
         errorCode: 'account_not_active',
       })
-      throw new ForbiddenException(
-        `Account is ${existingUser.accountStatus.toLowerCase()}`,
-      )
+      // Silent success — same as sendOtp: return the happy-path shape without
+      // creating or sending a magic link, so we never disclose that the account
+      // exists-but-is-inactive. The block is audited above.
+      return { message: 'Magic link sent successfully' }
     }
 
     // Rate limiting: 1 magic link per email per 60s
@@ -3279,13 +3490,26 @@ export class AuthService {
     })
 
     if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          email: record.email,
-          isVerified: true,
-          roles: [UserRole.PATIENT],
-        },
-      })
+      // Same pre-generate pattern as OTP path — see
+      // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+      user = await this.prisma.$transaction((tx) =>
+        this.displayIdService.issueForCreate(
+          tx,
+          DisplayIdClass.PATIENT,
+          'magic_link',
+          (displayId) =>
+            tx.user.create({
+              data: {
+                email: record.email,
+                isVerified: true,
+                roles: [UserRole.PATIENT],
+                displayId,
+              },
+            }),
+        ),
+      )
+      // First-touch welcome email — only fires on this new-user branch.
+      this.dispatchWelcomeEmail(user)
     } else if (!user.isVerified) {
       user = await this.prisma.user.update({
         where: { id: user.id },
@@ -3480,6 +3704,7 @@ export class AuthService {
       // here; the matching `policy_acknowledged` AuthLog event is written
       // post-commit below.
       let userRow: typeof existing
+      let userWasCreated = false
       if (existing) {
         const merged = Array.from(new Set([...existing.roles, fresh.role]))
         userRow = await tx.user.update({
@@ -3492,15 +3717,29 @@ export class AuthService {
           },
         })
       } else {
-        userRow = await tx.user.create({
-          data: {
-            email: fresh.email,
-            name: fresh.name,
-            isVerified: true,
-            roles: [fresh.role],
-            onboardingStatus: OnboardingStatus.COMPLETED,
-          },
-        })
+        // Pre-generate DisplayId so the User INSERT can satisfy NOT NULL.
+        // Class derives from the invited role: PATIENT invites → PAT
+        // prefix; staff invites → STF. See
+        // docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §3.
+        userRow = await this.displayIdService.issueForCreate(
+          tx,
+          fresh.role === UserRole.PATIENT
+            ? DisplayIdClass.PATIENT
+            : DisplayIdClass.STAFF,
+          'invite_accept',
+          (displayId) =>
+            tx.user.create({
+              data: {
+                email: fresh.email,
+                name: fresh.name,
+                isVerified: true,
+                roles: [fresh.role],
+                onboardingStatus: OnboardingStatus.COMPLETED,
+                displayId,
+              },
+            }),
+        )
+        userWasCreated = true
       }
 
       if (userRow.accountStatus !== AccountStatus.ACTIVE) {
@@ -3574,8 +3813,15 @@ export class AuthService {
         },
       })
 
-      return { user: userRow, invite: claimedInvite }
+      return { user: userRow, invite: claimedInvite, userWasCreated }
     })
+
+    // First-touch welcome email for the just-created invitee. The
+    // returning-user branch already has a displayId from their previous
+    // OTP/magic-link sign-in, so we skip them here to avoid spam.
+    if (result.userWasCreated) {
+      this.dispatchWelcomeEmail(result.user)
+    }
 
     await this.silentlyUpdateTimezone(result.user.id, context?.timezone)
 
@@ -3630,18 +3876,34 @@ export class AuthService {
   // ─── Email Helpers ──────────────────────────────────────────────────────────
 
   private async sendOtpEmail(email: string, otp: string): Promise<void> {
+    // N6 — OTP is pre-auth: the identifier may not resolve to a User row yet
+    // (new sign-up flow). patientUserId stays null; identifier goes in metadata
+    // so the §164.528 trail still records which email was targeted.
     await this.emailService.sendEmail(
       email,
       'Your Cardioplace verification code',
       otpEmailHtml(otp),
+      {
+        template: 'otp',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: null,
+        metadata: { identifier: email },
+      },
     )
   }
 
   private async sendMagicLinkEmail(email: string, url: string): Promise<void> {
+    // N6 — same reasoning as sendOtpEmail (pre-auth, identifier may not resolve).
     await this.emailService.sendEmail(
       email,
       'Sign in to Cardioplace',
       magicLinkEmailHtml(url),
+      {
+        template: 'magic_link',
+        templateVersion: EMAIL_TEMPLATE_VERSION,
+        patientUserId: null,
+        metadata: { identifier: email },
+      },
     )
   }
 }

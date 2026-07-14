@@ -1,3 +1,27 @@
+/**
+ * N6 (2026-07-10) — Coarse-grained version tag stamped into every
+ * EmailDisclosureLog row so the §164.528 accounting-of-disclosures trail
+ * records exactly which template variant went out.
+ *
+ * Bump procedure — whenever ANY template in this file (or its sibling render
+ * helpers: gap-alert, escalation body, monthly report, contact form) changes:
+ *   1. Edit the template function(s).
+ *   2. Bump this constant to today's date (or today-a, today-b if a second
+ *      bump happens on the same day).
+ *   3. Add a one-liner to EMAIL_TEMPLATE_CHANGELOG below.
+ *
+ * Per-template versioning (WELCOME_EMAIL_TEMPLATE_VERSION, etc.) is a
+ * potential future refinement. MVP is one file-level constant; if audit
+ * granularity ever demands per-template, factor at that point.
+ */
+export const EMAIL_TEMPLATE_VERSION = '2026-07-10'
+
+/**
+ * EMAIL_TEMPLATE_CHANGELOG — one line per bump.
+ *   2026-07-10 — Initial version (N6 baseline). Templates unchanged; this is
+ *                the anchor point for all future disclosure-log queries.
+ */
+
 const HEADER = `
   <div style="background: #7B00E0; padding: 24px; text-align: center;">
     <h1 style="color: #ffffff; margin: 0; font-family: sans-serif; font-size: 22px; letter-spacing: 1px;">
@@ -6,9 +30,13 @@ const HEADER = `
   </div>
 `
 
+// Standardized HIPAA confidentiality footer — applied to every wrap()-based
+// template (OTP, welcome, invite, MFA/biometric reset, caregiver update,
+// scheduled call, monthly report, contact form, …). HIPAA Minimum Necessary
+// §164.502(b) — outbound mail that may carry PHI must carry this notice.
 const FOOTER = `
   <div style="padding: 16px 24px; text-align: center; color: #9ca3af; font-size: 12px; font-family: sans-serif; border-top: 1px solid #e5e7eb;">
-    This is an automated alert from Cardioplace. Do not reply to this email.
+    This is an automated message from Cardioplace — please do not reply. It may contain protected health information; if you received it in error, please notify the sender and delete it without forwarding or printing.
   </div>
 `
 
@@ -60,6 +88,40 @@ export function escalationEmailHtml(
   `)
 }
 
+// First-touch welcome email sent after the user's permanent DisplayId is
+// issued. Tells the patient their Cardioplace ID so they can quote it when
+// calling support. Not sent to OTP/magic-link recipients on every sign-in
+// — only on first account creation. See
+// docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md §5.
+export function welcomeEmailHtml(
+  recipientName: string,
+  displayId: string,
+  isPatient: boolean,
+): string {
+  const audienceLine = isPatient
+    ? `When you call support or your care team, quote your Cardioplace ID so we can find your account quickly:`
+    : `When coordinating with another Cardioplace user, quote your Cardioplace ID so support can find your account quickly:`
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #7B00E0; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Welcome
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">Welcome to Cardioplace${recipientName ? `, ${recipientName}` : ''}</h2>
+    <p style="color: #374151; line-height: 1.6;">${audienceLine}</p>
+    <p style="margin: 16px 0; padding: 14px 20px; background: #f5f3ff;
+              border: 1px solid #ddd6fe; border-radius: 8px;
+              font-family: ui-monospace, SFMono-Regular, monospace;
+              font-size: 18px; font-weight: 700; color: #4c1d95;
+              letter-spacing: 1px; text-align: center;">
+      ${displayId}
+    </p>
+    <p style="color: #6b7280; line-height: 1.6; font-size: 13px;">
+      This ID is permanent and tied to your account. Keep it somewhere handy.
+    </p>
+  `)
+}
+
 // Gap 5 — caregiver alert email. Carries ONLY the signed-off caregiverMessage
 // (HIPAA Minimum Necessary): no readings, no other conditions, no diagnosis.
 export function caregiverEmailHtml(
@@ -81,35 +143,21 @@ export function caregiverEmailHtml(
   `)
 }
 
-export function scheduleCallEmailHtml(
-  patientName: string,
-  callType: string,
-  callDate: string,
-  callTime: string,
-): string {
-  const typeLabel = callType === 'video' ? 'Video Call' : 'Phone Call'
-
+// Monthly medication re-ask (crons/monthly-reask). Wrapped → carries the shared
+// Cardioplace header + HIPAA footer like every other patient-facing email.
+export function medicationReaskEmailHtml(name: string, body: string): string {
+  const greeting = name ? `Hi ${name},` : 'Hi,'
   return wrap(`
-    <h2 style="margin: 0 0 12px; color: #1a1a2e;">Your care team has scheduled a follow-up call</h2>
-    <p style="color: #374151; line-height: 1.6;">Hi ${patientName},</p>
-    <div style="margin: 20px 0; padding: 16px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
-      <table style="width: 100%; font-size: 15px; color: #374151;">
-        <tr>
-          <td style="padding: 6px 0; font-weight: 600; width: 80px;">Type</td>
-          <td style="padding: 6px 0;">${typeLabel}</td>
-        </tr>
-        <tr>
-          <td style="padding: 6px 0; font-weight: 600;">Date</td>
-          <td style="padding: 6px 0;">${callDate}</td>
-        </tr>
-        <tr>
-          <td style="padding: 6px 0; font-weight: 600;">Time</td>
-          <td style="padding: 6px 0;">${callTime} (EST)</td>
-        </tr>
-      </table>
-    </div>
-    <p style="color: #374151; line-height: 1.6;">
-      Your care team will contact you at the number on file.
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #7B00E0; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Reminder
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">Confirm your medications</h2>
+    <p style="color: #374151; line-height: 1.6;">${greeting}</p>
+    <p style="color: #374151; line-height: 1.6;">${body}</p>
+    <p style="color: #6b7280; line-height: 1.6; font-size: 13px; margin-top: 16px;">
+      Log in to Cardioplace to review and confirm your medication list.
     </p>
   `)
 }
@@ -375,6 +423,137 @@ export function monthlyReportEmailHtml(params: {
         Open full report
       </a>
     </div>
+  `)
+}
+
+/**
+ * Patient self-service permanent-close — step 1: the anti-impulse confirmation
+ * link (phase/28). Emailed when the patient requests closure from Settings.
+ * The link is the ONLY way to reach permanent-close/confirm and expires in 1h.
+ * Brand chrome matches every other Cardioplace email (shared wrap()).
+ */
+export function selfCloseConfirmEmailHtml(name: string, link: string): string {
+  const greeting = name ? `Hi ${name},` : 'Hi,'
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #dc2626; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Confirm closure
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">Confirm you want to close your account</h2>
+    <p style="color: #374151; line-height: 1.6;">${greeting}</p>
+    <p style="color: #374151; line-height: 1.6;">
+      You asked to <strong>permanently close</strong> your Cardioplace account.
+      This cannot be undone. You will lose access to your dashboard and history.
+    </p>
+    <p style="color: #374151; line-height: 1.6;">If this was you, confirm within the next hour:</p>
+    <div style="text-align: center; margin: 24px 0;">
+      <a href="${link}"
+         style="display: inline-block; background: #B91C1C; color: #ffffff; font-size: 16px;
+                font-weight: 600; padding: 14px 32px; border-radius: 30px;
+                text-decoration: none;">
+        Permanently close my account
+      </a>
+    </div>
+    <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+      If you did not request this, ignore this email. Your account stays exactly as it is.
+      This link expires in 1 hour.
+    </p>
+  `)
+}
+
+/**
+ * Patient permanent-close — step 2: the final "your account is closed"
+ * confirmation, sent once the closure completes (phase/28). Sent to the address
+ * captured BEFORE the User row is anonymised, since close wipes the email.
+ */
+export function accountClosedEmailHtml(name: string): string {
+  const greeting = name ? `Hi ${name},` : 'Hi,'
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #6b7280; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Account closed
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">Your account has been closed</h2>
+    <p style="color: #374151; line-height: 1.6;">${greeting}</p>
+    <p style="color: #374151; line-height: 1.6;">
+      Your Cardioplace account has been <strong>permanently closed</strong>. You no longer
+      have access to your dashboard or history, and this cannot be undone.
+    </p>
+    <p style="color: #374151; line-height: 1.6;">
+      Your medical records are retained securely as the law requires, but your personal
+      profile has been removed.
+    </p>
+    <p style="color: #9ca3af; font-size: 12px; margin: 16px 0 0;">
+      If you did not expect this, contact support right away.
+    </p>
+  `)
+}
+
+/** Support System — ops reply to a user's ticket. Wrapped → carries the
+ *  standardized HIPAA confidentiality footer like every other outbound email. */
+export function supportReplyEmailHtml(
+  ticketNumber: string,
+  replyBody: string,
+): string {
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #7B00E0; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Support reply
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">A reply to your support request</h2>
+    <p style="color: #6b7280; font-size: 13px; margin: 0 0 12px;">Ticket ${ticketNumber}</p>
+    <div style="background: #fafafa; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+      <p style="color: #1f2937; font-size: 14px; line-height: 1.7; margin: 0; white-space: pre-wrap;">${replyBody}</p>
+    </div>
+    <p style="color: #6b7280; font-size: 13px; line-height: 1.6;">
+      Reply to this email if you need anything else, and our team will follow up.
+    </p>
+  `)
+}
+
+/** Support System — ticket-resolved confirmation to the requester. Wrapped →
+ *  carries the standardized HIPAA confidentiality footer. */
+export function supportResolvedEmailHtml(ticketNumber: string): string {
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #059669; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Resolved
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">Your support request is resolved</h2>
+    <p style="color: #6b7280; font-size: 13px; margin: 0 0 12px;">Ticket ${ticketNumber}</p>
+    <p style="color: #1f2937; font-size: 14px; line-height: 1.7;">
+      Our team has marked this request as resolved. If you still need help, just reply to
+      this email and we'll pick it back up.
+    </p>
+  `)
+}
+
+/** Support System — ops "new ticket" notification. Notify-and-link: NO requester
+ *  email or message body inlined (mirrors the clinical-alert PHI refactor — the
+ *  inbox stays PHI-free; ops opens the dashboard for full, audit-logged context). */
+export function supportOpsNotifyHtml(
+  ticketNumber: string,
+  priority: string,
+  category: string,
+  dashboardUrl: string,
+): string {
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #7B00E0; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      New support ticket
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">A new ${priority} support ticket is waiting</h2>
+    <table style="width: 100%; font-size: 14px; color: #374151; margin: 0 0 20px;">
+      <tr><td style="padding: 4px 0; font-weight: 600; width: 90px;">Ticket</td><td style="padding: 4px 0;">${ticketNumber}</td></tr>
+      <tr><td style="padding: 4px 0; font-weight: 600;">Priority</td><td style="padding: 4px 0;">${priority}</td></tr>
+      <tr><td style="padding: 4px 0; font-weight: 600;">Category</td><td style="padding: 4px 0;">${category}</td></tr>
+    </table>
+    <a href="${dashboardUrl}" style="display: inline-block; padding: 11px 20px; background: #7B00E0; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;">View in dashboard →</a>
   `)
 }
 

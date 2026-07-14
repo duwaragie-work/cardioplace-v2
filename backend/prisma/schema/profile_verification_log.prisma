@@ -26,6 +26,10 @@ enum VerifierRole {
   PATIENT
   ADMIN
   PROVIDER
+  // Automated cron/engine writer (audit, 2026-07-03). A system principal from
+  // the registry made this clinical-state change, not a human — mirrors the
+  // 'SYSTEM_ACTOR' actorType used in AccessLog / Notification.
+  SYSTEM_ACTOR
 }
 
 enum VerificationChangeType {
@@ -53,4 +57,10 @@ enum VerificationChangeType {
   ADMIN_READING_ADDED
   ADMIN_READING_EDITED
   ADMIN_READING_DELETED
+  // Cron-driven clinical-state changes (audit, 2026-07-03; Humaira Activity 1
+  // #3). FINALIZE = session-finalize flipped JournalEntry.singleReadingFinalized
+  // after the buffer window; MEDICATION_HOLD_ESCALATION = medication-hold cron
+  // bumped PatientMedication.holdEscalationLevel on the T+N ladder.
+  SYSTEM_CRON_FINALIZE
+  SYSTEM_CRON_MEDICATION_HOLD_ESCALATION
 }

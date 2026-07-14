@@ -67,3 +67,5 @@ qa/reports/
 .tmp
 
 .claude
+
+cardioplace-vertex-sa.json

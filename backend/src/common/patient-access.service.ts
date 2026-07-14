@@ -94,6 +94,11 @@ export class PatientAccessService {
    * unscoped. On update flows the caller must pass *both* the existing
    * practiceId and the (optional) new practiceId so a MED_DIR can't move
    * a patient out of their practice into one they don't head.
+   *
+   * COORDINATOR is NOT permitted here (2026-07-01 walkback from #116 —
+   * care-team assignment is a clinical decision, not front-desk). The
+   * controller-level @Roles already blocks them; this is the defense-in-
+   * depth service check for the roles that do get through.
    */
   async assertCanModifyPracticeAssignment(
     actor: ActorUser,
@@ -101,13 +106,14 @@ export class PatientAccessService {
   ): Promise<void> {
     if (this.isUnscoped(actor)) return
 
+    const ids = Array.isArray(practiceIds) ? practiceIds : [practiceIds]
+
     if (!actor.roles.includes(UserRole.MEDICAL_DIRECTOR)) {
       throw new ForbiddenException(
         'Care-team assignment requires MEDICAL_DIRECTOR, HEALPLACE_OPS, or SUPER_ADMIN',
       )
     }
 
-    const ids = Array.isArray(practiceIds) ? practiceIds : [practiceIds]
     for (const practiceId of ids) {
       const ok = await this.medHeadsPractice(actor.id, practiceId)
       if (!ok) {
@@ -155,6 +161,78 @@ export class PatientAccessService {
     return {
       providerAssignmentAsPatient: { is: { id: '__never__' } },
     }
+  }
+
+  /**
+   * Where-clause fragment for the **dashboard alert queue** — the provider's
+   * personal work list. Identical to `patientScopeFilter()` for org-wide roles
+   * (SUPER_ADMIN / HEALPLACE_OPS) and MEDICAL_DIRECTOR (they see every patient
+   * in their practice), but tightens a plain PROVIDER to ASSIGNED patients
+   * only: the ones where they are the primary OR backup provider on the
+   * assignment row.
+   *
+   * Manisha 2026-06 sign-off (Humaira HIPAA N14 follow-up): practice-wide
+   * read + act on the patient list / detail, but the dashboard queue is a
+   * focused caseload, not a directory. See docs/ACCESS_SCOPE.md.
+   *
+   * Reuse: every path except the plain-PROVIDER case delegates to
+   * `patientScopeFilter()`, so the two methods can never drift for the
+   * org-wide / MED_DIR / defensive-deny branches.
+   */
+  async alertQueueScopeFilter(
+    actor: ActorUser,
+  ): Promise<{ providerAssignmentAsPatient: Record<string, unknown> } | undefined> {
+    // Only a plain PROVIDER gets the tighter assigned-only queue. A MED_DIR
+    // (even one who also holds PROVIDER) and the org-wide roles keep their
+    // normal patient scope — delegate so those branches live in one place.
+    const providerOnly =
+      actor.roles.includes(UserRole.PROVIDER) &&
+      !actor.roles.includes(UserRole.MEDICAL_DIRECTOR) &&
+      !this.isUnscoped(actor)
+    if (!providerOnly) return this.patientScopeFilter(actor)
+
+    const practiceIds = this.scopeToActive(
+      actor,
+      await this.practicesForProvider(actor.id),
+    )
+    return {
+      providerAssignmentAsPatient: {
+        is: {
+          OR: [
+            { primaryProviderId: actor.id },
+            { backupProviderId: actor.id },
+          ],
+          // Keep the active-practice scope so a multi-practice provider who
+          // switched practices doesn't see stale alerts from the other
+          // practice's assignment rows.
+          practiceId: { in: practiceIds },
+        },
+      },
+    }
+  }
+
+  /**
+   * Practice-management write guard (config edit + staff-membership CRUD) for
+   * `practice.controller.ts`. OPS / SUPER are unscoped; MEDICAL_DIRECTOR must
+   * head the target practice (PracticeMedicalDirector). Any other role → 403.
+   * The controller-level @Roles already limits the route to SUPER / OPS /
+   * MED_DIR — this enforces the per-practice cell for a MED_DIR so they can
+   * only manage practices they head, not any practice in the org. (2026-07-01)
+   */
+  async assertCanManagePractice(
+    actor: ActorUser,
+    practiceId: string,
+  ): Promise<void> {
+    if (this.isUnscoped(actor)) return
+    if (
+      actor.roles.includes(UserRole.MEDICAL_DIRECTOR) &&
+      (await this.medHeadsPractice(actor.id, practiceId))
+    ) {
+      return
+    }
+    throw new ForbiddenException(
+      `Practice ${practiceId} is outside your management scope`,
+    )
   }
 
   private isUnscoped(actor: ActorUser): boolean {
@@ -260,6 +338,17 @@ export class PatientAccessService {
         select: { practiceId: true },
       })
       for (const r of pp) ids.add(r.practiceId)
+    }
+
+    if (actor.roles.includes(UserRole.COORDINATOR)) {
+      // A coordinator staffs exactly one practice (PracticeCoordinator @unique).
+      // Read-only visibility into that practice (detail + staff list); they
+      // never get the clinical patient surfaces (those stay role-gated).
+      const coord = await this.prisma.practiceCoordinator.findUnique({
+        where: { userId: actor.id },
+        select: { practiceId: true },
+      })
+      if (coord) ids.add(coord.practiceId)
     }
 
     return Array.from(ids)

@@ -1,8 +1,10 @@
 import { jest } from '@jest/globals'
 import { Test, TestingModule } from '@nestjs/testing'
+import { ClsService } from 'nestjs-cls'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { TestControlService } from './test-control.service.js'
-import { GapAlertService } from '../crons/gap-alert.service.js'
+import { AuditExceptionReportService } from '../crons/audit-exception-report.service.js'
+import { DailyReminderService } from '../crons/daily-reminder.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
 import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
@@ -36,16 +38,34 @@ describe('TestControlService — medication-hold escalation cron driver (F33)', 
       notification: {
         create: (jest.fn() as any).mockResolvedValue({}),
       },
+      // Interactive $transaction runs its callback against the same mock client
+      // (no real rollback) — mirrors daily_journal.service.spec.ts. The med-hold
+      // cron wraps its update + notification writes in $transaction.
+      $transaction: jest.fn(async (fn: any) => fn(prisma)),
     }
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TestControlService,
         MedicationHoldEscalationService,
         { provide: PrismaService, useValue: prisma },
+        // runAsCronActor wraps scheduledRun in cls.run — pass-through stub.
+        {
+          provide: ClsService,
+          useValue: {
+            run: (fn: () => unknown) => fn(),
+            set: () => undefined,
+            get: () => null,
+          },
+        },
         // The other cron drivers are unused by this path — stub them.
-        { provide: GapAlertService, useValue: {} },
+        { provide: DailyReminderService, useValue: {} },
         { provide: MonthlyReaskService, useValue: {} },
         { provide: EscalationService, useValue: {} },
+        // N7 (2026-07-11) — stub the audit-exception cron driver too.
+        {
+          provide: AuditExceptionReportService,
+          useValue: {},
+        },
       ],
     }).compile()
     service = module.get(TestControlService)

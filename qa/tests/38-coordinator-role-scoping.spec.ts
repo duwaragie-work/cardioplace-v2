@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { signInAdmin, authedApi } from '../helpers/auth.js'
-import { ADMINS } from '../helpers/accounts.js'
+import { ADMINS, SEED_PRACTICE_ID } from '../helpers/accounts.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 import { byTestId, T } from '../helpers/selectors.js'
 
@@ -11,10 +11,11 @@ import { byTestId, T } from '../helpers/selectors.js'
  * own practice and nothing clinical. This spec pins both halves of the
  * boundary from admin/src/lib/roleGates.ts:
  *
- *   ALLOWED  → /users (canManageUsers), GET /admin/users
+ *   ALLOWED  → /users (canManageUsers), GET /admin/users,
+ *              GET /admin/practices (read-only view of their own practice + staff)
  *   DENIED   → /reports (canViewReports excludes COORDINATOR),
  *              alert resolve (canResolveAlerts excludes),
- *              practice CRUD (canManagePractices excludes),
+ *              practice CRUD — create/update/staff (canManagePractices excludes),
  *              threshold edit (canEditThresholds excludes)
  *
  * For each denied surface we assert BOTH the UI (access-denied / no action)
@@ -75,11 +76,103 @@ test.describe('Spec 38 — coordinator role scoping', () => {
       })
       expect(resolve.status(), 'POST resolve forbidden').toBe(403)
 
-      // Practice CRUD — operational/admin function, excluded.
+      // Practice READ — coordinators now get a read-only view of their own
+      // practice (+ staff), scoped server-side. GET is allowed (200)…
+      const practiceList = await api.get('admin/practices')
+      expect(practiceList.status(), 'GET /admin/practices allowed (read-only)').toBe(200)
+
+      // …but practice CRUD stays an operational/admin function, excluded.
       const practice = await api.post('admin/practices', {
         data: { name: 'QA should-403' },
       })
       expect(practice.status(), 'POST /admin/practices forbidden').toBe(403)
+    } finally {
+      await api.dispose()
+    }
+  })
+
+  // ── phase/28 — coordinator patient roster + care-team assignment ──────────
+
+  test('38.4 — coordinator CAN reach /patients (restricted, no-clinical view)', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000)
+    await signInAdmin(page, ADMINS.coordinator.email, ADMIN_BASE_URL, coordinatorLanding)
+    await page.goto(`${ADMIN_BASE_URL}/patients`)
+    // The coordinator-restricted roster renders (search box), NOT the clinical
+    // list (its search input) and NOT the 403 card.
+    await expect(
+      page.locator(byTestId('coordinator-patient-search')),
+    ).toBeVisible({ timeout: 25_000 })
+    await expect(
+      page.locator(byTestId(T.admin.patientListSearch)),
+    ).toHaveCount(0)
+    await expect(
+      page.locator(byTestId(T.admin.patientListAccessDenied)),
+    ).toHaveCount(0)
+  })
+
+  test('38.5 — coordinator patient/clinician lists allowed; care-team + permanent-close walked back (2026-07-01)', async ({}, testInfo) => {
+    testInfo.setTimeout(90_000)
+    const api = await authedApi(API_BASE_URL, ADMINS.coordinator.email, 'admin')
+    try {
+      // Coordinator read surfaces — still allowed, scoped server-side.
+      const patients = await api.get('admin/coordinator/patients')
+      expect(patients.status(), 'GET /admin/coordinator/patients allowed').toBe(200)
+      const clinicians = await api.get('admin/coordinator/clinicians')
+      expect(clinicians.status(), 'GET /admin/coordinator/clinicians allowed').toBe(200)
+
+      // Walkback #116 — care-team assignment is a clinical decision (MED_DIR /
+      // OPS / SUPER only). COORDINATOR is now removed from the @Roles, so the
+      // RolesGuard rejects BEFORE the handler runs → 403 for ANY practice,
+      // including their own. (Previously this returned 404 for own practice.)
+      const ownPractice = await api.post(
+        'admin/patients/qa-nonexistent-patient/assignment',
+        {
+          data: {
+            practiceId: SEED_PRACTICE_ID,
+            primaryProviderId: 'qa-a',
+            backupProviderId: 'qa-b',
+            medicalDirectorId: 'qa-c',
+          },
+        },
+      )
+      expect(
+        ownPractice.status(),
+        'coordinator care-team create forbidden (walkback #116)',
+      ).toBe(403)
+
+      const patchAssignment = await api.patch(
+        'admin/patients/qa-nonexistent-patient/assignment',
+        { data: { primaryProviderId: 'qa-a' } },
+      )
+      expect(
+        patchAssignment.status(),
+        'coordinator care-team update forbidden (walkback #116)',
+      ).toBe(403)
+
+      // Walkback #114 — permanent-close is irreversible org-level tombstoning
+      // (SUPER + OPS only). COORDINATOR is now rejected at the method-level
+      // @Roles → 403 before the handler runs.
+      const close = await api.post(
+        'admin/users/qa-nonexistent-user/permanent-close',
+        { data: { confirmDisplayId: 'QA', reason: 'x' } },
+      )
+      expect(
+        close.status(),
+        'coordinator permanent-close forbidden (walkback #114)',
+      ).toBe(403)
+
+      // Sanity — reversible deactivate stays reachable for the coordinator
+      // (RolesGuard passes → handler runs → 404 on the fake id, not a role 403).
+      const deactivate = await api.post(
+        'admin/users/qa-nonexistent-user/deactivate',
+        { data: { reason: 'x' } },
+      )
+      expect(
+        deactivate.status(),
+        'coordinator reaches deactivate handler (retained power)',
+      ).toBe(404)
     } finally {
       await api.dispose()
     }

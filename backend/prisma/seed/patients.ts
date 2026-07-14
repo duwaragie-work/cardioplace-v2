@@ -4,6 +4,9 @@
 // from the pre-Phase-0 seed.ts (phase/19 demo fixtures + Bucket B). No
 // clinical data changed — §F appends the filler cohort separately so this
 // module's output stays byte-identical for the modularization commit.
+import { DisplayIdClass } from '../../src/generated/prisma/enums.js'
+import { resolveCanonicalDrugId } from '../../src/intake/medication-dedup.js'
+import { getOrGenerateDisplayIdForEmail } from './display-ids.js'
 import {
   prisma,
   DEMO_OTP,
@@ -426,6 +429,11 @@ export async function seedPatients(
   } = admins
 
   for (const p of patients) {
+    const patientDisplayId = await getOrGenerateDisplayIdForEmail(
+      prisma,
+      p.email,
+      DisplayIdClass.PATIENT,
+    )
     const user = await prisma.user.upsert({
       where: { email: p.email },
       update: {},
@@ -446,6 +454,7 @@ export async function seedPatients(
         dateOfBirth: p.dateOfBirth,
         timezone: 'America/New_York',
         preferredLanguage: 'en',
+        displayId: patientDisplayId,
       },
     })
     await seedPermaOtp(p.email, otpHash)
@@ -472,6 +481,11 @@ export async function seedPatients(
           userId: user.id,
           drugName: m.drugName,
           drugClass: m.drugClass,
+          // #85 — populate canonical identity like the real self-report path
+          // (intake.service). Without it the admin-add dedup query
+          // (WHERE canonicalDrugId=…) never matches a seeded row, so a provider
+          // could silently add a duplicate of a seeded med (e.g. Rita's Metoprolol).
+          canonicalDrugId: resolveCanonicalDrugId(m.drugName),
           frequency: m.frequency,
           source: 'PATIENT_SELF_REPORT',
           verificationStatus: m.verificationStatus,
@@ -514,6 +528,12 @@ export async function seedPatients(
     // on journalEntry, so any §G alert bound to these entries is cascaded
     // here and recreated by seedState (which runs after seedPatients in
     // run.ts) — net state stays idempotent.
+    // Delete this patient's notifications BEFORE the journal wipe. journalEntry
+    // delete cascades to its DeviationAlerts, whose Notification.alert is
+    // onDelete:SetNull — that would leave orphaned null-alertId alert rows that
+    // used to leak into the bell. Removing them outright kills the leak source
+    // every reseed. See project_notification_tab_split_2026_06_04.
+    await prisma.notification.deleteMany({ where: { userId: user.id } })
     await prisma.journalEntry.deleteMany({ where: { userId: user.id } })
     for (const r of p.readings) {
       await prisma.journalEntry.create({

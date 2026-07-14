@@ -20,6 +20,10 @@ export interface JwtPayload {
    *  Switching mints a fresh access token so the FE sees the new context
    *  on its next request without a DB hit on the auth path. */
   activePracticeId?: string | null
+  /** phase/28 session kill-switch. Rejected when behind User.tokenVersion
+   *  (bumped on deactivate / permanent-close / role removal). Absent on
+   *  legacy tokens minted before this claim existed → treated as 0. */
+  tokenVersion?: number
   iat?: number
   exp?: number
 }
@@ -66,7 +70,12 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
         fromAccessCookie,
       ]),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('JWT_ACCESS_SECRET', 'fallback-secret'),
+      // Fail closed: no fallback default. If JWT_ACCESS_SECRET is unset the
+      // process must refuse to start rather than sign/verify tokens with a
+      // known constant — a hardcoded fallback lets anyone who's read the
+      // source forge valid access tokens (Humaira N4). getOrThrow surfaces a
+      // clear "JWT_ACCESS_SECRET" error at boot.
+      secretOrKey: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
     })
   }
 
@@ -83,6 +92,30 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
    * claim is null).
    */
   async validate(payload: JwtPayload) {
+    // phase/28 — session kill-switch + status gate. One PK lookup per request:
+    // reject a token whose version is behind the account's current tokenVersion
+    // (deactivate / close / role-removal bump it), or whose account is no
+    // longer ACTIVE. This is what makes "log out everywhere, now" instant.
+    const account = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { tokenVersion: true, accountStatus: true },
+    })
+    if (!account) {
+      throw new UnauthorizedException('Account no longer exists')
+    }
+    if ((payload.tokenVersion ?? 0) < account.tokenVersion) {
+      throw new UnauthorizedException({
+        message: 'Your session has ended — please sign in again.',
+        errorCode: 'TOKEN_REVOKED',
+      })
+    }
+    if (account.accountStatus !== 'ACTIVE') {
+      throw new UnauthorizedException({
+        message: 'This account is no longer active.',
+        errorCode: 'ACCOUNT_INACTIVE',
+      })
+    }
+
     const activePracticeId = payload.activePracticeId ?? null
     if (activePracticeId) {
       // Membership can live on ANY of three relations depending on role:

@@ -18,7 +18,21 @@ import { JwtStrategy } from './jwt.strategy.js'
  */
 describe('JwtStrategy.validate — practice membership probe', () => {
   function buildStrategy(prismaMock: any) {
-    const config = { get: () => 'test-secret' } as unknown as ConfigService
+    // phase/28 — validate() now always reads the account's tokenVersion +
+    // accountStatus first (the session kill-switch). Default every mock to an
+    // ACTIVE, version-0 account so the pre-existing practice-membership tests
+    // exercise only their intended path; the kill-switch cases set their own.
+    if (!prismaMock.user) {
+      prismaMock.user = {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ tokenVersion: 0, accountStatus: 'ACTIVE' } as any),
+      }
+    }
+    const config = {
+      get: () => 'test-secret',
+      getOrThrow: () => 'test-secret',
+    } as unknown as ConfigService
     return new JwtStrategy(config, prismaMock as any)
   }
 
@@ -153,6 +167,116 @@ describe('JwtStrategy.validate — practice membership probe', () => {
         activePracticeId: 'p-cedar',
       }),
     ).rejects.toThrow(UnauthorizedException)
+  })
+
+  // ── phase/28 session kill-switch ────────────────────────────────────────
+
+  it('stale tokenVersion (payload < account) → TOKEN_REVOKED', async () => {
+    const prisma = {
+      user: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ tokenVersion: 2, accountStatus: 'ACTIVE' } as any),
+      },
+    }
+    const strat = buildStrategy(prisma)
+    let thrown: unknown
+    try {
+      await strat.validate({
+        sub: 'u9',
+        email: 'stale@test',
+        roles: ['PATIENT'] as any,
+        tokenVersion: 1,
+      })
+    } catch (e) {
+      thrown = e
+    }
+    expect(thrown).toBeInstanceOf(UnauthorizedException)
+    expect((thrown as UnauthorizedException).getResponse()).toMatchObject({
+      errorCode: 'TOKEN_REVOKED',
+    })
+  })
+
+  it('legacy token (no tokenVersion claim) still passes when account is at 0', async () => {
+    const prisma = {
+      user: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ tokenVersion: 0, accountStatus: 'ACTIVE' } as any),
+      },
+    }
+    const strat = buildStrategy(prisma)
+    const result = await strat.validate({
+      sub: 'u10',
+      email: 'legacy@test',
+      roles: ['PATIENT'] as any,
+    })
+    expect(result.id).toBe('u10')
+  })
+
+  it('non-ACTIVE account (deactivated) → ACCOUNT_INACTIVE', async () => {
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({
+          tokenVersion: 0,
+          accountStatus: 'DEACTIVATED',
+        } as any),
+      },
+    }
+    const strat = buildStrategy(prisma)
+    let thrown: unknown
+    try {
+      await strat.validate({
+        sub: 'u11',
+        email: 'off@test',
+        roles: ['PATIENT'] as any,
+        tokenVersion: 0,
+      })
+    } catch (e) {
+      thrown = e
+    }
+    expect(thrown).toBeInstanceOf(UnauthorizedException)
+    expect((thrown as UnauthorizedException).getResponse()).toMatchObject({
+      errorCode: 'ACCOUNT_INACTIVE',
+    })
+  })
+
+  it('account no longer exists → 401', async () => {
+    const prisma = {
+      user: { findUnique: jest.fn().mockResolvedValue(null as any) },
+    }
+    const strat = buildStrategy(prisma)
+    await expect(
+      strat.validate({
+        sub: 'ghost',
+        email: 'ghost@test',
+        roles: ['PATIENT'] as any,
+      }),
+    ).rejects.toThrow(UnauthorizedException)
+  })
+
+  // Humaira N4 — fail closed on a missing signing secret. With the old
+  // config.get(..., 'fallback-secret') default, an unset JWT_ACCESS_SECRET
+  // silently signed/verified tokens with the known constant 'fallback-secret',
+  // letting anyone who's read the source forge access tokens. getOrThrow makes
+  // the strategy constructor throw at boot, so the process never comes up in
+  // that state.
+  it('missing JWT_ACCESS_SECRET → constructor throws (fail closed, no fallback)', () => {
+    const prisma = {
+      practiceProvider: { findUnique: jest.fn() },
+      practiceMedicalDirector: { findUnique: jest.fn() },
+      practiceCoordinator: { findUnique: jest.fn() },
+    }
+    // Mirror ConfigService.getOrThrow's real behaviour when the key is absent.
+    const config = {
+      get: () => undefined,
+      getOrThrow: (key: string) => {
+        throw new Error(`Configuration key "${key}" does not exist`)
+      },
+    } as unknown as ConfigService
+    expect(() => new JwtStrategy(config, prisma as any)).toThrow(
+      /JWT_ACCESS_SECRET/,
+    )
   })
 
   it('no membership in ANY of the three relations → PRACTICE_MEMBERSHIP_REVOKED', async () => {

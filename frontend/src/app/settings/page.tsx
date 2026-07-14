@@ -7,6 +7,7 @@
 // have a desktop one (a desktop passkey can't travel to a phone).
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Fingerprint,
   Loader2,
@@ -22,8 +23,15 @@ import {
   Check,
   X,
   Mail,
+  AlertTriangle,
+  Power,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
+import {
+  selfDeactivateAccount,
+  requestSelfClose,
+} from '@/lib/services/auth.service';
 import {
   isBiometricSupported,
   registerBiometric,
@@ -39,6 +47,8 @@ import {
   type RegisterMode,
 } from '@/lib/services/webauthn.service';
 import RecoveryCodesPanel from '@/components/cardio/RecoveryCodesPanel';
+import SupportContactForm from '@/components/SupportContactForm';
+import NotificationSettings from '@/components/cardio/NotificationSettings';
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -57,7 +67,53 @@ function looksLikePhone(name: string | null): boolean {
 }
 
 export default function SettingsPage() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, logout } = useAuth();
+  const { t } = useLanguage();
+  const router = useRouter();
+
+  // ── Account lifecycle (phase/28) ──────────────────────────────────────────
+  const [dangerBusy, setDangerBusy] = useState<null | 'deactivate' | 'close'>(null);
+  const [dangerError, setDangerError] = useState<string | null>(null);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [closeRequested, setCloseRequested] = useState(false);
+
+  async function handleSelfDeactivate() {
+    if (dangerBusy) return;
+    setDangerBusy('deactivate');
+    setDangerError(null);
+    try {
+      await selfDeactivateAccount();
+      // Session is already dead server-side (tokenVersion bumped) — clear the
+      // local session and bounce to sign-in.
+      try {
+        await logout();
+      } catch {
+        // logout is best-effort; the redirect below is what matters.
+      }
+      router.replace('/sign-in');
+    } catch (e) {
+      setDangerError(e instanceof Error ? e.message : t('settings.danger.error'));
+      setConfirmDeactivate(false);
+    } finally {
+      setDangerBusy(null);
+    }
+  }
+
+  async function handleRequestClose() {
+    if (dangerBusy) return;
+    setDangerBusy('close');
+    setDangerError(null);
+    try {
+      await requestSelfClose();
+      setConfirmClose(false);
+      setCloseRequested(true);
+    } catch (e) {
+      setDangerError(e instanceof Error ? e.message : t('settings.danger.error'));
+    } finally {
+      setDangerBusy(null);
+    }
+  }
 
   const [supported, setSupported] = useState(false);
   const [credentials, setCredentials] = useState<WebAuthnCredentialRow[]>([]);
@@ -113,8 +169,8 @@ export default function SettingsPage() {
       } else {
         setNotice(
           mode === 'platform'
-            ? 'Biometric sign-in is on for this device.'
-            : 'Your other device was added.',
+            ? t('settings.bio.noticeOn')
+            : t('settings.bio.noticeAdded'),
         );
       }
       await load();
@@ -164,7 +220,7 @@ export default function SettingsPage() {
     try {
       await deleteBiometricCredential(id);
       setCredentials((prev) => prev.filter((c) => c.id !== id));
-      setNotice('Device removed.');
+      setNotice(t('settings.bio.deviceRemoved'));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove device.');
@@ -220,10 +276,10 @@ export default function SettingsPage() {
           </div>
           <div className="min-w-0">
             <h1 className="text-xl font-bold truncate" style={{ color: 'var(--brand-text-primary)' }}>
-              Settings
+              {t('settings.title')}
             </h1>
             <p className="text-[12px] truncate" style={{ color: 'var(--brand-text-muted)' }}>
-              Manage how you sign in and keep your account secure.
+              {t('settings.subtitle')}
             </p>
           </div>
         </div>
@@ -233,7 +289,7 @@ export default function SettingsPage() {
           className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
           style={{ color: 'var(--brand-text-muted)' }}
         >
-          Sign-in &amp; security
+          {t('settings.security')}
         </p>
 
         {/* Factor 1 — Email one-time code (always on, read-only) */}
@@ -255,7 +311,7 @@ export default function SettingsPage() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                  Email one-time code
+                  {t('settings.email.title')}
                 </h2>
                 <span
                   className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide"
@@ -265,11 +321,11 @@ export default function SettingsPage() {
                   }}
                 >
                   <Check className="w-3 h-3" />
-                  Always on
+                  {t('settings.badge.alwaysOn')}
                 </span>
               </div>
               <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-                A 6-digit code (or magic link) is sent to your email each time you sign in.
+                {t('settings.email.desc')}
               </p>
             </div>
           </div>
@@ -283,7 +339,7 @@ export default function SettingsPage() {
                   className="text-[11px] font-semibold uppercase tracking-wide"
                   style={{ color: 'var(--brand-text-muted)' }}
                 >
-                  Codes are sent to
+                  {t('settings.email.sentTo')}
                 </p>
                 <p
                   className="mt-0.5 text-[13.5px] font-medium truncate"
@@ -293,7 +349,7 @@ export default function SettingsPage() {
                 </p>
               </div>
               <span className="shrink-0 text-[11.5px]" style={{ color: 'var(--brand-text-muted)' }}>
-                Can&apos;t be changed here
+                {t('settings.email.cantChange')}
               </span>
             </div>
           </div>
@@ -318,7 +374,7 @@ export default function SettingsPage() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                  Face ID / fingerprint
+                  {t('settings.bio.title')}
                 </h2>
                 {hasBiometric ? (
                   <span
@@ -329,7 +385,7 @@ export default function SettingsPage() {
                     }}
                   >
                     <Check className="w-3 h-3" />
-                    On
+                    {t('settings.badge.on')}
                   </span>
                 ) : (
                   <span
@@ -339,14 +395,12 @@ export default function SettingsPage() {
                       color: 'var(--brand-primary-purple)',
                     }}
                   >
-                    Recommended
+                    {t('settings.badge.recommended')}
                   </span>
                 )}
               </div>
               <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-                After your email code, confirm with Face ID or your fingerprint.
-                Keep your recovery codes safe — they&apos;re the only way in if you
-                can&apos;t use biometric.
+                {t('settings.bio.desc')}
               </p>
             </div>
           </div>
@@ -427,18 +481,18 @@ export default function SettingsPage() {
                               if (e.key === 'Enter') { e.preventDefault(); void handleRename(c.id); }
                               if (e.key === 'Escape') setEditingId(null);
                             }}
-                            placeholder="Device name"
+                            placeholder={t('settings.bio.deviceName')}
                             className="w-full h-8 px-2 rounded-lg border border-[#e5d9f2] text-[13.5px] outline-none focus:ring-2 focus:ring-[#7B00E0]"
                             style={{ color: 'var(--brand-text-primary)' }}
                           />
                         ) : (
                           <>
                             <p className="text-[13.5px] font-semibold truncate" style={{ color: 'var(--brand-text-primary)' }}>
-                              {c.deviceName || 'Registered device'}
+                              {c.deviceName || t('settings.bio.registeredDevice')}
                             </p>
                             <p className="text-[11.5px]" style={{ color: 'var(--brand-text-muted)' }}>
-                              Added {formatDate(c.createdAt)}
-                              {c.lastUsedAt ? ` · last used ${formatDate(c.lastUsedAt)}` : ''}
+                              {t('settings.bio.added')} {formatDate(c.createdAt)}
+                              {c.lastUsedAt ? ` · ${t('settings.bio.lastUsed')} ${formatDate(c.lastUsedAt)}` : ''}
                             </p>
                           </>
                         )}
@@ -449,7 +503,7 @@ export default function SettingsPage() {
                             type="button"
                             onClick={() => void handleRename(c.id)}
                             disabled={savingRename || !editName.trim()}
-                            aria-label="Save name"
+                            aria-label={t('settings.bio.saveNameAria')}
                             className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-primary-purple-light)] disabled:opacity-50 cursor-pointer"
                             style={{ color: 'var(--brand-primary-purple)' }}
                           >
@@ -471,7 +525,7 @@ export default function SettingsPage() {
                           <button
                             type="button"
                             onClick={() => startRename(c.id, c.deviceName)}
-                            aria-label="Rename device"
+                            aria-label={t('settings.bio.renameAria')}
                             className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-primary-purple-light)] cursor-pointer"
                             style={{ color: 'var(--brand-text-muted)' }}
                           >
@@ -481,7 +535,7 @@ export default function SettingsPage() {
                             type="button"
                             onClick={() => void handleRemove(c.id)}
                             disabled={removingId === c.id}
-                            aria-label="Remove device"
+                            aria-label={t('settings.bio.removeAria')}
                             className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-[var(--brand-alert-red-light)] disabled:opacity-50 cursor-pointer"
                             style={{ color: 'var(--brand-alert-red)' }}
                           >
@@ -506,10 +560,8 @@ export default function SettingsPage() {
                 >
                   <Smartphone className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>
-                    <strong>Add your phone too.</strong> A computer passkey only
-                    works on that computer. On a phone, tap “Set up” below; or
-                    from this computer, choose “use a phone” and scan the QR with
-                    your phone.
+                    <strong>{t('settings.bio.nudgeTitle')}</strong>{' '}
+                    {t('settings.bio.nudgeBody')}
                   </span>
                 </div>
               )}
@@ -522,8 +574,10 @@ export default function SettingsPage() {
                 >
                   <Info className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>
-                    You&apos;ve reached the maximum of {MAX_BIOMETRIC_DEVICES}{' '}
-                    devices. Remove one above to add another.
+                    {t('settings.bio.maxReached').replace(
+                      '{count}',
+                      String(MAX_BIOMETRIC_DEVICES),
+                    )}
                   </span>
                 </div>
               )}
@@ -540,12 +594,12 @@ export default function SettingsPage() {
                   {enabling === 'platform' ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Setting up…
+                      {t('settings.bio.settingUp')}
                     </>
                   ) : (
                     <>
                       <Plus className="w-4 h-4" />
-                      {hasBiometric ? 'Set up this device' : 'Set up Face ID / fingerprint'}
+                      {hasBiometric ? t('settings.bio.setupThis') : t('settings.bio.setupFirst')}
                     </>
                   )}
                 </button>
@@ -558,10 +612,7 @@ export default function SettingsPage() {
                   style={{ backgroundColor: 'var(--brand-background, #FAFBFF)', color: 'var(--brand-text-muted)' }}
                 >
                   <Info className="w-4 h-4 mt-0.5 shrink-0" />
-                  <span>
-                    Face ID or fingerprint isn&apos;t available on this device —
-                    but you can still add a phone or tablet below.
-                  </span>
+                  <span>{t('settings.bio.notSupported')}</span>
                 </div>
               )}
 
@@ -578,12 +629,12 @@ export default function SettingsPage() {
                     {enabling === 'cross-platform' ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        Waiting for the other device…
+                        {t('settings.bio.waitingOther')}
                       </>
                     ) : (
                       <>
                         <Smartphone className="w-4 h-4" />
-                        Add another device (phone / tablet)
+                        {t('settings.bio.addAnother')}
                       </>
                     )}
                   </button>
@@ -596,10 +647,8 @@ export default function SettingsPage() {
                   >
                     <Bluetooth className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                     <span>
-                      <strong>Turn Bluetooth ON on both devices first.</strong>{' '}
-                      Then on the next screen choose{' '}
-                      <strong>“use a phone or tablet”</strong>, scan the QR with
-                      that device, and confirm with its Face ID / fingerprint.
+                      <strong>{t('settings.bio.bluetoothTitle')}</strong>{' '}
+                      {t('settings.bio.bluetoothBody')}
                     </span>
                   </div>
                 </div>
@@ -607,6 +656,11 @@ export default function SettingsPage() {
             </div>
           )}
         </section>
+
+        {/* Notifications — turn out-of-app push on/off for this device */}
+        <div className="mt-4">
+          <NotificationSettings />
+        </div>
 
         {/* Recovery codes card — only meaningful once biometric is set up */}
         {!loading && hasBiometric && (
@@ -625,7 +679,7 @@ export default function SettingsPage() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
-                    Recovery codes
+                    {t('settings.recovery.title')}
                   </h2>
                   {(recovery?.remaining ?? 0) <= 3 ? (
                     <span
@@ -635,7 +689,7 @@ export default function SettingsPage() {
                         color: 'var(--brand-warning-amber, #92400E)',
                       }}
                     >
-                      Running low
+                      {t('settings.recovery.runningLow')}
                     </span>
                   ) : (
                     <span
@@ -645,15 +699,18 @@ export default function SettingsPage() {
                         color: 'var(--brand-text-muted)',
                       }}
                     >
-                      Fallback
+                      {t('settings.recovery.fallback')}
                     </span>
                   )}
                 </div>
                 <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
-                  Use one to sign in if you can&apos;t use Face ID / fingerprint.
+                  {t('settings.recovery.desc')}
                   <span className="font-semibold">
                     {' '}
-                    {recovery?.remaining ?? 0} of 10 left.
+                    {t('settings.recovery.remaining').replace(
+                      '{count}',
+                      String(recovery?.remaining ?? 0),
+                    )}
                   </span>
                 </p>
               </div>
@@ -667,14 +724,212 @@ export default function SettingsPage() {
                 className="w-full h-11 rounded-full border border-[#7B00E0] font-semibold text-sm text-[#7B00E0] hover:bg-[#7B00E0]/5 transition-colors disabled:opacity-50 cursor-pointer inline-flex items-center justify-center gap-2"
               >
                 {regenerating && <Loader2 className="w-4 h-4 animate-spin" />}
-                {regenerating ? 'Generating…' : 'Generate new codes'}
+                {regenerating ? t('settings.recovery.generating') : t('settings.recovery.generate')}
               </button>
               <p className="text-[11.5px] mt-2" style={{ color: 'var(--brand-text-muted)' }}>
-                Generating new codes replaces your old ones.
+                {t('settings.recovery.replaceNote')}
               </p>
             </div>
           </section>
         )}
+        {/* ── Danger zone (phase/28) — patient self-service lifecycle ────── */}
+        <p
+          className="mt-8 mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
+          style={{ color: 'var(--brand-alert-red)' }}
+        >
+          {t('settings.danger.title')}
+        </p>
+
+        <section
+          className="rounded-2xl bg-white overflow-hidden"
+          style={{ border: '1px solid var(--brand-alert-red-light, #FEE2E2)' }}
+        >
+          {/* Deactivate (reversible) */}
+          <div className="p-5">
+            <div className="flex items-start gap-4">
+              <span
+                className="shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center"
+                style={{
+                  backgroundColor: 'var(--brand-warning-amber-light, #FEF3C7)',
+                  color: 'var(--brand-warning-amber, #92400E)',
+                }}
+                aria-hidden
+              >
+                <Power className="w-6 h-6" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                  {t('settings.danger.deactivate.title')}
+                </h2>
+                <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
+                  {t('settings.danger.deactivate.desc')}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3">
+              {confirmDeactivate ? (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <span
+                    className="flex-1 text-[12.5px] font-medium"
+                    style={{ color: 'var(--brand-warning-amber, #92400E)' }}
+                  >
+                    {t('settings.danger.deactivate.confirm')}
+                  </span>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeactivate(false)}
+                      disabled={!!dangerBusy}
+                      className="h-10 px-4 rounded-full border font-semibold text-sm disabled:opacity-50 cursor-pointer"
+                      style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                    >
+                      {t('common.cancel')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSelfDeactivate}
+                      disabled={!!dangerBusy}
+                      data-testid="settings-deactivate-confirm"
+                      className="h-10 px-4 rounded-full text-white font-semibold text-sm inline-flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                      style={{ backgroundColor: 'var(--brand-warning-amber, #D97706)' }}
+                    >
+                      {dangerBusy === 'deactivate' && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {t('settings.danger.deactivate.button')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeactivate(true)}
+                  data-testid="settings-deactivate"
+                  className="h-10 px-4 rounded-full border font-semibold text-sm cursor-pointer"
+                  style={{ borderColor: 'var(--brand-warning-amber, #D97706)', color: 'var(--brand-warning-amber, #92400E)' }}
+                >
+                  {t('settings.danger.deactivate.button')}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--brand-border)' }} />
+
+          {/* Permanent close (irreversible, email-confirmed) */}
+          <div className="p-5">
+            <div className="flex items-start gap-4">
+              <span
+                className="shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center text-white"
+                style={{ backgroundColor: 'var(--brand-alert-red)' }}
+                aria-hidden
+              >
+                <AlertTriangle className="w-6 h-6" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-[15px] font-bold" style={{ color: 'var(--brand-text-primary)' }}>
+                  {t('settings.danger.close.title')}
+                </h2>
+                <p className="text-[13px] mt-0.5 leading-relaxed" style={{ color: 'var(--brand-text-muted)' }}>
+                  {t('settings.danger.close.desc')}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3">
+              {closeRequested ? (
+                <p
+                  className="text-[13px] font-semibold px-3 py-2.5 rounded-lg inline-flex items-start gap-2"
+                  style={{
+                    color: 'var(--brand-success-green, #166534)',
+                    backgroundColor: 'var(--brand-success-green-light, #DCFCE7)',
+                  }}
+                >
+                  <Mail className="w-4 h-4 mt-0.5 shrink-0" />
+                  {t('settings.danger.close.requested')}
+                </p>
+              ) : confirmClose ? (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <span
+                    className="flex-1 text-[12.5px] font-medium"
+                    style={{ color: 'var(--brand-alert-red)' }}
+                  >
+                    {t('settings.danger.close.confirm')}
+                  </span>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClose(false)}
+                      disabled={!!dangerBusy}
+                      className="h-10 px-4 rounded-full border font-semibold text-sm disabled:opacity-50 cursor-pointer"
+                      style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-secondary)' }}
+                    >
+                      {t('common.cancel')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRequestClose}
+                      disabled={!!dangerBusy}
+                      data-testid="settings-close-confirm"
+                      className="h-10 px-4 rounded-full text-white font-semibold text-sm inline-flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                      style={{ backgroundColor: 'var(--brand-alert-red)' }}
+                    >
+                      {dangerBusy === 'close' && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {t('settings.danger.close.button')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmClose(true)}
+                  disabled={!!dangerBusy}
+                  data-testid="settings-close-request"
+                  className="h-10 px-4 rounded-full text-white font-semibold text-sm inline-flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                  style={{ backgroundColor: 'var(--brand-alert-red)' }}
+                >
+                  {t('settings.danger.close.button')}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {dangerError && (
+            <div className="px-5 pb-5">
+              <p
+                role="alert"
+                className="text-[13px] font-semibold px-3 py-2 rounded-lg"
+                style={{ color: 'var(--brand-alert-red)', backgroundColor: 'var(--brand-alert-red-light)' }}
+              >
+                {dangerError}
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* Contact support — in-app form for signed-in patients. */}
+        <p
+          className="mb-2 mt-6 px-1 text-[11px] font-bold uppercase tracking-wide"
+          style={{ color: 'var(--brand-text-muted)' }}
+        >
+          Contact support
+        </p>
+        <section
+          className="rounded-2xl bg-white overflow-hidden p-5"
+          style={{ border: '1px solid var(--brand-border)' }}
+          data-testid="settings-support"
+        >
+          <p className="text-[13px] mb-4" style={{ color: 'var(--brand-text-muted)' }}>
+            Need help with your account, sign-in, or something in the app? Send our team a
+            message and we’ll follow up by email.
+          </p>
+          <SupportContactForm />
+          <a
+            href="/support/my-tickets"
+            data-testid="settings-my-requests-link"
+            className="mt-4 inline-flex items-center gap-1 text-[13px] font-semibold"
+            style={{ color: 'var(--brand-primary-purple)' }}
+          >
+            View my requests →
+          </a>
+        </section>
       </div>
 
       {/* Recovery-codes overlay (first setup / regenerate) */}
@@ -694,7 +949,7 @@ export default function SettingsPage() {
             </button>
             <RecoveryCodesPanel
               codes={codesToShow}
-              acknowledgeLabel="Done"
+              acknowledgeLabel={t('settings.recovery.done')}
               onAcknowledge={() => setCodesToShow(null)}
             />
           </div>

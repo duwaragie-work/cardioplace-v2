@@ -19,7 +19,7 @@ import {
   VerifierRole,
 } from '../generated/prisma/client.js'
 import { canCompleteEnrollment } from '../practice/enrollment-gate.js'
-import { resolveCanonicalDrugId } from './medication-dedup.js'
+import { resolveCanonicalDrugId, resolveCanonicalDrugClass } from './medication-dedup.js'
 import type {
   AdminAddMedicationDto,
   AdminEditMedicationDto,
@@ -449,6 +449,7 @@ export class IntakeService {
               title: 'Contraindicated medication re-added',
               body: `Patient re-added a medication flagged as contraindicated (prior angioedema): ${drugList}. It is held for your review before it can be trusted.`,
               tips: [],
+              dispatchTrigger: 'MEDICATION_CONTRAINDICATION',
             },
           })
         } else {
@@ -977,6 +978,7 @@ export class IntakeService {
           channel: NotificationChannel.PUSH,
           title: 'Please re-check a profile detail',
           body: systemMsgProfileFieldRejected(label),
+          dispatchTrigger: 'PROFILE_REJECTED',
         },
       })
     } catch (err) {
@@ -1241,6 +1243,7 @@ export class IntakeService {
               channel: NotificationChannel.PUSH,
               title,
               body,
+              dispatchTrigger: 'CARE_TEAM_UPDATE',
             },
           })
         }
@@ -1356,6 +1359,28 @@ export class IntakeService {
       if (dup) this.canonicalDuplicate409(dto.drugName, canonicalDrugId, dup)
     }
 
+    // Defensive fallback dedup: an existing active row with the SAME drugName
+    // (case-insensitive) that the canonical check above missed — e.g. a legacy
+    // row whose canonicalDrugId was never populated (pre-fix seed / import gap),
+    // or an off-catalog drug. Only 409s when the canonical pass didn't already
+    // cover this exact row, so it never double-throws.
+    const nameDup = await this.prisma.patientMedication.findFirst({
+      where: {
+        userId: patientUserId,
+        drugName: { equals: dto.drugName, mode: 'insensitive' },
+        discontinuedAt: null,
+      },
+    })
+    if (nameDup && (!canonicalDrugId || nameDup.canonicalDrugId !== canonicalDrugId)) {
+      this.canonicalDuplicate409(dto.drugName, canonicalDrugId ?? 'off-catalog', nameDup)
+    }
+
+    // Catalog wins on class: if the name resolves to the catalog, prefer the
+    // catalog's drugClass over whatever the provider picked — prevents a known
+    // drug being mis-filed (e.g. Metoprolol saved as OTHER_UNVERIFIED). Off-
+    // catalog names keep the provider's class.
+    const effectiveDrugClass = resolveCanonicalDrugClass(dto.drugName) ?? dto.drugClass
+
     // ACE/ARB-on-angioedema safety gate (mirror of #84). Auto-hold instead of
     // auto-verify so an admin can't silently re-introduce a contraindicated drug.
     const profile = await this.prisma.patientProfile.findUnique({
@@ -1363,7 +1388,8 @@ export class IntakeService {
       select: { aceContraindicatedAt: true },
     })
     const isAceArb =
-      dto.drugClass === DrugClass.ACE_INHIBITOR || dto.drugClass === DrugClass.ARB
+      effectiveDrugClass === DrugClass.ACE_INHIBITOR ||
+      effectiveDrugClass === DrugClass.ARB
     const angioedemaHold = profile?.aceContraindicatedAt != null && isAceArb
 
     const now = new Date()
@@ -1374,7 +1400,7 @@ export class IntakeService {
         data: {
           userId: patientUserId,
           drugName: dto.drugName,
-          drugClass: dto.drugClass,
+          drugClass: effectiveDrugClass,
           canonicalDrugId,
           frequency: dto.frequency,
           notes: this.composeNotes(dto.dose, dto.notes),
@@ -1398,7 +1424,7 @@ export class IntakeService {
           previousValue: Prisma.JsonNull,
           newValue: {
             drugName: dto.drugName,
-            drugClass: dto.drugClass,
+            drugClass: effectiveDrugClass,
             verificationStatus: med.verificationStatus,
             holdReason: med.holdReason,
           } as Prisma.InputJsonValue,
@@ -1439,7 +1465,7 @@ export class IntakeService {
     const now = new Date()
     const role = this.adminVerifierRole(actor.roles)
     const nameChanged = dto.drugName != null && dto.drugName !== med.drugName
-    const newDrugClass = dto.drugClass ?? med.drugClass
+    let newDrugClass = dto.drugClass ?? med.drugClass
     let canonicalDrugId = med.canonicalDrugId
     if (nameChanged) {
       canonicalDrugId = resolveCanonicalDrugId(dto.drugName!)
@@ -1455,6 +1481,13 @@ export class IntakeService {
         if (dup) this.canonicalDuplicate409(dto.drugName!, canonicalDrugId, dup)
       }
     }
+
+    // Catalog wins on class (mirror of adminAddMedication): if the effective
+    // drug name resolves to the catalog, the catalog's class overrides whatever
+    // the provider picked — self-heals a mis-classified catalog drug on any
+    // edit. Off-catalog names keep the provider/existing class.
+    const canonicalClass = resolveCanonicalDrugClass(dto.drugName ?? med.drugName)
+    if (canonicalClass) newDrugClass = canonicalClass
 
     // If the edit turns this into an ACE/ARB for an angioedema patient, hold it.
     const isAceArb =
@@ -1473,7 +1506,9 @@ export class IntakeService {
       lastEditedAt: now,
     }
     if (dto.drugName != null) data.drugName = dto.drugName
-    if (dto.drugClass != null) data.drugClass = dto.drugClass
+    // Persist the effective class (catalog-corrected) whenever it changes —
+    // covers both an explicit provider class change and a catalog auto-correct.
+    if (newDrugClass !== med.drugClass) data.drugClass = newDrugClass
     if (dto.frequency != null) data.frequency = dto.frequency
     if (dto.dose != null || dto.notes != null) {
       data.notes = this.composeNotes(dto.dose, dto.notes ?? med.notes ?? undefined)
@@ -1488,20 +1523,19 @@ export class IntakeService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const row = await tx.patientMedication.update({ where: { id: medicationId }, data })
+      // N5 (2026-07-09) — capture the FULL clinical snapshot before + after.
+      // Was 3 fields (drugName/drugClass/frequency); now mirrors serializeMedication
+      // so an alteration on dose, notes, verificationStatus, holdReason,
+      // holdEscalationLevel, discontinuedAt, etc. is reconstructable from the
+      // audit trail (HIPAA §164.312(c) integrity, Humaira Activity 4 item 2).
+      // The patient-facing update paths at :566 already use per-field snapshots;
+      // this brings the admin edit path to the same coverage.
       await tx.profileVerificationLog.create({
         data: {
           userId: med.userId,
           fieldPath: `medication:${medicationId}`,
-          previousValue: {
-            drugName: med.drugName,
-            drugClass: med.drugClass,
-            frequency: med.frequency,
-          } as Prisma.InputJsonValue,
-          newValue: {
-            drugName: dto.drugName ?? med.drugName,
-            drugClass: newDrugClass,
-            frequency: dto.frequency ?? med.frequency,
-          } as Prisma.InputJsonValue,
+          previousValue: this.serializeMedication(med) as Prisma.InputJsonValue,
+          newValue: this.serializeMedication(row) as Prisma.InputJsonValue,
           changedBy: actor.id,
           changedByRole: role,
           changeType: VerificationChangeType.ADMIN_CORRECT,
@@ -1727,6 +1761,7 @@ export class IntakeService {
         channel: NotificationChannel.PUSH,
         title,
         body,
+        dispatchTrigger: 'CARE_TEAM_UPDATE',
       })),
     })
   }

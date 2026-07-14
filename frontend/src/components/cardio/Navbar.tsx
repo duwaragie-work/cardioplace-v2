@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { Bell, Menu, X, Globe, User as UserIcon, Settings, LogOut } from 'lucide-react';
+import { Bell, Menu, X, Globe, User as UserIcon, Settings, LifeBuoy, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { getAlerts, getNotifications } from '@/lib/services/journal.service';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -314,7 +314,7 @@ export default function Navbar() {
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
                   <UserIcon className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
-                  Profile
+                  {t('profile.title')}
                 </Link>
                 <Link
                   href="/settings"
@@ -325,7 +325,18 @@ export default function Navbar() {
                   style={{ color: 'var(--brand-text-primary)' }}
                 >
                   <Settings className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
-                  Settings
+                  {t('settings.title')}
+                </Link>
+                <Link
+                  href="/support/my-tickets"
+                  role="menuitem"
+                  data-testid="navbar-menu-support"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2.5 px-4 py-3 text-[13.5px] font-medium transition hover:bg-gray-50"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  <LifeBuoy className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+                  {t('nav.support')}
                 </Link>
                 <button
                   type="button"
@@ -339,7 +350,7 @@ export default function Navbar() {
                   }}
                 >
                   <LogOut className="w-4 h-4" />
-                  Sign out
+                  {t('profile.signOut')}
                 </button>
               </div>
             )}

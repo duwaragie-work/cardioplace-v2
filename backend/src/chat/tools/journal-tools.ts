@@ -9,6 +9,11 @@ import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
 import { isoFromTzWallclock, tzWallclockFromIso } from '../../common/datetime.js'
 import { kgToLbs, normaliseWeightToKg } from '../../common/units.js'
+import {
+  JOURNAL_NOTE_MAX_LENGTH,
+  JOURNAL_CUSTOM_SYMPTOM_MAX_LENGTH,
+  JOURNAL_CUSTOM_SYMPTOMS_MAX_COUNT,
+} from '@cardioplace/shared'
 import type { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import type { SessionSymptoms } from '../../daily_journal/engine/types.js'
 import type { OcrService } from '../../ocr/ocr.service.js'
@@ -473,7 +478,13 @@ export function getJournalToolDeclarations(): FunctionDeclaration[] {
               'Default false.',
           },
         },
-        required: ['entry_date', 'measurement_time', 'systolic_bp', 'diastolic_bp', 'medication_taken', 'symptoms'],
+        // BP + medication_taken + symptoms are DESCRIPTION-required on normal check-ins but
+        // OMITTABLE on the Option D decline path (see decline_confirmation field). Listing them
+        // in JSON `required` blocked Gemini from calling the tool on decline turns — the model
+        // couldn't reconcile "these are required" with "pass zeros or omit" and stopped calling
+        // the tool, breaking qa/tests/60 Test 3. Description-level guidance is now the single
+        // enforcement point.
+        required: ['entry_date', 'measurement_time'],
       },
     },
     {
@@ -888,6 +899,63 @@ export async function executeJournalTool(
           message: `Cannot save a reading older than 30 days (${entryDate}). The BP check-in form has the same 30-day limit. Ask the patient if they meant a more recent date.`,
         })
       }
+      // Pre-flight range + transposition guards (parity with the voice
+      // dispatcher and the form). The backend DTO 422s on every out-of-range
+      // value; pre-empting them here lets the model re-ask just the bad field
+      // with friendly wording instead of surfacing a raw validation error.
+      // Only evaluated when a real BP is present (both > 0) — sparse 0/0 logs
+      // skip the BP checks. Clinical copy below is placeholder pending Dr.
+      // Singal sign-off.
+      const sbpNum = Number(args.systolic_bp)
+      const dbpNum = Number(args.diastolic_bp)
+      if (sbpNum > 0 && dbpNum > 0) {
+        if (sbpNum < 60 || sbpNum > 250 || dbpNum < 40 || dbpNum > 150) {
+          return JSON.stringify({
+            saved: false,
+            reason: 'BP_OUT_OF_RANGE',
+            message: `BP values out of range (got ${sbpNum}/${dbpNum}). Systolic must be 60-250, diastolic 40-150. Ask the patient to re-read the cuff.`,
+          })
+        }
+        // Transposition (strike 1) — DBP ≥ SBP almost always means the patient
+        // stated the numbers in the wrong order (80/120 instead of 120/80).
+        if (dbpNum >= sbpNum) {
+          return JSON.stringify({
+            saved: false,
+            reason: 'IMPLAUSIBLE_READING',
+            message:
+              'The numbers look flipped — the top number should be larger than the bottom. ' +
+              'Ask the patient to read both numbers again and re-call submit_checkin with the corrected values.',
+          })
+        }
+      }
+      // Pulse range (30-220). 0 / absent = skipped, never rejected.
+      const pulseNum = args.pulse != null ? Number(args.pulse) : 0
+      if (pulseNum > 0 && (pulseNum < 30 || pulseNum > 220)) {
+        return JSON.stringify({
+          saved: false,
+          reason: 'PULSE_OUT_OF_RANGE',
+          message: `That pulse (${pulseNum}) is outside the plausible 30-220 bpm range. Ask the patient to re-read just the pulse before saving.`,
+        })
+      }
+      // Weight range — normalise to kg first (DTO stores 20-300 kg) so an
+      // out-of-range lbs value gets a unit-aware re-ask instead of a 422.
+      if (typeof args.weight === 'number' && args.weight > 0) {
+        const weightKg = normaliseWeightToKg(
+          args.weight,
+          typeof args.weight_unit === 'string' ? args.weight_unit : undefined,
+        )
+        if (weightKg > 0 && (weightKg < 20 || weightKg > 300)) {
+          const unitLabel =
+            typeof args.weight_unit === 'string' && args.weight_unit.toUpperCase() === 'KG'
+              ? 'kg (20-300 allowed)'
+              : 'lbs (about 45-661 allowed)'
+          return JSON.stringify({
+            saved: false,
+            reason: 'WEIGHT_OUT_OF_RANGE',
+            message: `That weight (${args.weight} ${unitLabel}) is outside the plausible range. Ask the patient to re-read just the weight before saving.`,
+          })
+        }
+      }
       try {
         // Bug 28 — same UTC-default issue as the entry_date fallback above.
         // Pre-fix this took `new Date().toISOString().slice(11, 16)` (UTC's
@@ -970,7 +1038,11 @@ export async function executeJournalTool(
         }
         const dedupedSymptoms = dedupeSymptomsAgainstFlags(args.symptoms ?? [], finalFlags) ?? []
         const dedupedOtherSymptoms = Array.isArray(args.other_symptoms)
-          ? dedupeSymptomsAgainstFlags(args.other_symptoms, finalFlags)
+          ? // Defensive clamp to the DTO's custom-symptom caps (≤20 items, each
+            // ≤120 chars) so a runaway model can't 422 the whole save.
+            (dedupeSymptomsAgainstFlags(args.other_symptoms, finalFlags) ?? [])
+              .slice(0, JOURNAL_CUSTOM_SYMPTOMS_MAX_COUNT)
+              .map((s) => s.slice(0, JOURNAL_CUSTOM_SYMPTOM_MAX_LENGTH))
           : undefined
         const result = await journalService.create(userId, {
           measuredAt,
@@ -1017,7 +1089,8 @@ export async function executeJournalTool(
           faceSwelling: finalFlags.faceSwelling === true,
           throatTightness: finalFlags.throatTightness === true,
           otherSymptoms: dedupedOtherSymptoms,
-          notes: args.notes ?? '',
+          // Clamp to JOURNAL_NOTE_MAX_LENGTH (1000) — silent truncate beats a 422.
+          notes: (args.notes ?? '').slice(0, JOURNAL_NOTE_MAX_LENGTH),
           sessionId:
             typeof args.session_id === 'string' && args.session_id.trim() ? args.session_id.trim() : undefined,
           // Option D pair-link — model fills only when the patient is taking
@@ -1059,23 +1132,39 @@ export async function executeJournalTool(
             // reading enters Option D hold.
             return !hasOverrideSymptom
           })(),
-          // Session boundary — Phase/16 Item 7 (Nivakaran chat-v2 handoff
-          // 2026-06-17). Handoff: "every chat-initiated createJournalEntry
-          // defaults to closeSession: true (single reading = one session =
-          // closed immediately on commit)". We can't always trust the LLM
-          // to thread the flag explicitly, so default-by-shape:
+          // Session boundary — editable-buffer-window parity with the form.
+          // The form holds a non-emergency reading for a 5-min editable window
+          // (no alert, not surfaced to the care team) before it commits; chat
+          // now mirrors that by DEFERRING single readings instead of closing
+          // them immediately. closeSession:false leaves the backend's
+          // engineEvaluationDeferredUntil hold in place (5-min window + cron
+          // finalize); the patient's "I'm good / all set" confirmation calls
+          // finalize_checkin to fire early, and edits go through update_checkin
+          // (which never re-triggers). Default-by-shape:
           //   • model explicitly set close_session → honour it verbatim
-          //   • model passed session_id (Q3 / continuation) → leave false
-          //     unless the model opts in (handoff: "true on the LAST")
-          //   • single reading (no session_id) → true (matches Bug 19 /
-          //     handoff intent)
-          // Backend still ignores closeSession when emergencyConfirmation
-          // is AWAITING (guarded in DailyJournalService.create), so the
-          // Option D first-of-pair never closes prematurely.
-          closeSession:
-            args.close_session !== undefined
-              ? args.close_session === true
-              : !args.session_id,
+          //     (e.g. true on the LAST reading of a multi-reading session)
+          //   • Option D confirmatory (confirms_entry_id) → true: the
+          //     confirmatory entry closes the pair and fast-fires the outcome
+          //   • everything else (single non-emergency, or an intermediate
+          //     multi-reading) → false: defer for the editable window
+          // Backend still ignores closeSession when emergencyConfirmation is
+          // AWAITING, and emergency rules fire on create regardless of the
+          // hold, so emergencies are unaffected.
+          closeSession: (() => {
+            // Option D confirmatory closes + fast-fires the pair.
+            if (args.confirms_entry_id) return true
+            // Multi-reading session: honour the explicit flag — true only on
+            // the LAST reading, false on the intermediates.
+            if (args.session_id) return args.close_session === true
+            // Bare single reading: ALWAYS defer for the 5-min editable window,
+            // even if the model passed close_session:true (it follows the
+            // legacy "close single readings immediately" guidance). Forcing
+            // false here is what actually gives chat the editable window —
+            // "I'm good" finalises via finalize_checkin, the cron finalises on
+            // timeout. Honouring the model's true here was the bug that made
+            // the editable badge never appear (reading fast-fired instead).
+            return false
+          })(),
         } as any)
         ctx.onPatientDataMutated?.(userId)
         // Bug 54 — include weight_display so the LLM verbalises back in the
@@ -1111,15 +1200,44 @@ export async function executeJournalTool(
         // (whose medicationTaken=true is vacuously true per Bug 53).
         const hasActiveMedications =
           await journalService.hasActiveMedications(userId)
+        // Editable-buffer-window parity: a deferred (non fast-fired) entry
+        // carries engineEvaluationDeferredUntil in the future. Surface it (plus
+        // the entry id) explicitly so the prompt can tell the patient the
+        // reading is editable for a few more minutes, and call finalize_checkin
+        // with this entry_id when the patient confirms "I'm good / all set".
+        const entryData = result.data as {
+          id?: string
+          engineEvaluationDeferredUntil?: string | null
+        }
+        const editableUntil = entryData?.engineEvaluationDeferredUntil ?? null
+        const isDeferred =
+          editableUntil != null && new Date(editableUntil).getTime() > Date.now()
         return JSON.stringify({
           saved: true,
           message: 'Check-in saved successfully.',
           data: result.data,
+          entry_id: entryData?.id ?? null,
+          editable_until: editableUntil,
+          deferred: isDeferred,
           weight_display: weightDisplay,
           has_active_medications: hasActiveMedications,
         })
       } catch (err: any) {
         if (isIntakeIncompleteError(err)) return intakeIncompleteResponse('saved')
+        // Transposition strike 2 — the pre-flight guard above re-asked once
+        // (strike 1); reaching the backend's 'implausible-reading' 422 means
+        // the re-submitted values are STILL flipped. Escalate the wording.
+        // Clinical copy — placeholder pending Dr. Singal sign-off.
+        if (err?.message === 'implausible-reading') {
+          return JSON.stringify({
+            saved: false,
+            reason: 'IMPLAUSIBLE_READING',
+            message:
+              "I'm still getting a top number that isn't larger than the bottom. " +
+              "Let's double-check the cuff display together — the bigger number is the top (systolic) reading. " +
+              'Ask the patient to read it again and re-call submit_checkin with the corrected values.',
+          })
+        }
         return JSON.stringify({ saved: false, message: err.message ?? 'Failed to save check-in.' })
       }
     }

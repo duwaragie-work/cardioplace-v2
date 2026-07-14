@@ -45,6 +45,15 @@ import type {
   PatientAlert,
 } from '@/lib/services/patient-detail.service';
 
+/**
+ * Formats a canonical display ID ("CPPATK8M2R4N7") with hyphens
+ * ("CP-PAT-K8M2R4N-7"). Mirrors DisplayIdService.
+ */
+function formatDisplayId(value: string): string {
+  if (value.length !== 13 || value.includes('-')) return value;
+  return `${value.slice(0, 2)}-${value.slice(2, 5)}-${value.slice(5, 12)}-${value.slice(12)}`;
+}
+
 type TierBucket = 'BP_L2' | 'TIER_1' | 'TIER_2' | 'BP_L1' | 'TIER_3' | 'OTHER';
 
 function tierBucket(t: string | null): TierBucket {
@@ -185,10 +194,11 @@ interface Props {
    *  the parent shell already shows the patient. NotificationsScreen
    *  passes the resolved patient.name. */
   patientName?: string | null;
-  /** Optional follow-up call indicator — surfaces a "Call scheduled" pill
-   *  when the alert has a linked ScheduledCall. Sourced from the provider-
-   *  wide endpoint's followUpScheduledAt. */
-  followUpScheduledAt?: string | null;
+  /** Patient's permanent display ID (CP-PAT-...) shown next to the name on
+   *  cross-patient surfaces (NotificationsScreen). On the per-patient
+   *  AlertsTab the surrounding shell already exposes the ID. See
+   *  docs/UNIQUE_IDENTIFIER_PROPOSAL_2026_06_24.md. */
+  patientDisplayId?: string | null;
   /** PatientProfile.heightCm — used by the 15-field audit footer in
    *  EscalationAuditTrail to compute BMI from the alert's reading weight. */
   heightCm?: number | null;
@@ -230,7 +240,7 @@ export default function AlertCard({
   onAcknowledge,
   ackInFlight,
   patientName,
-  followUpScheduledAt,
+  patientDisplayId,
   heightCm,
   rowClickable = true,
   patientPreEnrollment = false,
@@ -302,6 +312,16 @@ export default function AlertCard({
                 style={{ color: 'var(--brand-text-primary)' }}
               >
                 {patientName}
+              </span>
+            )}
+            {patientDisplayId && (
+              <span
+                data-testid={`admin-alert-patient-display-id-${alert.id}`}
+                className="text-[11px] font-mono tracking-tight"
+                style={{ color: 'var(--brand-text-muted)' }}
+                title="Cardioplace ID — permanent"
+              >
+                {formatDisplayId(patientDisplayId)}
               </span>
             )}
             <span
@@ -426,14 +446,6 @@ export default function AlertCard({
                 style={{ backgroundColor: 'var(--brand-alert-red-light)', color: 'var(--brand-alert-red-text)' }}
               >
                 Escalated
-              </span>
-            )}
-            {followUpScheduledAt && (
-              <span
-                className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                style={{ backgroundColor: '#CCFBF1', color: '#0D9488' }}
-              >
-                Call scheduled
               </span>
             )}
           </div>

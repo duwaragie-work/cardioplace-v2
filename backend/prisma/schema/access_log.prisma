@@ -1,0 +1,44 @@
+// PHI access audit trail (Humaira N8 / 164.312-T7, HIPAA §164.312(b) audit
+// controls). One row per read/write/delete on a PHI model, written by the
+// access-log Prisma extension (behavior lands Thursday; this is the schema
+// half of the scaffolding). actorId is null when a system-actor cron writes.
+model AccessLog {
+  id        String   @id @default(ulid())
+  actorId   String? // null when system-actor cron writes
+  actorType String // 'USER' | 'SYSTEM_ACTOR'
+  action    String // 'READ' | 'WRITE' | 'DELETE'
+  modelName String // 'JournalEntry' | 'DeviationAlert' | ...
+  // Nullable by design: list/aggregate ops (findMany, count, createMany,
+  // updateMany, deleteMany) log the query INTENT, not each record, so they
+  // carry no single recordId. Single-record ops pin the id from where.id /
+  // result.id.
+  recordId  String?
+  ip        String?
+  userAgent String?
+  // Which background process wrote this row (e.g. 'cron-gap-alert'), set by
+  // runAsCronActor when actorType='SYSTEM_ACTOR'. Null for USER writes and for
+  // pre-2026-07-03 / unlabelled system writes (honest — we didn't know then).
+  systemActorLabel String?
+  // N2 (2026-07-07) — per-invocation correlation id. Cron path: one runId per
+  // @Cron() fire, set by runAsCronActor. HTTP path: one runId per request, set
+  // by the CLS interceptor in cls.module.ts. Groups every row emitted during
+  // the same run, so the N7 exception-report cron can compute per-run counts
+  // (e.g. "cron X wrote 0 rows this run" or "user Y read 400 records in one
+  // request") rather than day-granularity aggregates. Nullable — pre-N2 rows
+  // pre-date this column.
+  runId     String?
+  // N4 follow-up (2026-07-11) — practice-context attribution (Manisha
+  // 2026-06-12 Access Control §1, HIPAA 45 CFR §164.312(a)(2)(i)). The
+  // activePracticeId on the actor's AuthSession at the time of the row.
+  // NULL for SUPER_ADMIN / HEALPLACE_OPS / SYSTEM_ACTOR reads and pre-policy
+  // rows. Mirrors the field on AuthLog + ProfileVerificationLog +
+  // EmailDisclosureLog so per-practice audit queries can filter without
+  // resolving the actor's practice memberships at query time.
+  practiceContext String?
+  createdAt DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([modelName, recordId, createdAt])
+  @@index([runId])
+  @@index([practiceContext, createdAt])
+}

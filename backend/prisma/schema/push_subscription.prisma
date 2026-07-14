@@ -1,0 +1,22 @@
+// Web Push subscription for a patient's browser (service-worker + PushSubscription
+// + VAPID). One row per browser/device endpoint. This is the missing out-of-app
+// transport: a Notification created with channel PUSH is dispatched here so it
+// reaches the patient even when the app is closed. See WebPushService.
+//
+// `endpoint` is the push-service URL the browser hands us; it is globally unique
+// per subscription, so it's the natural upsert key. `p256dh` + `auth` are the
+// subscription's encryption keys (from `PushSubscription.getKey(...)`). A stale
+// endpoint (browser cleared it / permission revoked) returns 404/410 on send and
+// is pruned by WebPushService.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}

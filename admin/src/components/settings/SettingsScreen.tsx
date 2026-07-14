@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { getMyProfile, type MyProfile } from '@/lib/services/profile.service';
 import RecoveryCodesModal from '@/components/profile/RecoveryCodesModal';
+import SupportContactForm from '@/components/SupportContactForm';
 
 // ─── Small presentational helpers ─────────────────────────────────────────────
 
@@ -422,6 +423,26 @@ export default function SettingsScreen() {
               </CardFooter>
             </FactorCard>
           )}
+        </div>
+      </div>
+
+      {/* Contact support — in-app form for signed-in staff. */}
+      <div className="max-w-2xl mx-auto px-4 md:px-6 pb-8">
+        <p
+          className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wide"
+          style={{ color: 'var(--brand-text-muted)' }}
+        >
+          Contact support
+        </p>
+        <div
+          className="rounded-2xl bg-white p-5"
+          style={{ border: '1px solid var(--brand-border)' }}
+        >
+          <p className="text-[13px] mb-4" style={{ color: 'var(--brand-text-muted)' }}>
+            Question about your account, MFA, a clinical topic, or a bug? Send our team a
+            message and we’ll follow up by email.
+          </p>
+          <SupportContactForm />
         </div>
       </div>
 
