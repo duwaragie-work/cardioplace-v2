@@ -34,6 +34,7 @@ if (
   console.log(`🔑 Wrote GCP SA JSON to ${path} (from GOOGLE_APPLICATION_CREDENTIALS_JSON)`)
 }
 
+import { EventEmitter } from 'node:events'
 import { ValidationPipe } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
 import type { NestExpressApplication } from '@nestjs/platform-express'
@@ -41,6 +42,22 @@ import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
 import { IoAdapter } from '@nestjs/platform-socket.io'
 import { AppModule } from './app.module.js'
+
+// Node warns ("MaxListenersExceededWarning: possible EventEmitter memory leak")
+// once any emitter passes 10 listeners. Our request stack — Express, Nest,
+// helmet, cookie-parser, socket.io — each attach their own `finish` listener to
+// the ServerResponse, landing at 11: one over the default, on EVERY request. The
+// frontend polls every 30s, so the log filled with the warning.
+//
+// This is NOT a leak, and the warning text is misleading. The tell: the count is
+// pinned at exactly 11 on every line and never climbs. A real leak grows without
+// bound (12, 13, 14…) — that is the signal to watch for, and this isn't it.
+//
+// So raise the threshold rather than chase a phantom. Keep the headroom SMALL
+// (20, not Infinity): the warning is a genuinely useful leak detector, and
+// disabling it outright would hide the next real one. If this ever fires again,
+// something new is attaching listeners — investigate, don't just raise it.
+EventEmitter.defaultMaxListeners = 20
 
 async function bootstrap() {
   console.log('🚀 Starting Cardioplace backend...')
