@@ -15,6 +15,7 @@
  * Run: npm run test:e2e -- --testPathPattern=llm-judge/voice
  */
 
+import { jest } from '@jest/globals'
 import { io, Socket as ClientSocket } from 'socket.io-client'
 import { JudgeService, EvalResult } from './judge.service.js'
 import { setupTestApp, teardownTestApp, getBaseUrl, TestContext } from './test-helpers.js'
@@ -78,6 +79,16 @@ function connectVoice(url: string, jwt: string) {
 }
 
 descr('Voice Chat — Real E2E + LLM-as-Judge', () => {
+  // Per-test Jest retry. gemini-live-2.5-flash-native-audio (Vertex Live API)
+  // occasionally emits a truncated audio turn — the transcript that reaches
+  // the judge is a fragment like "a question. Your blood" or "a question. Is
+  // this" instead of the full response. The 30s waitFor + 600ms settle can't
+  // recover from that (the model already ended the turn); only a fresh
+  // WebSocket session + fresh model draw does. Mirrors the pattern used on
+  // text-chat.e2e-spec.ts:36 for the analogous Gemini parts=[] flake — same
+  // fix shape, same rationale.
+  jest.retryTimes(2, { logErrorsBeforeRetry: true })
+
   let judge: JudgeService
   // Definite-assignment assertion — beforeAll always sets this before any
   // it() runs. The earlier `| undefined` typing forced ctx!.jwt at every
