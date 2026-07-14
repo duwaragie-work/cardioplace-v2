@@ -18,8 +18,11 @@ concurrency:
 env:
   GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
   GEMINI_CHAT_MODEL: gemini-2.5-flash
-  JWT_ACCESS_SECRET: ci-test-jwt-secret
-  JWT_REFRESH_SECRET: ci-test-jwt-refresh-secret
+  # CI-only throwaway values, randomly generated. Must be REAL random values, not
+  # readable placeholders — the boot guard (backend/src/common/config/secret-guard.ts)
+  # refuses to start on anything placeholder-shaped.
+  JWT_ACCESS_SECRET: jscsVQYyLwor9pxmZPat_eLS9VAFlyQMMF8pxe-5Jtl-lH9SIOCqjbypsH7wzGOL
+  JWT_REFRESH_SECRET: 6Qi3vHuyVTRMM9zjO_Ae8iF2LzlIVAtTCJOTlPv7QlK2Iwnbvf59Qjmsh9wCLrEY
   LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
   LANGSMITH_PROJECT: healplace-cardio-ci
   LANGSMITH_TRACING_V2: 'true'

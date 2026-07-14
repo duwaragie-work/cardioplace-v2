@@ -19,6 +19,15 @@ import {
  *     <iv>:<authTag>:<ciphertext>
  * iv = 12 bytes (GCM standard), authTag = 16 bytes.
  */
+
+/**
+ * Shape of a valid MFA_ENCRYPTION_KEY: 32 bytes as 64 hex chars. Exported so the
+ * boot-time secret guard checks the same shape this service enforces at use-time
+ * — one definition, so the two can never drift apart. Note this is a FORMAT check
+ * only: an all-zero key matches it. Strength is the guard's job (secret-guard.ts).
+ */
+export const MFA_ENCRYPTION_KEY_PATTERN = /^[0-9a-fA-F]{64}$/
+
 @Injectable()
 export class EncryptionService {
   private static readonly ALGORITHM = 'aes-256-gcm'
@@ -37,7 +46,7 @@ export class EncryptionService {
   private getKey(): Buffer {
     if (this.cachedKey) return this.cachedKey
     const hexKey = this.config.get<string>('MFA_ENCRYPTION_KEY')
-    if (!hexKey || !/^[0-9a-fA-F]{64}$/.test(hexKey)) {
+    if (!hexKey || !MFA_ENCRYPTION_KEY_PATTERN.test(hexKey)) {
       throw new InternalServerErrorException(
         'MFA_ENCRYPTION_KEY must be set to 64 hex characters (32 bytes). ' +
           'Generate: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"',
