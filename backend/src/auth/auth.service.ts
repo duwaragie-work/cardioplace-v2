@@ -819,10 +819,15 @@ export class AuthService {
 
     // 2) Patient biometric second factor (WebAuthn). Patients resolve to the
     //    'none' practice kind, so no selector follows.
-    if (await this.shouldChallengeWebAuthn(user.id, user.roles)) {
+    //    PER-DEVICE: only challenged on the device that registered the passkey.
+    //    Any other device signs in with the first factor alone.
+    if (
+      await this.shouldChallengeWebAuthn(user.id, user.roles, context?.deviceId)
+    ) {
       const challengeToken = await this.startWebAuthnAuthentication(
         user.id,
         resolvedPracticeId,
+        context?.deviceId,
       )
       return { status: 'WEBAUTHN_REQUIRED', challengeToken }
     }
@@ -1642,15 +1647,33 @@ export class AuthService {
   // existing session (JwtAuthGuard), so a not-yet-signed-in user is never
   // shown setup — they enable it later from settings.
 
-  /** Whether this sign-in must clear a biometric second factor — true only for
-   *  a PATIENT who has registered at least one device. */
+  /** Whether this sign-in must clear a biometric second factor.
+   *
+   *  PER-DEVICE (2026-07-14): true only for a PATIENT signing in from the SAME
+   *  device that registered a passkey. Biometric is bound to the device it was
+   *  set up on — it is NOT an account-wide gate.
+   *
+   *  Signing in from any other device (or a device we can't identify) resolves
+   *  to `false`: the patient completes sign-in with OTP / magic-link alone and
+   *  is never prompted for biometric or a cross-device QR ceremony. They can
+   *  enable biometric for that new device separately, from Settings.
+   *
+   *  A missing deviceId (no `x-device-id` header, cleared storage, legacy row
+   *  with a NULL deviceId) is treated as "unknown device" → no challenge. This
+   *  is a deliberate fail-open: it cannot be used to bypass a control an
+   *  attacker didn't already have, because under this model ANY unrecognised
+   *  device signs in with OTP alone anyway. It does mean a patient who clears
+   *  site data stops being prompted until they re-enable — an accepted trade,
+   *  since a lockout in a BP-monitoring app has real clinical cost. */
   private async shouldChallengeWebAuthn(
     userId: string,
     roles: UserRole[],
+    deviceId: string | undefined,
   ): Promise<boolean> {
     if (!roles.includes(UserRole.PATIENT)) return false
+    if (!deviceId) return false // unknown device → OTP / magic-link only
     const count = await this.prisma.webAuthnCredential.count({
-      where: { userId },
+      where: { userId, deviceId },
     })
     return count > 0
   }
@@ -1659,6 +1682,7 @@ export class AuthService {
     userId: string,
     challenge: string,
     activePracticeId: string | null,
+    deviceId: string | undefined,
   ): Promise<string> {
     return this.jwtService.signAsync(
       {
@@ -1666,6 +1690,10 @@ export class AuthService {
         kind: 'webauthn_auth',
         challenge,
         activePracticeId: activePracticeId ?? null,
+        // The device this challenge was minted for. Server-signed, so the
+        // public /authenticate/options endpoint can scope allowCredentials to
+        // THIS device's passkeys without trusting a client-sent header.
+        deviceId: deviceId ?? null,
       },
       { expiresIn: WEBAUTHN_CHALLENGE_TTL },
     )
@@ -1675,12 +1703,14 @@ export class AuthService {
     userId: string
     challenge: string
     activePracticeId: string | null
+    deviceId: string | null
   }> {
     let payload: {
       sub: string
       kind: string
       challenge: string
       activePracticeId?: string | null
+      deviceId?: string | null
     }
     try {
       payload = await this.jwtService.verifyAsync(token)
@@ -1694,6 +1724,7 @@ export class AuthService {
       userId: payload.sub,
       challenge: payload.challenge,
       activePracticeId: payload.activePracticeId ?? null,
+      deviceId: payload.deviceId ?? null,
     }
   }
 
@@ -1732,19 +1763,29 @@ export class AuthService {
   private async startWebAuthnAuthentication(
     userId: string,
     activePracticeId: string | null,
+    deviceId: string | undefined,
   ): Promise<string> {
     const challenge = this.webAuthnService.randomChallenge()
-    return this.signWebAuthnAuthToken(userId, challenge, activePracticeId)
+    return this.signWebAuthnAuthToken(
+      userId,
+      challenge,
+      activePracticeId,
+      deviceId,
+    )
   }
 
   /** Build the navigator.credentials.get() options for a pending second factor.
-   *  allowCredentials is the patient's registered devices, so the browser only
-   *  prompts on a device that holds one of them. */
+   *  allowCredentials is scoped to the passkeys registered ON THIS DEVICE (the
+   *  deviceId rides in the server-signed challenge token), so the browser only
+   *  ever prompts for a credential it actually holds — it never falls back to
+   *  the cross-device QR / hybrid ceremony. A challenge is only ever minted for
+   *  a device that has a passkey (see shouldChallengeWebAuthn), so an empty set
+   *  here means the credential was removed mid-flow. */
   async webAuthnAuthenticationOptions(challengeToken: string) {
-    const { userId, challenge } =
+    const { userId, challenge, deviceId } =
       await this.verifyWebAuthnAuthToken(challengeToken)
     const creds = await this.prisma.webAuthnCredential.findMany({
-      where: { userId },
+      where: { userId, deviceId },
       select: { credentialId: true, transports: true },
     })
     if (creds.length === 0) {
@@ -2127,6 +2168,10 @@ export class AuthService {
         deviceType: info.credentialDeviceType,
         backedUp: info.credentialBackedUp,
         deviceName: deviceName?.trim() || null,
+        // Bind the passkey to the device that created it. This is what makes
+        // biometric a per-device factor: sign-in only challenges when the
+        // incoming x-device-id matches a credential registered here.
+        deviceId: context?.deviceId ?? null,
       },
       select: { id: true, deviceName: true },
     })

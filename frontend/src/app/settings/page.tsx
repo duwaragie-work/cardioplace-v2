@@ -18,7 +18,6 @@ import {
   CheckCircle2,
   KeyRound,
   Smartphone,
-  Bluetooth,
   Pencil,
   Check,
   X,
@@ -258,9 +257,13 @@ export default function SettingsPage() {
   );
   // "Set up this device" — only when supported, not already done here, under cap.
   const canAddThisDevice = supported && !thisDeviceRegistered && !atMax;
-  // "Add another device" (QR) — available whenever there's room, even on a
-  // device with no biometric of its own.
-  const canAddAnother = !atMax;
+  // The cross-device (QR) enrollment flow was REMOVED (2026-07-14). Biometric is
+  // now bound to the device that registers it: a passkey created over QR lives
+  // on a DIFFERENT device whose id we can't know, so it could never be bound
+  // correctly. Each device now enables biometric for itself, from its own
+  // Settings — which is also the flow the patient population can actually
+  // follow. Signing in on a new device never prompts for biometric or a QR
+  // ceremony; it's OTP / magic-link, then an optional opt-in here.
 
   return (
     <main id="main" className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
@@ -616,43 +619,9 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {/* Button 2 — add ANOTHER device via QR */}
-              {canAddAnother && (
-                <div className={canAddThisDevice ? 'mt-3' : ''}>
-                  <button
-                    type="button"
-                    data-testid="settings-add-another-device"
-                    onClick={() => void handleAdd('cross-platform')}
-                    disabled={enabling !== null}
-                    className="w-full h-12 rounded-full border border-[#7B00E0] font-semibold text-[#7B00E0] text-sm hover:bg-[#7B00E0]/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-2"
-                  >
-                    {enabling === 'cross-platform' ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        {t('settings.bio.waitingOther')}
-                      </>
-                    ) : (
-                      <>
-                        <Smartphone className="w-4 h-4" />
-                        {t('settings.bio.addAnother')}
-                      </>
-                    )}
-                  </button>
-                  <div
-                    className="mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-[11.5px]"
-                    style={{
-                      backgroundColor: 'var(--brand-primary-purple-light)',
-                      color: 'var(--brand-primary-purple)',
-                    }}
-                  >
-                    <Bluetooth className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                    <span>
-                      <strong>{t('settings.bio.bluetoothTitle')}</strong>{' '}
-                      {t('settings.bio.bluetoothBody')}
-                    </span>
-                  </div>
-                </div>
-              )}
+              {/* The cross-device (QR) enrollment button was removed — biometric
+                  is bound to the device that registers it, so each device now
+                  enables it from its own Settings. */}
             </div>
           )}
         </section>

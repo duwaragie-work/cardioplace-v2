@@ -160,26 +160,12 @@ test.describe('Spec 67b — patient MFA edges & device management', () => {
     }
   })
 
-  test('67b.6 — a second device can be added (cross-platform)', async ({ page }) => {
-    test.setTimeout(120_000)
-    const platform = await addVirtualAuthenticator(page)
-    let roaming: Awaited<ReturnType<typeof addVirtualAuthenticator>> | null = null
-    try {
-      await signInPatient(page, PATIENT.email)
-      await registerFromSettings(page)
-      await expect(page.getByRole('button', { name: /remove device/i })).toHaveCount(1)
-
-      // A roaming authenticator answers the cross-platform ("add another") flow.
-      roaming = await addVirtualAuthenticator(page, { transport: 'usb' })
-      await page.locator(byTestId(T.mfa.settingsAddAnotherDevice)).click()
-      await expect(page.getByRole('button', { name: /remove device/i })).toHaveCount(2, {
-        timeout: 30_000,
-      })
-    } finally {
-      if (roaming) await roaming.remove()
-      await platform.remove()
-    }
-  })
+  // 67b.6 (cross-platform "add another device" via QR) was REMOVED with the
+  // per-device biometric change (2026-07-14). A passkey is now bound to the
+  // device that registers it (WebAuthnCredential.deviceId), so it can only be
+  // created on the device you're currently using — there is no QR flow to test.
+  // Enabling biometric on a second device is now: sign in there with OTP (which
+  // does NOT prompt for biometric), then enable it from that device's Settings.
 
   test('67b.7 — a SUPER_ADMIN can reset a patient’s biometric', async ({ page }) => {
     test.setTimeout(120_000)
@@ -227,5 +213,54 @@ test.describe('Spec 67b — patient MFA edges & device management', () => {
       page.getByRole('heading', { name: /your sign-in expired/i }),
     ).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('link', { name: /back to sign in/i })).toBeVisible()
+  })
+
+  /**
+   * 67b.9 — PER-DEVICE BINDING (2026-07-14). Biometric is a second factor ONLY
+   * on the device that registered it. This is the core of the change, asserted
+   * in both directions:
+   *   • the enrolling device IS challenged on its next sign-in;
+   *   • a DIFFERENT device signing into the same account is NOT challenged —
+   *     it completes on OTP alone, with no biometric page and no QR ceremony.
+   *
+   * "Another device" is a fresh browser context: its own localStorage (so a new
+   * `healplace_device_id` → a different `x-device-id`) and no `cp_device_id`
+   * cookie. That is exactly what a second physical device looks like to the API.
+   */
+  test('67b.9 — biometric is bound to the device that registered it', async ({
+    page,
+    browser,
+  }) => {
+    test.setTimeout(120_000)
+    const authA = await addVirtualAuthenticator(page)
+    try {
+      // ── Device A — enable biometric here.
+      await signInPatient(page, PATIENT.email)
+      await registerFromSettings(page)
+      await signOutPatient(page)
+
+      // Device A again → biometric IS required (it holds the passkey).
+      // Throws if we don't land on /sign-in/biometric.
+      await patientOtpExpectingBiometric(page, PATIENT.email)
+
+      // ── Device B — same account, never enrolled.
+      const ctxB = await browser.newContext()
+      const pageB = await ctxB.newPage()
+      try {
+        // signInPatient waits for /dashboard|/onboarding|/clinical-intake. If the
+        // backend had challenged biometric it would have redirected to
+        // /sign-in/biometric and this would time out — so completing IS the
+        // assertion that OTP alone was enough.
+        await signInPatient(pageB, PATIENT.email)
+        await expect(pageB).not.toHaveURL(/\/sign-in\/biometric/)
+        await expect(pageB).toHaveURL(/\/(dashboard|onboarding|clinical-intake)/, {
+          timeout: 30_000,
+        })
+      } finally {
+        await ctxB.close()
+      }
+    } finally {
+      await authA.remove()
+    }
   })
 })
