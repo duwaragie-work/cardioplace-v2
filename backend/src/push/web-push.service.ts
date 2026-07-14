@@ -15,6 +15,60 @@ export interface WebPushSubscriptionInput {
 }
 
 /**
+ * The ONLY copy that ever reaches a device. A push renders on a locked phone
+ * with no authentication, so anything in it is readable by whoever is holding
+ * the handset — that makes clinical context (alert type, drug name, hold
+ * status) PHI in the clear. Keep these strings clinically empty and
+ * category-free; product may reword them, but they must never name what the
+ * notification is about.
+ *
+ * We vary on URGENCY, never on CATEGORY. "Please open Cardioplace now" tells the
+ * patient how fast to act without revealing what is wrong — whereas a category
+ * ("Blood pressure alert", "Medication hold") would disclose the condition
+ * itself, which is the part that identifies them. Urgency is the one axis that
+ * carries clinical value with no clinical content.
+ *
+ * Without this split, a hypertensive emergency and a routine monthly medication
+ * re-ask render identically, so a patient can dismiss a genuine emergency as
+ * just another reminder.
+ *
+ * WORDING IS CLINICAL: Dr. Singal owns these two strings. Do not reword without
+ * her sign-off (see CLAUDE.md, "Clinical authority").
+ *
+ * Deliberately backend-owned rather than baked into the service worker: a SW is
+ * aggressively cached, so copy baked there can take days to reach every device.
+ */
+export const PUSH_LOCK_SCREEN_TITLE = 'Cardioplace'
+export const PUSH_LOCK_SCREEN_BODY_ROUTINE = 'You have a new update'
+export const PUSH_LOCK_SCREEN_BODY_URGENT = 'Please open Cardioplace now'
+
+/**
+ * Alert tiers that warrant the urgent notice: the non-dismissable, act-now
+ * classes per CLINICAL_SPEC — BP Level 2 (hypertensive emergency, incl. the
+ * symptom override) and the Tier 1 contraindication classes (incl. the
+ * compressed-ladder angioedema variant). Everything else — BP Level 1, Tier 2
+ * discrepancies, Tier 3 info, reminders, re-asks — is routine.
+ */
+const URGENT_ALERT_TIERS: ReadonlySet<string> = new Set([
+  'BP_LEVEL_2',
+  'BP_LEVEL_2_SYMPTOM_OVERRIDE',
+  'TIER_1_CONTRAINDICATION',
+  'TIER_1_ANGIOEDEMA',
+])
+
+/**
+ * Urgent notifications with no backing DeviationAlert, so no tier to read:
+ * the chat/voice emergency page and the intake contraindication flag.
+ */
+const URGENT_TRIGGERS: ReadonlySet<string> = new Set([
+  'EMERGENCY_FLAGGED',
+  'MEDICATION_CONTRAINDICATION',
+])
+
+/** Where a tapped push should land. Paths only — no clinical content. */
+const BELL_PATH = '/notifications?tab=notifications'
+
+/**
  * Real out-of-app Web Push transport for PUSH-channel Notifications.
  *
  * Mirrors EmailService's safety contract: configured implicitly from env (VAPID
@@ -118,22 +172,26 @@ export class WebPushService implements OnModuleInit {
   async onNotificationCreated(
     event: PushNotificationCreatedEvent,
   ): Promise<void> {
-    await this.send(event.userId, {
-      title: event.title,
-      body: event.body,
-      notificationId: event.notificationId,
-    })
+    // `event.title` / `event.body` hold the real (clinical) copy — that is for
+    // the in-app bell, which is behind auth. It is deliberately NOT passed on:
+    // `send` takes only the id, so the clinical text cannot reach a device.
+    await this.send(event.userId, event.notificationId)
   }
 
   /**
    * Push to every registered browser for a user. Never throws: a failure to one
    * endpoint is logged (and pruned if the endpoint is dead) without affecting
    * the others or the caller. Silent no-op when VAPID isn't configured.
+   *
+   * HIPAA — lock-screen safety: takes only a `notificationId`, never the
+   * notification's title/body. Every push in the system funnels through here, so
+   * scrubbing at this one choke point means no current or future notification
+   * type can leak clinical context to a locked screen — no need to police the
+   * copy at each of the dozens of call sites that create PUSH rows. The device
+   * gets a generic notice plus the id; the app fetches the real content in-app,
+   * behind auth, when the patient taps it.
    */
-  async send(
-    userId: string,
-    message: { title: string; body: string; notificationId?: string },
-  ): Promise<void> {
+  async send(userId: string, notificationId?: string): Promise<void> {
     if (!this.configured) return
 
     let subscriptions: Array<{
@@ -156,15 +214,78 @@ export class WebPushService implements OnModuleInit {
 
     if (subscriptions.length === 0) return
 
+    // Resolved AFTER the subscription check so we don't pay for the lookup when
+    // the user has no device registered.
+    const { urgent, path } = await this.resolveRouting(notificationId)
+
     const payload = JSON.stringify({
-      title: message.title,
-      body: message.body,
-      notificationId: message.notificationId,
+      title: PUSH_LOCK_SCREEN_TITLE,
+      body: urgent ? PUSH_LOCK_SCREEN_BODY_URGENT : PUSH_LOCK_SCREEN_BODY_ROUTINE,
+      notificationId,
+      // Lets the service worker make an urgent push sticky (requireInteraction)
+      // so it can't be silently swiped past. Says "act now", not what about.
+      urgent,
+      path,
     })
 
     await Promise.all(
       subscriptions.map((s) => this.sendOne(s, payload)),
     )
+  }
+
+  /**
+   * Decide the two things the device is allowed to know: how urgent this is, and
+   * where tapping should land. Reads ONLY the notification's `dispatchTrigger`
+   * and its alert's `tier` — never the title/body — so no clinical text can be
+   * reached from here even by accident.
+   *
+   * Routing matters because `ALERT_*` notifications are deliberately hidden from
+   * the in-app bell (they render in the Alerts stream instead — see
+   * NotificationTrigger in schema). Sending an alert push to the bell tab would
+   * land the patient on a list that does not contain it, so alert-linked pushes
+   * go straight to the alert detail page.
+   *
+   * Fails to ROUTINE, never urgent: a DB blip must not turn every push into
+   * "open the app now", which would train patients to ignore the urgent notice.
+   * A genuine emergency still escalates to the care team via the T+N ladder
+   * regardless of what the patient's lock screen said.
+   */
+  private async resolveRouting(
+    notificationId?: string,
+  ): Promise<{ urgent: boolean; path: string }> {
+    if (!notificationId) return { urgent: false, path: BELL_PATH }
+    try {
+      const notification = await this.prisma.notification.findUnique({
+        where: { id: notificationId },
+        select: {
+          alertId: true,
+          dispatchTrigger: true,
+          alert: { select: { tier: true } },
+        },
+      })
+      if (!notification) return { urgent: false, path: BELL_PATH }
+
+      // `tier` is nullable (legacy v1 alert rows predate it). A null tier can't
+      // be classified, so it stays routine — consistent with the fail-safe
+      // below, and those rows never carry a v2 emergency anyway.
+      const tier = notification.alert?.tier ?? null
+      const urgent =
+        URGENT_TRIGGERS.has(notification.dispatchTrigger) ||
+        (tier !== null && URGENT_ALERT_TIERS.has(tier))
+
+      // An alert id is an opaque uuid — it names nothing clinical.
+      const path = notification.alertId
+        ? `/alerts/${notification.alertId}`
+        : BELL_PATH
+
+      return { urgent, path }
+    } catch (err) {
+      this.logger.error(
+        `Push: failed to resolve routing for ${notificationId}`,
+        err instanceof Error ? err.message : err,
+      )
+      return { urgent: false, path: BELL_PATH }
+    }
   }
 
   private async sendOne(
