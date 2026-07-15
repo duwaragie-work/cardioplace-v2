@@ -87,9 +87,15 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
     await page.waitForURL(/\/onboarding/, { timeout: 30_000 })
     await advancePastPrivacyStep(page)
     await page.locator('#onboarding-name').fill('Taylor Brown')
-    // Use the real submit testid (v3.1) — the prior getByRole name-regex was
-    // i18n/CI-fragile. handleContinue → submitProfile → router.push.
+    // Onboarding is now two steps. Step 1 Continue advances to the reminders
+    // step (it must NOT reach the dashboard yet) — assert we land there, then
+    // finish via the reminders-step Continue.
     await page.locator(byTestId(T.onboarding.submitBtn)).click()
+    await expect(
+      page.locator(byTestId(T.onboarding.remindersSubmitBtn)),
+    ).toBeVisible({ timeout: 15_000 })
+    await expect(page).toHaveURL(/\/onboarding/)
+    await page.locator(byTestId(T.onboarding.remindersSubmitBtn)).click()
     // Contract of "onboarding completion": (a) the patient leaves the
     // /onboarding page into the authenticated app, and (b) onboardingStatus
     // is COMPLETED server-side. The exact landing differs by build/gate
@@ -191,5 +197,61 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
 
     // Accepting advances to the profile (name) form.
     await expect(page.locator('#onboarding-name')).toBeVisible({ timeout: 10_000 })
+  })
+
+  // ─── Two-step onboarding: identity (step 1) → reminders (step 2) ──────────
+
+  test('20a.7 — skipping BOTH steps leaves onboardingStatus NOT_COMPLETED (re-asked elsewhere)', async ({
+    page,
+  }) => {
+    await tc.setOnboardingStatus(taylorId, 'NOT_COMPLETED')
+    await otpSignIn(page, PATIENTS.taylor.email)
+    await page.waitForURL(/\/onboarding/, { timeout: 30_000 })
+    await advancePastPrivacyStep(page)
+
+    // Step 1 Skip → must advance to the reminders step, NOT the dashboard.
+    await page.locator(byTestId(T.onboarding.skipBtn)).click()
+    await expect(
+      page.locator(byTestId(T.onboarding.remindersSkipBtn)),
+    ).toBeVisible({ timeout: 15_000 })
+    await expect(page).toHaveURL(/\/onboarding/)
+
+    // Step 2 Skip → leaves onboarding (this browser is satisfied via the
+    // localStorage flag)…
+    await page.locator(byTestId(T.onboarding.remindersSkipBtn)).click()
+    await expect(page).not.toHaveURL(/\/onboarding/, { timeout: 30_000 })
+
+    // …but nothing was persisted server-side, so another browser re-asks:
+    // onboardingStatus must NOT have flipped to COMPLETED.
+    await page.waitForTimeout(1500)
+    expect(
+      (await tc.findUser(PATIENTS.taylor.email)).onboardingStatus,
+    ).not.toBe('COMPLETED')
+  })
+
+  test('20a.8 — skipping identity but continuing reminders marks COMPLETED', async ({
+    page,
+  }) => {
+    await tc.setOnboardingStatus(taylorId, 'NOT_COMPLETED')
+    await otpSignIn(page, PATIENTS.taylor.email)
+    await page.waitForURL(/\/onboarding/, { timeout: 30_000 })
+    await advancePastPrivacyStep(page)
+
+    // Skip identity → reminders step.
+    await page.locator(byTestId(T.onboarding.skipBtn)).click()
+    await expect(
+      page.locator(byTestId(T.onboarding.remindersSubmitBtn)),
+    ).toBeVisible({ timeout: 15_000 })
+
+    // Continue on reminders → any real "Continue" onboards the patient.
+    await page.locator(byTestId(T.onboarding.remindersSubmitBtn)).click()
+    await expect(page).not.toHaveURL(/\/onboarding/, { timeout: 30_000 })
+    await expect
+      .poll(
+        async () =>
+          (await tc.findUser(PATIENTS.taylor.email)).onboardingStatus,
+        { timeout: 12_000 },
+      )
+      .toBe('COMPLETED')
   })
 })
