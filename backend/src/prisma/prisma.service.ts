@@ -7,6 +7,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
 import { accessLogExtension } from '../common/prisma-extensions/access-log.extension.js'
 import { pushDispatchExtension } from '../common/prisma-extensions/push-dispatch.extension.js'
+import { authFailureExtension } from '../common/prisma-extensions/auth-failure.extension.js'
 import { softDeleteJournalEntryExtension } from '../common/prisma-extensions/soft-delete.extension.js'
 
 /**
@@ -123,9 +124,14 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     // push-dispatch (Task 1): wraps `notification.create` to emit a fire-and-
     // forget event for PUSH-channel rows → WebPushService sends the browser
     // push. Chained last; its emit runs AFTER the audit write and never throws.
+    // auth-failure: wraps `authLog.create` to emit a fire-and-forget event on
+    // `success: false` rows → RealtimeFailedAuthService pages ops the moment a
+    // repeated-failed-auth burst is detected. AuthLog is not a PHI model, so
+    // there is no audit write to order against; same swallow-all safety.
     const extended = this.$extends(accessLogExtension(cls, this))
       .$extends(softDeleteJournalEntryExtension())
       .$extends(pushDispatchExtension(eventEmitter))
+      .$extends(authFailureExtension(eventEmitter))
 
     // Members that must resolve to THIS class instance, never the extended
     // client: our prototype methods (onModuleInit, withConnectionRetry) and

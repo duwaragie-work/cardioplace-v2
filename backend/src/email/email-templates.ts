@@ -14,12 +14,14 @@
  * potential future refinement. MVP is one file-level constant; if audit
  * granularity ever demands per-template, factor at that point.
  */
-export const EMAIL_TEMPLATE_VERSION = '2026-07-10'
+export const EMAIL_TEMPLATE_VERSION = '2026-07-15'
 
 /**
  * EMAIL_TEMPLATE_CHANGELOG — one line per bump.
  *   2026-07-10 — Initial version (N6 baseline). Templates unchanged; this is
  *                the anchor point for all future disclosure-log queries.
+ *   2026-07-15 — Added security_alert template (real-time repeated-failed-auth
+ *                page to the security owner). No existing template changed.
  */
 
 const HEADER = `
@@ -554,6 +556,50 @@ export function supportOpsNotifyHtml(
       <tr><td style="padding: 4px 0; font-weight: 600;">Category</td><td style="padding: 4px 0;">${category}</td></tr>
     </table>
     <a href="${dashboardUrl}" style="display: inline-block; padding: 11px 20px; background: #7B00E0; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;">View in dashboard →</a>
+  `)
+}
+
+/**
+ * Security System — real-time repeated-failed-auth page to the security owner
+ * (HIPAA §164.308(a)(6)). Carries the auth IDENTIFIER + failure metrics only —
+ * NEVER patient clinical data. The identifier is attacker-controllable (anyone
+ * can attempt a login with an arbitrary string), so it is HTML-escaped before
+ * it lands in the message body.
+ */
+export function securityAlertHtml(params: {
+  identifier: string
+  failedCount: number
+  distinctIpCount: number
+  severity: string
+  windowLabel: string
+  dashboardUrl: string
+}): string {
+  const esc = (s: string): string =>
+    s.replace(/[&<>"']/g, (c) =>
+      c === '&' ? '&amp;'
+        : c === '<' ? '&lt;'
+        : c === '>' ? '&gt;'
+        : c === '"' ? '&quot;'
+        : '&#39;',
+    )
+  const isCritical = params.severity.toUpperCase() === 'CRITICAL'
+  const badge = isCritical ? '#b91c1c' : '#b45309'
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: ${badge}; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Security alert · ${esc(params.severity)}
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">Repeated failed sign-in attempts detected</h2>
+    <p style="font-size: 14px; color: #374151; margin: 0 0 16px;">
+      An identifier crossed the failed-authentication threshold in ${esc(params.windowLabel)}. Review in the security worklist.
+    </p>
+    <table style="width: 100%; font-size: 14px; color: #374151; margin: 0 0 20px;">
+      <tr><td style="padding: 4px 0; font-weight: 600; width: 130px;">Identifier</td><td style="padding: 4px 0;">${esc(params.identifier)}</td></tr>
+      <tr><td style="padding: 4px 0; font-weight: 600;">Failed attempts</td><td style="padding: 4px 0;">${params.failedCount}</td></tr>
+      <tr><td style="padding: 4px 0; font-weight: 600;">Distinct IPs</td><td style="padding: 4px 0;">${params.distinctIpCount}</td></tr>
+    </table>
+    <a href="${params.dashboardUrl}" style="display: inline-block; padding: 11px 20px; background: #7B00E0; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;">View in worklist →</a>
   `)
 }
 
