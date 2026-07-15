@@ -158,6 +158,18 @@ describe('RealtimeFailedAuthService', () => {
     expect(h.incidentActionCreate).toHaveBeenCalledTimes(1)
   })
 
+  it('counts the triggering failure (query uses lte:now, not lt) — no off-by-one', async () => {
+    // The extension emits AFTER the row persists, so `now` is that row's own
+    // createdAt. It must be INCLUDED, or the count lags one behind and the
+    // exception fires on the 6th failure instead of the 5th.
+    const h = makeHarness({ rows: Array.from({ length: 5 }, (_, i) => row(i)) })
+    await h.svc.onAuthFailure(evt('bad@example.com'))
+    const where = h.authFindMany.mock.calls[0][0].where
+    expect(where.createdAt.lte).toEqual(NOW)
+    expect(where.createdAt.lt).toBeUndefined()
+    expect(where.identifier).toBe('bad@example.com')
+  })
+
   it('hour-buckets windowStart so the burst produces one row per hour', async () => {
     const h = makeHarness({ rows: Array.from({ length: 6 }, (_, i) => row(i)) })
     await h.svc.onAuthFailure(evt('bad@example.com'))

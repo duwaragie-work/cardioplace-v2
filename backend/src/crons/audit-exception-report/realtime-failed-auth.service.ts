@@ -87,7 +87,12 @@ export class RealtimeFailedAuthService {
     const rows = await this.prisma.authLog.findMany({
       where: {
         success: false,
-        createdAt: { gte: new Date(now.getTime() - LOOKBACK_MS), lt: now },
+        // `lte`, not `lt`: `now` IS the triggering row's own createdAt (the
+        // extension emits AFTER the row persists), and that failure must be
+        // counted — otherwise the count lags one behind and the exception
+        // fires on the 6th failure instead of the 5th, missing the memo's
+        // "N>=5 -> real-time exception" acceptance by one.
+        createdAt: { gte: new Date(now.getTime() - LOOKBACK_MS), lte: now },
         identifier,
       },
       select: FAILED_AUTH_SELECT,
