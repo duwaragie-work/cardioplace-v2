@@ -60,6 +60,8 @@ export type EmailTemplateName =
   | 'care_team_gap_alert'
   // Healthcare operations reporting
   | 'monthly_report'
+  // Security operations (HIPAA §164.308(a)(6))
+  | 'security_alert'
 
 /**
  * §164.528 permitted-use purpose taxonomy. Mirrors the Prisma
@@ -285,6 +287,21 @@ export const EMAIL_TEMPLATE_REGISTRY: Record<EmailTemplateName, TemplateSpec> = 
     briefDescriptionFn: (m) =>
       clip(
         `Monthly practice-wide alert summary — practice ${m.practiceId ?? '?'} — ${m.monthLabel ?? m.monthYear ?? '?'} — totalAlerts ${m.totalAlerts ?? '?'} — escalatedPct ${m.escalatedPct ?? '?'}`,
+      ),
+  },
+
+  // ── Security operations ───────────────────────────────────────────────
+  // Real-time repeated-failed-auth page to the security owner. Carries the
+  // auth IDENTIFIER + failure count only — never patient clinical data — so
+  // patientUserId is null on the disclosure (the subject is a login, not a
+  // patient). HEALTHCARE_OPERATIONS is the correct §164.506 purpose (security
+  // oversight of the system), matching monthly_report.
+  security_alert: {
+    purpose: 'HEALTHCARE_OPERATIONS',
+    recipientCategory: 'HEALPLACE_OPS',
+    briefDescriptionFn: (m) =>
+      clip(
+        `Security alert — ${m.failedCount ?? '?'} failed auth attempt(s) for identifier ${m.identifier ?? '?'} across ${m.distinctIpCount ?? '?'} IP(s)`,
       ),
   },
 }

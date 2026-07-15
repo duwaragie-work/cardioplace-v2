@@ -36,6 +36,7 @@ const ALL_TEMPLATES: EmailTemplateName[] = [
   'daily_reminder',
   'care_team_gap_alert',
   'monthly_report',
+  'security_alert',
 ]
 
 describe('EMAIL_TEMPLATE_REGISTRY — N6 extension', () => {
