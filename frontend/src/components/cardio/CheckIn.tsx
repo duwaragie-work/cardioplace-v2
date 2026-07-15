@@ -2581,10 +2581,27 @@ export default function CheckIn() {
     setSubmitting(true);
     try {
       if (optionDEligible && sys != null && dia != null) {
+        // L-10 — an Option-D emergency reading is its OWN episode and must NEVER
+        // be averaged into the ongoing (buffer/live) session. If the held
+        // reading inherited the current sessionId, the engine would group it
+        // with the ordinary session and a 180/120 emergency would surface as an
+        // innocuous averaged card. Mint a DEDICATED sessionId for the emergency
+        // episode, isolated from the ordinary session. We also adopt it into
+        // `sessionId` state so the paired confirmatory reading
+        // (submitOptionDSecond, which reads `sessionId`) lands in this SAME
+        // dedicated session — the two Option-D readings stay grouped with each
+        // other, never with the ordinary one. (The resume path mirrors this: it
+        // re-adopts the held reading's own sessionId.)
+        const emergencySessionId = uuid();
+        setSessionId(emergencySessionId);
         // Persist the first reading HELD (AWAITING) so the server-side safety
         // net (cron) can flag it UNCONFIRMED if the patient abandons the flow;
         // no alert pages anyone until the patient confirms or declines.
-        const held = await createJournalEntry({ ...basePayload, beginEmergencyConfirmation: true });
+        const held = await createJournalEntry({
+          ...basePayload,
+          sessionId: emergencySessionId,
+          beginEmergencyConfirmation: true,
+        });
         if (user?.id) clearCheckInDraft(user.id);
         setImplausibleCount(0);
         setOptionDFirstId(held.entry.id);
