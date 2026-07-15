@@ -315,6 +315,7 @@ const en = {
   // B5 — confirmation screen
   'checkin.confirm.title': 'Reading sent',
   'checkin.confirm.titleMulti': 'Reading {n} sent',
+  'checkin.confirm.lookingGood': 'Looking good — keep it up!',
   'checkin.confirm.subtitle': 'Your care team gets it right away.',
   // #88 — un-enrolled patients: no care team yet, engine didn't run.
   'checkin.confirm.subtitleUnenrolled': "We're setting up your care team. They'll start reviewing your readings once your enrollment is complete.",

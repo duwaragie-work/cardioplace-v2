@@ -675,9 +675,25 @@ export default function NotificationsPage() {
             a.patientMessage.trim().length > 0),
       );
       setAlerts(patientVisible.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-      // Only show PUSH notifications in-app — EMAIL records are for tracking only
-      const pushOnly = notifArr.filter((n) => !n.channel || n.channel === 'PUSH');
-      setNotifs(pushOnly.sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()));
+      // L-2 — the in-app inbox must render DASHBOARD notifications too (e.g.
+      // SUPPORT_REPLY / SUPPORT_RESOLVE are DASHBOARD-only), not just PUSH.
+      // Catch: the daily reminder creates BOTH a DASHBOARD and a PUSH row per
+      // dispatch, so showing every row would double it. Dedupe by content —
+      // prefer the DASHBOARD row and drop any PUSH row that has a DASHBOARD twin
+      // (same title+body). Net result: DASHBOARD-only (support) shows, PUSH-only
+      // (monthly re-ask) shows, and the reminder collapses to one card. EMAIL
+      // rows are already excluded server-side; the `!channel` guard keeps any
+      // legacy channel-less rows.
+      const contentKey = (n: Notif) => `${n.title} ${n.body}`;
+      const dashboardKeys = new Set(
+        notifArr.filter((n) => n.channel === 'DASHBOARD').map(contentKey),
+      );
+      const inApp = notifArr.filter((n) => {
+        if (n.channel === 'EMAIL') return false;
+        if (n.channel === 'PUSH' && dashboardKeys.has(contentKey(n))) return false;
+        return true;
+      });
+      setNotifs(inApp.sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()));
     } finally {
       if (!opts.silent) setLoading(false);
     }

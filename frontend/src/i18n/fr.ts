@@ -306,6 +306,7 @@ const fr: Record<TranslationKey, string> = {
   // B5 — confirmation
   'checkin.confirm.title': 'Lecture envoyée',
   'checkin.confirm.titleMulti': 'Lecture {n} envoyée',
+  'checkin.confirm.lookingGood': "C'est très bien, continuez comme ça !",
   'checkin.confirm.subtitle': 'Votre équipe soignante la reçoit immédiatement.',
   // #88 — English placeholder; flagged for Niva translation pass.
   'checkin.confirm.subtitleUnenrolled': 'Nous constituons votre équipe de soins. Ils commenceront à examiner vos mesures une fois votre inscription terminée.',

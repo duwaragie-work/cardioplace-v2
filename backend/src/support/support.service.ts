@@ -146,9 +146,8 @@ export class SupportService {
       select: { id: true },
     })
     const ticketNumber = await this.ticketNumbers.next()
-    const body = dto.contactPhone
-      ? `${dto.description}\n\nCallback phone: ${dto.contactPhone}`
-      : dto.description
+    // L-3 — no callback phone is collected on the locked-out form anymore.
+    const body = dto.description
     const ticket = await this.prisma.supportTicket.create({
       data: {
         ticketNumber,

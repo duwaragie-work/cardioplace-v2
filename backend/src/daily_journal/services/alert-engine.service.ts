@@ -305,10 +305,11 @@ export class AlertEngineService {
         this.logEvaluationError(payload.entryId, err)
       }
 
-      // Gap 1 fix (2026-07-13) — count DeviationAlert rows this entry produced
-      // and emit ENTRY_EVALUATED so the N7 logged-confirmation listener can
-      // decide whether to append "Looking good — keep it up!" based on the
-      // engine's actual verdict (not just the BP-band predicate). By this
+      // Count DeviationAlert rows this entry produced and emit ENTRY_EVALUATED
+      // with the verdict. (L-6, 2026-07-14 — the logged-confirmation listener
+      // that consumed this was removed; the "Looking good" confirmation is now
+      // an in-app success screen. The event is retained for any future
+      // post-evaluation consumer and is harmless with zero listeners.) By this
       // point evaluate() has awaited every persistAlert transaction (see
       // withDeadlockRetry + prisma.$transaction inside persistAlert), so all
       // committed rows are visible to the count. Wrapped in try/catch so a

@@ -308,6 +308,7 @@ const am: Record<TranslationKey, string> = {
   // B5 — confirmation
   'checkin.confirm.title': 'ንባብ ተልኳል',
   'checkin.confirm.titleMulti': 'ንባብ {n} ተልኳል',
+  'checkin.confirm.lookingGood': 'በጣም ጥሩ ነው — እንዲሁ ይቀጥሉ!',
   'checkin.confirm.subtitle': 'የተንከባካቢ ቡድንዎ ወዲያውኑ ይቀበላል።',
   // #88 — English placeholder; flagged for Niva translation pass.
   'checkin.confirm.subtitleUnenrolled': 'የእንክብካቤ ቡድንዎን እያዘጋጀን ነው። ምዝገባዎ ከተጠናቀቀ በኋላ ንባቦችዎን መገምገም ይጀምራሉ።',

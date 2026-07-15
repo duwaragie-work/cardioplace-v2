@@ -58,7 +58,6 @@ export async function listMyTickets(): Promise<{ data: MyTicket[] }> {
 export async function submitLockedOut(input: {
   email: string;
   description: string;
-  contactPhone?: string;
 }): Promise<{ ticketNumber: string }> {
   const res = await fetch(`${API}/api/v2/support/locked-out`, {
     method: 'POST',

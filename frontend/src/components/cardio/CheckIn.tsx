@@ -87,7 +87,7 @@ import {
   listMyMedications,
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
-import { getBMI, JOURNAL_NOTE_MAX_LENGTH, SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared';
+import { getBMI, isBpNormalRange, JOURNAL_NOTE_MAX_LENGTH, SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared';
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
 import BpPhotoButton from '@/components/intake/BpPhotoButton';
@@ -1866,6 +1866,22 @@ function ConfirmationScreen({
         {t(isEnrolled ? 'checkin.confirm.subtitle' : 'checkin.confirm.subtitleUnenrolled')}
       </p>
 
+      {/* L-6 — the "Logged ✓ / Looking good" confirmation now lives in-app on
+          this success screen (the push + persisted bell Notification were
+          removed — they piled up and desensitized patients). Positive tail is
+          gated on a normal BP band and a non-emergency reading, so it never
+          reassures over a concerning value. */}
+      {!isEmergency &&
+        isBpNormalRange(lastReading.systolicBP ?? null, lastReading.diastolicBP ?? null) && (
+          <p
+            className="text-[0.875rem] font-semibold -mt-2 mb-4"
+            style={{ color: 'var(--brand-success-green)' }}
+            data-testid="checkin-looking-good"
+          >
+            {t('checkin.confirm.lookingGood')}
+          </p>
+        )}
+
       {/* Reading summary card */}
       <div
         className="w-full rounded-2xl p-3 mb-3"
@@ -2334,6 +2350,12 @@ export default function CheckIn() {
     if (existing) {
       setBufferDraft(existing);
       setBufferReviewing(true);
+      // L-11 — re-adopt the buffered draft's sessionId into component state.
+      // Without this, after navigating away and back the rehydrated draft keeps
+      // its sessionId (journalDraft.ts) but the component's `sessionId` is a
+      // fresh uuid, so an "add another reading in the same session" would start
+      // a NEW session instead of joining the one still under review (§5.2).
+      setSessionId(existing.sessionId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, isLoading, user?.id]);
