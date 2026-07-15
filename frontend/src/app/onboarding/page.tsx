@@ -63,8 +63,20 @@ export default function OnboardingPage() {
   // Privacy/trust screen shows FIRST (V2-E Gap 7) — patients in the immigrant
   // cohort must see the "your data is private, not shared with government /
   // employer / anyone else" promise BEFORE they disclose any clinical info,
-  // or they won't enroll. "privacy" → reassurance step, "profile" → the form.
-  const [step, setStep] = useState<"privacy" | "profile">("privacy");
+  // or they won't enroll.
+  //   "privacy"   → reassurance + Terms/Privacy consent
+  //   "profile"   → Step 1 of 2: identity fields (name + comm preference)
+  //   "reminders" → Step 2 of 2: daily reminder time + quiet hours
+  // Onboarding is NOT finished until the patient leaves the reminders step
+  // (via Continue or Skip) — see the flow handlers below.
+  const [step, setStep] = useState<"privacy" | "profile" | "reminders">("privacy");
+  // True once the patient has committed the identity step with data (Continue,
+  // not Skip). Drives whether a reminders-step Skip still counts as onboarded:
+  // if either step was continued, the server row is already COMPLETED, so we
+  // finalize locally; if BOTH were skipped, nothing was persisted server-side
+  // and only the this-browser localStorage flag is set — so another browser
+  // re-asks. See handleRemindersSkip.
+  const [profileSubmitted, setProfileSubmitted] = useState(false);
   // Terms + Privacy consent — collected once here on the privacy step. Only new
   // users reach onboarding, so returning users are never re-asked. Recorded on
   // the AuthLog audit trail (event 'policy_acknowledged') via POST /v2/auth/consent.
@@ -119,13 +131,20 @@ export default function OnboardingPage() {
     );
   }
 
-  async function submitProfile(body: Record<string, unknown>) {
+  /**
+   * POST the given fields to /v2/auth/profile. The endpoint sets
+   * onboardingStatus=COMPLETED server-side, so ANY successful call here means
+   * "onboarded" on every browser. Returns true on success. Deliberately does
+   * NOT navigate or flip local onboarding state — callers own that, because
+   * step 1's Continue must land on the reminders step, not the dashboard.
+   */
+  async function postProfile(body: Record<string, unknown>): Promise<boolean> {
     setError("");
     setIsSubmitting(true);
     try {
       if (!user) {
         router.push("/sign-in");
-        return;
+        return false;
       }
       const timezone = getBrowserTimezone();
       const payload = timezone && !("timezone" in body) ? { ...body, timezone } : body;
@@ -146,43 +165,80 @@ export default function OnboardingPage() {
       if (!res.ok) {
         throw new Error(data.message || "Failed to save profile");
       }
-
-      markOnboardingComplete();
-      if (name.trim()) updateUser({ name: name.trim() });
-      router.push("/dashboard");
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to complete onboarding");
+      return false;
+    } finally {
       setIsSubmitting(false);
     }
   }
 
-  async function handleContinue() {
-    if (!isFormPartiallyFilled || isSubmitting) return;
-    await submitProfile({
-      name: name.trim() || null,
-      communicationPreference: communicationPreference || null,
-      // N8 (2026-07-13) — Reminder & Engagement prefs. Always pushed so a
-      // patient who tweaks the pickers before continuing sees their choice
-      // persist; defaults match backend so an untouched form is a no-op.
-      reminderTime,
-      quietHoursStart,
-      quietHoursEnd,
-    });
+  /** Leave onboarding as fully complete (server row is already COMPLETED). */
+  function finishOnboarded() {
+    markOnboardingComplete();
+    if (name.trim()) updateUser({ name: name.trim() });
+    router.push("/dashboard");
   }
 
-  async function handleSkip() {
+  // ─── Step 1 (identity) ──────────────────────────────────────────────────
+  // Continue: persist the identity fields (marks COMPLETED server-side), then
+  // advance to reminders. We do NOT finalize locally yet — flipping
+  // onboardingStatus here would trip the redirect-away effect and skip step 2.
+  async function handleProfileContinue() {
+    if (!isFormPartiallyFilled || isSubmitting) return;
+    const ok = await postProfile({
+      name: name.trim() || null,
+      communicationPreference: communicationPreference || null,
+    });
+    if (!ok) return;
+    setProfileSubmitted(true);
+    setStep("reminders");
+  }
+
+  // Skip: no server call — advance to reminders WITHOUT marking onboarded.
+  // Whether the patient ends up onboarded is decided on the reminders step.
+  function handleProfileSkip() {
+    if (isSubmitting) return;
+    setError("");
+    setStep("reminders");
+  }
+
+  // ─── Step 2 (reminders) ─────────────────────────────────────────────────
+  // Continue: persist reminder prefs. POST forces COMPLETED, so this onboards
+  // the patient even when step 1 was skipped (setting reminders is real data —
+  // per product, any Continue counts as onboarded).
+  async function handleRemindersContinue() {
+    if (isSubmitting) return;
+    const ok = await postProfile({ reminderTime, quietHoursStart, quietHoursEnd });
+    if (!ok) return;
+    finishOnboarded();
+  }
+
+  // Skip: the outcome depends on step 1.
+  //  • Step 1 was continued → server row is already COMPLETED → finalize.
+  //  • Step 1 was ALSO skipped → nothing persisted server-side. Set only the
+  //    this-browser localStorage flag so the patient isn't nagged again here,
+  //    but leave onboardingStatus untouched so another browser re-asks (both
+  //    steps were skipped — that's the sole "re-ask elsewhere" condition).
+  function handleRemindersSkip() {
     if (isSubmitting) return;
     if (!user) {
       router.push("/sign-in");
       return;
     }
-    // Skip is a client-only signal. We deliberately do NOT call POST
-    // /v2/auth/profile here — that would mark onboardingStatus=COMPLETED
-    // server-side, conflating "skipped" with "completed" (the admin can no
-    // longer tell them apart). The localStorage flag is enough to suppress
-    // the form on subsequent navigations within this browser.
+    if (profileSubmitted) {
+      finishOnboarded();
+      return;
+    }
     markOnboardingSkipped(user.id);
     router.push("/dashboard");
+  }
+
+  function handleRemindersBack() {
+    if (isSubmitting) return;
+    setError("");
+    setStep("profile");
   }
 
   return (
@@ -301,18 +357,29 @@ export default function OnboardingPage() {
           {/* Left side - Form */}
           <div className="flex-1 w-full max-w-[400px] md:max-w-105 lg:max-w-130">
 
-            {/* Heading */}
+            {/* Step indicator (Step 1 of 2 / 2 of 2) */}
+            <div
+              data-testid="onboarding-step-indicator"
+              className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#7B00E0] text-center md:text-left"
+            >
+              {t('onboarding.stepIndicator').replace('{n}', step === 'reminders' ? '2' : '1')}
+            </div>
+
+            {/* Heading — step-aware */}
             <div className="mb-4 md:mb-6">
               <h1 className="font-semibold text-[#171717] text-2xl sm:text-3xl lg:text-4xl tracking-[-0.04em] mb-2 text-center md:text-left">
-                {t('onboarding.title')}
+                {step === 'reminders' ? t('onboarding.reminders.title') : t('onboarding.title')}
               </h1>
               <p className="text-[#4b5563] text-sm lg:text-base leading-relaxed max-w-105 text-center md:text-left">
-                {t('onboarding.subtitle')}
+                {step === 'reminders' ? t('onboarding.reminders.subtitle') : t('onboarding.subtitle')}
               </p>
             </div>
 
             {/* Form */}
             <div className="space-y-6 w-full">
+              {/* ─── Step 1 of 2: identity fields ─────────────────────────── */}
+              {step === 'profile' && (
+              <>
               {/* Name */}
               <div className="w-full max-w-105">
                 <div className="flex items-center justify-between gap-2 mb-2">
@@ -363,11 +430,14 @@ export default function OnboardingPage() {
                 </select>
               </div>
 
-              {/* N8 (2026-07-13) — Reminder & Engagement pickers. Placed after
-                  the identity pair (name + comm-pref) so a patient who's
-                  already in the flow has the context to answer "what time
-                  works for you." All three have sensible defaults so a fast
-                  skip still ends up with usable values. */}
+              </>
+              )}
+
+              {/* ─── Step 2 of 2: reminder & quiet-hours pickers ──────────────
+                  All three have sensible backend defaults, so a patient who
+                  skips this step still ends up with usable values. */}
+              {step === 'reminders' && (
+              <>
               <div className="w-full max-w-105">
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <label htmlFor="onboarding-reminder-time" className="block font-semibold text-[#171717] text-xs lg:text-sm">
@@ -395,44 +465,51 @@ export default function OnboardingPage() {
                   {t('onboarding.reminders.quietHoursHeading')}
                 </div>
 
-                <div className="mb-3">
-                  <label htmlFor="onboarding-quiet-start" className="block text-[#525252] text-xs mb-1.5">
-                    {t('profile.reminders.startLabel')}
-                  </label>
-                  <select
-                    id="onboarding-quiet-start"
-                    data-testid="onboarding-quiet-start"
-                    value={quietHoursStart}
-                    onChange={(e) => setQuietHoursStart(e.target.value)}
-                    className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
-                  >
-                    {ONBOARDING_QUIET_SLOTS.map((slot) => (
-                      <option key={slot} value={slot}>{slot}</option>
-                    ))}
-                  </select>
-                </div>
+                {/* Start + End on one row (two columns). Stays side-by-side
+                    down to the smallest width — the 30-min "HH:MM" values are
+                    narrow, so two half-width selects still fit a phone. */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="onboarding-quiet-start" className="block text-[#525252] text-xs mb-1.5">
+                      {t('profile.reminders.startLabel')}
+                    </label>
+                    <select
+                      id="onboarding-quiet-start"
+                      data-testid="onboarding-quiet-start"
+                      value={quietHoursStart}
+                      onChange={(e) => setQuietHoursStart(e.target.value)}
+                      className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                    >
+                      {ONBOARDING_QUIET_SLOTS.map((slot) => (
+                        <option key={slot} value={slot}>{slot}</option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div>
-                  <label htmlFor="onboarding-quiet-end" className="block text-[#525252] text-xs mb-1.5">
-                    {t('profile.reminders.endLabel')}
-                  </label>
-                  <select
-                    id="onboarding-quiet-end"
-                    data-testid="onboarding-quiet-end"
-                    value={quietHoursEnd}
-                    onChange={(e) => setQuietHoursEnd(e.target.value)}
-                    className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
-                  >
-                    {ONBOARDING_QUIET_SLOTS.map((slot) => (
-                      <option key={slot} value={slot}>{slot}</option>
-                    ))}
-                  </select>
+                  <div>
+                    <label htmlFor="onboarding-quiet-end" className="block text-[#525252] text-xs mb-1.5">
+                      {t('profile.reminders.endLabel')}
+                    </label>
+                    <select
+                      id="onboarding-quiet-end"
+                      data-testid="onboarding-quiet-end"
+                      value={quietHoursEnd}
+                      onChange={(e) => setQuietHoursEnd(e.target.value)}
+                      className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                    >
+                      {ONBOARDING_QUIET_SLOTS.map((slot) => (
+                        <option key={slot} value={slot}>{slot}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <p className="mt-3 text-xs font-semibold text-[#92400E] bg-[#FEF3C7] rounded-lg px-3 py-2">
                   {t('onboarding.reminders.emergencyDisclaimer')}
                 </p>
               </div>
+              </>
+              )}
 
               {/* Error Message — vibrant-red palette routed through brand
                   tokens so the chip matches other validation states across
@@ -453,26 +530,61 @@ export default function OnboardingPage() {
                 </div>
               )}
 
-              {/* Action buttons */}
-              <div className="pt-4 w-full max-w-105 space-y-2">
-                <button
-                  type="button"
-                  data-testid="onboarding-submit-btn"
-                  onClick={handleContinue}
-                  disabled={!isFormPartiallyFilled || isSubmitting}
-                  className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  {isSubmitting ? t('common.saving') : t('onboarding.continue')}
-                </button>
-                <button
-                  type="button"
-                  data-testid="onboarding-skip-btn"
-                  onClick={handleSkip}
-                  className="w-full text-sm text-[#737373] mt-4 cursor-pointer"
-                >
-                  {t('onboarding.skip')}
-                </button>
-              </div>
+              {/* Action buttons — step-aware.
+                  Step 1 Continue advances to reminders (does NOT reach the
+                  dashboard); Step 2 Continue/Skip is the only exit. */}
+              {step === 'profile' ? (
+                <div className="pt-4 w-full max-w-105 space-y-2">
+                  <button
+                    type="button"
+                    data-testid="onboarding-submit-btn"
+                    onClick={handleProfileContinue}
+                    disabled={!isFormPartiallyFilled || isSubmitting}
+                    className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {isSubmitting ? t('common.saving') : t('onboarding.continue')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="onboarding-skip-btn"
+                    onClick={handleProfileSkip}
+                    disabled={isSubmitting}
+                    className="w-full text-sm text-[#737373] mt-4 cursor-pointer disabled:opacity-50"
+                  >
+                    {t('onboarding.skip')}
+                  </button>
+                </div>
+              ) : (
+                <div className="pt-4 w-full max-w-105 space-y-2">
+                  <button
+                    type="button"
+                    data-testid="onboarding-reminders-submit-btn"
+                    onClick={handleRemindersContinue}
+                    disabled={isSubmitting}
+                    className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {isSubmitting ? t('common.saving') : t('onboarding.continue')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="onboarding-reminders-skip-btn"
+                    onClick={handleRemindersSkip}
+                    disabled={isSubmitting}
+                    className="w-full text-sm text-[#737373] mt-4 cursor-pointer disabled:opacity-50"
+                  >
+                    {t('onboarding.skip')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="onboarding-reminders-back-btn"
+                    onClick={handleRemindersBack}
+                    disabled={isSubmitting}
+                    className="w-full text-sm text-[#7B00E0] font-medium cursor-pointer disabled:opacity-50"
+                  >
+                    ← {t('onboarding.back')}
+                  </button>
+                </div>
+              )}
               {/* (Privacy note and sign out text removed per design) */}
             </div>
           </div>
