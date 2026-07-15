@@ -7,6 +7,7 @@
 // "Resend / Revoke" actions instead of "Deactivate".
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ChevronLeft,
   ChevronRight,
@@ -141,19 +142,39 @@ function ActionsMenu({
 }) {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
-  // Flip the menu above the button when there isn't enough room below — else
-  // it spills past the overflow-x-auto table container and forces a scrollbar.
-  const [openUp, setOpenUp] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  // Fixed-viewport coordinates for the portaled menu. The menu is rendered into
+  // document.body (not the row) so it can't be clipped by the table's
+  // overflow-x-auto / the card's overflow-hidden — which is what cut off the
+  // last rows' menus when they were absolutely positioned inside the cell.
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const MENU_WIDTH = 208; // w-52 (13rem)
+
+  // Position relative to the trigger, in viewport coords (for position:fixed).
+  // Right-aligned to the button; flips above when there isn't room below; and
+  // clamped to the viewport so it never spills off an edge.
+  function computeCoords() {
+    const btn = btnRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const estimatedHeight = items.length * 44 + 16;
+    const openUp = window.innerHeight - rect.bottom < estimatedHeight;
+    const top = openUp
+      ? Math.max(8, rect.top - estimatedHeight - 4)
+      : rect.bottom + 4;
+    const left = Math.min(
+      Math.max(8, rect.right - MENU_WIDTH),
+      window.innerWidth - MENU_WIDTH - 8,
+    );
+    setCoords({ top, left });
+  }
 
   function toggle() {
     setOpen((v) => {
       const next = !v;
-      if (next && ref.current) {
-        const rect = ref.current.getBoundingClientRect();
-        const estimatedHeight = items.length * 44 + 16;
-        setOpenUp(window.innerHeight - rect.bottom < estimatedHeight);
-      }
+      if (next) computeCoords();
       return next;
     });
   }
@@ -161,17 +182,36 @@ function ActionsMenu({
   useEffect(() => {
     if (!open) return;
     function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      // The menu lives in a portal, so it is NOT inside btnRef — check both.
+      if (
+        btnRef.current &&
+        !btnRef.current.contains(target) &&
+        menuRef.current &&
+        !menuRef.current.contains(target)
+      ) {
+        setOpen(false);
+      }
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpen(false);
     }
+    // Keep the menu glued to its button while the page/table scrolls or resizes
+    // (capture:true catches scrolls on the inner overflow-x-auto container too).
+    function reposition() {
+      computeCoords();
+    }
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
     return () => {
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (items.length === 0) {
@@ -183,8 +223,9 @@ function ActionsMenu({
   }
 
   return (
-    <div className="relative inline-block text-left" ref={ref}>
+    <div className="inline-block text-left">
       <button
+        ref={btnRef}
         type="button"
         onClick={toggle}
         disabled={pending}
@@ -201,33 +242,39 @@ function ActionsMenu({
           <MoreVertical className="w-4 h-4" />
         )}
       </button>
-      {open && (
-        <div
-          role="menu"
-          className={`absolute right-0 z-30 w-52 bg-white rounded-xl overflow-hidden py-1 ${
-            openUp ? 'bottom-full mb-1' : 'top-full mt-1'
-          }`}
-          style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.12)', border: '1px solid var(--brand-border)' }}
-        >
-          {items.map((it) => (
-            <button
-              key={it.key}
-              type="button"
-              role="menuitem"
-              data-testid={`admin-user-action-${it.key}-${testId}`}
-              onClick={() => {
-                setOpen(false);
-                it.onClick();
-              }}
-              className="w-full text-left px-4 py-2.5 text-[13px] font-medium inline-flex items-center gap-2.5 hover:bg-gray-50 cursor-pointer"
-              style={{ color: it.danger ? 'var(--brand-alert-red)' : 'var(--brand-text-primary)' }}
-            >
-              <it.icon className="w-3.5 h-3.5" />
-              {it.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {open && coords && typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            className="fixed z-[100] w-52 bg-white rounded-xl overflow-hidden py-1"
+            style={{
+              top: coords.top,
+              left: coords.left,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+              border: '1px solid var(--brand-border)',
+            }}
+          >
+            {items.map((it) => (
+              <button
+                key={it.key}
+                type="button"
+                role="menuitem"
+                data-testid={`admin-user-action-${it.key}-${testId}`}
+                onClick={() => {
+                  setOpen(false);
+                  it.onClick();
+                }}
+                className="w-full text-left px-4 py-2.5 text-[13px] font-medium inline-flex items-center gap-2.5 hover:bg-gray-50 cursor-pointer"
+                style={{ color: it.danger ? 'var(--brand-alert-red)' : 'var(--brand-text-primary)' }}
+              >
+                <it.icon className="w-3.5 h-3.5" />
+                {it.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

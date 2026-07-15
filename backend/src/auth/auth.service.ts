@@ -2916,12 +2916,20 @@ export class AuthService {
         success: false,
         errorCode: 'account_not_active',
       })
-      // Silent success — return the happy-path shape WITHOUT generating or
-      // sending an OTP, so we never disclose to an unauthenticated requester
-      // that this email exists-but-is-inactive (info-disclosure). The block is
-      // still audited above; a non-ACTIVE user who somehow holds a valid code
-      // is still stopped at verifyOtp.
-      return { message: 'OTP sent successfully' }
+      // Product decision (2026-07-14, signed off): surface the account-status
+      // error AT SEND for a deactivated/suspended/blocked account, so the
+      // patient immediately gets the "reactivate" guidance instead of a dead
+      // "OTP sent" that goes nowhere (no code is ever minted for them). Same
+      // error shape verifyOtp throws, so the FE maps it to the reactivate CTA.
+      //
+      // TRADEOFF: this reveals that an email is registered-but-inactive
+      // (enumeration). Accepted for the UX of the Ward 7/8 patient cohort.
+      // SYSTEM rows are handled ABOVE and stay fully silent; non-existent
+      // emails still fall through to the generic success path (their existence
+      // is NOT disclosed). Still audited above regardless.
+      throw new ForbiddenException(
+        `Account is ${existingUser.accountStatus.toLowerCase()}`,
+      )
     }
 
     // Check for recent OTP request (rate limiting)
@@ -3434,10 +3442,16 @@ export class AuthService {
         success: false,
         errorCode: 'account_not_active',
       })
-      // Silent success — same as sendOtp: return the happy-path shape without
-      // creating or sending a magic link, so we never disclose that the account
-      // exists-but-is-inactive. The block is audited above.
-      return { message: 'Magic link sent successfully' }
+      // Product decision (2026-07-14, signed off): surface the account-status
+      // error AT SEND for a deactivated/suspended/blocked account so the patient
+      // gets the reactivate guidance immediately. Mirrors sendOtp; same error
+      // shape verify throws → FE maps it to the reactivate CTA. TRADEOFF: reveals
+      // an email is registered-but-inactive (enumeration), accepted for the
+      // Ward 7/8 cohort UX. SYSTEM rows stay silent above; non-existent emails
+      // still fall through to generic success. Audited above regardless.
+      throw new ForbiddenException(
+        `Account is ${existingUser.accountStatus.toLowerCase()}`,
+      )
     }
 
     // Rate limiting: 1 magic link per email per 60s

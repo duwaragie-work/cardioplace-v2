@@ -46,10 +46,10 @@ export class LockedOutDto {
   @MaxLength(5000)
   description!: string
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(40)
-  contactPhone?: string
+  // L-3 — `contactPhone` was removed. The locked-out form no longer collects a
+  // callback number (the phone-callback implication was dropped in Fix 6/7).
+  // With the global ValidationPipe whitelist (V-14), a client that still sends
+  // contactPhone is rejected rather than silently stored.
 }
 
 /** POST /v2/admin/support/tickets/:id/reply — ops replying to the user. */
