@@ -83,9 +83,13 @@ export function describeThisDevice(): string {
 
 // ─── Registration (authenticated — from settings) ─────────────────────────────
 
-/** 'platform' = register THIS device's Face ID / fingerprint.
- *  'cross-platform' = register ANOTHER device via the browser's QR flow. */
-export type RegisterMode = 'platform' | 'cross-platform';
+/** Only 'platform' remains: a passkey can ONLY be registered for the device
+ *  you're currently on. Biometric is bound per-device (WebAuthnCredential
+ *  .deviceId), so the old 'cross-platform' QR flow — which created a passkey on
+ *  a DIFFERENT device whose id we can't know — was removed. To use biometric on
+ *  another device, sign in there with OTP / magic-link and enable it from that
+ *  device's Settings. */
+export type RegisterMode = 'platform';
 
 /** Max passkeys a patient can register. */
 export const MAX_BIOMETRIC_DEVICES = 3;
@@ -157,14 +161,9 @@ export async function registerBiometric(
     throw toCeremonyError(err, 'register');
   }
 
-  // Name it. For a 'platform' passkey it's THIS device, so the user-agent is
-  // accurate. For 'cross-platform' the passkey was created on ANOTHER device
-  // (via QR) that the browser can't identify — so use a generic label, since
-  // sniffing the current browser would mislabel it (e.g. "Windows device" for
-  // a passkey that's actually on an Android phone).
-  const resolvedName =
-    deviceName ??
-    (mode === 'cross-platform' ? 'Phone or tablet' : describeThisDevice());
+  // The passkey is always created on THIS device now (the cross-device QR flow
+  // was removed), so the user-agent label is always accurate.
+  const resolvedName = deviceName ?? describeThisDevice();
 
   const verifyRes = await fetchWithAuth(
     `${API_URL}/api/v2/auth/webauthn/register/verify`,

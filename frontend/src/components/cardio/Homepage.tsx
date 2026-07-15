@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Mic, Send, Activity, Heart, MessageCircle, CheckCircle, AlertTriangle, Brain, Building2, Play, X } from 'lucide-react';
+import { Mic, Send, Activity, Heart, MessageCircle, CheckCircle, AlertTriangle, SlidersHorizontal, Building2, Play, X } from 'lucide-react';
 import { BsSoundwave } from "react-icons/bs";
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/lib/auth-context';
@@ -367,10 +367,12 @@ export default function Homepage() {
               </div>
             </div>
 
-            {/* Card 4 - Continuously Learning */}
+            {/* Card 4 - Personalized to Each Patient (physician-set, per-patient
+                rule-based thresholds — SlidersHorizontal for "tuned/tailored").
+                Was a Brain icon under the old ML "continuously learning" copy. */}
             <div className="rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 flex flex-col min-h-[320px] sm:min-h-[480px] transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:brightness-110 active:scale-[0.98]" style={{ backgroundImage: 'linear-gradient(148deg, #7b00e0 6%, #c79afd 98%)' }}>
               <div className="bg-[#c79afd] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mb-6 sm:mb-8">
-                <Brain className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
+                <SlidersHorizontal className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
               </div>
               <h3 className="text-white font-bold text-xl sm:text-xl leading-snug mb-3 sm:mb-4">{t('home.learning')}</h3>
               <p className="text-white text-sm sm:text-base leading-[1.8]">{t('home.learningDesc')}</p>
