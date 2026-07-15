@@ -144,7 +144,7 @@ export default function SettingsPage() {
       setRecovery(rec);
       setThisDeviceIds(getThisDeviceCredentialIds());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load settings.');
+      setError(err instanceof Error ? err.message : t('settings.error.load'));
     } finally {
       setLoading(false);
     }
@@ -176,7 +176,7 @@ export default function SettingsPage() {
     } catch (err) {
       const e = err as Error & { code?: string };
       if (e.code !== 'cancelled') {
-        setError(e.message || 'Could not set up biometric.');
+        setError(e.message || t('settings.bio.errorSetup'));
       }
     } finally {
       setEnabling(null);
@@ -205,7 +205,7 @@ export default function SettingsPage() {
       );
       setEditingId(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not rename device.');
+      setError(err instanceof Error ? err.message : t('settings.bio.errorRename'));
     } finally {
       setSavingRename(false);
     }
@@ -222,7 +222,7 @@ export default function SettingsPage() {
       setNotice(t('settings.bio.deviceRemoved'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not remove device.');
+      setError(err instanceof Error ? err.message : t('settings.bio.errorRemove'));
     } finally {
       setRemovingId(null);
     }
@@ -238,7 +238,7 @@ export default function SettingsPage() {
       setCodesToShow(codes);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not regenerate codes.');
+      setError(err instanceof Error ? err.message : t('settings.recovery.errorRegenerate'));
     } finally {
       setRegenerating(false);
     }
@@ -516,7 +516,7 @@ export default function SettingsPage() {
                             type="button"
                             onClick={() => setEditingId(null)}
                             disabled={savingRename}
-                            aria-label="Cancel"
+                            aria-label={t('common.cancel')}
                             className="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-lg hover:bg-gray-100 disabled:opacity-50 cursor-pointer"
                             style={{ color: 'var(--brand-text-muted)' }}
                           >
@@ -878,7 +878,7 @@ export default function SettingsPage() {
           className="mb-2 mt-6 px-1 text-[11px] font-bold uppercase tracking-wide"
           style={{ color: 'var(--brand-text-muted)' }}
         >
-          Contact support
+          {t('settings.support.title')}
         </p>
         <section
           className="rounded-2xl bg-white overflow-hidden p-5"
@@ -886,8 +886,7 @@ export default function SettingsPage() {
           data-testid="settings-support"
         >
           <p className="text-[13px] mb-4" style={{ color: 'var(--brand-text-muted)' }}>
-            Need help with your account, sign-in, or something in the app? Send our team a
-            message and we’ll follow up by email.
+            {t('settings.support.intro')}
           </p>
           <SupportContactForm />
           <a
@@ -896,7 +895,7 @@ export default function SettingsPage() {
             className="mt-4 inline-flex items-center gap-1 text-[13px] font-semibold"
             style={{ color: 'var(--brand-primary-purple)' }}
           >
-            View my requests →
+            {t('settings.support.myRequests')}
           </a>
         </section>
       </div>
@@ -911,7 +910,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setCodesToShow(null)}
-              aria-label="Close"
+              aria-label={t('common.close')}
               className="absolute right-4 top-4 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100 cursor-pointer"
             >
               <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />

@@ -2,21 +2,24 @@
 
 import { useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
+import { useLanguage } from '@/contexts/LanguageContext';
+import type { TranslationKey } from '@/i18n';
 import {
   submitContact,
   type SupportCategory,
 } from '@/lib/services/support.service';
 
-const CATEGORIES: { value: SupportCategory; label: string }[] = [
-  { value: 'ACCOUNT', label: 'Account' },
-  { value: 'MFA', label: 'MFA' },
-  { value: 'CLINICAL', label: 'Clinical question' },
-  { value: 'BUG', label: 'Bug' },
-  { value: 'OTHER', label: 'Other' },
+const CATEGORIES: { value: SupportCategory; labelKey: TranslationKey }[] = [
+  { value: 'ACCOUNT', labelKey: 'support.form.categoryAccount' },
+  { value: 'MFA', labelKey: 'support.form.categoryMfa' },
+  { value: 'CLINICAL', labelKey: 'support.form.categoryClinical' },
+  { value: 'BUG', labelKey: 'support.form.categoryBug' },
+  { value: 'OTHER', labelKey: 'support.form.categoryOther' },
 ];
 
 /** In-app "Contact support" form for signed-in patients → /v2/support/contact. */
 export default function SupportContactForm() {
+  const { t } = useLanguage();
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [category, setCategory] = useState<SupportCategory>('ACCOUNT');
@@ -43,7 +46,7 @@ export default function SupportContactForm() {
       setSubject('');
       setBody('');
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : 'Could not send your message.');
+      setErr(e2 instanceof Error ? e2.message : t('support.form.error'));
     } finally {
       setBusy(false);
     }
@@ -56,8 +59,10 @@ export default function SupportContactForm() {
         className="flex items-start gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-[13px] text-emerald-800"
       >
         <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
-        Thanks — your request <span className="font-mono">{done}</span> was received. We’ll
-        get back to you by email.
+        <span>
+          {t('support.form.successPrefix')}{' '}
+          <span className="font-mono">{done}</span> {t('support.form.successSuffix')}
+        </span>
       </div>
     );
   }
@@ -67,21 +72,21 @@ export default function SupportContactForm() {
       <input
         value={subject}
         onChange={(e) => setSubject(e.target.value)}
-        placeholder="Subject"
-        aria-label="Subject"
+        placeholder={t('support.form.subject')}
+        aria-label={t('support.form.subject')}
         data-testid="support-contact-subject"
         className="w-full text-[14px] rounded-xl border border-slate-200 p-3 outline-none"
       />
       <select
         value={category}
         onChange={(e) => setCategory(e.target.value as SupportCategory)}
-        aria-label="Category"
+        aria-label={t('support.form.category')}
         data-testid="support-contact-category"
         className="w-full text-[14px] rounded-xl border border-slate-200 p-3 outline-none bg-white"
       >
         {CATEGORIES.map((c) => (
           <option key={c.value} value={c.value}>
-            {c.label}
+            {t(c.labelKey)}
           </option>
         ))}
       </select>
@@ -89,13 +94,13 @@ export default function SupportContactForm() {
         value={body}
         onChange={(e) => setBody(e.target.value)}
         rows={4}
-        placeholder="How can we help?"
-        aria-label="Message"
+        placeholder={t('support.form.messagePlaceholder')}
+        aria-label={t('support.form.message')}
         data-testid="support-contact-body"
         className="w-full text-[14px] rounded-xl border border-slate-200 p-3 outline-none resize-y"
       />
       <fieldset className="flex items-center gap-4 text-[13px] text-slate-600">
-        <span className="text-slate-400">Prefer to be reached by:</span>
+        <span className="text-slate-400">{t('support.form.reachBy')}</span>
         {(['EMAIL', 'PHONE'] as const).map((p) => {
           const disabled = p === 'PHONE'; // phone support not yet available (Fix 6)
           return (
@@ -119,9 +124,9 @@ export default function SupportContactForm() {
                 data-no-min-target
                 className="h-4 w-4 shrink-0 accent-[var(--brand-primary-purple)] cursor-pointer disabled:cursor-not-allowed"
               />
-              {p === 'EMAIL' ? 'Email' : 'Phone'}
+              {p === 'EMAIL' ? t('support.form.email') : t('support.form.phone')}
               {disabled && (
-                <span className="text-[11px] text-slate-400">(coming soon)</span>
+                <span className="text-[11px] text-slate-400">{t('support.form.comingSoon')}</span>
               )}
             </label>
           );
@@ -134,7 +139,7 @@ export default function SupportContactForm() {
         data-testid="support-contact-submit"
         className="h-11 px-6 rounded-full bg-[#7B00E0] text-white text-sm font-semibold disabled:opacity-50 hover:bg-[#6600BC] transition-colors"
       >
-        {busy ? 'Sending…' : 'Send message'}
+        {busy ? t('support.form.sending') : t('support.form.send')}
       </button>
     </form>
   );
