@@ -105,8 +105,15 @@ export function BufferReviewScreen({
   ].join('. ');
 
   return (
-    <div className="min-h-[calc(100dvh-4rem)] flex flex-col" style={{ backgroundColor: 'var(--brand-background)' }}>
-      <main id="main" className="flex-1 w-full max-w-md mx-auto px-4 sm:px-6 py-6">
+    // `justify-center` centres the card vertically. Safe against tall content (3
+    // readings + the take-another nudge): the container is min-h, not a fixed h,
+    // so it simply grows past the viewport and the page scrolls — nothing gets
+    // clipped off the top, which is what a fixed-height centre would do.
+    <div
+      className="min-h-[calc(100dvh-4rem)] flex flex-col justify-center"
+      style={{ backgroundColor: 'var(--brand-background)' }}
+    >
+      <main id="main" className="w-full max-w-md mx-auto px-4 sm:px-6 py-6">
         <div className="flex items-start gap-2">
           <h1
             ref={headingRef}

@@ -30,8 +30,17 @@ export const T = {
     nameInput: 'onboarding-name-input',
     dobInput: 'onboarding-dob-input',
     timezoneSelect: 'onboarding-timezone-select',
+    // Step 1 of 2 — identity (name + comm preference).
     submitBtn: 'onboarding-submit-btn',
     skipBtn: 'onboarding-skip-btn',
+    stepIndicator: 'onboarding-step-indicator',
+    // Step 2 of 2 — reminders (daily time + quiet hours).
+    remindersSubmitBtn: 'onboarding-reminders-submit-btn',
+    remindersSkipBtn: 'onboarding-reminders-skip-btn',
+    remindersBackBtn: 'onboarding-reminders-back-btn',
+    reminderTime: 'onboarding-reminder-time',
+    quietStart: 'onboarding-quiet-start',
+    quietEnd: 'onboarding-quiet-end',
     // Privacy/trust step (V2-E Gap 7) — shown FIRST, before the profile form.
     agreeTerms: 'onboarding-agree-terms',
     privacyContinueBtn: 'onboarding-privacy-continue-btn',
@@ -752,7 +761,9 @@ export const T = {
     // no per-row testid; rename/remove are reached via their aria-labels
     // ("Rename device" / "Remove device" / "Save name").
     settingsEnableBiometric: 'settings-enable-biometric',
-    settingsAddAnotherDevice: 'settings-add-another-device',
+    // settingsAddAnotherDevice removed 2026-07-14 — the cross-device QR
+    // enrollment flow is gone; biometric is bound to the device that registers
+    // it, so each device enables it from its own Settings.
     settingsRenameInput: 'settings-rename-input',
     settingsRegenerateCodes: 'settings-regenerate-codes',
   },
