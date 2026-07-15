@@ -973,9 +973,19 @@ export default function PatientsPage() {
     }
     if (search) {
       const q = search.toLowerCase();
+      // L-1 — DisplayID search. The id is stored raw (e.g. "CPPAT5XDQ2WG7") but
+      // shown hyphenated ("CP-PAT-5XDQ2WG-7"). Normalize BOTH sides to
+      // uppercase alphanumerics so a query matches regardless of case, hyphens,
+      // or spacing. `includes` also makes it tolerant of a missing check digit
+      // (the typed id is then a prefix of the stored one). Gated to ≥4 chars so
+      // a bare "cp" doesn't match every patient via the shared prefix.
+      const normId = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const normalizedQuery = normId(search);
       return (
         (p.name ?? '').toLowerCase().includes(q) ||
-        (p.email ?? '').toLowerCase().includes(q)
+        (p.email ?? '').toLowerCase().includes(q) ||
+        (normalizedQuery.length >= 4 &&
+          normId(p.displayId ?? '').includes(normalizedQuery))
       );
     }
     return true;
@@ -1394,6 +1404,18 @@ export default function PatientsPage() {
                         <p className="text-[11px] truncate" style={{ color: 'var(--brand-text-muted)' }}>
                           {p.email ?? '--'}
                         </p>
+                        {/* L-1 — surface the Cardioplace ID on the row so staff
+                            can see + quote it (and search by it). Non-PHI opaque
+                            identifier, safe to display. */}
+                        {p.displayId ? (
+                          <p
+                            className="text-[10px] font-mono truncate mt-0.5"
+                            data-testid={`admin-patient-list-display-id-${p.id}`}
+                            style={{ color: 'var(--brand-text-muted)' }}
+                          >
+                            {formatDisplayId(p.displayId)}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
 

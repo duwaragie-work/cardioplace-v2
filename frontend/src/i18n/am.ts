@@ -308,6 +308,7 @@ const am: Record<TranslationKey, string> = {
   // B5 — confirmation
   'checkin.confirm.title': 'ንባብ ተልኳል',
   'checkin.confirm.titleMulti': 'ንባብ {n} ተልኳል',
+  'checkin.confirm.lookingGood': 'በጣም ጥሩ ነው — እንዲሁ ይቀጥሉ!',
   'checkin.confirm.subtitle': 'የተንከባካቢ ቡድንዎ ወዲያውኑ ይቀበላል።',
   // #88 — English placeholder; flagged for Niva translation pass.
   'checkin.confirm.subtitleUnenrolled': 'የእንክብካቤ ቡድንዎን እያዘጋጀን ነው። ምዝገባዎ ከተጠናቀቀ በኋላ ንባቦችዎን መገምገም ይጀምራሉ።',
@@ -557,7 +558,10 @@ const am: Record<TranslationKey, string> = {
   'settings.badge.alwaysOn': 'Always on',
   'settings.badge.on': 'On',
   'settings.badge.recommended': 'Recommended',
-  'settings.notif.title': 'ማሳወቂያዎች',
+  // TODO(i18n): "Pop-up notifications" — native-speaker Amharic pending. The
+  // prior value meant "phone notifications", now inaccurate (this also covers
+  // laptops). English placeholder until reviewed; never machine-translate.
+  'settings.notif.title': 'Pop-up notifications',
   'settings.notif.desc': 'መተግበሪያው ተዘግቶም ቢሆን ስለ ንባቦችዎ ማንቂያዎችንና አስታዋሾችን በዚህ መሣሪያ ላይ ይቀበሉ።',
   'settings.notif.badgeBlocked': 'ታግዷል',
   'settings.notif.badgeOff': 'ጠፍቷል',
@@ -613,6 +617,39 @@ const am: Record<TranslationKey, string> = {
   'settings.danger.close.requested': 'Check your email. We sent a link to confirm closing your account. It expires in 1 hour.',
   'settings.danger.processing': 'Processing…',
   'settings.danger.error': 'Something went wrong. Please try again.',
+
+  // ─── Settings — errors + Contact support (i18n sweep) ───────────────────────
+  // TODO(i18n): Amharic pending native-speaker review — English placeholders so
+  // the type stays satisfied and am users see English (the getTranslation
+  // fallback) rather than machine-translated Amharic. Never machine-translate.
+  'settings.error.load': 'Could not load settings.',
+  'settings.bio.errorSetup': 'Could not set up biometric.',
+  'settings.bio.errorRename': 'Could not rename device.',
+  'settings.bio.errorRemove': 'Could not remove device.',
+  'settings.recovery.errorRegenerate': 'Could not regenerate codes.',
+  'settings.support.title': 'Contact support',
+  'settings.support.intro':
+    "Need help with your account, sign-in, or something in the app? Send our team a message and we'll follow up by email.",
+  'settings.support.myRequests': 'View my requests →',
+  'support.form.categoryAccount': 'Account',
+  'support.form.categoryMfa': 'MFA',
+  'support.form.categoryClinical': 'Clinical question',
+  'support.form.categoryBug': 'Bug',
+  'support.form.categoryOther': 'Other',
+  'support.form.subject': 'Subject',
+  'support.form.category': 'Category',
+  'support.form.message': 'Message',
+  'support.form.messagePlaceholder': 'How can we help?',
+  'support.form.reachBy': 'Prefer to be reached by:',
+  'support.form.email': 'Email',
+  'support.form.phone': 'Phone',
+  'support.form.comingSoon': '(coming soon)',
+  'support.form.sending': 'Sending…',
+  'support.form.send': 'Send message',
+  'support.form.error': 'Could not send your message.',
+  'support.form.successPrefix': 'Thanks — your request',
+  'support.form.successSuffix': "was received. We'll get back to you by email.",
+
   'settings.close.pageTitle': 'Confirm account closure',
   'settings.close.pageDesc': 'Click below to permanently close your Cardioplace account. This cannot be undone.',
   'settings.close.confirmButton': 'Permanently close my account',
@@ -676,19 +713,20 @@ const am: Record<TranslationKey, string> = {
   // TODO(l10n-am): draft Amharic strings need native-speaker review before
   // the PR merges (Duwaragie hand-off). English fallbacks are placeholders
   // so the key-drift check passes; the runtime UI will still render them.
-  'profile.reminders.heading': 'Reminders',
-  'profile.reminders.editHeading': 'Edit reminders',
-  'profile.reminders.dailyTime': 'Daily reminder time',
-  'profile.reminders.quietHoursStart': 'Quiet hours start',
-  'profile.reminders.quietHoursEnd': 'Quiet hours end',
-  // TODO(l10n-am): Amharic native-speaker verification required per spec §N10.
-  'profile.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
-  'profile.reminders.startLabel': 'Start',
-  'profile.reminders.endLabel': 'End',
-  'profile.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
-  'profile.reminders.saveButton': 'Save',
-  'profile.reminders.savingButton': 'Saving…',
-  'profile.reminders.cancelButton': 'Cancel',
+  // L-5 — filled from English; TODO(l10n-am): native-speaker verification
+  // required before ship per spec §N10 (do not machine-translate as final).
+  'profile.reminders.heading': 'አስታዋሾች',
+  'profile.reminders.editHeading': 'አስታዋሾችን ያርትዑ',
+  'profile.reminders.dailyTime': 'የዕለታዊ አስታዋሽ ሰዓት',
+  'profile.reminders.quietHoursStart': 'የጸጥታ ሰዓታት መጀመሪያ',
+  'profile.reminders.quietHoursEnd': 'የጸጥታ ሰዓታት መጨረሻ',
+  'profile.reminders.quietHoursHeading': 'የጸጥታ ሰዓታት (በዚህ ጊዜ ውስጥ ምንም አስታዋሽ አይላክም)',
+  'profile.reminders.startLabel': 'መጀመሪያ',
+  'profile.reminders.endLabel': 'መጨረሻ',
+  'profile.reminders.emergencyDisclaimer': 'የአስቸኳይ ጤና ማንቂያዎች በጸጥታ ሰዓታት ውስጥም እንኳ ሁልጊዜ ይደርሳሉ።',
+  'profile.reminders.saveButton': 'አስቀምጥ',
+  'profile.reminders.savingButton': 'በማስቀመጥ ላይ…',
+  'profile.reminders.cancelButton': 'ይቅር',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'ንባቦቼ',
@@ -919,6 +957,7 @@ const am: Record<TranslationKey, string> = {
   'register.accountSuspended': 'መለያዎ ታግዷል። እባክዎ ድጋፍ ያግኙ።',
   'register.accountBlocked': 'መለያዎ ተዘግቷል። እባክዎ ድጋፍ ያግኙ።',
   'register.accountDeactivated': 'ይህ መለያ ተሰናክሏል። እንደገና ለማንቃት የእንክብካቤ ቡድንዎን ያግኙ።',
+  'register.contactSupportReactivate': 'እንደገና ለማንቃት ድጋፍን ያግኙ →',
   'register.accountClosed': 'ይህ መለያ በቋሚነት ተዘግቷል እና እንደገና ሊከፈት አይችልም።',
   'register.failedResend': 'OTP እንደገና መላክ አልተቻለም።',
   'register.verificationFailed': 'ማረጋገጥ አልተሳካም።',
@@ -945,19 +984,20 @@ const am: Record<TranslationKey, string> = {
   'register.otpTitle': 'OTP ኮድ',
   'register.otpInfo': '6-አሃዝ ኮድ በኢሜል እንልካለን። ለመግባት እዚህ ይጻፉት።',
   // Support — locked-out page (Fix 12). TODO: Amharic translations pending;
-  // English placeholders (runtime falls back am → en until translated).
-  'support.locked.title': 'Need help signing in?',
-  'support.locked.subtitle': 'Tell us what’s happening and our team will contact you to verify your identity before making any account changes.',
-  'support.locked.statusBanner': 'You can also check the status of an existing request by clicking the link in your confirmation email.',
-  'support.locked.email': 'Your account email',
-  'support.locked.description': 'What’s happening? (e.g. I lost my authenticator app and recovery codes)',
-  'support.locked.phone': 'Callback phone (optional)',
-  'support.locked.submit': 'Request help',
-  'support.locked.submitting': 'Submitting…',
-  'support.locked.successLead': 'Thanks — your request',
-  'support.locked.successTail': 'is in. Our team will reach out to verify your identity before any changes are made.',
-  'support.locked.error': 'Could not submit your request.',
-  'support.locked.backToSignIn': 'Back to sign in',
+  // L-5 — filled from English; TODO(l10n-am): native-speaker verification
+  // required before ship per spec §N10 (do not machine-translate as final).
+  'support.locked.title': 'ለመግባት እገዛ ይፈልጋሉ?',
+  'support.locked.subtitle': 'ምን እየተከሰተ እንዳለ ይንገሩን፤ ማንኛውንም የመለያ ለውጥ ከማድረጋችን በፊት ቡድናችን ማንነትዎን ለማረጋገጥ ያገኝዎታል።',
+  'support.locked.statusBanner': 'ነባር ጥያቄዎን ሁኔታ በማረጋገጫ ኢሜይልዎ ውስጥ ያለውን አገናኝ ጠቅ በማድረግ ማየት ይችላሉ።',
+  'support.locked.email': 'የመለያዎ ኢሜይል',
+  'support.locked.description': 'ምን እየተከሰተ ነው? (ለምሳሌ የማረጋገጫ መተግበሪያዬንና የመልሶ ማግኛ ኮዶቼን አጣሁ)',
+  'support.locked.phone': 'የመልስ ስልክ (አማራጭ)',
+  'support.locked.submit': 'እገዛ ይጠይቁ',
+  'support.locked.submitting': 'በማስገባት ላይ…',
+  'support.locked.successLead': 'እናመሰግናለን — ጥያቄዎ',
+  'support.locked.successTail': 'ገብቷል። ማንኛውም ለውጥ ከመደረጉ በፊት ቡድናችን ማንነትዎን ለማረጋገጥ ያገኝዎታል።',
+  'support.locked.error': 'ጥያቄዎን ማስገባት አልተቻለም።',
+  'support.locked.backToSignIn': 'ወደ መግቢያ ተመለስ',
   // Support — "My support requests" page (Fix 9). English fallback pending am.
   'support.mytickets.back': 'Back to settings',
   'support.mytickets.title': 'My support requests',

@@ -507,6 +507,21 @@ export default function RegisterPage() {
                     {errorMessage || statusMessage}
                   </output>
                 )}
+                {/* L-4 — a deactivated account gets a CONTEXTUAL reactivation CTA
+                    right under the error, instead of relying on the generic
+                    "Need help signing in?" link further down. Routes to the same
+                    public support form, pre-filled with the typed email. */}
+                {errorKey === 'register.accountDeactivated' && (
+                  <p className="mt-2">
+                    <a
+                      href={`/support/locked-out${emailTrimmed ? `?email=${encodeURIComponent(emailTrimmed)}` : ''}`}
+                      data-testid="signin-reactivate-cta"
+                      className="text-xs lg:text-sm font-semibold text-[#7B00E0] hover:underline"
+                    >
+                      {t('register.contactSupportReactivate')}
+                    </a>
+                  </p>
+                )}
                 {authMode === "otp" && otpSent && otp.length === 0 && !statusMessage && !errorMessage && (
                   <p className="mt-2 text-[#737373] text-xs lg:text-sm">
                     {t('register.enterCode')}
@@ -550,7 +565,8 @@ export default function RegisterPage() {
                     data-testid="signin-need-help"
                     className="text-[0.6875rem] lg:text-xs font-medium text-[#7B00E0] hover:underline"
                   >
-                    Need help signing in?
+                    {/* L-5 — was hardcoded English; now localized. */}
+                    {t('support.locked.title')}
                   </a>
                 </p>
                 {/* A2 — privacy assurance + A1 — medical disclaimer.

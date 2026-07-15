@@ -6,8 +6,10 @@
  *   • N1 + N8   Profile UI edits reminder-time / quiet-hours → PATCH lands → GET reflects
  *   • N2 + N4   Daily-reminder cron dispatches an escalating-tone Notification row
  *   • N6        Quiet-hours shift rule — reminderTime inside quiet band defers to quietEnd
- *   • N7        Logged confirmation Push notification fires after a journal-entry save,
- *               carries "Logged ✓" + "Looking good" (normal-range) with NO BP values.
+ *   • N7 / L-6  The logged-confirmation PUSH was REMOVED (L-6, 2026-07-14) — it
+ *               piled up in the bell and collided with the two-tier push. The
+ *               confirmation now lives on the in-app check-in success screen
+ *               (frontend). This spec now guards that NO "Logged ✓" push fires.
  *
  * N3 (delete gap-alert) is validated by the fact that this spec exists —
  * the old gap-alert Playwright coverage in qa/tests/15 was rewired here.
@@ -94,97 +96,38 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
     })
   })
 
-  // ─── N7 — Logged confirmation push fires after journal entry save ─────────
-  test('N7 — normal-range reading fires a "Logged ✓ ... Looking good" PUSH, no BP values', async () => {
+  // ─── N7 / L-6 — logged-confirmation push was REMOVED ──────────────────────
+  // L-6 (2026-07-14): the "Logged ✓ / Looking good" PUSH + persisted bell
+  // Notification were deleted (they piled up in the bell and collided with the
+  // two-tier lock-screen push, desensitizing patients). The confirmation now
+  // renders on the in-app check-in success screen (frontend CheckIn.tsx, gated
+  // on a normal BP band). So a reading save must fire NO "Logged ✓" push — this
+  // replaces the two prior tests that asserted the (now-removed) push.
+  test('N7 / L-6 — a reading save fires NO "Logged ✓" push notification', async () => {
     const patient = PATIENTS.aisha
     const u = await tc.findUserByEmail(patient.email)
     expect(u).not.toBeNull()
 
     const api = await authedApi(API_BASE_URL, patient.email)
-    // Normal-range reading — 118/76 — triggers the "Looking good" tail.
     const before = new Date(Date.now() - 5_000)
-    const posted = await postJournalEntry(api, {
+    await postJournalEntry(api, {
       measuredAt: new Date().toISOString(),
       systolicBP: 118,
       diastolicBP: 76,
       pulse: 72,
     })
-    expect(posted).toBeTruthy()
 
-    // Poll for the confirmation Notification (fire-and-forget event, may lag).
-    let confirmation: { title: string; body: string; channel: string } | undefined
-    const start = Date.now()
-    while (Date.now() - start < 15_000) {
-      const notes = await tc.listNotifications(u!.id)
-      confirmation = notes.find(
-        (n) =>
-          n.channel === 'PUSH' &&
-          n.title.includes('Logged') &&
-          new Date(n.sentAt) >= before,
-      )
-      if (confirmation) break
-      await new Promise((r) => setTimeout(r, 500))
-    }
-    expect(confirmation, 'expected a "Logged ✓" PUSH Notification').toBeTruthy()
-    expect(confirmation!.body).toContain('Logged ✓')
-    expect(confirmation!.body).toContain('Looking good')
-    // No BP values anywhere in the body.
-    expect(confirmation!.body).not.toContain('118')
-    expect(confirmation!.body).not.toContain('76')
-    expect(confirmation!.body).not.toMatch(/mmHg/i)
-  })
-
-  test('N7 — alert-range reading fires "Logged ✓" WITHOUT positive language', async () => {
-    const patient = PATIENTS.aisha
-    const u = await tc.findUserByEmail(patient.email)
-    expect(u).not.toBeNull()
-
-    const api = await authedApi(API_BASE_URL, patient.email)
-    // 165/105 — well above the normal-range predicate → no "Looking good" tail.
-    // Wall-clock snapshot after the request lands: the earlier N7 test in this
-    // file posted 118/76 (normal-range) moments ago, so its "Looking good"
-    // push is still fresh. Filtering only by `sentAt >= before` matches that
-    // stale push and the assertion mis-fires. Take the LATEST push instead —
-    // event dispatch preserves order, so the current entry's push always
-    // outranks a prior test's on `sentAt`.
-    const before = new Date(Date.now() - 5_000)
-    await postJournalEntry(api, {
-      measuredAt: new Date().toISOString(),
-      systolicBP: 165,
-      diastolicBP: 105,
-      pulse: 78,
-    })
-
-    let confirmation: { title: string; body: string; channel: string; sentAt: string } | undefined
-    const start = Date.now()
-    while (Date.now() - start < 15_000) {
-      const notes = await tc.listNotifications(u!.id)
-      const matches = notes
-        .filter(
-          (n) =>
-            n.channel === 'PUSH' &&
-            n.title.includes('Logged') &&
-            new Date(n.sentAt) >= before,
-        )
-        .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime())
-      // Need the entry we just posted to have produced a push AFTER the
-      // request. If the only match predates our post by more than a second,
-      // it's the stale one — keep polling.
-      const postStart = new Date(start)
-      const fresh = matches.find((m) => new Date(m.sentAt) >= postStart)
-      if (fresh) {
-        confirmation = fresh
-        break
-      }
-      await new Promise((r) => setTimeout(r, 500))
-    }
-    expect(confirmation, 'expected a "Logged ✓" PUSH Notification').toBeTruthy()
-    expect(confirmation!.body).toContain('Logged ✓')
-    expect(confirmation!.body).not.toContain('Looking good')
-    expect(confirmation!.body).not.toContain('keep it up')
-    // Belt-and-suspenders: no BP values.
-    expect(confirmation!.body).not.toContain('165')
-    expect(confirmation!.body).not.toContain('105')
+    // Give the (now-removed) fire-and-forget path time to prove it creates
+    // nothing, then assert no logged-confirmation push exists.
+    await new Promise((r) => setTimeout(r, 3_000))
+    const notes = await tc.listNotifications(u!.id)
+    const loggedPush = notes.find(
+      (n) =>
+        n.channel === 'PUSH' &&
+        n.title.includes('Logged') &&
+        new Date(n.sentAt) >= before,
+    )
+    expect(loggedPush, 'no "Logged ✓" push should be created (L-6)').toBeFalsy()
   })
 
   // ─── N2 + N4 — daily-reminder cron via test-control ───────────────────────
@@ -359,54 +302,9 @@ test.describe('N1–N10 Patient Reminder & Engagement Workflow', () => {
     expect(day1, 'expected some daily-reminder body to have landed').toBeTruthy()
   })
 
-  // ─── N7 — logged confirmation for missing BP values ────────────────────
-  test('N7 — reading without BP values still fires "Logged ✓" but with NO positive tail', async () => {
-    const patient = PATIENTS.aisha
-    const u = await tc.findUserByEmail(patient.email)
-    expect(u).not.toBeNull()
-
-    const api = await authedApi(API_BASE_URL, patient.email)
-    // Post an entry with only a weight (no BP) — edge case for the range check.
-    const before = new Date(Date.now() - 5_000)
-    const posted = await postJournalEntry(api, {
-      measuredAt: new Date().toISOString(),
-      systolicBP: null,
-      diastolicBP: null,
-      pulse: null,
-      weight: 75.5,
-    } as any)
-    // Some journals reject BP-null entries — skip gracefully if so.
-    test.skip(!posted, 'API rejected BP-null entry; range-check edge test not exercised')
-
-    let confirmation: { title: string; body: string; channel: string; sentAt: string } | undefined
-    const start = Date.now()
-    while (Date.now() - start < 15_000) {
-      const notes = await tc.listNotifications(u!.id)
-      const matches = notes
-        .filter(
-          (n) =>
-            n.channel === 'PUSH' &&
-            n.title.includes('Logged') &&
-            new Date(n.sentAt) >= before,
-        )
-        .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime())
-      // Take the LATEST match — an earlier test in this file posted
-      // 118/76 (normal-range) whose "Looking good" push may still be
-      // fresh, so plain `.find()` returns the stale row and mis-fires
-      // the .not.toContain assertion.
-      const postStart = new Date(start)
-      const fresh = matches.find((m) => new Date(m.sentAt) >= postStart)
-      if (fresh) {
-        confirmation = fresh
-        break
-      }
-      await new Promise((r) => setTimeout(r, 500))
-    }
-    if (confirmation) {
-      expect(confirmation.body).toContain('Logged ✓')
-      expect(confirmation.body).not.toContain('Looking good')
-    }
-  })
+  // N7 — the BP-null "Logged ✓" push edge case was REMOVED with L-6 (the push
+  // no longer exists at all; see the guard test above). The in-app success
+  // screen's "Looking good" gating (incl. the no-BP case) is a frontend concern.
 
   // ─── N2 — idempotency across two rapid scans ───────────────────────────
   test('N2 — two rapid scans at the same slot produce ONE Notification, not two', async () => {
