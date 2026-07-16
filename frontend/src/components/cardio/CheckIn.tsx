@@ -2199,6 +2199,12 @@ export default function CheckIn() {
   // Bug 8 — true when the just-submitted reading triggered an emergency-class
   // rule; suppresses the Q3 / AFib reading-prompt on the confirmation screen.
   const [confirmationIsEmergency, setConfirmationIsEmergency] = useState(false);
+  // L-9 (M-3, Manisha confirmed 2026-07-14) — true when the sitting was closed
+  // via an EXPLICIT "I'm good, send to my care team" (not the countdown timer).
+  // Drives startAnotherReading to mint a FRESH session instead of reopening the
+  // one the patient said they were done with. Timer/implicit close leaves this
+  // false, so its "Add another reading" still rejoins within the 5-min window.
+  const [committedExplicitly, setCommittedExplicitly] = useState(false);
   // Bug 20a (live-test 2026-06-17) — the confirmation screen's "We're setting up
   // your care team" copy is for NOT_ENROLLED patients ONLY. Read the enrollment
   // field DIRECTLY and show it only when explicitly NOT_ENROLLED. Defaulting to
@@ -2878,7 +2884,16 @@ export default function CheckIn() {
   }
 
   function startAnotherReading() {
-    // Keep sessionId; reset reading-specific fields; skip B1 next round.
+    // L-9 (M-3, Manisha confirmed) — if the patient EXPLICITLY finalized the
+    // last sitting ("I'm good, send to my care team"), "Add another reading"
+    // starts a BRAND-NEW session rather than reopening the one they said they
+    // were done with. A timer/implicit close leaves committedExplicitly false,
+    // so that path still rejoins the sitting within its 5-min edit window.
+    if (committedExplicitly) {
+      setSessionId(uuid());
+      setCommittedExplicitly(false);
+    }
+    // Reset reading-specific fields; skip B1 next round.
     setForm((prev) => ({
       ...emptyForm(),
       measuredDate: nowDate(),
@@ -2907,8 +2922,10 @@ export default function CheckIn() {
   // ── Part 1 — FE buffer handlers ──────────────────────────────────────────
   // Commit the whole buffered sitting in one shot. Every reading carries the
   // draft's shared sessionId so the engine groups + averages them as one
-  // session. Triggered by "I'm good" or the countdown expiring.
-  async function commitBuffer() {
+  // session. Triggered by "I'm good" (explicit=true) or the countdown expiring
+  // (explicit=false). The flag decides whether a later "Add another reading"
+  // starts a fresh session (L-9 / M-3).
+  async function commitBuffer(explicit: boolean) {
     if (!bufferDraft || committingBuffer) return;
     const draft = bufferDraft;
     setCommittingBuffer(true);
@@ -2953,6 +2970,9 @@ export default function CheckIn() {
       // the review screen), so don't arm the post-submit single-reading prompt.
       setPendingFinalizeEntryId(null);
       setConfirmationIsEmergency(false);
+      // L-9 — record whether the patient explicitly finalized ("I'm good") so
+      // the confirmation screen's "Add another reading" can start a new session.
+      setCommittedExplicitly(explicit);
       setShowConfirmation(true);
     } catch (e) {
       // Keep the buffer intact so the patient can retry.
@@ -3160,8 +3180,8 @@ export default function CheckIn() {
         hasAFib={hasAFib}
         committing={committingBuffer}
         onTakeAnother={takeAnotherFromBuffer}
-        onCommit={commitBuffer}
-        onExpire={commitBuffer}
+        onCommit={() => void commitBuffer(true)}
+        onExpire={() => void commitBuffer(false)}
         onEditReading={editBufferReading}
         onDeleteReading={deleteBufferReading}
       />
