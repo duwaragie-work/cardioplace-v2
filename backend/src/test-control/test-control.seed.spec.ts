@@ -8,6 +8,7 @@ import { jest } from '@jest/globals'
 import { ForbiddenException } from '@nestjs/common'
 import { TestControlService } from './test-control.service.js'
 import { TestControlController } from './test-control.controller.js'
+import { encryptionMock } from '../common/test/encryption.mock.js'
 
 type AnyFn = jest.Mock<(...args: any[]) => any>
 
@@ -31,10 +32,12 @@ function mockPrisma() {
 
 function makeService(prisma: ReturnType<typeof mockPrisma>) {
   // Only `prisma` is exercised by the §H methods — cron/escalation deps are
-  // unused, so empty stubs are sufficient for a unit spec. The sixth arg
-  // is `auditExceptionReport` (added by N7); the fifth is
-  // `medicationHoldEscalation` — same empty-stub pattern for every non-prisma
-  // dep the tested methods don't touch.
+  // unused, so empty stubs are sufficient for a unit spec. The sixth arg is
+  // `auditExceptionReport` (added by N7); the fifth is
+  // `medicationHoldEscalation`; the seventh is `encryption` (added by V-06 —
+  // only touched by seed paths that write rationale/reason, none of which
+  // §H exercises here). Same empty-stub pattern for every non-prisma dep the
+  // tested methods don't touch.
   return new TestControlService(
     prisma as never,
     {} as never,
@@ -42,6 +45,7 @@ function makeService(prisma: ReturnType<typeof mockPrisma>) {
     {} as never,
     {} as never,
     {} as never,
+    encryptionMock() as never,
   )
 }
 

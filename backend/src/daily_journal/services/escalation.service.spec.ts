@@ -9,6 +9,8 @@ import { SmsService } from '../../sms/sms.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import { EscalationService, escalationEmailBody } from './escalation.service.js'
 import type { AlertCreatedEvent } from '../interfaces/events.interface.js'
+import { EncryptionService } from '../../common/encryption.service.js'
+import { encryptionMock } from '../../common/test/encryption.mock.js'
 
 // Phase/7 — EscalationService state-machine tests.
 //
@@ -276,6 +278,7 @@ describe('EscalationService', () => {
             get: () => null,
           },
         },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
 

@@ -15,6 +15,7 @@ import {
   VerificationChangeType,
 } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
 import { canCompleteEnrollment } from './enrollment-gate.js'
 
@@ -26,6 +27,7 @@ export class EnrollmentService {
     private readonly prisma: PrismaService,
     private readonly escalation: EscalationService,
     private readonly access: PatientAccessService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   async completeEnrollment(actor: ActorUser, patientUserId: string) {
@@ -90,6 +92,7 @@ export class EnrollmentService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_VERIFY,
           rationale: 'Enrollment completed by admin.',
+          rationaleEncrypted: this.encryption.encryptNullable('Enrollment completed by admin.'),
         },
       }),
     ])
@@ -190,6 +193,9 @@ export class EnrollmentService {
           changeType: VerificationChangeType.ADMIN_CORRECT,
           rationale:
             'Enrollment auto-restored — re-enrollment gate cleared after the blocking prerequisite was configured.',
+          rationaleEncrypted: this.encryption.encryptNullable(
+            'Enrollment auto-restored — re-enrollment gate cleared after the blocking prerequisite was configured.',
+          ),
         },
       })
 
@@ -250,6 +256,9 @@ export class EnrollmentService {
           changeType: VerificationChangeType.ADMIN_CORRECT,
           rationale:
             'Enrollment reverted — personalized threshold removed for a condition that requires one.',
+          rationaleEncrypted: this.encryption.encryptNullable(
+            'Enrollment reverted — personalized threshold removed for a condition that requires one.',
+          ),
         },
       })
       return true

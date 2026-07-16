@@ -10,6 +10,7 @@ import {
   PatientAccessService,
 } from '../../common/patient-access.service.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
+import { EncryptionService } from '../../common/encryption.service.js'
 import {
   RESOLUTION_CATALOG,
   angioedemaPatientDeclinedEd,
@@ -47,6 +48,7 @@ export class AlertResolutionService {
     private readonly prisma: PrismaService,
     private readonly escalation: EscalationService,
     private readonly access: PatientAccessService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   async acknowledge(
@@ -355,6 +357,9 @@ export class AlertResolutionService {
           data: {
             aceContraindicatedAt: now,
             aceContraindicationReason: `Angioedema (alert ${alert.id})`,
+            aceContraindicationReasonEncrypted: this.encryption.encryptNullable(
+              `Angioedema (alert ${alert.id})`,
+            ),
           },
         }),
       ])

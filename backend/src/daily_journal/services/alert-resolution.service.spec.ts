@@ -6,6 +6,8 @@ import { UserRole } from '../../generated/prisma/enums.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { AlertResolutionService } from './alert-resolution.service.js'
 import { EscalationService } from './escalation.service.js'
+import { EncryptionService } from '../../common/encryption.service.js'
+import { encryptionMock } from '../../common/test/encryption.mock.js'
 
 // Phase/7 — covers the user-specified test surface items related to
 // resolution: tier-compat + rationale validation (Tier 1 / Tier 2 #1 / Tier 2
@@ -81,6 +83,7 @@ describe('AlertResolutionService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: EscalationService, useValue: escalation },
         { provide: PatientAccessService, useValue: access },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
 

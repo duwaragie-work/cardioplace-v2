@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import { AuditExceptionReportService } from '../crons/audit-exception-report.service.js'
 import { DailyReminderService, type DailyReminderScanSummary } from '../crons/daily-reminder.service.js'
 import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
@@ -32,6 +33,7 @@ export class TestControlService {
     // N7 (2026-07-11) — Playwright coverage for the audit-exception-report
     // cron. Same pattern as the other cron drivers above.
     private readonly auditExceptionReport: AuditExceptionReportService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   // ─── Cron drivers ───────────────────────────────────────────────────────
@@ -618,6 +620,9 @@ export class TestControlService {
           changedBy: 'SYSTEM',
           changedByRole: VerifierRole.ADMIN,
           reason: 'Angioedema ACE/ARB contraindication flag set (#84 retro-upgrade)',
+          reasonEncrypted: this.encryption.encryptNullable(
+            'Angioedema ACE/ARB contraindication flag set (#84 retro-upgrade)',
+          ),
           now,
         })
       }
@@ -1086,6 +1091,7 @@ export class TestControlService {
           newValue: (e.newValue ?? undefined) as never,
           discrepancyFlag: e.discrepancyFlag ?? false,
           rationale: e.rationale ?? null,
+          rationaleEncrypted: this.encryption.encryptNullable(e.rationale ?? null),
           ...(e.createdAtIso ? { createdAt: new Date(e.createdAtIso) } : {}),
         },
       })
@@ -1203,6 +1209,7 @@ export class TestControlService {
           afterHours: false,
           triggeredByResolution: false,
           reason: 'test-control.advanceLadderSteps',
+          reasonEncrypted: this.encryption.encryptNullable('test-control.advanceLadderSteps'),
         },
       })
       advanced.push(step.step)

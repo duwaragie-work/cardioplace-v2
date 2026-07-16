@@ -8,6 +8,8 @@ import { DailyReminderService } from '../crons/daily-reminder.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
 import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
+import { encryptionMock } from '../common/test/encryption.mock.js'
 
 // F33 — the test-control module gains a medication-hold-escalation cron driver
 // so the audit + Playwright suites no longer wait for the daily 15:00 UTC cron.
@@ -66,6 +68,7 @@ describe('TestControlService — medication-hold escalation cron driver (F33)', 
           provide: AuditExceptionReportService,
           useValue: {},
         },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     service = module.get(TestControlService)

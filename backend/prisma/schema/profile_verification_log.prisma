@@ -8,7 +8,8 @@ model ProfileVerificationLog {
   changedByRole   VerifierRole
   changeType      VerificationChangeType
   discrepancyFlag Boolean                @default(false)
-  rationale       String?                @db.Text
+  rationale          String?                @db.Text
+  rationaleEncrypted String?                @db.Text
   // June 2026 — practice-context attribution (Manisha 2026-06-12 Access
   // Control §1, HIPAA 45 CFR §164.312(a)(2)(i)). The activePracticeId on
   // the actor's AuthSession at the moment of the verification action.

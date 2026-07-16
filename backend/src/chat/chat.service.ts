@@ -20,6 +20,7 @@ import {
   PATIENT_DEVIATION_ALERT_FIELDS_FOR_LLM_PROMPT,
   PATIENT_JOURNAL_FIELDS_FOR_LLM_PROMPT,
 } from '../common/prisma-selects.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
 import { OcrService } from '../ocr/ocr.service.js'
 import { MedicationAdherenceService } from './services/medication-adherence.service.js'
@@ -76,6 +77,7 @@ export class ChatService {
     private readonly alertEngineService: AlertEngineService,
     private readonly intakeStatusService: IntakeStatusService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly encryption: EncryptionService,
   ) {}
 
   /**
@@ -1088,6 +1090,7 @@ export class ChatService {
         data: {
           id: sessionId,
           title: 'New Chat',
+          titleEncrypted: this.encryption.encryptNullable('New Chat'),
           userId: userId || null,
         },
       })
@@ -1108,7 +1111,10 @@ export class ChatService {
 
       await this.prisma.session.update({
         where: { id: sessionId },
-        data: { title },
+        data: {
+          title,
+          titleEncrypted: this.encryption.encryptNullable(title),
+        },
       })
       console.log(`Generated session title for ${sessionId}: ${title}`)
       return title

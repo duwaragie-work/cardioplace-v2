@@ -13,6 +13,7 @@ import {
   type ResolvedContext,
 } from '@cardioplace/shared'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import {
   PATIENT_DEVIATION_ALERT_FIELDS_FOR_LLM_PROMPT,
   PATIENT_JOURNAL_FIELDS_FOR_LLM_PROMPT,
@@ -212,6 +213,7 @@ export class VoiceService implements OnModuleDestroy {
     private readonly profileResolver: ProfileResolverService,
     private readonly voiceTools: VoiceToolsService,
     private readonly intakeStatusService: IntakeStatusService,
+    private readonly encryption: EncryptionService,
   ) {
     // Default to the GA Live-capable native-audio model on Vertex AI.
     // `gemini-live-2.5-flash-native-audio` exposes bidiGenerateContent and
@@ -1082,7 +1084,12 @@ export class VoiceService implements OnModuleDestroy {
 
     const newId = randomUUID()
     await this.prisma.session.create({
-      data: { id: newId, title: 'Voice Session', userId },
+      data: {
+        id: newId,
+        title: 'Voice Session',
+        titleEncrypted: this.encryption.encryptNullable('Voice Session'),
+        userId,
+      },
     })
     this.logger.log(`Created new session for voice [sessionId=${newId}]`)
     return newId
@@ -1190,7 +1197,12 @@ export class VoiceService implements OnModuleDestroy {
 
         await this.prisma.session.update({
           where: { id: session.sessionId },
-          data: { summary, title },
+          data: {
+            summary,
+            summaryEncrypted: this.encryption.encryptNullable(summary),
+            title,
+            titleEncrypted: this.encryption.encryptNullable(title),
+          },
         }).catch((err) => this.logger.error('Failed to save summary', err))
 
         this.logger.log(`Saved activity-based summary [session=${session.sessionId}]`)
@@ -1213,7 +1225,10 @@ export class VoiceService implements OnModuleDestroy {
 
       await this.prisma.session.update({
         where: { id: session.sessionId },
-        data: { title },
+        data: {
+          title,
+          titleEncrypted: this.encryption.encryptNullable(title),
+        },
       }).catch(() => {})
 
       this.logger.log(`[FLOW] Step 10 DONE — saved transcript [session=${session.sessionId}, lines=${lines.length}, title=${title}] (${Date.now() - saveStart}ms)`)

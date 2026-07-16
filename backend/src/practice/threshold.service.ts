@@ -17,6 +17,7 @@ import {
 } from '../generated/prisma/enums.js'
 import { systemMsgThresholdUpdated } from '@cardioplace/shared'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import {
   pickDisplayName,
   resolveUserDisplays,
@@ -45,6 +46,7 @@ export class ThresholdService {
     private readonly prisma: PrismaService,
     private readonly access: PatientAccessService,
     private readonly enrollment: EnrollmentService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   async create(
@@ -65,6 +67,7 @@ export class ThresholdService {
           userId: patientUserId,
           setByProviderId: actor.id,
           ...dto,
+          notesEncrypted: this.encryption.encryptNullable(dto.notes),
         },
       })
       // Finding 4 — JCAHO audit: a clinical-staff threshold write is a
@@ -160,6 +163,7 @@ export class ThresholdService {
       where: { userId: patientUserId },
       data: {
         ...dto,
+        notesEncrypted: this.encryption.encryptNullable(dto.notes),
         setByProviderId: actor.id,
         setAt: new Date(),
       },
@@ -215,6 +219,7 @@ export class ThresholdService {
         changedByRole: VerifierRole.ADMIN,
         changeType: VerificationChangeType.ADMIN_THRESHOLD_UPDATE,
         rationale: 'Personalized threshold cleared.',
+        rationaleEncrypted: this.encryption.encryptNullable('Personalized threshold cleared.'),
         practiceContext: ctx?.practiceId ?? null,
       },
     })
@@ -283,6 +288,7 @@ export class ThresholdService {
         changedByRole: VerifierRole.ADMIN,
         changeType: VerificationChangeType.ADMIN_THRESHOLD_UPDATE,
         rationale: newValue.notes ?? null,
+        rationaleEncrypted: this.encryption.encryptNullable(newValue.notes ?? null),
         practiceContext,
       },
     })

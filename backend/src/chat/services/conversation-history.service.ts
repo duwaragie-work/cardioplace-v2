@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
 import { EmbeddingService } from '../../common/embedding.service.js'
+import { EncryptionService } from '../../common/encryption.service.js'
 
 /**
  * How many of the most-recent turns getConversationHistory pulls verbatim
@@ -22,6 +23,7 @@ export class ConversationHistoryService {
     private readonly prisma: PrismaService,
     private readonly geminiService: GeminiService,
     private readonly embeddingService: EmbeddingService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   // ── Retrieval ───────────────────────────────────────────────────────────────
@@ -224,6 +226,11 @@ export class ConversationHistoryService {
 
       const aiSummary = this.summariseText(rawAiResponse)
 
+      // V-06 dual-write — encrypt the transcript pair once per turn; the sibling
+      // columns land alongside the plaintext in both raw-SQL branches below.
+      const userMessageEncrypted = this.encryption.encryptNullable(userMessage)
+      const aiSummaryEncrypted = this.encryption.encryptNullable(aiSummary)
+
       // Generate embedding
       const content = `Patient: ${userMessage}\nAI: ${aiSummary}`
       const embeddingResponse = await this.embeddingService.getEmbeddings(content)
@@ -232,20 +239,24 @@ export class ConversationHistoryService {
       if (embedding && embedding.length > 0) {
         const embeddingString = `[${embedding.join(',')}]`
         await (this.prisma as any).$executeRawUnsafe(
-          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source, embedding)
-           VALUES (gen_random_uuid(), $1, $2, $3, 'text', $4::vector)`,
+          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "userMessageEncrypted", "aiSummary", "aiSummaryEncrypted", source, embedding)
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'text', $6::vector)`,
           sessionId,
           userMessage,
+          userMessageEncrypted,
           aiSummary,
+          aiSummaryEncrypted,
           embeddingString,
         )
       } else {
         await (this.prisma as any).$executeRawUnsafe(
-          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source)
-           VALUES (gen_random_uuid(), $1, $2, $3, 'text')`,
+          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "userMessageEncrypted", "aiSummary", "aiSummaryEncrypted", source)
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'text')`,
           sessionId,
           userMessage,
+          userMessageEncrypted,
           aiSummary,
+          aiSummaryEncrypted,
         )
       }
 
@@ -268,6 +279,10 @@ export class ConversationHistoryService {
     aiSummary: string,
   ): Promise<void> {
     try {
+      // V-06 dual-write — encrypt the transcript pair once; used in both branches.
+      const patientSummaryEncrypted = this.encryption.encryptNullable(patientSummary)
+      const aiSummaryEncrypted = this.encryption.encryptNullable(aiSummary)
+
       const content = `Patient: ${patientSummary}\nAI: ${aiSummary}`
       const embeddingResponse = await this.embeddingService.getEmbeddings(content)
       const embedding = embeddingResponse.data[0]?.embedding
@@ -275,20 +290,24 @@ export class ConversationHistoryService {
       if (embedding && embedding.length > 0) {
         const embeddingString = `[${embedding.join(',')}]`
         await (this.prisma as any).$executeRawUnsafe(
-          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source, embedding)
-           VALUES (gen_random_uuid(), $1, $2, $3, 'voice', $4::vector)`,
+          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "userMessageEncrypted", "aiSummary", "aiSummaryEncrypted", source, embedding)
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'voice', $6::vector)`,
           sessionId,
           patientSummary,
+          patientSummaryEncrypted,
           aiSummary,
+          aiSummaryEncrypted,
           embeddingString,
         )
       } else {
         await (this.prisma as any).$executeRawUnsafe(
-          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source)
-           VALUES (gen_random_uuid(), $1, $2, $3, 'voice')`,
+          `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "userMessageEncrypted", "aiSummary", "aiSummaryEncrypted", source)
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'voice')`,
           sessionId,
           patientSummary,
+          patientSummaryEncrypted,
           aiSummary,
+          aiSummaryEncrypted,
         )
       }
 
@@ -353,22 +372,30 @@ export class ConversationHistoryService {
           // Continue without embedding
         }
 
+        // V-06 dual-write — per-turn envelope pair (loop, so recomputed each turn).
+        const turnUserMessageEncrypted = this.encryption.encryptNullable(turn.userMessage)
+        const turnAiSummaryEncrypted = this.encryption.encryptNullable(turn.aiSummary)
+
         if (embeddingString) {
           await (this.prisma as any).$executeRawUnsafe(
-            `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source, embedding)
-             VALUES (gen_random_uuid(), $1, $2, $3, 'voice', $4::vector)`,
+            `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "userMessageEncrypted", "aiSummary", "aiSummaryEncrypted", source, embedding)
+             VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'voice', $6::vector)`,
             sessionId,
             turn.userMessage,
+            turnUserMessageEncrypted,
             turn.aiSummary,
+            turnAiSummaryEncrypted,
             embeddingString,
           )
         } else {
           await (this.prisma as any).$executeRawUnsafe(
-            `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "aiSummary", source)
-             VALUES (gen_random_uuid(), $1, $2, $3, 'voice')`,
+            `INSERT INTO "Conversation" (id, "sessionId", "userMessage", "userMessageEncrypted", "aiSummary", "aiSummaryEncrypted", source)
+             VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'voice')`,
             sessionId,
             turn.userMessage,
+            turnUserMessageEncrypted,
             turn.aiSummary,
+            turnAiSummaryEncrypted,
           )
         }
       }
@@ -416,7 +443,11 @@ export class ConversationHistoryService {
 
       await this.prisma.session.update({
         where: { id: sessionId },
-        data: { summary: mergedSummary, messageCount: (existing?.messageCount ?? 0) + turns.length },
+        data: {
+          summary: mergedSummary,
+          summaryEncrypted: this.encryption.encryptNullable(mergedSummary),
+          messageCount: (existing?.messageCount ?? 0) + turns.length,
+        },
       })
 
       console.log(`Saved ${turns.length} voice transcript turns for session ${sessionId} with LLM summary`)
@@ -431,7 +462,10 @@ export class ConversationHistoryService {
           : '- Voice conversation (transcript save failed)'
         await this.prisma.session.update({
           where: { id: sessionId },
-          data: { summary: basicSummary },
+          data: {
+            summary: basicSummary,
+            summaryEncrypted: this.encryption.encryptNullable(basicSummary),
+          },
         })
         console.log(`[Voice Summary] Fallback summary saved for session ${sessionId}`)
       } catch (fallbackErr) {
@@ -512,7 +546,11 @@ export class ConversationHistoryService {
 
       await this.prisma.session.update({
         where: { id: sessionId },
-        data: { summary: updatedSummary, messageCount: newCount },
+        data: {
+          summary: updatedSummary,
+          summaryEncrypted: this.encryption.encryptNullable(updatedSummary),
+          messageCount: newCount,
+        },
       })
       console.log(`[Rolling Summary] Updated session ${sessionId} (count=${newCount}, len=${updatedSummary.length})`)
     } catch (error) {

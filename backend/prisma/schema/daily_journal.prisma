@@ -128,11 +128,14 @@ model JournalEntry {
   // tab as a "possible measurement artifact" note.
   narrowPpArtifact Boolean @default(false)
 
-  otherSymptoms String[]
+  otherSymptoms          String[]
+  otherSymptomsEncrypted String?
 
-  teachBackAnswer  String?
-  teachBackCorrect Boolean?
-  notes            String?
+  teachBackAnswer          String?
+  teachBackAnswerEncrypted String?
+  teachBackCorrect         Boolean?
+  notes                    String?
+  notesEncrypted           String?
   source           EntrySource @default(MANUAL)
   sourceMetadata   Json?
 

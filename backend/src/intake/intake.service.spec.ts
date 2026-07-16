@@ -5,6 +5,8 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
 import { PatientAccessService } from '../common/patient-access.service.js'
 import { IntakeService } from './intake.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
+import { encryptionMock } from '../common/test/encryption.mock.js'
 
 // IVR-18 — listMedications filter scoping. The REJECTED exclusion is opt-out
 // (default ON) so rejected meds don't get re-asked in the check-in or
@@ -26,6 +28,7 @@ describe('IntakeService.listMedications filter scoping', () => {
         { provide: DrugEnrichmentService, useValue: {} },
         { provide: PatientAccessService, useValue: {} },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
 
@@ -126,6 +129,7 @@ async function makeService(prisma: unknown): Promise<IntakeService> {
       { provide: DrugEnrichmentService, useValue: {} },
       { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
       { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      { provide: EncryptionService, useValue: encryptionMock() },
     ],
   }).compile()
   return module.get<IntakeService>(IntakeService)
@@ -321,6 +325,7 @@ describe('IntakeService.listVerificationLogs caregiver resolution (Round 2 A4)',
         { provide: DrugEnrichmentService, useValue: {} },
         { provide: PatientAccessService, useValue: {} },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     service = module.get<IntakeService>(IntakeService)
@@ -446,6 +451,7 @@ describe('IntakeService.createMedications — F13 ACE/ARB contraindication', () 
         // Bug 11 — IntakeService emits intake.updated; sibling test helpers
         // (lines 28 / 128 / 322 / 632) already include this mock.
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     return module.get<IntakeService>(IntakeService)
@@ -555,6 +561,7 @@ describe('IntakeService.verifyMedication — F16 administrative hold dedup', () 
         // Bug 11 — IntakeService emits intake.updated; sibling test helpers
         // (lines 28 / 128 / 322 / 632) already include this mock.
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     return module.get<IntakeService>(IntakeService)
@@ -659,6 +666,7 @@ describe('IntakeService.adminAddMedication (#92)', () => {
         // push live "intake complete" notices into ongoing voice sessions.
         // Match the sibling test helpers at lines 28 / 128 / 322.
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     return module.get<IntakeService>(IntakeService)
@@ -810,6 +818,7 @@ describe('IntakeService.adminEditMedication (N5 audit snapshot)', () => {
         { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
         { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     return module.get<IntakeService>(IntakeService)

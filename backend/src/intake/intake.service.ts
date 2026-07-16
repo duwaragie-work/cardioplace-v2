@@ -34,6 +34,7 @@ import type {
   PatientProfile,
 } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import {
   pickDisplayName,
   pickDisplayRole,
@@ -138,6 +139,7 @@ export class IntakeService {
     private readonly drugEnrichment: DrugEnrichmentService,
     private readonly access: PatientAccessService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly encryption: EncryptionService,
   ) {}
 
   /**
@@ -172,6 +174,9 @@ export class IntakeService {
           data: {
             pillImageUrl: enrichment.pillImageUrl,
             plainLanguageDescription: enrichment.plainLanguageDescription,
+            plainLanguageDescriptionEncrypted: this.encryption.encryptNullable(
+              enrichment.plainLanguageDescription,
+            ),
           },
         })
       }),
@@ -388,7 +393,9 @@ export class IntakeService {
               combinationComponents: item.combinationComponents ?? [],
               source: item.source ?? 'PATIENT_SELF_REPORT',
               rawInputText: item.rawInputText,
+              rawInputTextEncrypted: this.encryption.encryptNullable(item.rawInputText),
               notes: item.notes,
+              notesEncrypted: this.encryption.encryptNullable(item.notes),
               // Patient self-report starts unverified; voice/photo cannot
               // fire automated alerts until a provider verifies (see
               // BUILD_PLAN §3.4 safety-net table). F13 — a re-added ACE/ARB on
@@ -535,10 +542,12 @@ export class IntakeService {
       }
       if (dto.rawInputText !== undefined) {
         data.rawInputText = dto.rawInputText
+        data.rawInputTextEncrypted = this.encryption.encryptNullable(dto.rawInputText)
         changedFields.push('rawInputText')
       }
       if (dto.notes !== undefined) {
         data.notes = dto.notes
+        data.notesEncrypted = this.encryption.encryptNullable(dto.notes)
         changedFields.push('notes')
       }
 
@@ -654,7 +663,9 @@ export class IntakeService {
             combinationComponents: item.combinationComponents ?? [],
             source: item.source ?? 'PATIENT_SELF_REPORT',
             rawInputText: item.rawInputText,
+            rawInputTextEncrypted: this.encryption.encryptNullable(item.rawInputText),
             notes: item.notes,
+            notesEncrypted: this.encryption.encryptNullable(item.notes),
             verificationStatus:
               item.source === 'PATIENT_VOICE' || item.source === 'PATIENT_PHOTO'
                 ? MedicationVerificationStatus.AWAITING_PROVIDER
@@ -674,6 +685,7 @@ export class IntakeService {
           changedByRole: VerifierRole.PATIENT,
           changeType: VerificationChangeType.PATIENT_REPORT,
           rationale: 'patient self-edit post-verification',
+          rationaleEncrypted: this.encryption.encryptNullable('patient self-edit post-verification'),
         })),
         ...created.map((med) => ({
           userId,
@@ -684,6 +696,7 @@ export class IntakeService {
           changedByRole: VerifierRole.PATIENT,
           changeType: VerificationChangeType.PATIENT_REPORT,
           rationale: 'patient self-edit post-verification',
+          rationaleEncrypted: this.encryption.encryptNullable('patient self-edit post-verification'),
         })),
       ]
       if (logRows.length) {
@@ -767,6 +780,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_VERIFY,
           rationale: dto.rationale,
+          rationaleEncrypted: this.encryption.encryptNullable(dto.rationale),
           practiceContext: ctx?.practiceId ?? null,
         },
       }),
@@ -827,6 +841,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_VERIFY,
           rationale: dto.rationale,
+          rationaleEncrypted: this.encryption.encryptNullable(dto.rationale),
           practiceContext: ctx?.practiceId ?? null,
         })),
       })
@@ -943,6 +958,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_REJECT,
           rationale: dto.rationale,
+          rationaleEncrypted: this.encryption.encryptNullable(dto.rationale),
           discrepancyFlag: true,
           practiceContext: ctx?.practiceId ?? null,
         },
@@ -959,6 +975,9 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_REJECT,
           rationale: `Reverted to unverified — ${dto.field} rejected`,
+          rationaleEncrypted: this.encryption.encryptNullable(
+            `Reverted to unverified — ${dto.field} rejected`,
+          ),
           practiceContext: ctx?.practiceId ?? null,
         },
       }),
@@ -1094,6 +1113,7 @@ export class IntakeService {
             changeType: VerificationChangeType.ADMIN_CORRECT,
             discrepancyFlag: true,
             rationale: dto.rationale,
+            rationaleEncrypted: this.encryption.encryptNullable(dto.rationale),
             practiceContext: ctx?.practiceId ?? null,
           },
         })
@@ -1188,6 +1208,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType,
           rationale: dto.rationale,
+          rationaleEncrypted: this.encryption.encryptNullable(dto.rationale),
           discrepancyFlag: changeType === VerificationChangeType.ADMIN_REJECT,
           // Phase/practice-identity (Manisha 2026-06-12 §1, HIPAA 45 CFR
           // §164.312(a)(2)(i)) — capture WHICH practice the admin/provider
@@ -1396,6 +1417,7 @@ export class IntakeService {
     const role = this.adminVerifierRole(actor.roles)
 
     const created = await this.prisma.$transaction(async (tx) => {
+      const composedNotes = this.composeNotes(dto.dose, dto.notes)
       const med = await tx.patientMedication.create({
         data: {
           userId: patientUserId,
@@ -1403,7 +1425,8 @@ export class IntakeService {
           drugClass: effectiveDrugClass,
           canonicalDrugId,
           frequency: dto.frequency,
-          notes: this.composeNotes(dto.dose, dto.notes),
+          notes: composedNotes,
+          notesEncrypted: this.encryption.encryptNullable(composedNotes),
           source: 'PROVIDER_ENTERED',
           addedByUserId: actor.id,
           addedByRole: role,
@@ -1435,6 +1458,11 @@ export class IntakeService {
           rationale: angioedemaHold
             ? 'Admin-added ACE/ARB on angioedema-contraindicated patient — auto-held (PROVIDER_DIRECTED_HOLD).'
             : 'Admin-added medication.',
+          rationaleEncrypted: this.encryption.encryptNullable(
+            angioedemaHold
+              ? 'Admin-added ACE/ARB on angioedema-contraindicated patient — auto-held (PROVIDER_DIRECTED_HOLD).'
+              : 'Admin-added medication.',
+          ),
           practiceContext: ctx?.practiceId ?? null,
         },
       })
@@ -1512,6 +1540,7 @@ export class IntakeService {
     if (dto.frequency != null) data.frequency = dto.frequency
     if (dto.dose != null || dto.notes != null) {
       data.notes = this.composeNotes(dto.dose, dto.notes ?? med.notes ?? undefined)
+      data.notesEncrypted = this.encryption.encryptNullable(data.notes)
     }
     if (nameChanged) data.canonicalDrugId = canonicalDrugId
     if (angioedemaHold && med.verificationStatus !== MedicationVerificationStatus.HOLD) {
@@ -1543,6 +1572,11 @@ export class IntakeService {
           rationale: angioedemaHold
             ? 'Admin edit to ACE/ARB on angioedema-contraindicated patient — auto-held.'
             : 'Admin edit to medication.',
+          rationaleEncrypted: this.encryption.encryptNullable(
+            angioedemaHold
+              ? 'Admin edit to ACE/ARB on angioedema-contraindicated patient — auto-held.'
+              : 'Admin edit to medication.',
+          ),
           practiceContext: ctx?.practiceId ?? null,
         },
       })
@@ -1717,6 +1751,9 @@ export class IntakeService {
         discrepancyFlag: true,
         rationale:
           'Enrollment auto-reverted — a threshold-mandatory condition (HFrEF / HCM / DCM) was added without a configured threshold.',
+        rationaleEncrypted: this.encryption.encryptNullable(
+          'Enrollment auto-reverted — a threshold-mandatory condition (HFrEF / HCM / DCM) was added without a configured threshold.',
+        ),
       },
     })
     return true
@@ -1954,6 +1991,7 @@ export class IntakeService {
     },
   ) {
     if (!params.changes.length) return
+    const rationaleEncrypted = this.encryption.encryptNullable(params.rationale)
     await tx.profileVerificationLog.createMany({
       data: params.changes.map((change) => ({
         userId: params.userId,
@@ -1965,6 +2003,7 @@ export class IntakeService {
         changeType: params.changeType,
         discrepancyFlag: params.discrepancyFlag ?? false,
         rationale: params.rationale,
+        rationaleEncrypted,
         practiceContext: params.practiceContext ?? null,
       })),
     })

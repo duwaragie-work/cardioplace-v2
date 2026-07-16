@@ -5,6 +5,8 @@ import { SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
 import { SessionFinalizeService } from './session-finalize.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
+import { encryptionMock } from '../common/test/encryption.mock.js'
 
 // runAsCronActor wraps scheduledRun in cls.run — a pass-through stub is enough
 // for the unit tests, which call runScan directly.
@@ -46,6 +48,7 @@ describe('SessionFinalizeService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: DailyJournalService, useValue: mockDailyJournal },
         { provide: ClsService, useValue: clsStub },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     service = module.get<SessionFinalizeService>(SessionFinalizeService)
@@ -113,6 +116,7 @@ describe('SessionFinalizeService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: DailyJournalService, useValue: mockDailyJournal },
         { provide: ClsService, useValue: auditCls },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     const svc = mod.get<SessionFinalizeService>(SessionFinalizeService)

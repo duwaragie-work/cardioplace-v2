@@ -68,6 +68,30 @@ export class EncryptionService {
     return `${iv.toString('hex')}:${authTag.toString('hex')}:${ciphertext.toString('hex')}`
   }
 
+  /**
+   * Null-passthrough encrypt used by V-06 dual-write sites (sibling `*Encrypted`
+   * columns for high-sensitivity free-text). `null`/`undefined` → `null` so the
+   * encrypted sibling stays null when the plaintext is absent — matches the
+   * TotpCredential.secretEncrypted convention (no cipher rows for empty inputs).
+   * Empty string passes through to encrypt() so the null-vs-empty distinction is
+   * preserved on the encrypted side too.
+   */
+  encryptNullable(plaintext: string | null | undefined): string | null {
+    if (plaintext == null) return null
+    return this.encrypt(plaintext)
+  }
+
+  /**
+   * JSON envelope for V-06 array/object columns (JournalEntry.otherSymptoms is
+   * the current case). `null`/`undefined` → `null`; else JSON.stringify then
+   * encrypt into a single envelope. Follow-up read path is
+   * `JSON.parse(decrypt(envelope))`.
+   */
+  encryptJson(value: unknown): string | null {
+    if (value == null) return null
+    return this.encrypt(JSON.stringify(value))
+  }
+
   /** Reverse of {@link encrypt}. Throws if the envelope is malformed or the
    *  auth tag fails (tampered/garbage ciphertext). */
   decrypt(envelope: string): string {

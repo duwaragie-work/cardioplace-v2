@@ -18,6 +18,8 @@ import { ProfileResolverService } from '../daily_journal/services/profile-resolv
 import { GeminiService } from '../gemini/gemini.service.js'
 import { VoiceToolsService } from './tools/voice-tools.service.js'
 import { IntakeStatusService } from '../intake/intake-status.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
+import { encryptionMock } from '../common/test/encryption.mock.js'
 
 const NOW = new Date('2026-04-22T10:00:00Z')
 const DOB = new Date('1980-06-15T00:00:00Z')
@@ -140,6 +142,7 @@ describe('VoiceService.buildPatientContext() — phase/16', () => {
             getStatus: jest.fn(async () => ({ completed: true, profileExists: true })),
           },
         },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     service = module.get(VoiceService)

@@ -10,6 +10,7 @@ import { Cron } from '@nestjs/schedule'
 import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from '../../common/cls/cron-actor.util.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
+import { EncryptionService } from '../../common/encryption.service.js'
 import { EmailService } from '../../email/email.service.js'
 import { EMAIL_TEMPLATE_VERSION, caregiverEmailHtml } from '../../email/email-templates.js'
 import type {
@@ -95,6 +96,7 @@ export class EscalationService {
     private readonly smsService: SmsService,
     config: ConfigService,
     private readonly cls: ClsService,
+    private readonly encryption: EncryptionService,
   ) {
     // Used by escalation emails to deep-link recipients into the right app.
     // Provider/admin recipients → admin app (/patients/{userId}?alert={id});
@@ -382,14 +384,16 @@ export class EscalationService {
     escalationLevel?: 'LEVEL_1' | 'LEVEL_2'
   }): Promise<void> {
     const scheduledFor = new Date(args.now.getTime() + args.offsetMs)
+    const reasonText =
+      args.reason ??
+      `BP L2 retry — ${args.ladderStep} scheduled ${scheduledFor.toISOString()}`
     await this.prisma.escalationEvent.create({
       data: {
         alertId: args.alertId,
         userId: args.userId,
         escalationLevel: args.escalationLevel ?? 'LEVEL_2',
-        reason:
-          args.reason ??
-          `BP L2 retry — ${args.ladderStep} scheduled ${scheduledFor.toISOString()}`,
+        reason: reasonText,
+        reasonEncrypted: this.encryption.encryptNullable(reasonText),
         ladderStep: args.ladderStep,
         recipientIds: [],
         recipientRoles: args.recipientRoles,
@@ -704,7 +708,11 @@ export class EscalationService {
       ) {
         await this.prisma.escalationEvent.update({
           where: { id: row.id },
-          data: { notificationSentAt: now, reason: 'skipped — alert resolved or acknowledged' },
+          data: {
+            notificationSentAt: now,
+            reason: 'skipped — alert resolved or acknowledged',
+            reasonEncrypted: this.encryption.encryptNullable('skipped — alert resolved or acknowledged'),
+          },
         })
         continue
       }
@@ -715,7 +723,11 @@ export class EscalationService {
       if (row.triggeredByResolution && alert.status === 'RESOLVED') {
         await this.prisma.escalationEvent.update({
           where: { id: row.id },
-          data: { notificationSentAt: now, reason: 'skipped — alert resolved post-retry-schedule' },
+          data: {
+            notificationSentAt: now,
+            reason: 'skipped — alert resolved post-retry-schedule',
+            reasonEncrypted: this.encryption.encryptNullable('skipped — alert resolved post-retry-schedule'),
+          },
         })
         continue
       }
@@ -725,7 +737,11 @@ export class EscalationService {
       if (!ladder || !step) {
         await this.prisma.escalationEvent.update({
           where: { id: row.id },
-          data: { notificationSentAt: now, reason: 'skipped — no ladder match' },
+          data: {
+            notificationSentAt: now,
+            reason: 'skipped — no ladder match',
+            reasonEncrypted: this.encryption.encryptNullable('skipped — no ladder match'),
+          },
         })
         continue
       }
@@ -948,6 +964,9 @@ export class EscalationService {
               userId: alert.userId,
               escalationLevel: this.legacyLevelFor(args.ladderKind),
               reason: `Queued for business hours — ${step.step}${dispatchReason.suffix}`,
+              reasonEncrypted: this.encryption.encryptNullable(
+                `Queued for business hours — ${step.step}${dispatchReason.suffix}`,
+              ),
               ladderStep: step.step,
               // Persist what we'd dispatch when the queue fires. The cron will
               // re-resolve at fire time too (practice staff may change before
@@ -985,6 +1004,9 @@ export class EscalationService {
             userId: alert.userId,
             escalationLevel: this.legacyLevelFor(args.ladderKind),
             reason: `${step.step} dispatched${dispatchReason.suffix}`,
+            reasonEncrypted: this.encryption.encryptNullable(
+              `${step.step} dispatched${dispatchReason.suffix}`,
+            ),
             ladderStep: step.step,
             recipientIds: resolved.recipientIds,
             recipientRoles: resolved.recipientRoles,
@@ -1059,6 +1081,9 @@ export class EscalationService {
             recipientRoles: resolved.recipientRoles,
             afterHours,
             reason: `${args.step.step} dispatched${args.triggeredByResolution ? ' (retry)' : ''}${dispatchReason.suffix}`,
+            reasonEncrypted: this.encryption.encryptNullable(
+              `${args.step.step} dispatched${args.triggeredByResolution ? ' (retry)' : ''}${dispatchReason.suffix}`,
+            ),
           },
         })
 
@@ -1439,6 +1464,9 @@ export class EscalationService {
               userId: alert.userId,
               escalationLevel: 'LEVEL_1',
               reason: `Caregiver notified (${caregiver.notifyChannel.toLowerCase()})`,
+              reasonEncrypted: this.encryption.encryptNullable(
+                `Caregiver notified (${caregiver.notifyChannel.toLowerCase()})`,
+              ),
               ladderStep: 'T0',
               recipientIds: [caregiver.caregiverUserId ?? caregiver.id],
               recipientRoles: ['CAREGIVER'],
