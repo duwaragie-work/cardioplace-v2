@@ -5,6 +5,7 @@ import { ClsService } from 'nestjs-cls'
 import { PrismaClient } from '../generated/prisma/client.js'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
+import { AccessLogWriter } from '../common/audit/access-log-writer.js'
 import { accessLogExtension } from '../common/prisma-extensions/access-log.extension.js'
 import { pushDispatchExtension } from '../common/prisma-extensions/push-dispatch.extension.js'
 import { authFailureExtension } from '../common/prisma-extensions/auth-failure.extension.js'
@@ -69,6 +70,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     configService: ConfigService,
     cls: ClsService,
     eventEmitter: EventEmitter2,
+    // V-17 (2026-07-16) — shadow-mode Pino access-log writer. CommonModule
+    // is @Global(), so DI resolves without adding it to imports. See
+    // backend/src/common/audit/access-log-writer.ts for dormant-by-default
+    // semantics; the writer is passed as the third arg to the access-log
+    // extension factory and invoked alongside the existing DB write.
+    accessLogWriter: AccessLogWriter,
   ) {
     const dbUrl = configService.get<string>('DATABASE_URL')!
     const isAccelerate = dbUrl.startsWith('prisma://')
@@ -128,7 +135,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     // `success: false` rows → RealtimeFailedAuthService pages ops the moment a
     // repeated-failed-auth burst is detected. AuthLog is not a PHI model, so
     // there is no audit write to order against; same swallow-all safety.
-    const extended = this.$extends(accessLogExtension(cls, this))
+    const extended = this.$extends(accessLogExtension(cls, this, accessLogWriter))
       .$extends(softDeleteJournalEntryExtension())
       .$extends(pushDispatchExtension(eventEmitter))
       .$extends(authFailureExtension(eventEmitter))
