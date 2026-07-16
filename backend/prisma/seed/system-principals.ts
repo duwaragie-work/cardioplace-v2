@@ -36,6 +36,9 @@ const SYSTEM_PRINCIPALS = [
   { label: 'audit-exception-report', displayName: 'Audit Exception Report Cron' },
   // N2 (2026-07-13) — daily patient reminder cron (Reminder & Engagement).
   { label: 'daily-reminder', displayName: 'Daily Reminder Cron' },
+  // N-2 (Duwaragie 2026-07-14 triage) — support ops routing (HTTP intake, not
+  // a cron; naming kept "Cron" convention-consistent for the display name).
+  { label: 'support-ops-notify', displayName: 'Support Ops Notify' },
 ] as const
 
 export function systemPrincipalEmail(label: string): string {

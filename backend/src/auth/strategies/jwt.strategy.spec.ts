@@ -33,7 +33,16 @@ describe('JwtStrategy.validate — practice membership probe', () => {
       get: () => 'test-secret',
       getOrThrow: () => 'test-secret',
     } as unknown as ConfigService
-    return new JwtStrategy(config, prismaMock as any)
+    // N-3 (2026-07-14 triage) — validate() now stamps the CLS actor from
+    // payload.sub before the User.findUnique. Minimal mock records the
+    // stamps so the "no `system: unknown` after fix" behavior is testable
+    // (see the dedicated actor-stamp spec below).
+    const cls = {
+      set: jest.fn(),
+      get: jest.fn(),
+      run: jest.fn(),
+    } as any
+    return new JwtStrategy(config, prismaMock as any, cls)
   }
 
   it('no activePracticeId → never queries either relation, returns user verbatim', async () => {
@@ -301,5 +310,97 @@ describe('JwtStrategy.validate — practice membership probe', () => {
     expect((thrown as UnauthorizedException).getResponse()).toMatchObject({
       errorCode: 'PRACTICE_MEMBERSHIP_REVOKED',
     })
+  })
+})
+
+/**
+ * N-3 (Duwaragie 2026-07-14 triage) — the CLS actor stamp must happen
+ * BEFORE the User.findUnique inside validate(). Pre-fix, that read fired
+ * the access-log Prisma extension with no CLS actor set → every
+ * authenticated request wrote one AccessLog row as
+ * `actorType='SYSTEM_ACTOR', actorId=null, systemActorLabel=null`,
+ * flooding the §164.312(b) audit trail with `system: unknown` noise.
+ *
+ * The regression pattern is: someone re-orders validate() so the
+ * findUnique fires before the cls.set calls. This spec is the guard.
+ */
+describe('JwtStrategy.validate — N-3 CLS actor stamp', () => {
+  it('stamps actorId/actorType/activePracticeId on CLS before the User.findUnique fires', async () => {
+    // Track call order across CLS and Prisma to prove the stamp happens first.
+    const callOrder: string[] = []
+    const clsSet = jest.fn((key: string, _value: unknown) => {
+      callOrder.push(`cls.set:${key}`)
+    })
+    const cls = { set: clsSet, get: jest.fn(), run: jest.fn() } as any
+    const prisma = {
+      user: {
+        findUnique: jest.fn(async () => {
+          callOrder.push('prisma.user.findUnique')
+          return { tokenVersion: 0, accountStatus: 'ACTIVE' }
+        }),
+      },
+      practiceProvider: { findUnique: jest.fn() },
+      practiceMedicalDirector: { findUnique: jest.fn() },
+      practiceCoordinator: { findUnique: jest.fn() },
+    }
+    const config = {
+      get: () => 'test-secret',
+      getOrThrow: () => 'test-secret',
+    } as unknown as ConfigService
+    const strat = new JwtStrategy(config, prisma as any, cls)
+
+    await strat.validate({
+      sub: 'user-abc',
+      email: 'p@example.com',
+      roles: ['PATIENT'] as any,
+      activePracticeId: null,
+    })
+
+    // The three N-3 stamps in the exact expected order + the User read AFTER.
+    expect(callOrder.slice(0, 4)).toEqual([
+      'cls.set:actorId',
+      'cls.set:actorType',
+      'cls.set:activePracticeId',
+      'prisma.user.findUnique',
+    ])
+    // Values on the stamps come straight from the JWT payload.
+    expect(clsSet.mock.calls).toEqual(
+      expect.arrayContaining([
+        ['actorId', 'user-abc'],
+        ['actorType', 'USER'],
+        ['activePracticeId', null],
+      ]),
+    )
+  })
+
+  it('stamps activePracticeId from payload when present', async () => {
+    const clsSet = jest.fn()
+    const cls = { set: clsSet, get: jest.fn(), run: jest.fn() } as any
+    const prisma = {
+      user: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ tokenVersion: 0, accountStatus: 'ACTIVE' } as any),
+      },
+      practiceProvider: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'pp-1' } as any),
+      },
+      practiceMedicalDirector: { findUnique: jest.fn().mockResolvedValue(null as any) },
+      practiceCoordinator: { findUnique: jest.fn().mockResolvedValue(null as any) },
+    }
+    const config = {
+      get: () => 'test-secret',
+      getOrThrow: () => 'test-secret',
+    } as unknown as ConfigService
+    const strat = new JwtStrategy(config, prisma as any, cls)
+
+    await strat.validate({
+      sub: 'user-xyz',
+      email: 'provider@clinic.test',
+      roles: ['PROVIDER'] as any,
+      activePracticeId: 'practice-cedar',
+    })
+
+    expect(clsSet).toHaveBeenCalledWith('activePracticeId', 'practice-cedar')
   })
 })

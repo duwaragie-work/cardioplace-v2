@@ -30,6 +30,14 @@ function make() {
   }
   const ticketNumbers = { next: jest.fn(async () => 'CP-SUP-ABCDEFG') as any }
   const config = { get: (_k: string, d?: string) => d } as any
+  // N-2 (2026-07-14 triage) — notifyOpsNewTicket wraps in runAsCronActor,
+  // which calls `cls.run(...)`. Minimal fake that just invokes the callback
+  // (spec-level attribution is out of scope for these unit tests).
+  const cls = {
+    run: async (fn: () => Promise<unknown>) => fn(),
+    set: jest.fn(),
+    get: jest.fn(),
+  } as any
   prisma.user.findMany.mockResolvedValue([{ id: 'ops-1' }])
   const svc = new SupportService(
     prisma as any,
@@ -37,6 +45,7 @@ function make() {
     auth as any,
     ticketNumbers as any,
     config,
+    cls,
   )
   return { svc, prisma, email, auth }
 }

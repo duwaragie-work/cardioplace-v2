@@ -36,6 +36,13 @@ export const SYSTEM_PRINCIPAL_LABELS = [
   // N2 (2026-07-13) — daily patient reminder cron (Reminder & Engagement).
   // Replaces gap-alert with an escalating-tone daily nudge.
   'daily-reminder',
+  // N-2 (Duwaragie 2026-07-14 triage) — support ops routing. Fires from the
+  // HTTP intake path (createContactTicket / createLockedOutTicket), NOT a
+  // cron — but the CLS-actor pattern is the same. Without this, the
+  // support_ops_notify email lands in EmailDisclosureLog with
+  // senderPrincipal='system-principal-unknown' and trips N7's
+  // UNATTRIBUTED_SYSTEM_DISCLOSURE detector.
+  'support-ops-notify',
 ] as const
 
 export type SystemPrincipalLabel = (typeof SYSTEM_PRINCIPAL_LABELS)[number]
@@ -63,6 +70,9 @@ export const CRON_LABEL_TO_PRINCIPAL: Readonly<Record<string, SystemPrincipalLab
   'cron-daily-reminder': 'daily-reminder',
   // Engine @OnEvent handler — no 'cron-' prefix; label == principal.
   'engine-alert-generator': 'engine-alert-generator',
+  // N-2 (2026-07-14 triage) — support-ops notify runs from the HTTP intake
+  // path; no cron prefix, label == principal.
+  'support-ops-notify': 'support-ops-notify',
 }
 
 // Derive the principal label from a seed row's email:

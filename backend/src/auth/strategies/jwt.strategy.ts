@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PassportStrategy } from '@nestjs/passport'
 import type { Request } from 'express'
+import { ClsService } from 'nestjs-cls'
 import { ExtractJwt, Strategy } from 'passport-jwt'
 import { UserRole } from '../../generated/prisma/enums.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
@@ -59,6 +60,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   constructor(
     config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly cls: ClsService,
   ) {
     super({
       // Accept BOTH the Authorization: Bearer header AND the HttpOnly cookie.
@@ -92,6 +94,20 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
    * claim is null).
    */
   async validate(payload: JwtPayload) {
+    // N-3 (Duwaragie 2026-07-14 triage) — stamp the CLS actor BEFORE the
+    // User.findUnique below. That read fires the access-log Prisma extension
+    // on the User model (User is in PHI_MODELS), and pre-fix it was landing
+    // with `actorType='SYSTEM_ACTOR', actorId=null, systemActorLabel=null` on
+    // every authenticated request because the CLS interceptor only ran
+    // AFTER guards. CLS is now mounted as middleware (see
+    // common/cls/cls.module.ts) with default no-actor values; this stamp is
+    // the first authenticated overwrite. Signed JWT payload → the actor
+    // identity is trustworthy at this point (secret/signature already
+    // verified by passport-jwt before validate() is called).
+    this.cls.set('actorId', payload.sub)
+    this.cls.set('actorType', 'USER')
+    this.cls.set('activePracticeId', payload.activePracticeId ?? null)
+
     // phase/28 — session kill-switch + status gate. One PK lookup per request:
     // reject a token whose version is behind the account's current tokenVersion
     // (deactivate / close / role-removal bump it), or whose account is no

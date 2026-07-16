@@ -143,25 +143,33 @@ export class EscalationService {
 
   @OnEvent(JOURNAL_EVENTS.ALERT_CREATED, { async: true })
   async handleAlertCreated(payload: AlertCreatedEvent, now: Date = new Date()): Promise<void> {
-    try {
-      await this.fireT0(payload, now)
-    } catch (err) {
-      this.logger.error(
-        `T+0 dispatch failed for alert ${payload.alertId}`,
-        err instanceof Error ? err.stack : err,
-      )
-    }
-    // Cluster 7 A.6 — caregiver dispatch runs alongside the standard ladder.
-    // Tier 3 caregiver-routed rules (e.g. RULE_HF_CAREGIVER_EDEMA) have no
-    // ladder, so fireT0() exits early; this path is their only delivery.
-    try {
-      await this.dispatchCaregiverNotification(payload)
-    } catch (err) {
-      this.logger.error(
-        `Caregiver dispatch failed for alert ${payload.alertId}`,
-        err instanceof Error ? err.stack : err,
-      )
-    }
+    // N-2 (Duwaragie 2026-07-14 triage) — wrap the T+0 event body in the
+    // registered system-principal CLS scope. Without this, T+0 email sends
+    // land in EmailDisclosureLog with senderPrincipal='system-principal-
+    // unknown' (event handlers run outside the HTTP interceptor and outside
+    // the @Cron scheduledRun wrapper — the T+0 leak Duwaragie surfaced from
+    // the escalation_tier_1_staff template inspection).
+    return runAsCronActor(this.cls, 'engine-alert-generator', async () => {
+      try {
+        await this.fireT0(payload, now)
+      } catch (err) {
+        this.logger.error(
+          `T+0 dispatch failed for alert ${payload.alertId}`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+      // Cluster 7 A.6 — caregiver dispatch runs alongside the standard ladder.
+      // Tier 3 caregiver-routed rules (e.g. RULE_HF_CAREGIVER_EDEMA) have no
+      // ladder, so fireT0() exits early; this path is their only delivery.
+      try {
+        await this.dispatchCaregiverNotification(payload)
+      } catch (err) {
+        this.logger.error(
+          `Caregiver dispatch failed for alert ${payload.alertId}`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+    })
   }
 
   /**
