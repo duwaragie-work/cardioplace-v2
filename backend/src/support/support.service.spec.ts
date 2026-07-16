@@ -87,13 +87,16 @@ describe('SupportService', () => {
         Promise.resolve(ticketRow({ ...a.data })),
       )
       await svc.createLockedOutTicket(
-        { email: 'p@example.com', description: 'cant sign in', contactPhone: '555' },
+        { email: 'p@example.com', description: 'cant sign in' },
         CTX,
       )
       const created = prisma.supportTicket.create.mock.calls[0][0].data
       expect(created.identityVerified).toBe(false)
       expect(created.priority).toBe('HIGH')
-      expect(created.body).toContain('555') // callback phone folded in
+      // L-3 — contactPhone was removed from the locked-out form; the ticket
+      // body is now just the patient's description verbatim (no callback-phone
+      // folding). See support-request.dto.ts:49-52.
+      expect(created.body).toBe('cant sign in')
     })
 
     it('locked-out is rate-limited to 5/IP/hour (6th → 429)', async () => {
