@@ -168,18 +168,6 @@ exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_ABSOLUTE 
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_ABSOLUTE STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"Tier 1 — Absolute bradycardia HR 72 bpm. ECG + pacemaker evaluation; hold rate-controlling agents pending review."`;
 
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_HR_ASYMPTOMATIC ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"The patient's heart rate is low at HR 72 bpm."`;
-
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_HR_ASYMPTOMATIC ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your heart rate is HR 72 bpm, which is low. Please contact your care team today. Please retake the reading following the measurement checklist."`;
-
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_HR_ASYMPTOMATIC ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: physician-annotated 1`] = `"HR Level 1 Low — asymptomatic bradycardia <40: HR 72 bpm. | Annotation A | Annotation B | Single-reading session — confirm with next reading"`;
-
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_HR_ASYMPTOMATIC STANDARD context — patient/caregiver/physician messages match snapshot: caregiver 1`] = `"The patient's heart rate is low at HR 72 bpm."`;
-
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_HR_ASYMPTOMATIC STANDARD context — patient/caregiver/physician messages match snapshot: patient 1`] = `"Your heart rate is HR 72 bpm, which is low. Please contact your care team today."`;
-
-exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_HR_ASYMPTOMATIC STANDARD context — patient/caregiver/physician messages match snapshot: physician 1`] = `"HR Level 1 Low — asymptomatic bradycardia <40: HR 72 bpm."`;
-
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_HR_SYMPTOMATIC ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: caregiver-annotated 1`] = `"The patient's heart rate is low at HR 72 bpm with symptoms."`;
 
 exports[`Cluster 8 §F.2 — message-registry snapshot gate RULE_BRADY_HR_SYMPTOMATIC ANNOTATED context (preDay3 + suboptimal + annotations + miss + sustained) — match snapshot: patient-annotated 1`] = `"Your heart rate is HR 72 bpm and you reported symptoms. Please contact your care team today. Please retake the reading following the measurement checklist."`;
