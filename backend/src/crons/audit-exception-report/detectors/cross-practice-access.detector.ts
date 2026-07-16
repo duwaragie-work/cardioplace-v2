@@ -1,6 +1,7 @@
 import {
   AuditExceptionDetectorId,
   AuditExceptionSeverity,
+  AuditExceptionStatus,
   UserRole,
 } from '../../../generated/prisma/enums.js'
 import type {
@@ -163,16 +164,28 @@ export class CrossPracticeAccessDetector implements ExceptionDetector {
         continue
       }
 
-      // Ops is cross-practice by design; still fire with a role tag so
-      // triage can filter noise.
+      // Ops is cross-practice by design; still record the audit row so
+      // HIPAA has the trail, but N-5 (Duwaragie 2026-07-14 triage) — file
+      // the row as LOW severity + already-ACKNOWLEDGED so it never enters
+      // the worklist's OPEN pane. Pre-fix, every ops access filed HIGH-open
+      // and drowned the reviewer's queue with rubber-stamp work. See
+      // ACCESS_SCOPE.md §5 ("HEALPLACE_OPS cross-practice visibility
+      // intentionally") for the policy backing the auto-ack.
       if (isOps) {
         out.push(
-          candidate(p, {
-            role: 'HEALPLACE_OPS',
-            reason: 'ops accessed patient PHI (cross-practice by design; audit for justification)',
-            actorPractices: [...actorPractices],
+          candidate(
+            p,
+            {
+              role: 'HEALPLACE_OPS',
+              reason:
+                'ops accessed patient PHI (cross-practice by design; auto-acknowledged for compliance-trail retention)',
+              actorPractices: [...actorPractices],
+              targetPractice,
+            },
+            AuditExceptionSeverity.MEDIUM,
             targetPractice,
-          }, undefined, targetPractice),
+            AuditExceptionStatus.ACKNOWLEDGED,
+          ),
         )
         continue
       }
@@ -198,6 +211,7 @@ function candidate(
   extra: Record<string, unknown>,
   severityOverride: AuditExceptionSeverity | undefined,
   practiceContext: string,
+  initialStatus?: AuditExceptionStatus,
 ): ExceptionCandidate {
   return {
     subjectKey: `actor:${pair.actorId}::target:${pair.targetId}`,
@@ -212,5 +226,6 @@ function candidate(
     },
     practiceContext,
     severityOverride,
+    initialStatus,
   }
 }

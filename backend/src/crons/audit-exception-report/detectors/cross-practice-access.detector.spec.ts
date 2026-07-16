@@ -142,7 +142,11 @@ describe('CrossPracticeAccessDetector — N7', () => {
     expect(candidates[0].evidence.role).toBe('COORDINATOR')
   })
 
-  it('fires but tags HEALPLACE_OPS for cross-practice ops access', async () => {
+  it('fires MEDIUM + auto-ACK for HEALPLACE_OPS cross-practice access (N-5 tuning)', async () => {
+    // N-5 (Duwaragie 2026-07-14 triage) — ops cross-practice access is by
+    // design (ACCESS_SCOPE.md §5), so the audit row lands with LOW-tier
+    // severity + status ACKNOWLEDGED. Pre-fix it landed HIGH-open and
+    // flooded Lakshitha's L3 worklist with rubber-stamp work.
     const ctx = makeCtx({
       accessRows: [accessRow('ops-1', 'patient-1')],
       users: {
@@ -153,8 +157,11 @@ describe('CrossPracticeAccessDetector — N7', () => {
     const candidates = await new CrossPracticeAccessDetector().scan(ctx)
     expect(candidates).toHaveLength(1)
     expect(candidates[0].evidence.role).toBe('HEALPLACE_OPS')
-    // Ops does NOT bump to CRITICAL by default — leaves severityOverride undefined.
-    expect(candidates[0].severityOverride).toBeUndefined()
+    expect(candidates[0].severityOverride).toBe(AuditExceptionSeverity.MEDIUM)
+    expect(candidates[0].initialStatus).toBe('ACKNOWLEDGED')
+    // Evidence string signals the intent to any future reviewer inspecting
+    // the row directly (or hitting it through a compliance export).
+    expect(candidates[0].evidence.reason).toMatch(/auto-acknowledged/i)
   })
 
   it('never fires for SUPER_ADMIN — unscoped by policy', async () => {
