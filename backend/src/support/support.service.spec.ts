@@ -81,7 +81,25 @@ describe('SupportService', () => {
       expect(created.identityVerified).toBe(true)
       expect(created.userId).toBe('user-1')
       // Ops notified — email to the inbox + one dashboard row per ops user.
-      expect(email.sendEmail.mock.calls[0][0]).toBe('ops@healplace.com')
+      // Also (N-1, 2026-07-14) — the requester receives a support_ticket_received
+      // confirmation, backing the "check the link in your confirmation email"
+      // promise the intake screens make. Both sends fire concurrently, so we
+      // look them up by template rather than by call index.
+      const templates = email.sendEmail.mock.calls.map((c: any[]) => c[3]?.template)
+      expect(templates).toContain('support_ops_notify')
+      expect(templates).toContain('support_ticket_received')
+      const opsCall = email.sendEmail.mock.calls.find(
+        (c: any[]) => c[3]?.template === 'support_ops_notify',
+      )
+      expect(opsCall?.[0]).toBe('ops@healplace.com')
+      const requesterCall = email.sendEmail.mock.calls.find(
+        (c: any[]) => c[3]?.template === 'support_ticket_received',
+      )
+      expect(requesterCall?.[0]).toBe('p@example.com')
+      expect(requesterCall?.[3]).toMatchObject({
+        template: 'support_ticket_received',
+        patientUserId: 'user-1',
+      })
       expect(prisma.notification.createMany).toHaveBeenCalled()
       // Every dashboard row declares its trigger (action → visible in the bell).
       const notifRows = prisma.notification.createMany.mock.calls[0][0].data

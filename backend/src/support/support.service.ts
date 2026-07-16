@@ -23,6 +23,7 @@ import {
   supportOpsNotifyHtml,
   supportReplyEmailHtml,
   supportResolvedEmailHtml,
+  supportTicketReceivedEmailHtml,
 } from '../email/email-templates.js'
 import { AuthService, type SessionContext } from '../auth/auth.service.js'
 import { TicketNumberService } from './ticket-number.service.js'
@@ -119,7 +120,14 @@ export class SupportService {
         userAgent: ctx.userAgent ?? null,
       },
     })
-    await this.notifyOpsNewTicket(ticket)
+    // N-1 (Duwaragie 2026-07-14 triage) — fire both notifications concurrently.
+    // Ops routing and submitter confirmation are independent; awaiting one
+    // before the other would delay the response for no gain. Both are
+    // fire-and-forget at the email layer (EmailService never throws).
+    await Promise.all([
+      this.notifyOpsNewTicket(ticket),
+      this.notifyRequesterTicketReceived(ticket),
+    ])
     return { ticketNumber: ticket.ticketNumber }
   }
 
@@ -165,7 +173,15 @@ export class SupportService {
         userAgent: ctx.userAgent ?? null,
       },
     })
-    await this.notifyOpsNewTicket(ticket)
+    // N-1 — same concurrent dispatch as createContactTicket. The locked-out
+    // flow shows "check the link in your confirmation email" copy directly
+    // on the success screen (frontend/src/i18n/en.ts:996), so a missing
+    // requester email is user-visibly wrong. Ops still gets its routing
+    // notification alongside.
+    await Promise.all([
+      this.notifyOpsNewTicket(ticket),
+      this.notifyRequesterTicketReceived(ticket),
+    ])
     return { ticketNumber: ticket.ticketNumber }
   }
 
@@ -508,6 +524,41 @@ export class SupportService {
         actionType,
         metadata: metadata as Prisma.InputJsonValue,
       },
+    })
+  }
+
+  /**
+   * N-1 (Duwaragie 2026-07-14 triage) — submitter confirmation email fired on
+   * ticket create. The intake flows (both authenticated contact + public
+   * locked-out) show copy promising "check the link in your confirmation
+   * email"; before this method existed, the promise was hollow. Wrapped in
+   * the `support-ops-notify` CLS scope (same principal PR 2 introduced) so
+   * `EmailDisclosureLog.senderPrincipal` doesn't fall back to
+   * `system-principal-unknown`. Fire-and-forget — never delay the intake
+   * response on mail delivery.
+   */
+  private async notifyRequesterTicketReceived(ticket: {
+    email: string
+    ticketNumber: string
+    category: string
+    userId: string | null
+  }) {
+    if (!ticket.email) return
+    return runAsCronActor(this.cls, 'support-ops-notify', async () => {
+      void this.email.sendEmail(
+        ticket.email,
+        `[Support] ${ticket.ticketNumber} — we've received your request`,
+        supportTicketReceivedEmailHtml(ticket.ticketNumber, ticket.category),
+        {
+          template: 'support_ticket_received',
+          templateVersion: EMAIL_TEMPLATE_VERSION,
+          patientUserId: ticket.userId,
+          metadata: {
+            ticketNumber: ticket.ticketNumber,
+            category: ticket.category,
+          },
+        },
+      )
     })
   }
 

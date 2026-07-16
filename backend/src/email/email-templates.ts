@@ -516,6 +516,33 @@ export function supportReplyEmailHtml(
   `)
 }
 
+/** Support System — submitter's confirmation email on ticket create (N-1,
+ *  Duwaragie 2026-07-14 triage). The intake screen already promises "check
+ *  the link in your confirmation email"; this template delivers on that
+ *  promise. Wrapped → HIPAA confidentiality footer. */
+export function supportTicketReceivedEmailHtml(
+  ticketNumber: string,
+  category: string,
+): string {
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #7B00E0; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Request received
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">We've received your support request</h2>
+    <p style="color: #6b7280; font-size: 13px; margin: 0 0 12px;">Ticket ${ticketNumber} · ${category}</p>
+    <p style="color: #1f2937; font-size: 14px; line-height: 1.7;">
+      Thanks for reaching out. Our team will review this and get back to you as soon as we can. If
+      you need to add more detail, reply to this email and we'll append it to your ticket.
+    </p>
+    <p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin-top: 16px;">
+      Please keep this email — the ticket number above is how we look up your request if you
+      write back.
+    </p>
+  `)
+}
+
 /** Support System — ticket-resolved confirmation to the requester. Wrapped →
  *  carries the standardized HIPAA confidentiality footer. */
 export function supportResolvedEmailHtml(ticketNumber: string): string {
