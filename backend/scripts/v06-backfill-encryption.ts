@@ -109,6 +109,21 @@ interface FieldSpec {
 const SPECS: FieldSpec[] = [
   // ── Conversation ─────────────────────────────────────────────────────────
   // Session.userId anchors the audit row — Conversation has no direct userId.
+  //
+  // ⚠️ LEFT JOIN, deliberately (fixed 2026-07-17). This was an INNER JOIN, which
+  // silently dropped any Conversation whose Session is missing — and that is a
+  // reachable state, not a hypothetical: `Conversation.sessionId` is a plain
+  // indexed String with NO @relation/FK (conversation.prisma), so nothing stops
+  // it referencing a deleted Session. Session.userId is itself nullable
+  // (onDelete: SetNull), so a live Session can also yield a NULL anchor.
+  //
+  // Under the old INNER JOIN those rows were never encrypted, yet still counted
+  // by the verification pass and by phase 3's self-gating DROP — which checks
+  // `userMessageEncrypted IS NULL` on a NOT NULL column. The backfill could
+  // never satisfy the gate it had to satisfy: a deadlock that only surfaces at
+  // the irreversible step. Encryption must not depend on being able to attribute
+  // an audit row; `userIdFromRow`/null already means "skip the audit row, no
+  // anchor available", which is the right degradation.
   {
     model: 'Conversation',
     field: 'userMessage',
@@ -117,7 +132,7 @@ const SPECS: FieldSpec[] = [
       const rows = await (p as any).$queryRawUnsafe(
         `SELECT c.id, s."userId", c."userMessage" AS plaintext
          FROM "Conversation" c
-         JOIN "Session" s ON s.id = c."sessionId"
+         LEFT JOIN "Session" s ON s.id = c."sessionId"
          WHERE c."userMessage" IS NOT NULL
            AND c."userMessageEncrypted" IS NULL
          LIMIT $1 OFFSET $2`,
@@ -143,7 +158,7 @@ const SPECS: FieldSpec[] = [
       const rows = await (p as any).$queryRawUnsafe(
         `SELECT c.id, s."userId", c."aiSummary" AS plaintext
          FROM "Conversation" c
-         JOIN "Session" s ON s.id = c."sessionId"
+         LEFT JOIN "Session" s ON s.id = c."sessionId"
          WHERE c."aiSummary" IS NOT NULL
            AND c."aiSummaryEncrypted" IS NULL
          LIMIT $1 OFFSET $2`,
