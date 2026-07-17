@@ -729,6 +729,24 @@ const am: Record<TranslationKey, string> = {
   'profile.reminders.saveButton': 'አስቀምጥ',
   'profile.reminders.savingButton': 'በማስቀመጥ ላይ…',
   'profile.reminders.cancelButton': 'ይቅር',
+  // L3 — TODO(l10n-am): native-speaker verification required before ship.
+  // NOTE: the consent line is the TCPA wording under counsel review — the
+  // Amharic rendering must be checked by a native speaker AND counsel.
+  'profile.sms.heading': 'የጽሑፍ መልእክት አስታዋሾች',
+  'profile.sms.editHeading': 'የጽሑፍ መልእክት አስታዋሾችን ያርትዑ',
+  'profile.sms.phoneLabel': 'የሞባይል ቁጥር',
+  'profile.sms.phoneHelp': 'አማራጭ። የአገር ኮድን ያካትቱ፣ ለምሳሌ +1 555 010 0000።',
+  'profile.sms.phoneInvalid': 'ቁጥርዎን ከአገር ኮድ ጋር ያስገቡ፣ ለምሳሌ +15550100።',
+  'profile.sms.consentLabel': 'የጽሑፍ አስታዋሾችን ይላኩልኝ',
+  'profile.sms.consentFinePrint':
+    'መልእክቶቹ ከCardioplace ይመጣሉ። ምንም የጤና መረጃ አይካተትም። የመልእክት ክፍያዎች ሊተገበሩ ይችላሉ። በማንኛውም ጊዜ STOP ብለው ይመልሱ።',
+  'profile.sms.optedOutNotice':
+    'STOP ብለው ስለመለሱ የጽሑፍ መልእክቶች ጠፍተዋል። እንደገና ለማብራት ከላይ ያለውን ሳጥን ምልክት ያድርጉ።',
+  'profile.sms.statusLabel': 'የጽሑፍ አስታዋሾች',
+  'profile.sms.statusOn': 'በርቷል',
+  'profile.sms.statusOff': 'ጠፍቷል',
+  'profile.sms.statusStopped': 'ቆሟል (STOP ብለው መልሰዋል)',
+  'profile.sms.notSet': 'አልተቀናበረም',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'ንባቦቼ',
@@ -1038,6 +1056,11 @@ const am: Record<TranslationKey, string> = {
   // TODO(l10n-am): Amharic native-speaker verification required.
   'onboarding.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
   'onboarding.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
+  // L3 — TODO(l10n-am): native-speaker verification required before ship.
+  'onboarding.sms.phoneLabel': 'የሞባይል ቁጥር (አማራጭ)',
+  'onboarding.sms.phoneAudio': 'የሞባይል ቁጥርዎ ስንት ነው? ይህ አማራጭ ነው — ባዶ መተው ይችላሉ።',
+  'onboarding.sms.phoneHelp': 'የጽሑፍ አስታዋሾችን ከፈለጉ ብቻ ያክሉ። የአገር ኮድን ያካትቱ፣ ለምሳሌ +1 555 010 0000።',
+  'onboarding.sms.phoneInvalid': 'ቁጥርዎን ከአገር ኮድ ጋር ያስገቡ፣ ለምሳሌ +15550100 — ወይም ባዶ ይተዉት።',
   'onboarding.reminders.title': 'ማስታወሻዎችዎን ያዘጋጁ',
   'onboarding.reminders.subtitle': 'መቼ እንደምናገኝዎት ይምረጡ። ይህን በማንኛውም ጊዜ በቅንብሮች ውስጥ መቀየር ይችላሉ።',
   'onboarding.stepIndicator': 'ደረጃ {n} ከ2',

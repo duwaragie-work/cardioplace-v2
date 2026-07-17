@@ -21,6 +21,7 @@ import { EmailService } from '../email/email.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { AuthService } from './auth.service.js'
 import { BcryptService } from './bcrypt.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import { DisplayIdService } from '../users/display-id.service.js'
 import { GeolocationService } from './geolocation.service.js'
 import { MfaService } from './mfa.service.js'
@@ -291,6 +292,16 @@ describe('AuthService', () => {
                 createUserFn: (displayId: string) => Promise<unknown>,
               ) => createUserFn('CPPATTESTING0'),
             ),
+          },
+        },
+        {
+          // L3 (2026-07-14) — AuthService encrypts User.phoneNumber at rest.
+          // Identity round-trip stub: keeps the profile specs readable (a saved
+          // number comes back as itself) without pulling in a real key.
+          provide: EncryptionService,
+          useValue: {
+            encrypt: jest.fn((plaintext: string) => plaintext),
+            decrypt: jest.fn((envelope: string) => envelope),
           },
         },
       ],

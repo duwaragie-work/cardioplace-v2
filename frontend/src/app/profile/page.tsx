@@ -32,6 +32,7 @@ import {
   LogOut,
   CheckCircle2,
   Clock,
+  MessageSquare,
   Info,
   X,
   User as UserIcon,
@@ -159,6 +160,12 @@ interface AuthProfileDto {
   reminderTime: string | null;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
+  // L3 (2026-07-14) — SMS reminders. Both optional: a patient can have no phone
+  // at all. `smsOptedOut` is read-only — it's set when they reply STOP, and the
+  // UI surfaces it so a patient understands why texts stopped.
+  phoneNumber: string | null;
+  smsConsent: boolean;
+  smsOptedOut: boolean;
 }
 
 /**
@@ -183,6 +190,11 @@ async function patchAuthProfile(payload: {
   reminderTime?: string;
   quietHoursStart?: string;
   quietHoursEnd?: string;
+  // L3 — E.164 ("+15550100"), or null to clear the number (which also revokes
+  // consent server-side). `smsConsent` is opt-in only; the server stamps the
+  // consent timestamp/method itself, so the client never sends those.
+  phoneNumber?: string | null;
+  smsConsent?: boolean;
 }): Promise<AuthProfileDto> {
   // Backend's PATCH only returns the patched fields (no email, no id), so
   // we re-fetch the full GET after a successful write to keep the UI state
@@ -931,6 +943,247 @@ function RemindersModal({
   );
 }
 
+/**
+ * L3 (2026-07-14) — text-reminder settings: phone number + SMS consent.
+ *
+ * Rules the spec is explicit about, all enforced here:
+ *  • Phone is OPTIONAL — no number is a perfectly valid state.
+ *  • Consent is OPT-IN ONLY — the checkbox is never pre-checked for a patient
+ *    who hasn't consented, and it is HIDDEN ENTIRELY until a number is entered.
+ *  • Clearing the number revokes consent (the server does this too).
+ *  • The sender-name explanation must appear next to the phone field.
+ */
+function SmsModal({
+  current,
+  onClose,
+  onSaved,
+}: {
+  current: AuthProfileDto;
+  onClose: () => void;
+  onSaved: (next: AuthProfileDto) => void;
+}) {
+  const { t } = useLanguage();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const [phone, setPhone] = useState(current.phoneNumber ?? '');
+  const [consent, setConsent] = useState(current.smsConsent);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const trimmed = phone.trim();
+  const hasPhone = trimmed.length > 0;
+  // E.164 — mirrors the backend DTO so we fail fast in the UI instead of
+  // round-tripping a 400.
+  const phoneValid = /^\+[1-9]\d{7,14}$/.test(trimmed);
+  // Consent can't survive without a number to send to.
+  const effectiveConsent = hasPhone ? consent : false;
+
+  const dirty =
+    trimmed !== (current.phoneNumber ?? '') ||
+    effectiveConsent !== current.smsConsent;
+  const canSave = dirty && !saving && (!hasPhone || phoneValid);
+
+  async function save() {
+    if (!canSave) return;
+    setSaving(true);
+    setError('');
+    try {
+      const next = await patchAuthProfile({
+        phoneNumber: hasPhone ? trimmed : null,
+        smsConsent: effectiveConsent,
+      });
+      onSaved(next);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('profile.saveError'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}
+    >
+      <div className="absolute inset-0" onClick={onClose} />
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sms-title"
+        initial={{ y: 60, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 60, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+        className="relative w-full sm:max-w-md bg-white sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"
+        style={{ maxHeight: '90dvh', boxShadow: '0 8px 48px rgba(0,0,0,0.18)' }}
+      >
+        <div
+          className="shrink-0 flex items-center justify-between px-5 py-4"
+          style={{ borderBottom: '1px solid var(--brand-border)' }}
+        >
+          <div className="flex items-center gap-2">
+            <h2
+              id="sms-title"
+              className="text-[1rem] font-bold"
+              style={{ color: 'var(--brand-text-primary)' }}
+            >
+              {t('profile.sms.editHeading')}
+            </h2>
+            <AudioButton size="sm" text={t('profile.sms.editHeading')} />
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-11 h-11 rounded-full flex items-center justify-center cursor-pointer"
+            style={{ backgroundColor: 'var(--brand-background)' }}
+            aria-label={t('accessibility.closeDialog')}
+          >
+            <X className="w-4 h-4" style={{ color: 'var(--brand-text-muted)' }} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto thin-scrollbar p-5 space-y-4">
+          <div>
+            <label
+              htmlFor="sms-phone"
+              className="block text-[0.75rem] font-semibold mb-1.5"
+              style={{ color: 'var(--brand-text-primary)' }}
+            >
+              {t('profile.sms.phoneLabel')}
+            </label>
+            <input
+              id="sms-phone"
+              type="tel"
+              inputMode="tel"
+              data-testid="sms-phone-input"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="+15550100"
+              className="w-full h-11 px-3 rounded-xl border text-[0.875rem] outline-none bg-white"
+              style={{ borderColor: 'var(--brand-border)', color: 'var(--brand-text-primary)' }}
+            />
+            <p className="text-[0.6875rem] mt-1.5" style={{ color: 'var(--brand-text-muted)' }}>
+              {t('profile.sms.phoneHelp')}
+            </p>
+            {hasPhone && !phoneValid && (
+              <p
+                className="text-[0.6875rem] mt-1 font-semibold"
+                style={{ color: 'var(--brand-error, #DC2626)' }}
+              >
+                {t('profile.sms.phoneInvalid')}
+              </p>
+            )}
+          </div>
+
+          {/* Consent — opt-in only, and only offered once a number exists. */}
+          {hasPhone && (
+            <div>
+              {/* `data-no-min-target` opts out of the global 44px tap-target
+                  rule (globals.css) which otherwise renders a giant box. The
+                  WCAG intent is kept: the <label> wraps the control, so the
+                  whole padded row toggles it — a big hit area, text-sized box. */}
+              <label className="flex items-center gap-2 cursor-pointer py-1.5">
+                <input
+                  type="checkbox"
+                  data-testid="sms-consent-checkbox"
+                  data-no-min-target
+                  checked={consent}
+                  onChange={(e) => setConsent(e.target.checked)}
+                  className="w-3.5 h-3.5 shrink-0 cursor-pointer accent-[#7B00E0]"
+                />
+                <span
+                  className="text-[0.75rem] font-medium"
+                  style={{ color: 'var(--brand-text-primary)' }}
+                >
+                  {t('profile.sms.consentLabel')}
+                </span>
+              </label>
+              {/* Required TCPA disclosures as fine print — reviewed with the
+                  label above as a pair (counsel packet Q3). */}
+              <p
+                className="pl-5.5 text-[0.6875rem] leading-relaxed"
+                style={{ color: 'var(--brand-text-muted)' }}
+              >
+                {t('profile.sms.consentFinePrint')}
+              </p>
+            </div>
+          )}
+
+          {/* The standalone sender-name explainer (spec §2C) was folded into the
+              consent fine print above ("Texts come from Cardioplace…"). Its only
+              purpose was explaining why texts arrived from "Healplace" rather
+              than "Cardioplace" — moot now the team set the sender to
+              Cardioplace, so a separate callout would just repeat the app name. */}
+
+          {/* L7 — the patient replied STOP. Explain why texts stopped and how
+              to turn them back on (re-consenting clears the opt-out). */}
+          {current.smsOptedOut && (
+            <div
+              className="rounded-xl p-3 text-[0.75rem] font-semibold"
+              style={{
+                backgroundColor: 'var(--brand-warning-amber-bg, #FEF3C7)',
+                color: 'var(--brand-warning-amber-text, #92400E)',
+              }}
+              data-testid="sms-optedout-notice"
+            >
+              {t('profile.sms.optedOutNotice')}
+            </div>
+          )}
+
+          {error && (
+            <div
+              className="text-[0.75rem] font-semibold"
+              style={{ color: 'var(--brand-error, #DC2626)' }}
+            >
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div
+          className="shrink-0 px-5 py-3 flex items-center justify-end gap-2"
+          style={{ borderTop: '1px solid var(--brand-border)' }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-11 px-4 rounded-xl text-[0.875rem] font-semibold cursor-pointer"
+            style={{ color: 'var(--brand-text-muted)' }}
+          >
+            {t('profile.reminders.cancelButton')}
+          </button>
+          <button
+            type="button"
+            data-testid="sms-save-button"
+            onClick={save}
+            disabled={!canSave}
+            className="h-11 px-5 rounded-xl text-[0.875rem] font-bold text-white cursor-pointer disabled:cursor-not-allowed"
+            style={{
+              backgroundColor: canSave
+                ? 'var(--brand-primary, #0891B2)'
+                : 'var(--brand-text-muted, #64748B)',
+              opacity: canSave ? 1 : 0.6,
+            }}
+          >
+            {saving ? t('profile.reminders.savingButton') : t('profile.reminders.saveButton')}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main page
 // ─────────────────────────────────────────────────────────────────────────────
@@ -948,6 +1201,7 @@ export default function ProfilePage() {
   const [showPersonalEdit, setShowPersonalEdit] = useState(false);
   // N8 (2026-07-13) — Reminder & Engagement preferences modal.
   const [showRemindersEdit, setShowRemindersEdit] = useState(false);
+  const [showSmsEdit, setShowSmsEdit] = useState(false);
 
   // Match the right column's height to the left column's natural height.
   // CSS grid alone always sizes the row to the taller side; we want the
@@ -1224,6 +1478,39 @@ export default function ProfilePage() {
               <Row
                 label={t('profile.reminders.quietHoursEnd')}
                 value={formatTimeForDisplay(authProfile?.quietHoursEnd, '07:00')}
+              />
+            </SectionCard>
+
+            {/* L3 (2026-07-14) — text reminders (SMS). Optional: a patient with
+                no phone simply shows "Not set" and gets no texts. */}
+            <SectionCard
+              title={t('profile.sms.heading')}
+              icon={<MessageSquare className="w-4 h-4" />}
+              onEdit={authProfile ? () => setShowSmsEdit(true) : undefined}
+              editTestId="profile-sms-edit-button"
+              audioText={[
+                `${t('profile.sms.heading')}.`,
+                `${t('profile.sms.phoneLabel')}: ${authProfile?.phoneNumber ?? t('profile.sms.notSet')}.`,
+                `${t('profile.sms.statusLabel')}: ${
+                  authProfile?.smsConsent
+                    ? t('profile.sms.statusOn')
+                    : t('profile.sms.statusOff')
+                }.`,
+              ].join(' ')}
+            >
+              <Row
+                label={t('profile.sms.phoneLabel')}
+                value={authProfile?.phoneNumber ?? t('profile.sms.notSet')}
+              />
+              <Row
+                label={t('profile.sms.statusLabel')}
+                value={
+                  authProfile?.smsOptedOut
+                    ? t('profile.sms.statusStopped')
+                    : authProfile?.smsConsent
+                      ? t('profile.sms.statusOn')
+                      : t('profile.sms.statusOff')
+                }
               />
             </SectionCard>
 
@@ -1546,6 +1833,14 @@ export default function ProfilePage() {
           <RemindersModal
             current={authProfile}
             onClose={() => setShowRemindersEdit(false)}
+            onSaved={(next) => setAuthProfile(next)}
+          />
+        )}
+        {/* L3 (2026-07-14) — text-reminder (SMS) settings modal. */}
+        {showSmsEdit && authProfile && (
+          <SmsModal
+            current={authProfile}
+            onClose={() => setShowSmsEdit(false)}
             onSaved={(next) => setAuthProfile(next)}
           />
         )}

@@ -177,10 +177,12 @@ describe('DailyReminderService.runScan', () => {
     // Morning greeting at 09:00 ET.
     expect(payload.body).toMatch(/^Good morning, /)
     expect(payload.body).not.toContain("it's been a few days")
-    // Spec §N2 default fan-out: DASHBOARD + PUSH + EMAIL. SMS is added by
-    // Lakshitha's L5 with its own consent+phone+opt-in gates — NOT part of
-    // Niva's default array.
-    expect(channels).toEqual(['DASHBOARD', 'PUSH', 'EMAIL'])
+    // Spec §N2 default fan-out: DASHBOARD + PUSH + EMAIL, plus SMS as an
+    // ADDITIVE 4th channel (L5, 2026-07-14) — SMS never replaces the others.
+    // Listing SMS here is safe because the dispatcher's SMS branch self-gates
+    // (flag + phone + consent + not-opted-out) and no-ops otherwise; a
+    // non-consenting patient can never be texted.
+    expect(channels).toEqual(['DASHBOARD', 'PUSH', 'EMAIL', 'SMS'])
     expect(s.dispatched).toBe(1)
     expect(s.careTeamAlerts).toBe(0)
   })
