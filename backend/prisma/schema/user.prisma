@@ -38,6 +38,15 @@ model User {
   // never re-asks for reminders. Orthogonal to `onboardingStatus`, which is
   // identity-gated (name/comm) and never flipped by reminder prefs.
   reminderPreferenceSet   Boolean                  @default(false)
+  // Terms + Privacy consent (A5). Recorded once, in a column, so onboarding
+  // can skip the privacy step for a patient who already agreed — without
+  // scanning the AuthLog on every load. The immutable audit trail is still
+  // the AuthLog `policy_acknowledged` event; these two are the fast-read
+  // mirror. `acknowledgedPolicyVersion` is version-aware: if POLICY_VERSION
+  // is bumped, the stored version no longer matches and the patient
+  // legitimately re-consents to the new policy.
+  policyAcknowledgedAt      DateTime?
+  acknowledgedPolicyVersion String?
   isVerified              Boolean                  @default(false)
   roles                   UserRole[]               @default([PATIENT])
   onboardingStatus        OnboardingStatus         @default(NOT_COMPLETED)

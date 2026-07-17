@@ -79,9 +79,15 @@ export default function OnboardingPage() {
   // re-ask (second device) this is true and the reminders step is skipped
   // entirely — reminders already have a value, so asking again is noise.
   const [reminderPreferenceSet, setReminderPreferenceSet] = useState<boolean | null>(null);
-  // Terms + Privacy consent — collected once here on the privacy step. Only new
-  // users reach onboarding, so returning users are never re-asked. Recorded on
-  // the AuthLog audit trail (event 'policy_acknowledged') via POST /v2/auth/consent.
+  // False until the profile fetch (reminder + consent flags) resolves. Gates
+  // the first render so an already-consented patient doesn't flash the privacy
+  // step before A5 auto-advances past it.
+  const [flagsLoaded, setFlagsLoaded] = useState(false);
+  // Terms + Privacy consent — collected once on the privacy step. A5: a patient
+  // who already agreed to the current POLICY_VERSION skips this step on every
+  // later device (see the profile-fetch effect). Recorded both on the AuthLog
+  // audit trail (event 'policy_acknowledged') and in User.acknowledgedPolicyVersion
+  // via POST /v2/auth/consent.
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   useEffect(() => {
@@ -111,9 +117,9 @@ export default function OnboardingPage() {
     }
   }, [user, isLoading, router]);
 
-  // The auth response carries onboarding_required but not the reminder flag,
-  // so read it from the profile. Resolves long before the patient can leave
-  // the identity step, which is the only place it is consulted.
+  // The auth response carries onboarding_required but not the reminder /
+  // consent flags, so read them from the profile. Resolves on mount, while the
+  // patient is still on the (possibly-to-be-skipped) privacy step.
   useEffect(() => {
     if (isLoading || !user) return;
     let cancelled = false;
@@ -124,10 +130,20 @@ export default function OnboardingPage() {
         );
         if (!res.ok) return;
         const data = await res.json();
-        if (!cancelled) setReminderPreferenceSet(!!data.reminderPreferenceSet);
+        if (cancelled) return;
+        setReminderPreferenceSet(!!data.reminderPreferenceSet);
+        // A5 — consent is asked once. A patient who already agreed to the
+        // CURRENT policy version skips the privacy step entirely (a re-ask on
+        // another device lands straight on identity). Only auto-advance from
+        // the untouched privacy step; never yank someone out of a later step.
+        if (data.acknowledgedPolicyVersion === POLICY_VERSION) {
+          setStep((s) => (s === "privacy" ? "profile" : s));
+        }
       } catch {
-        // Best-effort — null falls back to showing the reminders step, which
-        // is the right default for a patient who has never answered it.
+        // Best-effort — the null/privacy defaults are correct for a patient
+        // who has never answered these.
+      } finally {
+        if (!cancelled) setFlagsLoaded(true);
       }
     })();
     return () => {
@@ -149,7 +165,7 @@ export default function OnboardingPage() {
       onboardingRequiredHint: user.onboardingRequired,
     });
 
-  if (isLoading || !user || isRedirecting || willRedirectAway) {
+  if (isLoading || !user || isRedirecting || willRedirectAway || !flagsLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <SpinnerIndicator size={40} className="text-[#7B00E0]" />

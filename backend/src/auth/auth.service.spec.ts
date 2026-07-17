@@ -1154,6 +1154,33 @@ describe('AuthService', () => {
     })
   })
 
+  // ─── recordConsent service method (A5) ────────────────────────────────────────
+
+  describe('recordConsent', () => {
+    it('persists policyAcknowledgedAt + version AND writes the audit event', async () => {
+      const logSpy = jest
+        .spyOn(
+          service as unknown as { logAuthEvent: (...a: unknown[]) => Promise<void> },
+          'logAuthEvent',
+        )
+        .mockResolvedValue(undefined)
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({})
+
+      const res = await service.recordConsent(mockUser.id, '2026-05-25')
+
+      expect(res).toEqual({ recorded: true })
+      // Fast-read mirror on the User row.
+      const data = (prisma.user.update as jest.Mock).mock.calls[0][0].data
+      expect(data.acknowledgedPolicyVersion).toBe('2026-05-25')
+      expect(data.policyAcknowledgedAt).toBeInstanceOf(Date)
+      // Immutable audit trail still written.
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'policy_acknowledged' }),
+      )
+      logSpy.mockRestore()
+    })
+  })
+
   // ─── patchProfile service method ──────────────────────────────────────────────
 
   describe('patchProfile', () => {

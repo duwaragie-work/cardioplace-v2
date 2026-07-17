@@ -2393,9 +2393,10 @@ export class AuthService {
   }
 
   // Public entry point used by the post-login consent gate (onboarding privacy
-  // step). Records the patient's Terms + Privacy agreement once, on the AuthLog
-  // audit trail (no new table). Idempotent in spirit — a returning user who
-  // already consented never reaches the gate, so it isn't called again.
+  // step). Records the patient's Terms + Privacy agreement. Two writes: the
+  // AuthLog `policy_acknowledged` event stays the immutable audit trail, and
+  // the User columns are the fast-read mirror onboarding checks so it can skip
+  // the privacy step on a re-ask (A5) — without an audit-log scan per load.
   async recordConsent(
     userId: string,
     policyVersion: string,
@@ -2407,6 +2408,13 @@ export class AuthService {
       ipAddress: context?.ipAddress,
       userAgent: context?.userAgent,
       via: 'onboarding',
+    })
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        policyAcknowledgedAt: new Date(),
+        acknowledgedPolicyVersion: policyVersion,
+      },
     })
     return { recorded: true }
   }
@@ -3341,6 +3349,9 @@ export class AuthService {
         quietHoursEnd: true,
         // Onboarding step routing — see the field comment in user.prisma.
         reminderPreferenceSet: true,
+        // A5 — lets onboarding skip the privacy step when this already matches
+        // the current POLICY_VERSION.
+        acknowledgedPolicyVersion: true,
         createdAt: true,
       },
     })
@@ -3424,6 +3435,8 @@ export class AuthService {
       // Onboarding step routing — the re-ask on a second device shows the
       // identity step only when this is already true.
       reminderPreferenceSet: user.reminderPreferenceSet,
+      // A5 — onboarding skips the privacy step when this === POLICY_VERSION.
+      acknowledgedPolicyVersion: user.acknowledgedPolicyVersion,
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
       // MFA status (additive) — drives the profile Security pill.
