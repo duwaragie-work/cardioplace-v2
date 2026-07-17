@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
+import { redactText } from '../common/logging/log-redact.js'
 import { ConfigService } from '@nestjs/config'
 import { OnEvent } from '@nestjs/event-emitter'
 import { GoogleGenAI, Modality } from '@google/genai'
@@ -386,7 +387,9 @@ export class VoiceService implements OnModuleDestroy {
             const reason = e.reason ?? ''
             const code = e.code ?? 0
             this.logger.log(
-              `[VOICE Live] closed code=${code} reason="${reason}" [socket=${socketId}]`,
+              // V-05: code= is the diagnostic; `reason` comes from Gemini and
+              // can echo model text, so it is treated as untrusted for PHI.
+              `[VOICE Live] closed code=${code} reason=${redactText(reason)} [socket=${socketId}]`,
             )
             const sess = this.sessions.get(socketId)
             if (!sess) return
@@ -752,9 +755,11 @@ export class VoiceService implements OnModuleDestroy {
     session.hallucinationFlaggedThisTurn = true
     const excerpt = text.slice(0, 240).replace(/\s+/g, ' ').trim()
     this.logger.error(
+      // V-05: type= + the fired-tool list diagnose the hallucination; the
+      // transcript excerpt was the patient's clinical conversation.
       `[VOICE hallucination_suspected] type=${claim} ` +
         `tools=[${[...session.currentTurnWriteToolsCalled].join(',')}] ` +
-        `transcript="${excerpt}" [socket=${socketId}]`,
+        `transcript=${redactText(excerpt)} [socket=${socketId}]`,
     )
     try {
       session.callbacks.onHallucinationSuspected?.(claim, excerpt)
@@ -1138,7 +1143,9 @@ export class VoiceService implements OnModuleDestroy {
           const userBase64 = userWav.toString('base64')
           this.logger.log(`Transcribing user audio [${(userWav.length / 1024).toFixed(0)} KB]`)
           userTranscript = await this.geminiService.transcribeAudio(userBase64)
-          this.logger.log(`User transcript [${userTranscript.length} chars]: ${userTranscript.slice(0, 100)}`)
+          // V-05: the `[N chars]` half was already the safe signal; only the
+          // trailing slice of the patient's verbatim speech had to go.
+          this.logger.log(`User transcript ${redactText(userTranscript)}`)
         } catch (err) {
           this.logger.error('Failed to transcribe user audio', err)
         }
@@ -1150,7 +1157,8 @@ export class VoiceService implements OnModuleDestroy {
           const agentBase64 = agentWav.toString('base64')
           this.logger.log(`Transcribing agent audio [${(agentWav.length / 1024).toFixed(0)} KB]`)
           agentTranscript = await this.geminiService.transcribeAudio(agentBase64)
-          this.logger.log(`Agent transcript [${agentTranscript.length} chars]: ${agentTranscript.slice(0, 100)}`)
+          // V-05 — the agent's reply discusses the patient's own clinical data.
+          this.logger.log(`Agent transcript ${redactText(agentTranscript)}`)
         } catch (err) {
           this.logger.error('Failed to transcribe agent audio', err)
         }
@@ -1231,8 +1239,11 @@ export class VoiceService implements OnModuleDestroy {
         },
       }).catch(() => {})
 
-      this.logger.log(`[FLOW] Step 10 DONE — saved transcript [session=${session.sessionId}, lines=${lines.length}, title=${title}] (${Date.now() - saveStart}ms)`)
-      this.logger.log(`Saved voice transcript [session=${session.sessionId}, title=${title}]`)
+      // V-05: `title` is an LLM summary of the clinical conversation, and it is
+      // encrypted at rest via titleEncrypted a few lines above — logging the
+      // plaintext here defeated that. session= + lines= keep the flow trace.
+      this.logger.log(`[FLOW] Step 10 DONE — saved transcript [session=${session.sessionId}, lines=${lines.length}, title=${redactText(title)}] (${Date.now() - saveStart}ms)`)
+      this.logger.log(`Saved voice transcript [session=${session.sessionId}, title=${redactText(title)}]`)
     } catch (err) {
       this.logger.error('Failed to save voice transcript', err)
     }

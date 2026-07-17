@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { situationHash } from '../../common/logging/log-redact.js'
 import { ConfigService } from '@nestjs/config'
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
 import {
@@ -186,7 +187,10 @@ export class EscalationService {
       await this.dispatchEmergencyToCareTeam(payload)
     } catch (err) {
       this.logger.error(
-        `[SECURITY-CRITICAL] Emergency dispatch failed userId=${payload.userId} situation="${payload.situation}"`,
+        // V-05: digest + userId, not the narrative — see chat.service.ts's
+        // emergency path for the reasoning. The dispatch failed, but the
+        // EmergencyEvent row that triggered it is persisted and audited.
+        `[SECURITY-CRITICAL] Emergency dispatch failed userId=${payload.userId} situation=${situationHash(payload.situation)}`,
         err instanceof Error ? err.stack : err,
       )
     }
