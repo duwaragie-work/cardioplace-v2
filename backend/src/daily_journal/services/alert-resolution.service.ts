@@ -449,8 +449,17 @@ export class AlertResolutionService {
    * §V2-D. 13 fields auto-computed from DB state, 2 filled by the resolver.
    * Shape is the endpoint contract; keep stable once phase/11 wires the
    * admin UI.
+   *
+   * `actor` is REQUIRED (V-01, Humaira 2026-07-14 CRITICAL). This payload is
+   * the richest PHI object the admin API returns, and it used to be reachable
+   * for ANY alertId by any staff account in the controller's @Roles set —
+   * cross-tenant disclosure at scale. Gated below on the alert's owning patient,
+   * exactly like `acknowledge` (:63) and `resolve` (:109).
    */
-  async buildAuditPayload(alertId: string): Promise<AuditPayload> {
+  async buildAuditPayload(
+    alertId: string,
+    actor: ActorUser,
+  ): Promise<AuditPayload> {
     const alert = await this.prisma.deviationAlert.findUnique({
       where: { id: alertId },
       include: {
@@ -476,6 +485,10 @@ export class AlertResolutionService {
       },
     })
     if (!alert) throw new NotFoundException(`Alert ${alertId} not found`)
+    // 404 before 403, deliberately — a Forbidden on a non-existent id would
+    // confirm which alertIds are real. Same ordering as provider.controller's
+    // getAlertDetail and as acknowledge/resolve above.
+    await this.access.assertCanAccessPatient(actor, alert.userId)
 
     const firstEscalation = alert.escalationEvents[0] ?? null
     const ackAt = alert.acknowledgedAt
