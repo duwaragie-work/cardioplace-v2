@@ -4,7 +4,8 @@ import { validateSecrets, validateEnvSecrets } from './secret-guard.js'
 /**
  * Boot-time secret guard (§164.312(d)). The contract under test:
  *   • a PRESENT-but-weak secret is rejected
- *   • an ABSENT secret is allowed — unless it is JWT_ACCESS_SECRET
+ *   • an ABSENT secret is allowed — unless it is JWT_ACCESS_SECRET or
+ *     MFA_ENCRYPTION_KEY (see 'presence' below for why the second one joined)
  *   • every violation is reported at once, not just the first
  */
 
@@ -22,6 +23,8 @@ const SIXTEEN = randomBytes(12).toString('base64url')
 /** The minimum env that passes, so each test can vary exactly one thing. */
 const clean = (over: Record<string, string | undefined> = {}) => ({
   JWT_ACCESS_SECRET: STRONG,
+  // Required as of V-06 (2026-07-17) — see the 'presence' block.
+  MFA_ENCRYPTION_KEY: STRONG_HEX_KEY,
   ...over,
 })
 
@@ -39,24 +42,50 @@ describe('validateSecrets', () => {
   })
 
   describe('presence', () => {
-    it('rejects a missing JWT_ACCESS_SECRET — the one required secret', () => {
-      const v = validateSecrets({})
-      expect(v).toHaveLength(1)
-      expect(v[0]).toMatch(/JWT_ACCESS_SECRET is required/)
-    })
-
-    it('treats an empty string as absent, not as a weak value', () => {
-      expect(validateSecrets({ JWT_ACCESS_SECRET: '   ' })[0]).toMatch(
+    it('rejects a missing JWT_ACCESS_SECRET', () => {
+      expect(validateSecrets(clean({ JWT_ACCESS_SECRET: undefined }))[0]).toMatch(
         /JWT_ACCESS_SECRET is required/,
       )
     })
 
-    // The asymmetry that keeps push / SMTP / MFA dark-launchable. If this test
-    // ever fails, someone has turned an optional feature into a boot requirement.
+    /**
+     * MFA_ENCRYPTION_KEY moved from "may be absent" to required on 2026-07-17,
+     * deliberately tripping the tripwire that used to live in the it.each below
+     * ("if this test ever fails, someone has turned an optional feature into a
+     * boot requirement").
+     *
+     * That exemption was justified by the key having exactly one consumer: the
+     * TOTP secret, dark-launched behind MFA_ENFORCEMENT_ENABLED, where unset
+     * genuinely meant "feature cleanly off". V-06 ended that. `encryptNullable`
+     * now runs on ~60 dual-write sites on the clinical write path and resolves
+     * the key for any non-null value, so with the key unset a check-in carrying
+     * a note does not degrade — it throws InternalServerErrorException.
+     *
+     * "Unset = feature off" was the premise; it is now false, so the exemption
+     * goes with it. Note the name is a misnomer post-V-06: it is the field
+     * encryption key, not just MFA's.
+     */
+    it('rejects a missing MFA_ENCRYPTION_KEY — required since V-06 put it on the clinical write path', () => {
+      expect(validateSecrets(clean({ MFA_ENCRYPTION_KEY: undefined }))[0]).toMatch(
+        /MFA_ENCRYPTION_KEY is required/,
+      )
+    })
+
+    it('reports both required secrets when the environment is empty', () => {
+      expect(validateSecrets({})).toHaveLength(2)
+    })
+
+    it('treats an empty string as absent, not as a weak value', () => {
+      expect(validateSecrets(clean({ JWT_ACCESS_SECRET: '   ' }))[0]).toMatch(
+        /JWT_ACCESS_SECRET is required/,
+      )
+    })
+
+    // The asymmetry that keeps push / SMTP dark-launchable. If this test ever
+    // fails, someone has turned an optional feature into a boot requirement.
     it.each([
       'JWT_SECRET',
       'JWT_REFRESH_SECRET',
-      'MFA_ENCRYPTION_KEY',
       'TEST_CONTROL_SECRET',
       'VAPID_PRIVATE_KEY',
       'SMTP_PASS',
@@ -74,13 +103,13 @@ describe('validateSecrets', () => {
       ['an angle-bracket placeholder', '<your-secret-here-please-replace-it>'],
       ['an XXXX placeholder', 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'],
     ])('rejects %s', (_label, value) => {
-      const v = validateSecrets({ JWT_ACCESS_SECRET: value })
+      const v = validateSecrets(clean({ JWT_ACCESS_SECRET: value }))
       expect(v).toHaveLength(1)
       expect(v[0]).toMatch(/placeholder value from the example config/)
     })
 
     it('rejects a secret that is too short', () => {
-      const v = validateSecrets({ JWT_ACCESS_SECRET: 'abc123' })
+      const v = validateSecrets(clean({ JWT_ACCESS_SECRET: 'abc123' }))
       expect(v[0]).toMatch(/too short \(6 chars, minimum 32\)/)
     })
 
@@ -134,7 +163,7 @@ describe('validateSecrets', () => {
     it.each([['abab...', 'ab'.repeat(20)], ['xyzxyz...', 'xyz'.repeat(12)]])(
       'also rejects %s',
       (_label, value) => {
-        expect(validateSecrets({ JWT_ACCESS_SECRET: value })[0]).toMatch(
+        expect(validateSecrets(clean({ JWT_ACCESS_SECRET: value }))[0]).toMatch(
           /repeated end to end/,
         )
       },
@@ -162,7 +191,7 @@ describe('validateSecrets', () => {
     })
 
     it('still rejects a 16-char JWT_ACCESS_SECRET', () => {
-      expect(validateSecrets({ JWT_ACCESS_SECRET: SIXTEEN })[0]).toMatch(
+      expect(validateSecrets(clean({ JWT_ACCESS_SECRET: SIXTEEN }))[0]).toMatch(
         /too short/,
       )
     })
@@ -176,6 +205,8 @@ describe('validateSecrets', () => {
       MFA_ENCRYPTION_KEY: '0'.repeat(64),
     })
     expect(v).toHaveLength(4)
+    // All four are PRESENT-but-weak, so this still exercises weakness rather
+    // than the new presence requirement.
     expect(v.join('\n')).toMatch(/JWT_ACCESS_SECRET/)
     expect(v.join('\n')).toMatch(/JWT_SECRET/)
     expect(v.join('\n')).toMatch(/JWT_REFRESH_SECRET/)
@@ -183,7 +214,7 @@ describe('validateSecrets', () => {
   })
 
   it('names the generation command on every violation', () => {
-    const v = validateSecrets({ JWT_ACCESS_SECRET: 'change-me' })
+    const v = validateSecrets(clean({ JWT_ACCESS_SECRET: 'change-me' }))
     expect(v[0]).toMatch(/Generate: node -e/)
   })
 
@@ -202,7 +233,7 @@ describe('validateSecrets', () => {
 
 describe('validateEnvSecrets (the ConfigModule hook)', () => {
   it('returns the config untouched when everything is strong', () => {
-    const config = { JWT_ACCESS_SECRET: STRONG, PORT: '4000' }
+    const config = { JWT_ACCESS_SECRET: STRONG, MFA_ENCRYPTION_KEY: STRONG_HEX_KEY, PORT: '4000' }
     expect(validateEnvSecrets(config)).toBe(config)
   })
 
@@ -216,7 +247,7 @@ describe('validateEnvSecrets (the ConfigModule hook)', () => {
   })
 
   it('singularises the message for a single violation', () => {
-    expect(() => validateEnvSecrets({})).toThrow(
+    expect(() => validateEnvSecrets({ JWT_ACCESS_SECRET: STRONG })).toThrow(
       /Refusing to start — 1 insecure secret in the environment/,
     )
   })

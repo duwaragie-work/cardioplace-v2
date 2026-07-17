@@ -13,13 +13,16 @@ import { MFA_ENCRYPTION_KEY_PATTERN } from '../encryption.service.js'
  *
  * That asymmetry is deliberate and load-bearing. Several services are built so
  * that "unset" means "feature cleanly off" — WebPushService no-ops without VAPID
- * keys, SMTP no-ops, LangSmith no-ops, OTLP no-ops, and EncryptionService
- * validates the MFA key lazily precisely so a deploy without it still boots (MFA
- * is dark-launched behind MFA_ENFORCEMENT_ENABLED). A guard that demanded
+ * keys, SMTP no-ops, LangSmith no-ops, OTLP no-ops. A guard that demanded
  * presence would silently convert every one of those optional features into a
- * hard boot requirement. So: empty ⇒ skip, set ⇒ must be strong. JWT_ACCESS_SECRET
- * is the single exception — it is already genuinely required (jwt.strategy.ts
- * uses getOrThrow) and stays required.
+ * hard boot requirement. So: empty ⇒ skip, set ⇒ must be strong.
+ *
+ * The exceptions are the secrets where "unset" does NOT mean cleanly off:
+ *   • JWT_ACCESS_SECRET — genuinely required already (jwt.strategy.ts getOrThrow).
+ *   • MFA_ENCRYPTION_KEY — required since V-06 (2026-07-17). It used to qualify
+ *     for the exemption because only the dark-launched TOTP path consumed it;
+ *     V-06's dual-write put it on the clinical write path, where unset throws
+ *     rather than degrades. See the entry in SECRETS below.
  *
  * Fails closed in EVERY environment, not just production — mirroring the doctrine
  * already stated in jwt.strategy.ts ("Fail closed: no fallback default … the
@@ -66,7 +69,18 @@ const SECRETS: Record<string, SecretSpec> = {
   JWT_SECRET: { minLength: 32, fix: GEN_RANDOM_48 },
   JWT_REFRESH_SECRET: { minLength: 32, fix: GEN_RANDOM_48 },
 
+  // Required since V-06 (2026-07-17), and no longer only about MFA despite the
+  // name. The "absent ⇒ feature cleanly off" exemption above was granted when
+  // the sole consumer was the dark-launched TOTP path. V-06 put ~60 dual-write
+  // sites on the core clinical write path (journal notes, medication free-text,
+  // escalation reasons), and `encryptNullable` resolves the key for any non-null
+  // value — so with the key unset those writes do not degrade gracefully, they
+  // throw InternalServerErrorException. Unset now means "every check-in carrying
+  // a note 500s", which is the opposite of cleanly off.
+  //
+  // Failing at boot with a generator command beats 500s at the bedside.
   MFA_ENCRYPTION_KEY: {
+    required: true,
     minLength: 64,
     pattern: {
       re: MFA_ENCRYPTION_KEY_PATTERN,

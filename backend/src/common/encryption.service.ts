@@ -7,10 +7,16 @@ import {
 } from 'crypto'
 
 /**
- * Symmetric encryption for secrets that must be reversible at rest — currently
- * the TOTP shared secret (Manisha 2026-06-12 Access Control §6, HIPAA 45 CFR
- * §164.312(d)). AES-256-GCM gives confidentiality + integrity (the auth tag
- * detects tampering on decrypt).
+ * Symmetric encryption for secrets that must be reversible at rest. Two
+ * consumers now:
+ *   • the TOTP shared secret (Manisha 2026-06-12 Access Control §6, HIPAA 45 CFR
+ *     §164.312(d)) — the original, dark-launched behind MFA_ENFORCEMENT_ENABLED;
+ *   • V-06 field-level encryption of clinical free-text (§164.312(a)(2)(iv)) —
+ *     ~60 dual-write sites on the core write path, read back through
+ *     `common/prisma-extensions/v06-decrypt.extension.ts`.
+ *
+ * AES-256-GCM gives confidentiality + integrity (the auth tag detects tampering
+ * on decrypt).
  *
  * Key source: MFA_ENCRYPTION_KEY — a 32-byte key as 64 hex chars. Generate one
  * with:  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -37,11 +43,18 @@ export class EncryptionService {
   constructor(private readonly config: ConfigService) {}
 
   /**
-   * Resolve + cache the master key. Validated lazily (on first encrypt/decrypt)
-   * rather than at construction so a deploy without the key set still boots —
-   * MFA is dark-launched behind MFA_ENFORCEMENT_ENABLED, and only the MFA paths
-   * touch encryption. Throws a clear error the moment encryption is actually
-   * needed without a valid key.
+   * Resolve + cache the master key.
+   *
+   * Still lazy, but the reasoning has changed. It used to be "a deploy without
+   * the key still boots, because only the dark-launched MFA paths touch
+   * encryption". That stopped being true with V-06: the dual-write sites are on
+   * the clinical write path, so a missing key would surface as a 500 on every
+   * check-in carrying a note. The key is therefore `required: true` in
+   * secret-guard.ts as of 2026-07-17 and the process refuses to boot without it
+   * — laziness here is now just caching, not a deployment affordance.
+   *
+   * The throw below is kept as the backstop for anything that bypasses the guard
+   * (scripts, tests, a future direct instantiation).
    */
   private getKey(): Buffer {
     if (this.cachedKey) return this.cachedKey
