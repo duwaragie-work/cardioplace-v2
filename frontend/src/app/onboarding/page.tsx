@@ -65,18 +65,20 @@ export default function OnboardingPage() {
   // employer / anyone else" promise BEFORE they disclose any clinical info,
   // or they won't enroll.
   //   "privacy"   → reassurance + Terms/Privacy consent
-  //   "profile"   → Step 1 of 2: identity fields (name + comm preference)
-  //   "reminders" → Step 2 of 2: daily reminder time + quiet hours
-  // Onboarding is NOT finished until the patient leaves the reminders step
-  // (via Continue or Skip) — see the flow handlers below.
+  //   "profile"   → identity fields (name + comm preference)
+  //   "reminders" → daily reminder time + quiet hours
+  // Only the identity step completes onboarding. Reminders always have a
+  // usable default, so answering them says nothing about who the patient is.
   const [step, setStep] = useState<"privacy" | "profile" | "reminders">("privacy");
   // True once the patient has committed the identity step with data (Continue,
-  // not Skip). Drives whether a reminders-step Skip still counts as onboarded:
-  // if either step was continued, the server row is already COMPLETED, so we
-  // finalize locally; if BOTH were skipped, nothing was persisted server-side
-  // and only the this-browser localStorage flag is set — so another browser
-  // re-asks. See handleRemindersSkip.
+  // not Skip) — i.e. the server row is now COMPLETED. If they skipped it, the
+  // only thing that lets them out of onboarding is this device's skip flag.
   const [profileSubmitted, setProfileSubmitted] = useState(false);
+  // Server-side "reminders were already answered" (any device). null = not
+  // loaded yet; treated as false so a fresh patient still sees the step. On a
+  // re-ask (second device) this is true and the reminders step is skipped
+  // entirely — reminders already have a value, so asking again is noise.
+  const [reminderPreferenceSet, setReminderPreferenceSet] = useState<boolean | null>(null);
   // Terms + Privacy consent — collected once here on the privacy step. Only new
   // users reach onboarding, so returning users are never re-asked. Recorded on
   // the AuthLog audit trail (event 'policy_acknowledged') via POST /v2/auth/consent.
@@ -109,6 +111,30 @@ export default function OnboardingPage() {
     }
   }, [user, isLoading, router]);
 
+  // The auth response carries onboarding_required but not the reminder flag,
+  // so read it from the profile. Resolves long before the patient can leave
+  // the identity step, which is the only place it is consulted.
+  useEffect(() => {
+    if (isLoading || !user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchWithAuth(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/v2/auth/profile`,
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setReminderPreferenceSet(!!data.reminderPreferenceSet);
+      } catch {
+        // Best-effort — null falls back to showing the reminders step, which
+        // is the right default for a patient who has never answered it.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isLoading]);
+
   const isFormPartiallyFilled = name.trim() !== "" || communicationPreference !== "";
 
   // Synchronous "should we redirect?" check — if shouldShowOnboardingForUser
@@ -132,11 +158,12 @@ export default function OnboardingPage() {
   }
 
   /**
-   * POST the given fields to /v2/auth/profile. The endpoint sets
-   * onboardingStatus=COMPLETED server-side, so ANY successful call here means
-   * "onboarded" on every browser. Returns true on success. Deliberately does
-   * NOT navigate or flip local onboarding state — callers own that, because
-   * step 1's Continue must land on the reminders step, not the dashboard.
+   * POST the given fields to /v2/auth/profile. The endpoint marks
+   * onboardingStatus=COMPLETED only for payloads carrying identity (name or
+   * comm preference); a reminder-only payload persists its fields and leaves
+   * onboarding alone. Returns true on success. Deliberately does NOT navigate
+   * or flip local onboarding state — callers own that, because the identity
+   * step's Continue must land on the reminders step, not the dashboard.
    */
   async function postProfile(body: Record<string, unknown>): Promise<boolean> {
     setError("");
@@ -181,10 +208,27 @@ export default function OnboardingPage() {
     router.push("/dashboard");
   }
 
-  // ─── Step 1 (identity) ──────────────────────────────────────────────────
-  // Continue: persist the identity fields (marks COMPLETED server-side), then
-  // advance to reminders. We do NOT finalize locally yet — flipping
-  // onboardingStatus here would trip the redirect-away effect and skip step 2.
+  /**
+   * Leave onboarding without identity. Nothing is persisted server-side, so
+   * `onboardingStatus` stays NOT_COMPLETED and another device still asks. The
+   * device flag (and the marker cookie it writes) is what stops the route
+   * guard bouncing this browser straight back here.
+   */
+  function finishSkipped() {
+    if (!user) {
+      router.push("/sign-in");
+      return;
+    }
+    markOnboardingSkipped(user.id);
+    router.push("/dashboard");
+  }
+
+  // ─── Identity step ──────────────────────────────────────────────────────
+  // Continue: persist identity (this is what marks COMPLETED server-side).
+  // Advance to reminders unless they're already answered — on a re-ask there
+  // is nothing left to ask, so finish here. We do NOT finalize locally before
+  // the reminders step: flipping onboardingStatus trips the redirect-away
+  // effect and would skip it.
   async function handleProfileContinue() {
     if (!isFormPartiallyFilled || isSubmitting) return;
     const ok = await postProfile({
@@ -193,46 +237,40 @@ export default function OnboardingPage() {
     });
     if (!ok) return;
     setProfileSubmitted(true);
+    if (reminderPreferenceSet) {
+      finishOnboarded();
+      return;
+    }
     setStep("reminders");
   }
 
-  // Skip: no server call — advance to reminders WITHOUT marking onboarded.
-  // Whether the patient ends up onboarded is decided on the reminders step.
+  // Skip: no server call. Advance to reminders if they still need answering,
+  // otherwise leave as un-onboarded-but-dismissed.
   function handleProfileSkip() {
     if (isSubmitting) return;
     setError("");
+    if (reminderPreferenceSet) {
+      finishSkipped();
+      return;
+    }
     setStep("reminders");
   }
 
-  // ─── Step 2 (reminders) ─────────────────────────────────────────────────
-  // Continue: persist reminder prefs. POST forces COMPLETED, so this onboards
-  // the patient even when step 1 was skipped (setting reminders is real data —
-  // per product, any Continue counts as onboarded).
+  // ─── Reminders step ─────────────────────────────────────────────────────
+  // Continue is the only exit (no Skip — daily reminders are always-on per
+  // Manisha's Patient Reminder spec §1D, so a Skip would just apply the 09:00
+  // default while implying it had opted out). Persisting reminders marks
+  // reminderPreferenceSet but never completes onboarding: if identity was
+  // skipped, the patient leaves as NOT_COMPLETED + device-dismissed.
   async function handleRemindersContinue() {
     if (isSubmitting) return;
     const ok = await postProfile({ reminderTime, quietHoursStart, quietHoursEnd });
     if (!ok) return;
-    finishOnboarded();
-  }
-
-  // Skip: the outcome depends on step 1.
-  //  • Step 1 was continued → server row is already COMPLETED → finalize.
-  //  • Step 1 was ALSO skipped → nothing persisted server-side. Set only the
-  //    this-browser localStorage flag so the patient isn't nagged again here,
-  //    but leave onboardingStatus untouched so another browser re-asks (both
-  //    steps were skipped — that's the sole "re-ask elsewhere" condition).
-  function handleRemindersSkip() {
-    if (isSubmitting) return;
-    if (!user) {
-      router.push("/sign-in");
-      return;
-    }
     if (profileSubmitted) {
       finishOnboarded();
       return;
     }
-    markOnboardingSkipped(user.id);
-    router.push("/dashboard");
+    finishSkipped();
   }
 
   function handleRemindersBack() {
@@ -357,12 +395,17 @@ export default function OnboardingPage() {
           {/* Left side - Form */}
           <div className="flex-1 w-full max-w-[400px] md:max-w-105 lg:max-w-130">
 
-            {/* Step indicator (Step 1 of 2 / 2 of 2) */}
+            {/* Step indicator. Two steps normally; on a re-ask (reminders
+                already answered on another device) identity is the only step,
+                so the total collapses to 1 rather than promising a step 2
+                that never comes. */}
             <div
               data-testid="onboarding-step-indicator"
               className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#7B00E0] text-center md:text-left"
             >
-              {t('onboarding.stepIndicator').replace('{n}', step === 'reminders' ? '2' : '1')}
+              {t('onboarding.stepIndicator')
+                .replace('{n}', step === 'reminders' ? '2' : '1')
+                .replace('{t}', reminderPreferenceSet ? '1' : '2')}
             </div>
 
             {/* Heading — step-aware */}
@@ -391,6 +434,7 @@ export default function OnboardingPage() {
                 <div className="flex items-center gap-2">
                   <input
                     id="onboarding-name"
+                    data-testid="onboarding-name-input"
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -564,15 +608,6 @@ export default function OnboardingPage() {
                     className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     {isSubmitting ? t('common.saving') : t('onboarding.continue')}
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="onboarding-reminders-skip-btn"
-                    onClick={handleRemindersSkip}
-                    disabled={isSubmitting}
-                    className="w-full text-sm text-[#737373] mt-4 cursor-pointer disabled:opacity-50"
-                  >
-                    {t('onboarding.skip')}
                   </button>
                   <button
                     type="button"

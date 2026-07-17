@@ -1019,7 +1019,7 @@ const fr: Record<TranslationKey, string> = {
   'onboarding.reminders.emergencyDisclaimer': "Les alertes d'urgence sont toujours transmises, même pendant les heures de silence.",
   'onboarding.reminders.title': 'Configurez vos rappels',
   'onboarding.reminders.subtitle': 'Choisissez quand nous prenons de vos nouvelles. Vous pouvez modifier cela à tout moment dans les Paramètres.',
-  'onboarding.stepIndicator': 'Étape {n} sur 2',
+  'onboarding.stepIndicator': 'Étape {n} sur {t}',
   'onboarding.back': 'Retour',
   'onboarding.invalidDob': 'Veuillez entrer une date de naissance valide.',
   'onboarding.continue': 'Continuer',

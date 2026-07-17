@@ -30,6 +30,14 @@ model User {
   reminderTime            String?                  @default("09:00")
   quietHoursStart         String?                  @default("22:00")
   quietHoursEnd           String?                  @default("07:00")
+  // True once the patient has been through the onboarding reminders step.
+  // The three fields above always hold a usable value (defaults), so they
+  // cannot distinguish "patient chose 09:00" from "nobody ever asked" — this
+  // flag carries that fact across devices, which localStorage cannot. Drives
+  // the onboarding re-ask: a second device shows the identity step only and
+  // never re-asks for reminders. Orthogonal to `onboardingStatus`, which is
+  // identity-gated (name/comm) and never flipped by reminder prefs.
+  reminderPreferenceSet   Boolean                  @default(false)
   isVerified              Boolean                  @default(false)
   roles                   UserRole[]               @default([PATIENT])
   onboardingStatus        OnboardingStatus         @default(NOT_COMPLETED)

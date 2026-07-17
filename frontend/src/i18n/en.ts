@@ -1045,7 +1045,7 @@ const en = {
   'onboarding.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
   'onboarding.reminders.title': 'Set up your reminders',
   'onboarding.reminders.subtitle': 'Choose when we check in with you. You can change this anytime in Settings.',
-  'onboarding.stepIndicator': 'Step {n} of 2',
+  'onboarding.stepIndicator': 'Step {n} of {t}',
   'onboarding.back': 'Back',
   'onboarding.invalidDob': 'Please enter a valid date of birth.',
   'onboarding.continue': 'Continue',

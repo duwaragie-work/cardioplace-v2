@@ -176,6 +176,9 @@ export interface ProfileResult {
   preferredLanguage?: string | null
   timezone: string | null
   onboardingStatus: OnboardingStatus
+  // Present on submit/patch responses so the client can route the onboarding
+  // steps without a follow-up GET.
+  reminderPreferenceSet?: boolean
 }
 
 function sha256(input: string): string {
@@ -3204,9 +3207,34 @@ export class AuthService {
   async submitProfile(userId: string, dto: ProfileDto): Promise<ProfileResult> {
     const patch = this.buildProfilePatch(dto)
 
+    // Onboarding completion is IDENTITY-gated: only a non-empty name or a
+    // communication preference counts. Reminder prefs must never complete
+    // onboarding — they always fall back to a schema default (09:00/22:00/
+    // 07:00), so treating them as "the patient told us something" marked
+    // patients COMPLETED who had supplied nothing. A reminder-only payload
+    // still persists its fields; it just leaves onboardingStatus alone.
+    const hasIdentity =
+      (typeof dto.name === 'string' && dto.name.trim() !== '') ||
+      (dto.communicationPreference !== undefined &&
+        dto.communicationPreference !== null)
+
+    // Reminder step answered (any of the three fields posted). Recorded so a
+    // re-ask on another device shows the identity step only — localStorage is
+    // device-local and cannot carry this.
+    const hasReminderPrefs =
+      dto.reminderTime !== undefined ||
+      dto.quietHoursStart !== undefined ||
+      dto.quietHoursEnd !== undefined
+
     const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: { ...patch, onboardingStatus: OnboardingStatus.COMPLETED },
+      data: {
+        ...patch,
+        ...(hasIdentity
+          ? { onboardingStatus: OnboardingStatus.COMPLETED }
+          : {}),
+        ...(hasReminderPrefs ? { reminderPreferenceSet: true } : {}),
+      },
       select: {
         name: true,
         dateOfBirth: true,
@@ -3214,6 +3242,7 @@ export class AuthService {
         preferredLanguage: true,
         timezone: true,
         onboardingStatus: true,
+        reminderPreferenceSet: true,
       },
     })
 
@@ -3225,9 +3254,18 @@ export class AuthService {
   async patchProfile(userId: string, dto: ProfileDto): Promise<ProfileResult> {
     const patch = this.buildProfilePatch(dto)
 
+    // Editing reminders from the profile page counts as answering them, same
+    // as the onboarding step — otherwise a patient who set a time here would
+    // still be re-asked for reminders on their next device. PATCH never
+    // touches onboardingStatus; identity completion is submitProfile's job.
+    const hasReminderPrefs =
+      dto.reminderTime !== undefined ||
+      dto.quietHoursStart !== undefined ||
+      dto.quietHoursEnd !== undefined
+
     const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: patch,
+      data: { ...patch, ...(hasReminderPrefs ? { reminderPreferenceSet: true } : {}) },
       select: {
         name: true,
         dateOfBirth: true,
@@ -3240,6 +3278,7 @@ export class AuthService {
         quietHoursStart: true,
         quietHoursEnd: true,
         onboardingStatus: true,
+        reminderPreferenceSet: true,
       },
     })
 
@@ -3300,6 +3339,8 @@ export class AuthService {
         reminderTime: true,
         quietHoursStart: true,
         quietHoursEnd: true,
+        // Onboarding step routing — see the field comment in user.prisma.
+        reminderPreferenceSet: true,
         createdAt: true,
       },
     })

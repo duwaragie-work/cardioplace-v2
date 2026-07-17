@@ -1019,7 +1019,7 @@ const de: Record<TranslationKey, string> = {
   'onboarding.reminders.emergencyDisclaimer': 'Notfallalarme werden auch während der Ruhezeiten immer zugestellt.',
   'onboarding.reminders.title': 'Richten Sie Ihre Erinnerungen ein',
   'onboarding.reminders.subtitle': 'Wählen Sie, wann wir uns bei Ihnen melden. Sie können dies jederzeit in den Einstellungen ändern.',
-  'onboarding.stepIndicator': 'Schritt {n} von 2',
+  'onboarding.stepIndicator': 'Schritt {n} von {t}',
   'onboarding.back': 'Zurück',
   'onboarding.invalidDob': 'Bitte geben Sie ein gültiges Geburtsdatum ein.',
   'onboarding.continue': 'Weiter',

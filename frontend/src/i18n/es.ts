@@ -1019,7 +1019,7 @@ const es: Record<TranslationKey, string> = {
   'onboarding.reminders.emergencyDisclaimer': 'Las alertas de emergencia siempre llegan, incluso durante las horas silenciosas.',
   'onboarding.reminders.title': 'Configura tus recordatorios',
   'onboarding.reminders.subtitle': 'Elige cuándo queremos saber de ti. Puedes cambiarlo en cualquier momento en Ajustes.',
-  'onboarding.stepIndicator': 'Paso {n} de 2',
+  'onboarding.stepIndicator': 'Paso {n} de {t}',
   'onboarding.back': 'Atrás',
   'onboarding.invalidDob': 'Por favor ingresa una fecha de nacimiento válida.',
   'onboarding.continue': 'Continuar',
