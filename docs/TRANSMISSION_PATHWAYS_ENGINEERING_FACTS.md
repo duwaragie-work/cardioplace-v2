@@ -61,11 +61,6 @@ On the 2026-07-14 revision, two entries in my task memo did not match the code a
 - `:81` — *"🔴 Voice WebSocket CORS = wildcard — accepts any origin."* **Stale.** `voice.gateway.ts:34-59` now enforces a `WEB_APP_URL` allowlist (with the null-origin carve-out in §2).
 - `:68` — *"In transit — external services ✅ HTTPS enforced by Gemini / Resend / Google SDKs."* Omits Web Push and OTLP entirely, and glosses the un-enforced SMTP STARTTLS.
 
-### 3.3 Stale lines in `docs/ENCRYPTION.md`
-
-- `:81` — *"🔴 Voice WebSocket CORS = wildcard — accepts any origin."* **Stale.** `voice.gateway.ts:34-59` now enforces a `WEB_APP_URL` allowlist (with the null-origin carve-out in §2).
-- `:68` — *"In transit — external services ✅ HTTPS enforced by Gemini / Resend / Google SDKs."* Omits Web Push and OTLP entirely, and glosses the un-enforced SMTP STARTTLS.
-
 ---
 
 ## 4 · OTLP row — RESOLVED 2026-07-16 (Ruhaim)

@@ -23,7 +23,6 @@ import { AuditExceptionWriter } from './audit-exception-writer.js'
 import type { ExceptionCandidate } from './detector.types.js'
 import {
   aggregateFailedAuth,
-  CRITICAL_ESCALATION_THRESHOLD,
   DEV_OTP_IDENTIFIER,
   FAILED_AUTH_SELECT,
 } from './detectors/repeated-failed-auth.shared.js'

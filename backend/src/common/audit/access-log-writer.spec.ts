@@ -56,7 +56,29 @@ async function waitForFile(
     }
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
-  return readdirSync(dir).catch(() => [] as string[]) as never
+  // Timed out. readdirSync is SYNCHRONOUS, so the `.catch()` that used to be
+  // here was never callable — on the timeout path it threw a TypeError and
+  // masked the real assertion failure. Return whatever is on disk (or nothing)
+  // so the caller's expectation produces a useful diff.
+  try {
+    return readdirSync(dir)
+  } catch {
+    return []
+  }
+}
+
+// Poll until a condition holds. Used for state the transport worker changes
+// asynchronously (e.g. the writer falling back to dormant on a transport
+// error), which no synchronous assertion can observe.
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 3000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
 }
 
 async function flushAndDestroy(writer: AccessLogWriter) {
@@ -187,7 +209,7 @@ describe('AccessLogWriter — V-17 (dormant-by-default access-log Pino writer)',
     expect(content).toMatch(/"action":"READ"/)
   })
 
-  it('bad LOG_SINK config keeps the writer dormant (no throw)', async () => {
+  it('bad LOG_SINK config keeps the writer dormant (async transport error, no crash)', async () => {
     process.env.LOG_SINK = 'file'
     // Point at a path pino-roll cannot write under to force an init failure.
     // On Windows a NUL device / on POSIX a bogus root path both fail; we use
@@ -195,8 +217,18 @@ describe('AccessLogWriter — V-17 (dormant-by-default access-log Pino writer)',
     process.env.ACCESS_LOG_FILE_DIR = 'C:/?bad?path?'
 
     const writer = new AccessLogWriter(new PassThroughRedactor())
-    // Init must not throw — errors are caught + logged.
+    // Init must not throw — but this assertion alone is NOT the guarantee.
+    // pino-roll validates the filename inside the worker thread, so the
+    // failure arrives as an async 'error' on the ThreadStream long after
+    // onModuleInit() has returned. Before the transport 'error' handler
+    // existed this spec passed while the event went unhandled and killed the
+    // process. The real proof is that the writer falls back to dormant below.
     expect(() => writer.onModuleInit()).not.toThrow()
+
+    await waitFor(() => writer.sinkMode === 'off')
+    expect(writer.sinkMode).toBe('off')
+
+    // Dormant writer must still be a safe no-op for callers.
     expect(() => writer.logAccess(SAMPLE)).not.toThrow()
     await flushAndDestroy(writer)
   })

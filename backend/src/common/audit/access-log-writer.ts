@@ -13,13 +13,17 @@ import { NullRedactor, PHI_REDACTOR, type PhiRedactor } from './phi-redactor.js'
  * V-17 (Ruhaim 2026-07-16 addendum) — Pino access-log writer with rotated
  * file transport + config seam for a future S3 destination.
  *
- * Ships DORMANT this PR: the DB write at
+ * SHADOW MODE: the DB write at
  *   backend/src/common/prisma-extensions/access-log.extension.ts:413
- * is untouched; the extension gains a *shadow* call to logAccess() alongside
- * it, but the default PHI_REDACTOR binding (NullRedactor) returns null, so
- * every record is dropped before it reaches Pino. The follow-up flip PR
- * (after V-05 lands) swaps the NullRedactor binding for the real V-05
- * redactor + deletes the DB write.
+ * is untouched; the extension makes a *shadow* call to logAccess() alongside
+ * it. The DB write is only retired once the S3 destination lands with the AWS
+ * migration — until then the rotated file runs beside it, not instead of it.
+ *
+ * Redactor unblocked 2026-07-17: the binding is now StrictMetadataRedactor
+ * (was NullRedactor, which dropped everything pending V-05). AccessLogData is
+ * a closed metadata-only struct, so the V-05 dependency was a comment rather
+ * than a real one — see phi-redactor.ts. Writes still only happen when an
+ * operator opts in via LOG_SINK; prod's default ('off') is unchanged.
  *
  * Config seam mirrors `backend/src/observability/tracing.ts` — read env,
  * guard on presence, no-op when unset. Env vars:
@@ -44,6 +48,16 @@ export class AccessLogWriter implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(PHI_REDACTOR) private readonly redactor: PhiRedactor,
   ) {}
+
+  /**
+   * Current sink state. 'off' means dormant — either never configured, or the
+   * transport failed and we fell back. Exposed because the transport can go
+   * dormant ASYNCHRONOUSLY (see the 'error' handler in onModuleInit), so this
+   * is the only way to assert the fail-safe actually held.
+   */
+  get sinkMode(): 'off' | 'file' | 's3' {
+    return this.mode
+  }
 
   onModuleInit(): void {
     const sink = (process.env.LOG_SINK ?? 'off').trim().toLowerCase()
@@ -92,6 +106,23 @@ export class AccessLogWriter implements OnModuleInit, OnModuleDestroy {
           mkdir: true,
         },
       })
+
+      // pino-roll validates the filename INSIDE the worker thread, so a bad
+      // ACCESS_LOG_FILE_DIR surfaces as an async 'error' on the ThreadStream
+      // — never as a throw from pinoTransport() above. Without this handler
+      // the event is unhandled and Node takes the whole process down, which
+      // is precisely the failure the catch below claims to prevent. Same
+      // dormancy semantics as the sync path: log loudly, no partial state.
+      transport.on('error', (err: unknown) => {
+        this.log.error(
+          `AccessLogWriter transport failed for LOG_SINK=file at ${dir} — ` +
+            'writer is now dormant. Prod DB access-log path unaffected.',
+          err instanceof Error ? err.stack : String(err),
+        )
+        this.mode = 'off'
+        this.logger = null
+      })
+
       this.logger = pino({}, transport)
     } catch (err) {
       // Never let a bad LOG_SINK config crash the app — the DB write path is
@@ -108,10 +139,14 @@ export class AccessLogWriter implements OnModuleInit, OnModuleDestroy {
     }
 
     if (this.redactor instanceof NullRedactor) {
+      // No longer the default (StrictMetadataRedactor is, since 2026-07-17), so
+      // reaching this means someone deliberately rebound it. Keep the warning:
+      // an operator who set LOG_SINK=file deserves to know the file will stay
+      // empty rather than assume the sink is broken.
       this.log.warn(
-        'LOG_SINK=file is active but PHI_REDACTOR is bound to NullRedactor ' +
-          '(default). Every logAccess() call will be silently dropped. Wire ' +
-          'V-05 to activate writes.',
+        'LOG_SINK=file is active but PHI_REDACTOR is bound to NullRedactor — ' +
+          'every logAccess() call will be silently dropped. Rebind to ' +
+          'StrictMetadataRedactor to activate writes.',
       )
     } else {
       this.log.log(

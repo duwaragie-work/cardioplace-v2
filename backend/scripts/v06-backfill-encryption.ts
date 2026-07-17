@@ -84,8 +84,17 @@ interface FieldSpec {
   field: string
   /** Encrypted sibling column name. */
   siblingField: string
-  /** Fetch id + plaintext for candidate rows. */
-  loadBatch: (prisma: PrismaClient) => Promise<Array<{ id: string; userId: string | null; plaintext: string | string[] | null }>>
+  /**
+   * Fetch id + plaintext for candidate rows.
+   *
+   * `skip` is an OFFSET used by DRY_RUN only. Live runs always pass 0: rows
+   * leave the `<field> IS NOT NULL AND <sibling> IS NULL` filter as they are
+   * encrypted, so the next query naturally returns the next batch. A dry run
+   * writes nothing, so without an advancing offset the identical batch would
+   * return forever — the loop's `length === 0` / `length < BATCH_SIZE` exits
+   * could never fire and the run would hang while inflating its own count.
+   */
+  loadBatch: (prisma: PrismaClient, skip: number) => Promise<Array<{ id: string; userId: string | null; plaintext: string | string[] | null }>>
   /** Persist encrypted envelope on a single row. */
   update: (prisma: PrismaClient, id: string, encrypted: string) => Promise<void>
   /** Encode plaintext (string arrays go via JSON before encryption). */
@@ -104,15 +113,16 @@ const SPECS: FieldSpec[] = [
     model: 'Conversation',
     field: 'userMessage',
     siblingField: 'userMessageEncrypted',
-    loadBatch: async (p) => {
+    loadBatch: async (p, skip) => {
       const rows = await (p as any).$queryRawUnsafe(
         `SELECT c.id, s."userId", c."userMessage" AS plaintext
          FROM "Conversation" c
          JOIN "Session" s ON s.id = c."sessionId"
          WHERE c."userMessage" IS NOT NULL
            AND c."userMessageEncrypted" IS NULL
-         LIMIT $1`,
+         LIMIT $1 OFFSET $2`,
         BATCH_SIZE,
+        skip,
       )
       return rows.map((r: any) => ({ id: r.id, userId: r.userId, plaintext: r.plaintext }))
     },
@@ -129,15 +139,16 @@ const SPECS: FieldSpec[] = [
     model: 'Conversation',
     field: 'aiSummary',
     siblingField: 'aiSummaryEncrypted',
-    loadBatch: async (p) => {
+    loadBatch: async (p, skip) => {
       const rows = await (p as any).$queryRawUnsafe(
         `SELECT c.id, s."userId", c."aiSummary" AS plaintext
          FROM "Conversation" c
          JOIN "Session" s ON s.id = c."sessionId"
          WHERE c."aiSummary" IS NOT NULL
            AND c."aiSummaryEncrypted" IS NULL
-         LIMIT $1`,
+         LIMIT $1 OFFSET $2`,
         BATCH_SIZE,
+        skip,
       )
       return rows.map((r: any) => ({ id: r.id, userId: r.userId, plaintext: r.plaintext }))
     },
@@ -155,11 +166,12 @@ const SPECS: FieldSpec[] = [
     model: 'Session',
     field: 'title',
     siblingField: 'titleEncrypted',
-    loadBatch: (p) =>
+    loadBatch: (p, skip) =>
       p.session.findMany({
         where: { title: { not: null }, titleEncrypted: null },
         select: { id: true, userId: true, title: true },
         take: BATCH_SIZE,
+        skip,
       }).then((rows) => rows.map((r) => ({ id: r.id, userId: r.userId, plaintext: r.title }))),
     update: async (p, id, enc) => {
       await p.session.update({ where: { id }, data: { titleEncrypted: enc } })
@@ -170,11 +182,12 @@ const SPECS: FieldSpec[] = [
     model: 'Session',
     field: 'summary',
     siblingField: 'summaryEncrypted',
-    loadBatch: (p) =>
+    loadBatch: (p, skip) =>
       p.session.findMany({
         where: { summary: { not: null }, summaryEncrypted: null },
         select: { id: true, userId: true, summary: true },
         take: BATCH_SIZE,
+        skip,
       }).then((rows) => rows.map((r) => ({ id: r.id, userId: r.userId, plaintext: r.summary }))),
     update: async (p, id, enc) => {
       await p.session.update({ where: { id }, data: { summaryEncrypted: enc } })
@@ -186,11 +199,12 @@ const SPECS: FieldSpec[] = [
     model: 'JournalEntry',
     field: 'notes',
     siblingField: 'notesEncrypted',
-    loadBatch: (p) =>
+    loadBatch: (p, skip) =>
       p.journalEntry.findMany({
         where: { notes: { not: null }, notesEncrypted: null },
         select: { id: true, userId: true, notes: true },
         take: BATCH_SIZE,
+        skip,
       }).then((rows) => rows.map((r) => ({ id: r.id, userId: r.userId, plaintext: r.notes }))),
     update: async (p, id, enc) => {
       await p.journalEntry.update({ where: { id }, data: { notesEncrypted: enc } })
@@ -201,11 +215,12 @@ const SPECS: FieldSpec[] = [
     model: 'JournalEntry',
     field: 'teachBackAnswer',
     siblingField: 'teachBackAnswerEncrypted',
-    loadBatch: (p) =>
+    loadBatch: (p, skip) =>
       p.journalEntry.findMany({
         where: { teachBackAnswer: { not: null }, teachBackAnswerEncrypted: null },
         select: { id: true, userId: true, teachBackAnswer: true },
         take: BATCH_SIZE,
+        skip,
       }).then((rows) => rows.map((r) => ({ id: r.id, userId: r.userId, plaintext: r.teachBackAnswer }))),
     update: async (p, id, enc) => {
       await p.journalEntry.update({ where: { id }, data: { teachBackAnswerEncrypted: enc } })
@@ -220,14 +235,15 @@ const SPECS: FieldSpec[] = [
     model: 'JournalEntry',
     field: 'otherSymptoms',
     siblingField: 'otherSymptomsEncrypted',
-    loadBatch: async (p) => {
+    loadBatch: async (p, skip) => {
       const rows = await (p as any).$queryRawUnsafe(
         `SELECT id, "userId", "otherSymptoms" AS plaintext
          FROM "JournalEntry"
          WHERE array_length("otherSymptoms", 1) > 0
            AND "otherSymptomsEncrypted" IS NULL
-         LIMIT $1`,
+         LIMIT $1 OFFSET $2`,
         BATCH_SIZE,
+        skip,
       )
       return rows.map((r: any) => ({ id: r.id, userId: r.userId, plaintext: r.plaintext }))
     },
@@ -242,11 +258,12 @@ const SPECS: FieldSpec[] = [
     model: 'PatientThreshold',
     field: 'notes',
     siblingField: 'notesEncrypted',
-    loadBatch: (p) =>
+    loadBatch: (p, skip) =>
       p.patientThreshold.findMany({
         where: { notes: { not: null }, notesEncrypted: null },
         select: { id: true, userId: true, notes: true },
         take: BATCH_SIZE,
+        skip,
       }).then((rows) => rows.map((r) => ({ id: r.id, userId: r.userId, plaintext: r.notes }))),
     update: async (p, id, enc) => {
       await p.patientThreshold.update({ where: { id }, data: { notesEncrypted: enc } })
@@ -258,11 +275,12 @@ const SPECS: FieldSpec[] = [
     model: 'EscalationEvent',
     field: 'reason',
     siblingField: 'reasonEncrypted',
-    loadBatch: (p) =>
+    loadBatch: (p, skip) =>
       p.escalationEvent.findMany({
         where: { reason: { not: null }, reasonEncrypted: null },
         select: { id: true, userId: true, reason: true },
         take: BATCH_SIZE,
+        skip,
       }).then((rows) => rows.map((r) => ({ id: r.id, userId: r.userId, plaintext: r.reason }))),
     update: async (p, id, enc) => {
       await p.escalationEvent.update({ where: { id }, data: { reasonEncrypted: enc } })
@@ -274,11 +292,12 @@ const SPECS: FieldSpec[] = [
     model: 'ProfileVerificationLog',
     field: 'rationale',
     siblingField: 'rationaleEncrypted',
-    loadBatch: (p) =>
+    loadBatch: (p, skip) =>
       p.profileVerificationLog.findMany({
         where: { rationale: { not: null }, rationaleEncrypted: null },
         select: { id: true, userId: true, rationale: true },
         take: BATCH_SIZE,
+        skip,
       }).then((rows) => rows.map((r) => ({ id: r.id, userId: r.userId, plaintext: r.rationale }))),
     update: async (p, id, enc) => {
       await p.profileVerificationLog.update({ where: { id }, data: { rationaleEncrypted: enc } })
@@ -290,11 +309,12 @@ const SPECS: FieldSpec[] = [
     model: 'PatientMedication',
     field: 'notes',
     siblingField: 'notesEncrypted',
-    loadBatch: (p) =>
+    loadBatch: (p, skip) =>
       p.patientMedication.findMany({
         where: { notes: { not: null }, notesEncrypted: null },
         select: { id: true, userId: true, notes: true },
         take: BATCH_SIZE,
+        skip,
       }).then((rows) => rows.map((r) => ({ id: r.id, userId: r.userId, plaintext: r.notes }))),
     update: async (p, id, enc) => {
       await p.patientMedication.update({ where: { id }, data: { notesEncrypted: enc } })
@@ -305,11 +325,12 @@ const SPECS: FieldSpec[] = [
     model: 'PatientMedication',
     field: 'rawInputText',
     siblingField: 'rawInputTextEncrypted',
-    loadBatch: (p) =>
+    loadBatch: (p, skip) =>
       p.patientMedication.findMany({
         where: { rawInputText: { not: null }, rawInputTextEncrypted: null },
         select: { id: true, userId: true, rawInputText: true },
         take: BATCH_SIZE,
+        skip,
       }).then((rows) => rows.map((r) => ({ id: r.id, userId: r.userId, plaintext: r.rawInputText }))),
     update: async (p, id, enc) => {
       await p.patientMedication.update({ where: { id }, data: { rawInputTextEncrypted: enc } })
@@ -320,11 +341,12 @@ const SPECS: FieldSpec[] = [
     model: 'PatientMedication',
     field: 'plainLanguageDescription',
     siblingField: 'plainLanguageDescriptionEncrypted',
-    loadBatch: (p) =>
+    loadBatch: (p, skip) =>
       p.patientMedication.findMany({
         where: { plainLanguageDescription: { not: null }, plainLanguageDescriptionEncrypted: null },
         select: { id: true, userId: true, plainLanguageDescription: true },
         take: BATCH_SIZE,
+        skip,
       }).then((rows) => rows.map((r) => ({ id: r.id, userId: r.userId, plaintext: r.plainLanguageDescription }))),
     update: async (p, id, enc) => {
       await p.patientMedication.update({ where: { id }, data: { plainLanguageDescriptionEncrypted: enc } })
@@ -336,7 +358,7 @@ const SPECS: FieldSpec[] = [
     model: 'PatientProfile',
     field: 'aceContraindicationReason',
     siblingField: 'aceContraindicationReasonEncrypted',
-    loadBatch: (p) =>
+    loadBatch: (p, skip) =>
       p.patientProfile.findMany({
         where: {
           aceContraindicationReason: { not: null },
@@ -344,6 +366,7 @@ const SPECS: FieldSpec[] = [
         },
         select: { id: true, userId: true, aceContraindicationReason: true },
         take: BATCH_SIZE,
+        skip,
       }).then((rows) => rows.map((r) => ({ id: r.id, userId: r.userId, plaintext: r.aceContraindicationReason }))),
     update: async (p, id, enc) => {
       await p.patientProfile.update({ where: { id }, data: { aceContraindicationReasonEncrypted: enc } })
@@ -372,11 +395,18 @@ async function main() {
       const label = `${spec.model}.${spec.field}`
       let fieldCount = 0
       let batchIdx = 0
+      // Live runs MUST keep this at 0: encrypting a row drops it out of
+      // loadBatch's `<sibling> IS NULL` filter, so the next query already
+      // returns the next batch — an advancing offset would step over rows that
+      // still need encrypting. DRY_RUN writes nothing, so the filter never
+      // advances and the offset is the only thing that can move the cursor.
+      let skip = 0
 
       while (true) {
-        const batch = await spec.loadBatch(prisma)
+        const batch = await spec.loadBatch(prisma, skip)
         if (batch.length === 0) break
         batchIdx += 1
+        if (DRY_RUN) skip += batch.length
 
         for (const row of batch) {
           if (row.plaintext == null) continue
