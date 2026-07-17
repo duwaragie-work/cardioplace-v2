@@ -2886,36 +2886,52 @@ export default function CheckIn() {
   function startAnotherReading() {
     // L-9 (M-3, Manisha confirmed) — if the patient EXPLICITLY finalized the
     // last sitting ("I'm good, send to my care team"), "Add another reading"
-    // starts a BRAND-NEW session rather than reopening the one they said they
-    // were done with. A timer/implicit close leaves committedExplicitly false,
-    // so that path still rejoins the sitting within its 5-min edit window.
-    if (committedExplicitly) {
+    // opens a BRAND-NEW session rather than reopening the one they said they
+    // were done with. That means a full reset, not just a new id:
+    //   • new sessionId                → the reading can't group/average with it
+    //   • readingNumber → 0            → runs STEP_FLOW (the B1 checklist is
+    //                                    per-sitting) and drops the "Reading N in
+    //                                    this session · AFib needs 3" banner
+    //   • sessionReadings → []         → the old sitting's readings don't count
+    //                                    toward the new one's AFib 3-in-a-row
+    // A timer/implicit close leaves committedExplicitly false, so that path
+    // still rejoins the sitting within its 5-min edit window (unchanged).
+    const freshSession = committedExplicitly;
+    if (freshSession) {
       setSessionId(uuid());
       setCommittedExplicitly(false);
+      setReadingNumber(0);
+      setSessionReadings([]);
     }
-    // Reset reading-specific fields; skip B1 next round.
     setForm((prev) => ({
       ...emptyForm(),
       measuredDate: nowDate(),
       measuredTime: nowTime(),
-      // Carry forward the user's checklist answers — they're still valid for
-      // the same session so we don't make them re-tap 8 things.
-      noCaffeine: prev.noCaffeine,
-      noSmoking: prev.noSmoking,
-      noExercise: prev.noExercise,
-      bladderEmpty: prev.bladderEmpty,
-      seatedQuietly: prev.seatedQuietly,
-      posturalSupport: prev.posturalSupport,
-      notTalking: prev.notTalking,
-      cuffOnBareArm: prev.cuffOnBareArm,
+      // SAME session → carry the checklist forward; it's still valid for this
+      // sitting and we don't make them re-tap 8 things. NEW session → a new
+      // sitting, so nothing is pre-filled and B1 re-asks (a checklist attests
+      // to the conditions of THAT measurement, so it must not be inherited).
+      ...(freshSession
+        ? {}
+        : {
+            noCaffeine: prev.noCaffeine,
+            noSmoking: prev.noSmoking,
+            noExercise: prev.noExercise,
+            bladderEmpty: prev.bladderEmpty,
+            seatedQuietly: prev.seatedQuietly,
+            posturalSupport: prev.posturalSupport,
+            notTalking: prev.notTalking,
+            cuffOnBareArm: prev.cuffOnBareArm,
+          }),
+      // Unit is a display preference, not a clinical attestation — always keep.
       weightUnit: prev.weightUnit,
     }));
     setShowConfirmation(false);
-    // Cluster 6 Q2 — second reading is being logged in the same session.
-    // Clear the finalize timer so it doesn't fire when the new reading
-    // averages with the first.
+    // Cluster 6 Q2 — clear the finalize timer so it doesn't fire when the new
+    // reading averages with the first (same-session case).
     setPendingFinalizeEntryId(null);
-    setStep('B2');
+    // New session starts at the checklist (STEP_FLOW[0]); same session skips B1.
+    setStep(freshSession ? 'B1' : 'B2');
     setDirection(1);
   }
 
@@ -3272,10 +3288,25 @@ export default function CheckIn() {
         resumed={optionDResumed}
         onSubmitSecond={submitOptionDSecond}
         onDecline={handleOptionDDecline}
+        hasPendingBufferedReading={!!bufferDraft}
         onDone={() => {
           // Bug 16 — if the confirmatory was emergency-range we already routed to
           // the 911 alert; don't bounce over it to the dashboard.
           if (optionDRoutedToEmergencyRef.current) return;
+          // A buffered sitting is still UNCOMMITTED on-device — the patient
+          // logged a normal reading (held for the 5-min window), then a high one
+          // that routed here. Leaving for the dashboard strands that first
+          // reading (the backend has never seen it), so hand them back to the
+          // buffer review to finish it. Its own draft.sessionId is used on
+          // commit, so it stays a separate session from this emergency episode.
+          if (bufferDraft) {
+            setOptionDActive(false);
+            setOptionDFirstId(null);
+            setOptionDFirstBp(null);
+            setOptionDResumed(false);
+            setBufferReviewing(true);
+            return;
+          }
           router.push('/dashboard');
         }}
       />

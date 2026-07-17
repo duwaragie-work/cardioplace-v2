@@ -256,6 +256,9 @@ const en = {
   'checkin.optionD.screenC.body': 'We saved your reading and let your care team know they should check in with you.',
   'checkin.optionD.screenC.safetyFooter': "If you're feeling unwell right now, please call your doctor or 911.",
   'checkin.optionD.screenC.done': 'Back to dashboard',
+  // Shown instead of the above when an uncommitted buffered reading is still
+  // waiting — the CTA returns to the check-in so it isn't left unsent.
+  'checkin.optionD.screenC.doneFinishOther': 'Finish your other reading',
   // Bug 26 — confirmed-normal Screen C variant (PLACEHOLDER pending Manisha CONFIRM).
   'checkin.optionD.confirmedNormal.title': 'Your second reading looks better',
   'checkin.optionD.confirmedNormal.body': 'Your follow-up reading is in a safer range. We saved both readings and let your care team know — they may still reach out to check in.',
