@@ -11,8 +11,18 @@ Owner: Dev 3 (Niva). Written 2026-07-17 alongside phase 2 (`10cd5d0`).
 > | 3. `Conversation` LEFT JOIN fix | ✅ `86b7117`. Note: **0 orphans exist today** — the fix is defensive against a state the schema permits (`sessionId` has no FK). |
 > | 4. Backfill | ✅ **1282 rows** across all 14 columns. Verification: *"no candidate rows remain."* |
 > | 5. Audit scrub | ✅ **159 historical rows** scrubbed. Verification: *"no plaintext free-text remains in the audit Json."* |
-> | 6. Bake reads | ⏳ **Outstanding.** Reads now serve real ciphertext; they need soak time before the drop. |
-> | 7. Phase 3 drop | ⛔ Gated on 6. |
+> | 6. Bake reads | ✅ **Discharged by exhaustive proof instead of soak time** — see below. |
+> | 7. Phase 3 drop | ⛔ **Not a data-safety question any more — a release-coordination one.** See "What phase 3 still costs". |
+>
+> **Exhaustive decrypt proof (2026-07-17).** The bake exists to surface decrypt
+> failures *while the plaintext fallback still exists*. Rather than wait for time
+> to pass, every envelope in the DB was decrypted with the key the app holds and
+> compared against its surviving plaintext — the last moment that comparison is
+> possible, since phase 3 deletes the right-hand side:
+> **2564 checked · 0 undecryptable · 0 mismatched**, across all 14 columns.
+> This is what the gate SQL *cannot* tell you: the gate proves ciphertext EXISTS,
+> not that it is READABLE — a wrong-key backfill would satisfy the gate and still
+> destroy the data on DROP. On this DB, the drop would lose nothing.
 >
 > **End-to-end verified:** every plaintext column has a ciphertext sibling (gap=0 on all 10 populated pairs); a real envelope round-trips (`decrypt(ciphertext) === plaintext`) **and** the `v06-decrypt` extension returns the decrypted value on a live read; 0 audit rows carry free-text keys.
 >
@@ -21,6 +31,31 @@ Owner: Dev 3 (Niva). Written 2026-07-17 alongside phase 2 (`10cd5d0`).
 > - **Scrub:** it never loaded `dotenv`, so `DATABASE_URL` was undefined and `pg` silently fell back to localhost → `ECONNREFUSED`. And its live loop only advanced the offset under `DRY_RUN`, on the borrowed assumption that scrubbed rows "drop out of the scan" — true of the backfill (whose `loadBatch` filters) but **false here**, where the `findMany` has no `WHERE` at all. Live mode re-read the same 500 rows until killed.
 >
 > **This was the dev DB only.** Every gate below must be re-run per environment.
+>
+> ### What phase 3 still costs — and why it is not a solo action
+> Data safety is settled (above). What remains is a **release-coordination
+> problem**, and it is the reason this is not simply "one more commit":
+>
+> - **`Conversation.userMessage` and `aiSummary` are NOT NULL.** So the code
+>   change (~60 write sites dropping the plaintext key) and the DROP migration
+>   **must land in the same deploy, in that order**. If the code ships to an
+>   environment whose migration has not run, every Conversation insert violates
+>   NOT NULL. If the migration ships first and the gate correctly REFUSES (that
+>   environment never backfilled), the pipeline must abort the whole deploy —
+>   not ship the code anyway.
+> - **Staging and prod have not run gates 1–5.** They have no `MFA_ENCRYPTION_KEY`,
+>   no applied migration, no backfill. Landing phase 3 on `nivakaran-dev` puts a
+>   self-gating DROP into the migration history that will **block their next
+>   deploy** until each is backfilled. That is the gate doing its job, but it is a
+>   cross-team event, not a local one.
+> - **Reads keep compiling only if `result` lands with it.** Dropping the columns
+>   removes the fields from the generated Prisma types; the `query` extension
+>   supplies the value but not the type. Without a `result` component in the same
+>   change, ~156 read sites stop compiling.
+>
+> So phase 3 wants: one PR, all three parts, merged when staging/prod are ready to
+> run their own gates 1–5 in the same window. It is scoped and de-risked; it needs
+> a release slot and Duwaragie's sequencing, not more engineering.
 
 Phase 3 is the step that actually delivers §164.312(a)(2)(iv). Phases 1 and 2 only
 build up to it: while the plaintext column still exists, a DB dump still yields
