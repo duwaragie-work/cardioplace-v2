@@ -254,6 +254,8 @@ const am: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': 'ንባብዎን አስቀምጠናል እና የእንክብካቤ ቡድንዎ እንዲያገኝዎት አሳውቀናል።',
   'checkin.optionD.screenC.safetyFooter': 'አሁን ጤናዎ ካልተሰማዎት፣ እባክዎ ሐኪምዎን ወይም 911 ይደውሉ።',
   'checkin.optionD.screenC.done': 'ወደ ዳሽቦርድ ተመለስ',
+  // TODO(l10n-am): native-speaker verification required before ship.
+  'checkin.optionD.screenC.doneFinishOther': 'ሌላውን ንባብዎን ይጨርሱ',
   'checkin.optionD.confirmedNormal.title': 'ሁለተኛው ንባብዎ የተሻለ ይመስላል',
   'checkin.optionD.confirmedNormal.body': 'የክትትል ንባብዎ ይበልጥ ደህንነቱ በተጠበቀ ክልል ውስጥ ነው። ሁለቱንም ንባቦች አስቀምጠን ለእንክብካቤ ቡድንዎ አሳውቀናል — አሁንም ሊያገኙዎት ይችላሉ።',
   // Resume intro — Screen A ራስ-ሰር መቀጠያ (2026-06-16)። ጊዜያዊ (ማኒሻ በመጠባበቅ ላይ)።

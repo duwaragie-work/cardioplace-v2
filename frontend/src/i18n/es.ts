@@ -252,6 +252,7 @@ const es: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': 'Guardamos su lectura e informamos a su equipo de atención para que se comunique con usted.',
   'checkin.optionD.screenC.safetyFooter': 'Si se siente mal en este momento, llame a su médico o al 911.',
   'checkin.optionD.screenC.done': 'Volver al panel',
+  'checkin.optionD.screenC.doneFinishOther': 'Termina tu otra lectura',
   'checkin.optionD.confirmedNormal.title': 'Su segunda lectura se ve mejor',
   'checkin.optionD.confirmedNormal.body': 'Su lectura de seguimiento está en un rango más seguro. Guardamos ambas lecturas e informamos a su equipo de atención — es posible que aún se comuniquen con usted.',
   // Resume intro — Screen A auto-resume (2026-06-16). PLACEHOLDER (pendiente Manisha).

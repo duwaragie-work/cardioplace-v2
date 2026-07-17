@@ -3,6 +3,64 @@ import type { NextConfig } from "next";
 
 const monorepoRoot = path.resolve(process.cwd(), '..');
 
+// ─── V-12 · Security headers (CSP / X-Frame-Options / nosniff) ──────────────
+// Assessment finding: the Next apps emitted HSTS only. Policy is built from what
+// THIS app actually loads, so it can be enforced without breaking anything:
+//   • API    — every fetch goes to NEXT_PUBLIC_API_URL (connect-src).
+//   • blob:  — report/CSV downloads, recovery-code export.
+//   • data:  — inline SVG chevrons + the MFA-enrolment QR code (a data: PNG).
+// Deliberately tighter than the patient app: no third-party frames or images —
+// admin embeds nothing external, so frame-src stays same-origin.
+//
+// NOTE on script-src 'unsafe-inline': Next's App Router injects inline bootstrap
+// + RSC flight scripts. Dropping it needs a per-request nonce, which can't live
+// in this static `headers()` block and would force every page dynamic. The
+// finding asks for CSP in next.config, so we take the static form — the
+// high-value directives (frame-ancestors, connect-src, object-src) still hold.
+const isDev = process.env.NODE_ENV !== 'production';
+const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+
+/** ws(s):// origin for a http(s):// URL. */
+function wsOrigin(httpUrl: string): string {
+  try {
+    const u = new URL(httpUrl);
+    return `${u.protocol === 'https:' ? 'wss:' : 'ws:'}//${u.host}`;
+  } catch {
+    return '';
+  }
+}
+
+const connectSrc = [
+  ...new Set(
+    [
+      "'self'",
+      apiUrl,
+      wsOrigin(apiUrl),
+      // Dev only: Turbopack/HMR talks over ws to the dev server.
+      ...(isDev ? ['ws:', 'wss:'] : []),
+    ].filter(Boolean),
+  ),
+];
+
+const csp = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  // The real clickjacking control (X-Frame-Options below is the legacy twin).
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  // 'unsafe-eval' is required by React Refresh in dev only — never in prod.
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "media-src 'self' blob:",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
+  "frame-src 'self'",
+  `connect-src ${connectSrc.join(' ')}`,
+].join('; ');
+
 const nextConfig: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: monorepoRoot,
@@ -30,6 +88,14 @@ const nextConfig: NextConfig = {
             key: 'Strict-Transport-Security',
             value: 'max-age=31536000; includeSubDomains',
           },
+          // V-12 — see the policy note above.
+          { key: 'Content-Security-Policy', value: csp },
+          // Legacy clickjacking header for browsers that predate
+          // frame-ancestors. Nothing may embed the admin console.
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          // Admin URLs carry patient ids — never send them to another origin.
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         ],
       },
     ];
