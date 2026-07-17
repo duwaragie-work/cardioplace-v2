@@ -12,14 +12,23 @@ function keyFor(userId: string): string {
   return `${KEY_PREFIX}${userId}`;
 }
 
+/** V-10 — write time, so the stale-draft sweep can age this ePHI out when the
+ *  patient never signs out (tab closed / crash). Stripped on load so it never
+ *  leaks into IntakeFormState or a submit payload. Absent on drafts written
+ *  before this shipped — treated as "unknown age" and kept (see the sweep). */
+type StoredIntakeDraft = IntakeFormState & { __savedAt?: number };
+
 export function loadDraft(userId: string): IntakeFormState | null {
   if (typeof window === 'undefined' || !userId) return null;
   try {
     const raw = window.localStorage.getItem(keyFor(userId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as IntakeFormState;
+    const parsed = JSON.parse(raw) as StoredIntakeDraft;
     if (!parsed || typeof parsed !== 'object') return null;
-    return { ...EMPTY_INTAKE_STATE, ...parsed };
+    // Drop the storage-only stamp before it reaches the form state.
+    const { __savedAt: _savedAt, ...state } = parsed;
+    void _savedAt;
+    return { ...EMPTY_INTAKE_STATE, ...state };
   } catch {
     return null;
   }
@@ -28,7 +37,8 @@ export function loadDraft(userId: string): IntakeFormState | null {
 export function saveDraft(userId: string, state: IntakeFormState): void {
   if (typeof window === 'undefined' || !userId) return;
   try {
-    window.localStorage.setItem(keyFor(userId), JSON.stringify(state));
+    const stored: StoredIntakeDraft = { ...state, __savedAt: Date.now() };
+    window.localStorage.setItem(keyFor(userId), JSON.stringify(stored));
   } catch {
     // quota / private mode — silently no-op
   }

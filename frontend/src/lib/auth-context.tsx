@@ -21,6 +21,10 @@ import {
 } from '@/lib/cookie-names';
 import { useIdleTimeout } from '@/lib/hooks/useIdleTimeout';
 import { unsubscribePush } from '@/lib/services/push.service';
+import {
+  purgeClinicalDrafts,
+  sweepStaleClinicalDrafts,
+} from '@/lib/clinical-drafts';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -201,6 +205,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // cookie. If it succeeds we hydrate state with a fresh access token +
   // user profile; if it fails we treat the user as logged-out.
   useEffect(() => {
+    // V-10 — age out clinical drafts left behind when sign-out never ran (tab
+    // closed, crash, battery died), so abandoned ePHI can't linger on a shared
+    // device indefinitely. Runs before the auth branch below because it must
+    // happen whether or not this visitor turns out to be signed in.
+    sweepStaleClinicalDrafts();
+
     // Skip rehydrate when we're handling a fresh magic-link sign-in.
     // MagicLinkHandler is about to call login() with the tokens from the
     // URL params; running /refresh here would consume the just-issued
@@ -397,6 +407,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAvailablePractices([]);
       clearTokenState();
       clearAuthMarkers();
+      // V-10 — an idle timeout is the walked-away-from-a-shared-device case,
+      // so the clinical drafts must go here too, not just on explicit sign-out.
+      purgeClinicalDrafts();
       window.location.href = '/sign-in?session_expired=1';
     },
   });
@@ -428,6 +441,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAvailablePractices([]);
     clearTokenState();
     clearAuthMarkers();
+    // V-10 — wipe in-progress clinical drafts (BP, symptoms, medications) from
+    // this device. Runs even if the backend logout call above failed: the local
+    // ePHI must not survive a sign-out just because the network did not.
+    purgeClinicalDrafts();
     // Hard navigation guarantees the cookie clear has settled before the
     // next request — router.push raced with cookie clearing in production
     // and proxy.ts kept routing the user back to /dashboard.
