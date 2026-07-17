@@ -25,6 +25,11 @@ import {
   purgeClinicalDrafts,
   sweepStaleClinicalDrafts,
 } from '@/lib/clinical-drafts';
+import {
+  clearOnboardedMarker,
+  isOnboardingSkippedOnDevice,
+  writeOnboardedMarker,
+} from '@/lib/onboarding';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -133,10 +138,24 @@ function writeAuthMarkers(roles: string[]) {
   document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax`;
 }
 
+// The onboarding gate bit proxy.ts reads. Onboarded means either the server
+// says identity is captured, or this device chose to skip it — the guard must
+// honour both or a patient who skipped would be stuck in a redirect loop.
+function writeOnboardedMarkerFor(user: {
+  id: string;
+  onboardingStatus?: string;
+} | null) {
+  if (!user) return;
+  writeOnboardedMarker(
+    user.onboardingStatus === 'COMPLETED' || isOnboardingSkippedOnDevice(user.id),
+  );
+}
+
 function clearAuthMarkers() {
   if (typeof document === 'undefined') return;
   document.cookie = `${AUTH_MARKER_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
   document.cookie = `${AUTH_ROLE_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+  clearOnboardedMarker();
   // Clear pre-fix unscoped names too so a local session created before the
   // app-scoped rename doesn't leave a stale "logged in" marker behind.
   for (const name of LEGACY_MARKER_COOKIES) {
@@ -256,6 +275,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           preferredLanguage: profile.preferredLanguage ?? null,
         });
         writeAuthMarkers(profile.roles ?? []);
+        writeOnboardedMarkerFor({
+          id: profile.id,
+          onboardingStatus: profile.onboardingStatus,
+        });
         // Mirror of admin's rehydrate wiring — no consumer on the patient
         // app today, but the shape stays aligned so future patient-facing
         // practice copy can rely on it.
@@ -376,6 +399,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (newUser?.roles) {
       writeAuthMarkers(newUser.roles);
     }
+    writeOnboardedMarkerFor(newUser);
     // Refresh token deliberately NOT persisted client-side — the backend
     // already set the HttpOnly `refresh_token` cookie on the verify-OTP
     // response (auth.controller.setRefreshCookie). Keeping it out of JS
@@ -452,6 +476,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const markOnboardingComplete = () => {
+    // Open the route guard in the same tick the patient finishes onboarding —
+    // the redirect to /dashboard hits proxy.ts before any rehydrate could
+    // refresh the cookie.
+    writeOnboardedMarker(true);
     setUser((prev) =>
       prev
         ? { ...prev, onboardingStatus: 'COMPLETED', onboardingRequired: false }
