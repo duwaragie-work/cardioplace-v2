@@ -38,6 +38,7 @@ export function OptionDFlow({
   firstSystolic,
   firstDiastolic,
   resumed = false,
+  hasPendingBufferedReading = false,
   onSubmitSecond,
   onDecline,
   onDone,
@@ -49,15 +50,26 @@ export function OptionDFlow({
    *  auto-resumed because the patient returned to an unfinished held emergency
    *  (vs. reached by submitting a fresh reading). Shows the resume intro. */
   resumed?: boolean;
+  /** True when an uncommitted buffered sitting is still waiting on-device (the
+   *  patient logged a normal reading, then a high one that routed here). Screen
+   *  C's CTA then returns to the buffer review to finish it instead of going to
+   *  the dashboard — so the label must say that, not "Back to dashboard". */
+  hasPendingBufferedReading?: boolean;
   /** Submit the confirmatory second reading. CheckIn builds the payload
    *  (same session + confirmsEntryId) and persists it. */
   onSubmitSecond: (reading: OptionDSecondReading) => Promise<void>;
   /** Patient declined / window expired — flag the first reading UNCONFIRMED. */
   onDecline: () => Promise<void>;
-  /** Flow finished — navigate on (confirmation / dashboard). */
+  /** Flow finished — navigate on (confirmation / dashboard / back to buffer). */
   onDone: () => void;
 }) {
   const { t } = useLanguage();
+  // Screen C's CTA: when a buffered sitting is still uncommitted on-device, the
+  // flow returns to the buffer review (so it isn't stranded) rather than the
+  // dashboard — so the label must describe THAT, not "Back to dashboard".
+  const doneLabelKey = hasPendingBufferedReading
+    ? ('checkin.optionD.screenC.doneFinishOther' as const)
+    : ('checkin.optionD.screenC.done' as const);
   const [phase, setPhase] = useState<Phase>('screenA');
   // Bug 26 — Screen C copy depends on how the flow resolved:
   //   'confirmedNormal' = a sub-emergency second reading (reassure)
@@ -419,7 +431,7 @@ export function OptionDFlow({
                           : 'checkin.optionD.screenC.body',
                       ),
                       t('checkin.optionD.screenC.safetyFooter'),
-                      t('checkin.optionD.screenC.done'),
+                      t(doneLabelKey),
                     ].join('. ')}
                   />
                 </div>
@@ -448,7 +460,7 @@ export function OptionDFlow({
                 className="w-full h-12 rounded-full font-bold text-white text-[0.9375rem] cursor-pointer mt-6"
                 style={{ backgroundColor: 'var(--brand-primary-purple)', boxShadow: 'var(--brand-shadow-button)' }}
               >
-                {t('checkin.optionD.screenC.done')}
+                {t(doneLabelKey)}
               </button>
             </>
           )}
