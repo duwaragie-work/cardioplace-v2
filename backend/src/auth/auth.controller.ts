@@ -15,6 +15,8 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { Throttle } from '@nestjs/throttler'
+import { AuthThrottlerGuard } from '../common/guards/auth-throttler.guard.js'
 import type { Request, Response } from 'express'
 import { UserRole } from '../generated/prisma/enums.js'
 import { AccountLifecycleService } from '../users/account-lifecycle.service.js'
@@ -63,7 +65,36 @@ type AuthedReq = Request & {
   user: { id: string; email: string | null; roles: UserRole[] }
 }
 
+/**
+ * V-03 — the tight bucket for routes that either guess a credential or send a
+ * message: 5 attempts per minute per ip:email, vs the controller-wide 20/60s.
+ *
+ * It overrides the 'default' throttler for the decorated handler rather than
+ * naming a second limiter, because ThrottlerGuard evaluates EVERY configured
+ * throttler on EVERY guarded route — a second named entry would apply its limit
+ * controller-wide, not just where named. See app.module.ts.
+ *
+ * 5/60s deliberately mirrors the existing OtpCode 5-attempt lockout
+ * (auth.service.ts:3023) so the two controls agree instead of one silently
+ * masking the other.
+ */
+const STRICT_AUTH_THROTTLE = { limit: 5, ttl: 60_000 } as const
+
+/**
+ * V-03 (Humaira assessment 2026-07-14, CRITICAL) — every route here was
+ * unthrottled: a 6-digit OTP (10^6 space) could be brute-forced, and otp/send /
+ * magic-link/send could be flooded to exhaust resources and burn the email
+ * sender's reputation. ThrottlerModule was configured in app.module.ts but no
+ * guard consumed it and no route named a limiter, so the config was inert.
+ *
+ * Mounted at the controller so the whole auth surface is covered by default —
+ * including routes added later, which is the failure mode a per-route list
+ * invites. The buckets are keyed ip:email (AuthThrottlerGuard) and land on the
+ * 'default' 20/60s limiter; the credential-guessing routes below tighten that
+ * to 5/60s with @Throttle.
+ */
 @Controller('v2/auth')
+@UseGuards(AuthThrottlerGuard)
 export class AuthController {
   constructor(
     private authService: AuthService,
@@ -174,6 +205,7 @@ export class AuthController {
   // ─── Email OTP ────────────────────────────────────────────────────────────────
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('otp/send')
   sendOtp(@Body() dto: SendOtpDto, @Req() req: Request) {
     const context = {
@@ -184,6 +216,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('otp/verify')
   async verifyOtp(
     @Body() dto: VerifyOtpDto,
@@ -408,6 +441,7 @@ export class AuthController {
   // challenge token), so they're Public and issue + set cookies on success.
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('mfa/challenge')
   async mfaChallenge(
     @Body() dto: MfaChallengeDto,
@@ -431,6 +465,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('mfa/recovery')
   async mfaRecovery(
     @Body() dto: MfaRecoveryDto,
@@ -513,6 +548,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('webauthn/authenticate/verify')
   async webAuthnAuthVerify(
     @Body() dto: WebAuthnAuthVerifyDto,
@@ -533,6 +569,7 @@ export class AuthController {
   // Recovery-code sign-in — the only fallback when biometric can't be used on
   // this device. Consumes a code, regenerates the set, issues the session.
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('webauthn/authenticate/recovery')
   async webAuthnAuthRecovery(
     @Body() dto: WebAuthnRecoverySignInDto,
@@ -622,6 +659,7 @@ export class AuthController {
   // ─── Magic Link ────────────────────────────────────────────────────────────────
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('magic-link/send')
   sendMagicLink(@Body() dto: SendOtpDto, @Req() req: Request) {
     const context = this.buildAuthContext(req)

@@ -59,16 +59,21 @@ const TEST_CONTROL_MODULES = [TestControlModule]
       verboseMemoryLeak: true,
     }),
 
+    // V-03 (2026-07-17) — consumed by AuthThrottlerGuard, which AuthModule
+    // mounts on AuthController. Until now nothing read this config at all.
+    //
+    // ONE throttler on purpose. ThrottlerGuard.canActivate loops EVERY named
+    // throttler for EVERY route it guards and requires all to pass
+    // (`continues.every(...)`), so the old second entry named 'otp' (5/60s) was
+    // not "dormant until a route names it" — it would have capped every guarded
+    // route at 5 requests/minute the instant a guard was mounted. Strict limits
+    // therefore belong on the ROUTE, via @Throttle({ default: { limit: 5 } }),
+    // which overrides this entry for that handler only. See auth.controller.ts.
     ThrottlerModule.forRoot([
       {
         name: 'default',
         ttl: 60_000,
         limit: 20,
-      },
-      {
-        name: 'otp',
-        ttl: 60_000,
-        limit: 5,
       },
     ]),
 

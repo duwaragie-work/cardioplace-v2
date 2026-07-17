@@ -61,8 +61,15 @@ import { SystemPrincipalsService } from './system-principals.service.js'
           // system principal.
           cls.set('runId', randomUUID())
           // ip / userAgent come from the raw request; both are set before any
-          // guard runs, so grabbing them here is safe. `req.ip` respects
-          // trust-proxy config (main.ts sets `trust proxy`).
+          // guard runs, so grabbing them here is safe.
+          //
+          // `req.ip` respects Express's trust-proxy setting — which main.ts
+          // only enables when TRUST_PROXY_HOPS is set (V-03, 2026-07-17). This
+          // comment previously asserted "main.ts sets `trust proxy`" as a flat
+          // fact; it did not, and had never done so, which meant the ip stamped
+          // here was the load balancer's in any hosted environment. If
+          // TRUST_PROXY_HOPS is unset behind an LB, that is still the case —
+          // the audit IP is the proxy, not the actor.
           cls.set('ip', req?.ip ?? null)
           cls.set('userAgent', req?.headers?.['user-agent'] ?? null)
         },
