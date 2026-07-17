@@ -99,6 +99,20 @@ jobs:
       # readings, drive cron scans). Sourced from repo Secrets — see the JWT
       # comment above for the generation command.
       TEST_CONTROL_SECRET: ${{ secrets.CI_TEST_CONTROL_SECRET }}
+      # V-03 auth limiter escape hatch (2026-07-17). The qa suite signs in as a
+      # handful of shared seed accounts (~100 specs), so the 5-per-60s STRICT
+      # bucket on otp/send + otp/verify (auth.controller.ts) exhausts inside
+      # each ip:email bucket and cascades every downstream sign-in into 429s or
+      # OTP-input-never-renders timeouts. AuthThrottlerGuard.shouldSkip is
+      # designed for exactly this — see the class docstring
+      # (backend/src/common/guards/auth-throttler.guard.ts:44) and the qa-side
+      # note in tests/76-alert-scope-idor.spec.ts:36. The flag is double-gated
+      # (ignored under NODE_ENV=production) so it cannot weaken prod. Spec 75
+      # (tests/75-auth-rate-limiting.spec.ts) is the one exception — it toggles
+      # the limiter back ON around its own describe block via
+      # /test-control/auth/throttle and restores after, so this flag stays
+      # compatible with proving the limiter actually fires.
+      AUTH_THROTTLE_DISABLED: '1'
       NODE_ENV: test
       # Frontend
       NEXT_PUBLIC_API_URL: http://localhost:4000
