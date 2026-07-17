@@ -433,7 +433,8 @@ async function main() {
             continue
           }
 
-          await prisma.$transaction(async (tx) => {
+          await prisma.$transaction(
+            async (tx) => {
             // Cast — the interactive-tx PrismaClient shape is a superset; the
             // spec.update was typed against the top-level client for clarity.
             await spec.update(tx as unknown as PrismaClient, row.id, envelope)
@@ -456,7 +457,21 @@ async function main() {
               })
               totalAuditRows += 1
             }
-          })
+            },
+            // Prisma's interactive-transaction default is 5s, which is tuned
+            // for a local DB. This script runs against managed Postgres over
+            // the network, where the two writes above plus the commit round-trip
+            // can exceed it — observed 6799 ms on the very first live run
+            // (P2028, "commit cannot be executed on an expired transaction").
+            //
+            // The transaction is already per-ROW and minimal, so the error's
+            // other suggestion ("do less work in the transaction") has nothing
+            // left to give: the update and its audit row MUST commit together
+            // or a crash could encrypt a column with no audit trail. So raise
+            // the ceiling instead. maxWait covers pool acquisition under the
+            // 20-connection cap; timeout covers the round-trips.
+            { timeout: 30_000, maxWait: 10_000 },
+          )
           fieldCount += 1
         }
 

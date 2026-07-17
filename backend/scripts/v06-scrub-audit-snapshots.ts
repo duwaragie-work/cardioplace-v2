@@ -47,10 +47,18 @@
  * Idempotent: a scrubbed row no longer contains any free-text key, so it stops
  * matching the candidate filter. Safe to re-run.
  */
+// dotenv MUST be loaded before the pg.Pool is constructed below: without it
+// DATABASE_URL is undefined and node-postgres silently falls back to
+// localhost:5432, so the script dies with ECONNREFUSED against a DB that was
+// never the target. Matches v06-backfill-encryption.ts, which does the same.
+// (Omitted on the first cut — this script had never been run.)
+import dotenv from 'dotenv'
 import { PrismaClient } from '../src/generated/prisma/client.js'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
 import { createHash } from 'node:crypto'
+
+dotenv.config()
 
 const DRY_RUN = process.env.DRY_RUN === '1'
 const BATCH_SIZE = Number(process.env.V06_SCRUB_BATCH_SIZE ?? 500)
@@ -150,10 +158,19 @@ async function main() {
 
   let scanned = 0
   let scrubbed = 0
-  // DRY_RUN writes nothing, so scrubbed rows keep matching the filter — page
-  // with an explicit offset or the same batch returns forever. (Same trap the
-  // v06 backfill had.) Live runs keep this at 0: a scrubbed row no longer
-  // contains a free-text key and drops out of the scan naturally.
+  // Advance the offset in BOTH modes — this is a single ordered pass over every
+  // row, not a drain of a shrinking candidate set.
+  //
+  // The first cut only advanced under DRY_RUN, reasoning that "a scrubbed row
+  // no longer contains a free-text key and drops out of the scan naturally".
+  // That is true of the v06 BACKFILL, whose loadBatch filters
+  // `plaintext IS NOT NULL AND <sibling> IS NULL` — so a written row really
+  // does leave the result set. It is false HERE: the findMany below has no
+  // WHERE clause at all, it selects every ProfileVerificationLog row. With skip
+  // pinned at 0 the same first BATCH_SIZE rows came back forever, `length` never
+  // fell below BATCH_SIZE, neither break could fire, and the live run spun until
+  // it was killed (observed 2026-07-17). The reasoning was borrowed from the
+  // backfill without its precondition.
   let skip = 0
 
   for (;;) {
@@ -185,11 +202,10 @@ async function main() {
       })
     }
 
-    if (DRY_RUN) skip += batch.length
-    else if (batch.length < BATCH_SIZE) break
+    skip += batch.length
+    if (batch.length < BATCH_SIZE) break
 
     console.log(`  … scanned=${scanned} scrubbed=${scrubbed}`)
-    if (!DRY_RUN && batch.length < BATCH_SIZE) break
   }
 
   console.log(`\nScanned ${scanned} rows; ${scrubbed} ${DRY_RUN ? 'would be' : ''} scrubbed.`)
