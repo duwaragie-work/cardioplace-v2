@@ -10,6 +10,8 @@ import { accessLogExtension } from '../common/prisma-extensions/access-log.exten
 import { pushDispatchExtension } from '../common/prisma-extensions/push-dispatch.extension.js'
 import { authFailureExtension } from '../common/prisma-extensions/auth-failure.extension.js'
 import { softDeleteJournalEntryExtension } from '../common/prisma-extensions/soft-delete.extension.js'
+import { v06DecryptExtension } from '../common/prisma-extensions/v06-decrypt.extension.js'
+import { EncryptionService } from '../common/encryption.service.js'
 
 /**
  * Prisma error codes that indicate a stale or closed connection — usually
@@ -76,6 +78,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     // semantics; the writer is passed as the third arg to the access-log
     // extension factory and invoked alongside the existing DB write.
     accessLogWriter: AccessLogWriter,
+    // V-06 phase 2 (2026-07-17) — read path for field-level encryption at rest.
+    // Same @Global() CommonModule route as accessLogWriter above.
+    encryption: EncryptionService,
   ) {
     const dbUrl = configService.get<string>('DATABASE_URL')!
     const isAccelerate = dbUrl.startsWith('prisma://')
@@ -135,10 +140,38 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     // `success: false` rows → RealtimeFailedAuthService pages ops the moment a
     // repeated-failed-auth burst is detected. AuthLog is not a PHI model, so
     // there is no audit write to order against; same swallow-all safety.
+    // v06-decrypt (V-06 phase 2): resolves every `<field>Encrypted` sibling in a
+    // result back into its plaintext field, so the ciphertext — not the
+    // plaintext column — is what callers actually read. Phase 1 shipped
+    // dual-write with no reader, which meant zero protection; this closes that
+    // and is the prerequisite for phase 3 dropping the plaintext columns.
+    // Chained here so it wraps the others and sees the final result.
+    //
+    // A decrypt failure during the bake window degrades to the (identical)
+    // plaintext column rather than taking clinical reads down — but that must
+    // never pass silently, so warn once per sibling. Once phase 3 removes the
+    // plaintext there is no fallback and the extension rethrows instead:
+    // silently serving `undefined` for a clinical note is worse than failing.
+    const warnedSiblings = new Set<string>()
     const extended = this.$extends(accessLogExtension(cls, this, accessLogWriter))
       .$extends(softDeleteJournalEntryExtension())
       .$extends(pushDispatchExtension(eventEmitter))
       .$extends(authFailureExtension(eventEmitter))
+      .$extends(
+        v06DecryptExtension(
+          (envelope) => encryption.decrypt(envelope),
+          (sibling, err) => {
+            if (warnedSiblings.has(sibling)) return
+            warnedSiblings.add(sibling)
+            this.logger.error(
+              `V-06 decrypt failed for ${sibling} — falling back to the plaintext ` +
+                'column for this and further rows. Check MFA_ENCRYPTION_KEY. ' +
+                'This fallback DISAPPEARS once phase 3 drops the plaintext columns.',
+              err instanceof Error ? err.stack : String(err),
+            )
+          },
+        ),
+      )
 
     // Members that must resolve to THIS class instance, never the extended
     // client: our prototype methods (onModuleInit, withConnectionRetry) and
