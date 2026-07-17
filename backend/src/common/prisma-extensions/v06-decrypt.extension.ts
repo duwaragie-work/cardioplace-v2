@@ -43,6 +43,27 @@ import { Prisma } from '../../generated/prisma/client.js'
  *     loud failure.
  */
 
+/**
+ * PHASE 3 NOTE (read before dropping the plaintext columns).
+ * This extension keeps phase 3's READ side working unchanged — once `notes` is
+ * gone from the table, the walk below simply synthesises it from
+ * `notesEncrypted` instead of overwriting it, and the ~156 read sites never
+ * notice. But it does NOT carry the TYPE: dropping the column removes `notes`
+ * from the generated Prisma types, so every read site stops compiling. Phase 3
+ * therefore also needs a `result` component (`needs: { notesEncrypted: true }`,
+ * `compute(...)`) to re-add each field as a computed one. The `query` hook here
+ * supplies the value; only `result` can supply the type.
+ *
+ * Writes are the opposite problem and have no such escape: `data: { notes }`
+ * targets a column that no longer exists, so all ~60 dual-write sites must drop
+ * the plaintext key in the SAME deploy as the migration. For
+ * `Conversation.userMessage`/`aiSummary` that is not merely advisable but
+ * forced — they are NOT NULL, so "stop writing plaintext" and "drop the column"
+ * cannot be separated into two deploys.
+ *
+ * Full gate order lives in docs/V06_PHASE3_RUNBOOK.md.
+ */
+
 /** How a sibling's ciphertext decodes back into its plaintext column. */
 export type V06Kind = 'text' | 'json'
 
