@@ -31,10 +31,13 @@ import { API_BASE_URL } from '../playwright.config.js'
  * are all linked to Cedar Hill via PracticeProvider (backend/prisma/seed/
  * patients.ts staffLinks) and are therefore IN-scope for every seeded alert —
  * a 200 from any of them is correct behaviour of the gate, not a leak. This
- * spec uses `outOfScopeProvider` (Dr. Ines Vega, no PracticeProvider row) so
- * that providerInPractice() returns false for whichever practice the alert
- * belongs to, forcing the 403 branch. See backend/src/common/patient-access.
- * service.ts:77-88.
+ * spec uses `outOfScopeProvider` (Dr. Ines Vega), whose single PracticeProvider
+ * row points at `seed-idor-harness` — a purpose-built practice that holds zero
+ * patients. Auth sign-in auto-resolves against that one membership (satisfies
+ * auth.service.ts's "No practice membership" guard); PatientAccessService's
+ * inActiveScope() then trips the 403 branch for every Cedar Hill alert. See
+ * backend/src/common/patient-access.service.ts:77-88 and
+ * backend/prisma/seed/practices.ts (harness practice definition).
  */
 test.describe('76 — alert endpoint scope (V-01 / V-04 IDOR)', () => {
   // Sign in ONCE per role and reuse across both tests. Each apiSignIn spends an
