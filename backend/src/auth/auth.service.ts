@@ -3421,6 +3421,9 @@ export class AuthService {
       reminderTime: user.reminderTime,
       quietHoursStart: user.quietHoursStart,
       quietHoursEnd: user.quietHoursEnd,
+      // Onboarding step routing — the re-ask on a second device shows the
+      // identity step only when this is already true.
+      reminderPreferenceSet: user.reminderPreferenceSet,
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
       // MFA status (additive) — drives the profile Security pill.
