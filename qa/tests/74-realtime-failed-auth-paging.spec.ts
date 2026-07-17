@@ -2,6 +2,7 @@ import { test, expect, request as pwRequest } from '@playwright/test'
 import { authedApi } from '../helpers/auth.js'
 import { ADMINS } from '../helpers/accounts.js'
 import { API_BASE_URL } from '../playwright.config.js'
+import { newTestControl } from '../helpers/test-control.js'
 
 /**
  * Real-time repeated-failed-auth paging (HIPAA §164.308(a)(6) / §164.308(a)(5)(ii)(C)).
@@ -27,20 +28,33 @@ test.describe('74 — real-time failed-auth paging', () => {
     const email = `repeat-fail-${Date.now()}@cardioplace.test`
     const deviceId = `qa-${email}`
 
-    // 1. Drive 6 failed verify attempts (>=5; 6 gives margin over the async
-    //    handler + the "counts the triggering row" boundary).
+    // 1. Drive exactly 5 failed verify attempts over real HTTP.
+    //
+    // Was 6, "for margin" — but V-03 (2026-07-17) caps /otp/verify at 5 per 60s
+    // per ip:email, so the 6th is now rejected with 429 BEFORE reaching
+    // verifyOtp and logs nothing. The margin was silently gone: 6 attempts
+    // yielded 5 rows, exactly the detector's threshold, and the loop's
+    // `>=400 && <500` assertion accepted the 429 without noticing.
+    //
+    // 5 is the honest number here, and the coupling is deliberate: the throttle
+    // ceiling (5/60s) and the detector floor (FAILURE_THRESHOLD=5) are the same
+    // value, so a single client can produce exactly enough failures to be
+    // detected and not one more. Assert each attempt is a genuine auth failure
+    // and NOT a 429 — if the limiter ever tightens below 5, this fails loudly
+    // here rather than silently starving the detector.
     const anon = await pwRequest.newContext({
       baseURL: API_BASE_URL,
       extraHTTPHeaders: { 'x-device-id': deviceId },
     })
     try {
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 5; i++) {
         const res = await anon.post('/api/v2/auth/otp/verify', {
           data: { email, otp: '000000', appContext: 'patient', deviceId },
         })
-        // Each is expected to FAIL auth (400) — that's the point. We only assert
-        // it's a client error, not a 5xx (which would mean the endpoint broke).
-        expect(res.status(), await res.text()).toBeGreaterThanOrEqual(400)
+        // Expected to FAIL auth — that's the point. Not a 5xx (endpoint broke),
+        // and not a 429 (the limiter ate the row the detector needs).
+        expect(res.status(), await res.text()).not.toBe(429)
+        expect(res.status()).toBeGreaterThanOrEqual(400)
         expect(res.status()).toBeLessThan(500)
       }
     } finally {
@@ -94,27 +108,37 @@ test.describe('74 — real-time failed-auth paging', () => {
     }
   })
 
+  /**
+   * Rewritten 2026-07-17 (V-03). This drove the CRITICAL tier by POSTing 50
+   * wrong OTPs from one context. That can no longer reach 50: the V-03 rate
+   * limiter caps /otp/verify at 5 per 60s per ip:email, so attempts 6..50 were
+   * rejected with 429 before ever reaching verifyOtp — no AuthLog row, no
+   * evaluator, no incident. The test still "passed" its own status assertion
+   * (429 is 4xx, which `>=400 && <500` accepts) and then failed at the poll.
+   *
+   * That is the limiter working, not a bug: preventing 50 rapid failed logins
+   * for one account from one client is exactly V-03's job. The CRITICAL tier
+   * exists for the case the limiter does NOT stop — a DISTRIBUTED burst (50 IPs
+   * × 1 attempt each). A single test host cannot synthesise that over HTTP,
+   * because req.ip is the socket peer unless TRUST_PROXY_HOPS is set, and
+   * making it spoofable is the failure mode main.ts deliberately avoids.
+   *
+   * So drive the evaluator at its real trigger instead of through the transport:
+   * seedFailedAuth writes the rows via the same authLog.create that
+   * authFailureExtension wraps, so AUTH_EVENTS.FAILURE fires exactly as in
+   * production, with varied IPs. Only the HTTP hop — the part V-03 blocks — is
+   * skipped. The ≥5 test above still drives real HTTP, so the transport path
+   * keeps its coverage.
+   */
   test('>=50 failed logins (CRITICAL) -> auto-opens a system-owned SecurityIncident', async () => {
-    test.slow() // 50 sequential auth calls
     const email = `repeat-crit-${Date.now()}@cardioplace.test`
-    const deviceId = `qa-${email}`
 
-    const anon = await pwRequest.newContext({
-      baseURL: API_BASE_URL,
-      extraHTTPHeaders: { 'x-device-id': deviceId },
-    })
+    const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     try {
-      // 50 failures -> the aggregation stamps CRITICAL, which is the gate for
-      // auto-opening a SecurityIncident (a 5-failure fat-finger must NOT).
-      for (let i = 0; i < 50; i++) {
-        const res = await anon.post('/api/v2/auth/otp/verify', {
-          data: { email, otp: '000000', appContext: 'patient', deviceId },
-        })
-        expect(res.status()).toBeGreaterThanOrEqual(400)
-        expect(res.status()).toBeLessThan(500)
-      }
+      const { seeded } = await tc.seedFailedAuth(email, 50)
+      expect(seeded).toBe(50)
     } finally {
-      await anon.dispose()
+      await tc.dispose()
     }
 
     const ops = await authedApi(API_BASE_URL, ADMINS.ops.email, 'admin')

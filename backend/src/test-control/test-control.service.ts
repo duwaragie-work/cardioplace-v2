@@ -129,6 +129,54 @@ export class TestControlService {
     return { scanned: 1, ...summary }
   }
 
+  /**
+   * Seed N failed-auth rows for one identifier, so a spec can drive the
+   * repeated-failed-auth evaluator past a threshold.
+   *
+   * WHY THIS EXISTS (2026-07-17). qa/tests/74 used to drive the CRITICAL tier by
+   * POSTing 50 wrong OTPs to /otp/verify. V-03's rate limiter now (correctly)
+   * rejects that at 5/60s per ip:email — the limiter exists precisely to make
+   * "50 rapid failed logins for one account from one client" impossible, so the
+   * old driver can never reach 50 again. The scenario the CRITICAL tier is
+   * really for is a DISTRIBUTED attacker (50 IPs × 1 attempt each, which the
+   * per-ip:email limiter does not stop) — and a single test host cannot
+   * synthesise that over HTTP, because req.ip is the socket peer unless
+   * TRUST_PROXY_HOPS is set, and making it spoofable would be the bug main.ts
+   * deliberately avoids.
+   *
+   * So drive the evaluator at its real trigger instead of through the transport:
+   * `authFailureExtension` wraps `authLog.create` and emits AUTH_EVENTS.FAILURE
+   * for every `success: false` row. `this.prisma` IS the extended client, so
+   * these writes fire the evaluator on exactly the production path — only the
+   * HTTP hop (the part V-03 now blocks) is skipped.
+   *
+   * Rows mirror what verifyOtp's miss path writes (`otp_expired`, success:false,
+   * identifier = the email), so the detector groups them identically.
+   */
+  async seedFailedAuth(
+    identifier: string,
+    count: number,
+    ipAddress?: string,
+  ): Promise<{ seeded: number }> {
+    for (let i = 0; i < count; i += 1) {
+      await this.prisma.authLog.create({
+        data: {
+          event: 'otp_expired',
+          identifier,
+          method: 'otp',
+          // Vary the IP by default so the row set looks like the distributed
+          // burst the CRITICAL tier is meant to catch, and so the detector's
+          // distinctIpCount evidence is meaningful rather than always 1.
+          ipAddress: ipAddress ?? `203.0.113.${i % 254}`,
+          userAgent: 'test-control/seedFailedAuth',
+          success: false,
+          errorCode: 'otp_not_found_or_expired',
+        },
+      })
+    }
+    return { seeded: count }
+  }
+
   // ─── N4/N5/N6/N7 audit-read helpers ────────────────────────────────────
   // Thin read-only surfaces over the audit tables so Playwright can verify a
   // UI action produced the expected audit row. Dev-only — guarded by the

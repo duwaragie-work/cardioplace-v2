@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -54,6 +55,68 @@ export class TestControlController {
       nodeEnv: this.nodeEnv,
       secretRequired: this.secret !== null,
     }
+  }
+
+  /**
+   * Seed N failed-auth rows for one identifier (2026-07-17).
+   *
+   * Exists because V-03's rate limiter now — correctly — makes the old driver
+   * impossible: qa/tests/74 drove the CRITICAL tier by POSTing 50 wrong OTPs,
+   * and 5/60s per ip:email stops that at 5. See TestControlService.seedFailedAuth
+   * for why this is the faithful path rather than a shortcut (the rows go through
+   * the same authLog.create extension that emits AUTH_EVENTS.FAILURE in prod).
+   *
+   * Same gate as every route here: prod hard-block + ENABLE_TEST_CONTROL +
+   * secret. `count` is capped so this can never be used as an amplifier.
+   */
+  @Post('auth/seed-failed')
+  @HttpCode(200)
+  async seedFailedAuth(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { identifier: string; count: number; ipAddress?: string },
+  ) {
+    this.assertAuthorized(secret)
+    if (!body?.identifier) {
+      throw new BadRequestException('identifier is required')
+    }
+    const count = Number(body?.count ?? 0)
+    if (!Number.isInteger(count) || count < 1 || count > 200) {
+      throw new BadRequestException('count must be an integer 1..200')
+    }
+    return this.svc.seedFailedAuth(body.identifier, count, body.ipAddress)
+  }
+
+  /**
+   * Flip the auth rate limiter on/off at runtime (2026-07-17).
+   *
+   * The qa suite runs with AUTH_THROTTLE_DISABLED=1 because ~100 specs sign in
+   * as a handful of shared seed accounts and would otherwise trip V-03's 5/60s
+   * limit on their own auth. But the spec that PROVES the limiter
+   * (tests/75-auth-rate-limiting) needs it ON. AuthThrottlerGuard.shouldSkip
+   * reads process.env live on every request, so that spec toggles it around its
+   * own block instead of forcing a whole separate backend process.
+   *
+   * Same prod hard-block as every route here; NODE_ENV=production also makes the
+   * guard ignore the flag regardless, so this cannot weaken a real deployment.
+   */
+  @Post('auth/throttle')
+  @HttpCode(200)
+  async setThrottle(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { enabled: boolean },
+  ) {
+    this.assertAuthorized(secret)
+    if (typeof body?.enabled !== 'boolean') {
+      throw new BadRequestException('enabled (boolean) is required')
+    }
+    // enabled=true  → limiter active  → flag cleared
+    // enabled=false → limiter skipped → flag set
+    if (body.enabled) {
+      delete process.env.AUTH_THROTTLE_DISABLED
+    } else {
+      process.env.AUTH_THROTTLE_DISABLED = '1'
+    }
+    return { throttleEnabled: body.enabled }
   }
 
   // ─── Cron drivers ───────────────────────────────────────────────────────
