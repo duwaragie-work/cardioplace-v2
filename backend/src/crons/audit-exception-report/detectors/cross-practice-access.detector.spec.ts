@@ -144,9 +144,10 @@ describe('CrossPracticeAccessDetector — N7', () => {
 
   it('fires MEDIUM + auto-ACK for HEALPLACE_OPS cross-practice access (N-5 tuning)', async () => {
     // N-5 (Duwaragie 2026-07-14 triage) — ops cross-practice access is by
-    // design (ACCESS_SCOPE.md §5), so the audit row lands with LOW-tier
-    // severity + status ACKNOWLEDGED. Pre-fix it landed HIGH-open and
-    // flooded Lakshitha's L3 worklist with rubber-stamp work.
+    // design (ACCESS_SCOPE.md §5), so the audit row lands at MEDIUM + status
+    // ACKNOWLEDGED. Pre-fix it landed HIGH-open and flooded Lakshitha's L3
+    // worklist with rubber-stamp work. (MEDIUM is the floor — the severity
+    // enum has no LOW; this comment claimed "LOW-tier" until 2026-07-17.)
     const ctx = makeCtx({
       accessRows: [accessRow('ops-1', 'patient-1')],
       users: {

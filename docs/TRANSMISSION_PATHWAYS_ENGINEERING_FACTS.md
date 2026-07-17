@@ -54,7 +54,9 @@ On the 2026-07-14 revision, two entries in my task memo did not match the code a
 
 **Then (2026-07-14):** the provider/MD body carried BP block, pulse, position, tier, step, mode, ruleId, and the pseudonymous `displayId` (`escalation.service.ts:1775-1819`). No patient name, but genuine clinical values — I described it as "minimum-necessary with a pseudonymous handle."
 
-**Now:** the provider/MD/backup/ops body is genuinely notify-and-link with NO patient PHI (`escalation.service.ts:1877-1896`, explicit "NO patient PHI" comment at `:1877-1881`). Patient's own email still carries permitted-content PHI (unchanged). Row 4 above reflects the landed split.
+**Now:** the provider/MD/backup/ops body is genuinely notify-and-link with NO patient PHI — see `escalation.service.ts`, the `providerHtml` template (guarded by the explicit "NO patient PHI (no name, email, DOB, age, BP/pulse/position, clinical narrative, or rule metadata)" comment immediately above it) and the recipient split `const html = isPatient ? patientHtml : providerHtml`. Patient's own email still carries permitted-content PHI (unchanged). Row 4 above reflects the landed split.
+
+> **Cite by symbol, not line number.** This paragraph previously pinned the provider block to `escalation.service.ts:1877-1896` with the comment at `:1877-1881`. Later commits (the V-06 encryption work) shifted the file ~23 lines, and by 2026-07-17 `:1877` had drifted into the *patient* template — so the citation pointed at the precise opposite of what it claimed, while still reading as precise. Verified against the code on 2026-07-17: the comment is at `:1900`, `providerHtml` at `:1904`, the selector at `:1920`. Those numbers will rot too; grep the quoted strings instead.
 
 ### 3.3 Stale lines in `docs/ENCRYPTION.md` — still stale
 

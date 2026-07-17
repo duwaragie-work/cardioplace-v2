@@ -16,7 +16,7 @@ It is also the only irreversible step. Hence this runbook.
 
 | Gate | State |
 |---|---|
-| V-06 migration `20260716120000_v06_add_encrypted_columns` applied | ❌ **No** — still pending, and *untracked in git* (local-only). 3 other migrations are also unapplied. |
+| V-06 migration `20260716120000_v06_add_encrypted_columns` applied | ❌ **No** — still pending. 3 other migrations are also unapplied. (An earlier revision of this runbook called it "untracked in git / local-only" — that was **wrong**: it is committed in `231af26` on `nivakaran-dev`. It is not on `origin/dev` yet, which is a merge, not a loss.) |
 | `MFA_ENCRYPTION_KEY` set | ❌ **No** — absent from `backend/.env`, blank in `.env.example`. |
 | Ciphertext rows written | ❌ **0** — the `*Encrypted` columns do not exist in the dev DB yet. |
 | Backfill run + verified green | ❌ Never run. |
@@ -32,7 +32,8 @@ The columns do not exist; the key is unset; nothing has ever been encrypted.
 ## Gate order (each one blocks the next)
 
 1. **Apply the pending migrations.** `20260716120000_v06_add_encrypted_columns`
-   is untracked — commit it first, or it exists on exactly one laptop.
+   is committed (`231af26`) but lives only on `nivakaran-dev` — it reaches other
+   environments when that branch merges.
    `npx prisma migrate deploy` (forward-only; never `migrate dev` against a
    shared DB — it can reset).
 2. **Set `MFA_ENCRYPTION_KEY`** in every environment.
