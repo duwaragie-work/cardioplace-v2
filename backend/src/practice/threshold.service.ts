@@ -6,6 +6,10 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import {
+  snapshotHash,
+  SNAPSHOT_HASH_KEY,
+} from '../common/audit/snapshot-hash.js'
+import {
   ActorUser,
   PatientAccessService,
 } from '../common/patient-access.service.js'
@@ -35,7 +39,13 @@ interface ThresholdSnapshot {
   dbpLowerTarget: number | null
   hrUpperTarget: number | null
   hrLowerTarget: number | null
-  notes: string | null
+  // V-06 audit-log leak (2026-07-17): `notes` used to live here, which meant
+  // writeThresholdAudit encrypted it into `rationaleEncrypted` and left the
+  // same bytes plaintext in `newValue.notes` — on adjacent lines of the same
+  // object. The narrative now lives only on rationale/rationaleEncrypted (the
+  // V-06 dual-write pair); this digest attests the full record. See
+  // common/audit/snapshot-hash.ts.
+  _snapshotHash: string
 }
 
 @Injectable()
@@ -77,6 +87,7 @@ export class ThresholdService {
         actor.id,
         Prisma.JsonNull,
         this.thresholdSnapshot(threshold),
+        threshold.notes ?? null,
         ctx?.practiceId ?? null,
       )
       // IVR-04 — if this threshold clears the re-enrollment gate for a patient
@@ -174,6 +185,7 @@ export class ThresholdService {
       actor.id,
       this.thresholdSnapshot(existing),
       this.thresholdSnapshot(updated),
+      updated.notes ?? null,
       ctx?.practiceId ?? null,
     )
     // IVR-04 — restore enrollment if this update clears the gate for an
@@ -266,15 +278,24 @@ export class ThresholdService {
       dbpLowerTarget: t.dbpLowerTarget ?? null,
       hrUpperTarget: t.hrUpperTarget ?? null,
       hrLowerTarget: t.hrLowerTarget ?? null,
-      notes: t.notes ?? null,
+      // V-06: `notes` deliberately absent — see the ThresholdSnapshot docstring.
+      [SNAPSHOT_HASH_KEY]: snapshotHash(t),
     }
   }
 
+  /**
+   * `notes` is now passed explicitly rather than read off `newValue`: V-06
+   * removed it from the snapshot (it was being written plaintext into the
+   * unencrypted Json while simultaneously being encrypted into
+   * rationaleEncrypted). The rationale/rationaleEncrypted pair below is the
+   * V-06 dual-write and remains the single home for the narrative.
+   */
   private async writeThresholdAudit(
     patientUserId: string,
     adminId: string,
     previousValue: ThresholdSnapshot | typeof Prisma.JsonNull,
     newValue: ThresholdSnapshot,
+    notes: string | null,
     practiceContext: string | null = null,
   ): Promise<void> {
     await this.prisma.profileVerificationLog.create({
@@ -287,8 +308,8 @@ export class ThresholdService {
         changedBy: adminId,
         changedByRole: VerifierRole.ADMIN,
         changeType: VerificationChangeType.ADMIN_THRESHOLD_UPDATE,
-        rationale: newValue.notes ?? null,
-        rationaleEncrypted: this.encryption.encryptNullable(newValue.notes ?? null),
+        rationale: notes ?? null,
+        rationaleEncrypted: this.encryption.encryptNullable(notes ?? null),
         practiceContext,
       },
     })

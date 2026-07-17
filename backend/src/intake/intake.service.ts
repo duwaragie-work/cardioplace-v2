@@ -1,6 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import {
+  redactedFieldValue,
+  snapshotHash,
+  SNAPSHOT_HASH_KEY,
+} from '../common/audit/snapshot-hash.js'
+import {
   ActorUser,
   PatientAccessService,
 } from '../common/patient-access.service.js'
@@ -65,6 +70,19 @@ type PrismaTx = Omit<
 // burst load — proxy round-trips can eat past 5s when the pool needs a
 // fresh connection.
 const TX_OPTIONS = { timeout: 20_000, maxWait: 15_000 } as const
+
+/**
+ * V-06 audit-log leak (2026-07-17) — PatientMedication fields whose values are
+ * free-text clinical narrative. These are exactly the columns V-06 encrypts
+ * into `*Encrypted` siblings, so their raw values must never be written into
+ * the unencrypted `ProfileVerificationLog.previousValue` / `newValue` Json.
+ * Kept in sync with the V-06 spec set in scripts/v06-backfill-encryption.ts.
+ */
+const FREE_TEXT_MED_FIELDS: ReadonlySet<string> = new Set([
+  'rawInputText',
+  'notes',
+  'plainLanguageDescription',
+])
 
 // Clinical fields on PatientProfile that participate in verification logs.
 // Any change to one of these fields produces a ProfileVerificationLog row.
@@ -573,17 +591,31 @@ export class IntakeService {
       })
 
       await tx.profileVerificationLog.createMany({
-        data: changedFields.map((field) => ({
-          userId,
-          fieldPath: `medication:${medicationId}.${field}`,
-          previousValue: this.toJsonValue(
-            existing[field as keyof PatientMedication],
-          ),
-          newValue: this.toJsonValue(updated[field as keyof PatientMedication]),
-          changedBy: userId,
-          changedByRole: VerifierRole.PATIENT,
-          changeType: VerificationChangeType.PATIENT_REPORT,
-        })),
+        data: changedFields.map((field) => {
+          // V-06 audit-log leak: `rawInputText` / `notes` are free-text that
+          // V-06 encrypts into *Encrypted siblings a few lines above — writing
+          // the raw value here would put the exact same bytes into an
+          // UNENCRYPTED Json column. fieldPath already names the field; the
+          // digest attests the value without duplicating it.
+          const isFreeText = FREE_TEXT_MED_FIELDS.has(field)
+          const prev = existing[field as keyof PatientMedication]
+          const next = updated[field as keyof PatientMedication]
+          return {
+            userId,
+            fieldPath: `medication:${medicationId}.${field}`,
+            // Route through toJsonValue either way so null → Prisma.JsonNull
+            // (a bare null is not a valid Json input) stays consistent.
+            previousValue: this.toJsonValue(
+              isFreeText ? redactedFieldValue(prev) : prev,
+            ),
+            newValue: this.toJsonValue(
+              isFreeText ? redactedFieldValue(next) : next,
+            ),
+            changedBy: userId,
+            changedByRole: VerifierRole.PATIENT,
+            changeType: VerificationChangeType.PATIENT_REPORT,
+          }
+        }),
       })
 
       await this.flipProfileToUnverified(tx, userId)
@@ -2073,13 +2105,52 @@ export class IntakeService {
     }
   }
 
+  /**
+   * V-06 audit-log leak (2026-07-17). This used to `...med` — spreading the
+   * WHOLE row into `ProfileVerificationLog.newValue`, an UNENCRYPTED Json
+   * column. That copied `notes` / `rawInputText` / `plainLanguageDescription`
+   * verbatim in plaintext — the exact bytes V-06 encrypts — and, once the
+   * siblings existed, the ciphertext right beside them, i.e. a known-plaintext
+   * pair in a single blob. Phase 3 drops the plaintext columns, at which point
+   * the audit log would have been the last plaintext copy standing.
+   *
+   * Now an explicit allowlist of STRUCTURED fields. Verified against every
+   * reader: the admin Timeline reads only drugName/drugClass/frequency
+   * (`TimelineTab.tsx` formatMedicationObject), and nothing anywhere reads the
+   * free-text keys off these rows. Mirrors the 4-key snapshot
+   * `adminAddMedication` already writes.
+   *
+   * §164.312(c) reconstructability (N5's 2026-07-09 rationale for widening this
+   * to a full snapshot) is preserved by `_snapshotHash` — see
+   * common/audit/snapshot-hash.ts. `pillImageUrl` is excluded too: it points at
+   * an image of the patient's own medication and no reader wants it here.
+   */
   private serializeMedication(med: PatientMedication) {
-    return {
-      ...med,
+    const snapshot = {
+      id: med.id,
+      drugName: med.drugName,
+      drugClass: med.drugClass,
+      isCombination: med.isCombination,
+      combinationComponents: med.combinationComponents,
+      frequency: med.frequency,
+      source: med.source,
+      verificationStatus: med.verificationStatus,
+      verifiedByAdminId: med.verifiedByAdminId,
+      canonicalDrugId: med.canonicalDrugId,
+      holdReason: med.holdReason,
+      holdSetAt: med.holdSetAt?.toISOString() ?? null,
+      holdEscalationLevel: med.holdEscalationLevel,
+      addedByUserId: med.addedByUserId,
+      addedByRole: med.addedByRole,
+      addedAt: med.addedAt?.toISOString() ?? null,
+      lastEditedByUserId: med.lastEditedByUserId,
+      lastEditedByRole: med.lastEditedByRole,
+      lastEditedAt: med.lastEditedAt?.toISOString() ?? null,
       reportedAt: med.reportedAt.toISOString(),
       verifiedAt: med.verifiedAt?.toISOString() ?? null,
       discontinuedAt: med.discontinuedAt?.toISOString() ?? null,
     }
+    return { ...snapshot, [SNAPSHOT_HASH_KEY]: snapshotHash(med) }
   }
 }
 

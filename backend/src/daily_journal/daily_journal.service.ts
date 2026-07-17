@@ -9,6 +9,10 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import {
+  snapshotHash,
+  SNAPSHOT_HASH_KEY,
+} from '../common/audit/snapshot-hash.js'
 import { randomUUID } from 'node:crypto'
 import { SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared'
 import {
@@ -1804,10 +1808,18 @@ export class DailyJournalService {
     source?: EntrySource
     [key: string]: unknown
   }): Prisma.InputJsonValue {
-    const symptoms: string[] = [
-      ...AUDIT_SYMPTOM_FLAGS.filter((flag) => entry[flag] === true),
-      ...(entry.otherSymptoms ?? []),
-    ]
+    // V-06 audit-log leak (2026-07-17): this spliced the patient's FREEFORM
+    // `otherSymptoms` into the symptom list and carried `notes` verbatim — both
+    // are encrypted at rest (otherSymptomsEncrypted / notesEncrypted), so
+    // writing them here put the same bytes into an UNENCRYPTED Json column.
+    // The structured symptom FLAGS are Manisha's signed-off boolean vocabulary,
+    // not free text, so they stay. `otherSymptomsCount` preserves the "did they
+    // report something off-catalog?" signal; the text lives on the encrypted
+    // column. `_snapshotHash` attests the full record — see
+    // common/audit/snapshot-hash.ts.
+    const symptoms: string[] = AUDIT_SYMPTOM_FLAGS.filter(
+      (flag) => entry[flag] === true,
+    )
     return {
       entryId: entry.id,
       measuredAt: entry.measuredAt.toISOString(),
@@ -1820,8 +1832,9 @@ export class DailyJournalService {
       medicationTaken: entry.medicationTaken ?? null,
       missedDoses: entry.missedDoses ?? null,
       symptoms,
-      notes: entry.notes ?? null,
+      otherSymptomsCount: entry.otherSymptoms?.length ?? 0,
       source: entry.source ? entry.source.toLowerCase() : null,
+      [SNAPSHOT_HASH_KEY]: snapshotHash(entry),
     }
   }
 
