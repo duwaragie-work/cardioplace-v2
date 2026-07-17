@@ -156,6 +156,34 @@ export async function seedAdmins() {
   console.log(`  ops: ${opsUser.email}`)
   console.log(`  coordinator: ${coordinator.email} (practice seed-cedar-hill)`)
 
+  // ─── Out-of-scope PROVIDER (V-01/V-04 IDOR spec harness) ─────────────────
+  // PROVIDER role with NO PracticeProvider row and NO patient assignment. By
+  // construction, PatientAccessService.assertCanAccessPatient rejects every
+  // patient for this actor (providerInPractice() returns false for any
+  // practiceId), which is exactly the "scoped PROVIDER outside the alert's
+  // scope" case spec 76 (V-01/V-04 IDOR) needs to prove the fix at the HTTP
+  // layer. Using the assigned primaryProvider for that spec would be
+  // in-scope and legitimately return 200 — see qa/tests/76-alert-scope-idor.
+  //
+  // NOT gated behind SEED_TEST_FIXTURES: spec 76 must run in every CI shard
+  // that hits the auth-limiter-off env, and the account cost is one row.
+  const outOfScopeProvider = await prisma.user.upsert({
+    where: { email: 'outofscope-provider@cardioplace.test' },
+    update: {},
+    create: {
+      email: 'outofscope-provider@cardioplace.test',
+      pwdhash,
+      name: 'Dr. Ines Vega',
+      roles: ['PROVIDER'],
+      isVerified: true,
+      onboardingStatus: 'COMPLETED',
+      timezone: 'America/New_York',
+      displayId: await staffDisplayId('outofscope-provider@cardioplace.test'),
+    },
+  })
+  await seedPermaOtp('outofscope-provider@cardioplace.test', otpHash)
+  console.log(`  out-of-scope provider: ${outOfScopeProvider.email} (no practice link — V-01/V-04 harness)`)
+
   // ─── Multi-practice provider fixture (phase/practice-identity) ───────────
   // Behind SEED_TEST_FIXTURES so production seeds stay single-practice. Drives
   // Playwright specs 34/35/36: this provider is a member of BOTH Cedar Hill
@@ -223,6 +251,7 @@ export async function seedAdmins() {
     medicalDirector,
     opsUser,
     coordinator,
+    outOfScopeProvider,
     multiPracticeProvider,
   }
 }

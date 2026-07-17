@@ -22,10 +22,19 @@ import { API_BASE_URL } from '../playwright.config.js'
  * real HTTP.
  *
  * Boundary under test, using seeded roles:
- *   • HEALPLACE_OPS  → isUnscoped() → allowed on any alert (200)
- *   • plain PROVIDER → scoped; refused on an alert outside their scope (403)
+ *   • HEALPLACE_OPS       → isUnscoped() → allowed on any alert (200)
+ *   • out-of-scope PROVIDER → scoped; refused on an alert outside their scope (403)
  * The two roles hit the SAME alert id, so the only variable is the scope gate.
  * A 403-vs-200 split on one id is the whole finding.
+ *
+ * ⚠️ Actor choice matters. The seed's primary/backup/multi-practice providers
+ * are all linked to Cedar Hill via PracticeProvider (backend/prisma/seed/
+ * patients.ts staffLinks) and are therefore IN-scope for every seeded alert —
+ * a 200 from any of them is correct behaviour of the gate, not a leak. This
+ * spec uses `outOfScopeProvider` (Dr. Ines Vega, no PracticeProvider row) so
+ * that providerInPractice() returns false for whichever practice the alert
+ * belongs to, forcing the 403 branch. See backend/src/common/patient-access.
+ * service.ts:77-88.
  */
 test.describe('76 — alert endpoint scope (V-01 / V-04 IDOR)', () => {
   // Sign in ONCE per role and reuse across both tests. Each apiSignIn spends an
@@ -40,7 +49,7 @@ test.describe('76 — alert endpoint scope (V-01 / V-04 IDOR)', () => {
 
   test.beforeAll(async () => {
     ops = await authedApi(API_BASE_URL, ADMINS.ops.email, 'admin')
-    provider = await authedApi(API_BASE_URL, ADMINS.primaryProvider.email, 'admin')
+    provider = await authedApi(API_BASE_URL, ADMINS.outOfScopeProvider.email, 'admin')
   })
   test.afterAll(async () => {
     await ops?.dispose()
