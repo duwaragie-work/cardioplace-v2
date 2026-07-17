@@ -1,7 +1,26 @@
 # V-06 phase 3 — dropping the plaintext columns
 
-**Status: BLOCKED. Do not start until every gate below is green.**
+**Status: gates 1–5 are GREEN as of 2026-07-17 (dev DB). Phase 3 still needs the bake.**
 Owner: Dev 3 (Niva). Written 2026-07-17 alongside phase 2 (`10cd5d0`).
+
+> ### Executed 2026-07-17 against the dev DB (db.prisma.io)
+> | Gate | Result |
+> |---|---|
+> | 1. Apply 4 pending migrations | ✅ `migrate deploy` — all 4 applied. Pre-flight confirmed **0** `DeviationType.WEIGHT` rows, so the enum rebuild could not abort. |
+> | 2. `MFA_ENCRYPTION_KEY` | ✅ Dev key generated into the gitignored `.env`. (Also replaced a `change-me-…` `JWT_SECRET` placeholder that was blocking boot — pre-existing, unrelated.) |
+> | 3. `Conversation` LEFT JOIN fix | ✅ `86b7117`. Note: **0 orphans exist today** — the fix is defensive against a state the schema permits (`sessionId` has no FK). |
+> | 4. Backfill | ✅ **1282 rows** across all 14 columns. Verification: *"no candidate rows remain."* |
+> | 5. Audit scrub | ✅ **159 historical rows** scrubbed. Verification: *"no plaintext free-text remains in the audit Json."* |
+> | 6. Bake reads | ⏳ **Outstanding.** Reads now serve real ciphertext; they need soak time before the drop. |
+> | 7. Phase 3 drop | ⛔ Gated on 6. |
+>
+> **End-to-end verified:** every plaintext column has a ciphertext sibling (gap=0 on all 10 populated pairs); a real envelope round-trips (`decrypt(ciphertext) === plaintext`) **and** the `v06-decrypt` extension returns the decrypted value on a live read; 0 audit rows carry free-text keys.
+>
+> **Two script bugs only the first real run could find** (`611df36`) — both would have hit whoever ran this next:
+> - **Backfill:** Prisma's 5s interactive-transaction default is tuned for a local DB; against managed Postgres the per-row commit hit **6799 ms** → P2028 mid-run. Raised to 30s. (The run is resumable — 161 rows had already committed and the retry resumed cleanly, which is the per-row transaction design working.)
+> - **Scrub:** it never loaded `dotenv`, so `DATABASE_URL` was undefined and `pg` silently fell back to localhost → `ECONNREFUSED`. And its live loop only advanced the offset under `DRY_RUN`, on the borrowed assumption that scrubbed rows "drop out of the scan" — true of the backfill (whose `loadBatch` filters) but **false here**, where the `findMany` has no `WHERE` at all. Live mode re-read the same 500 rows until killed.
+>
+> **This was the dev DB only.** Every gate below must be re-run per environment.
 
 Phase 3 is the step that actually delivers §164.312(a)(2)(iv). Phases 1 and 2 only
 build up to it: while the plaintext column still exists, a DB dump still yields
