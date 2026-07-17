@@ -31,15 +31,17 @@ function mockPrisma() {
 }
 
 function makeService(prisma: ReturnType<typeof mockPrisma>) {
-  // Only `prisma` is exercised by the §H methods — cron/escalation deps are
-  // unused, so empty stubs are sufficient for a unit spec. The sixth arg is
-  // `auditExceptionReport` (added by N7); the fifth is
-  // `medicationHoldEscalation`; the seventh is `encryption` (added by V-06 —
-  // only touched by seed paths that write rationale/reason, none of which
-  // §H exercises here). Same empty-stub pattern for every non-prisma dep the
-  // tested methods don't touch.
+  // Only `prisma` and `encryption` are exercised by the §H methods; every
+  // cron/escalation dep is unused here, so empty stubs suffice.
+  //
+  // Constructor order (test-control.service.ts) — keep in sync:
+  //   1 prisma · 2 cls (N-2 residual 2026-07-17) · 3 dailyReminder ·
+  //   4 monthlyReask · 5 escalation · 6 medicationHoldEscalation ·
+  //   7 auditExceptionReport (N7) · 8 encryption (V-06)
+  // `cls` is only touched by the cron drivers, which §H does not exercise.
   return new TestControlService(
     prisma as never,
+    {} as never,
     {} as never,
     {} as never,
     {} as never,

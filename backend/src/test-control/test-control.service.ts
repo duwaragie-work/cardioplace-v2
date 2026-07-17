@@ -1,4 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EncryptionService } from '../common/encryption.service.js'
 import { AuditExceptionReportService } from '../crons/audit-exception-report.service.js'
@@ -16,6 +18,19 @@ import { createHash, randomBytes } from 'node:crypto'
 /**
  * Helpers backing the /test-control HTTP endpoints. Pure delegation —
  * the controller layer handles auth/secret + DTO shape.
+ *
+ * N-2 residual (2026-07-17) — the cron drivers below call each service's inner
+ * `runScan` / `run` / `dispatchT0ForAlert` DIRECTLY, which skips the `@Cron`
+ * (or `@OnEvent`) method that establishes the system-principal CLS scope. Every
+ * PHI write and email those scans emit was therefore attributed to whoever hit
+ * the test-control endpoint — or to nobody (`system-principal-unknown`) —
+ * instead of the cron's principal. That is the same defect N-2 fixed on the
+ * production paths, arriving through the back door: these routes are @Public()
+ * and HTTP-reachable wherever ENABLE_TEST_CONTROL is on (see V-08).
+ *
+ * Each driver now re-establishes the SAME label its real scheduler uses, so a
+ * test-driven run is audited identically to a scheduled one — which is the
+ * point of driving the real cron rather than a copy of it.
  */
 @Injectable()
 export class TestControlService {
@@ -23,6 +38,9 @@ export class TestControlService {
 
   constructor(
     private readonly prisma: PrismaService,
+    // N-2 residual — needed to re-establish the cron actor scope the @Cron
+    // wrappers would otherwise provide.
+    private readonly cls: ClsService,
     // N3 (2026-07-13) — gap-alert is replaced by daily-reminder. Test-control
     // now drives the new cron; the qa helper's old runGapAlert() call is
     // rewired to hit runDailyReminderScan() below.
@@ -39,7 +57,9 @@ export class TestControlService {
   // ─── Cron drivers ───────────────────────────────────────────────────────
   async runEscalationScan(now: Date): Promise<{ scanned: number; dispatched: number }> {
     const before = await this.prisma.escalationEvent.count()
-    await this.escalation.runScan(now)
+    await runAsCronActor(this.cls, 'cron-escalation-ladder', () =>
+      this.escalation.runScan(now),
+    )
     const after = await this.prisma.escalationEvent.count()
     return { scanned: 1, dispatched: Math.max(0, after - before) }
   }
@@ -51,7 +71,11 @@ export class TestControlService {
    * Idempotent + error-propagating (see EscalationService.dispatchT0ForAlert).
    */
   async fireEscalationT0(alertId: string): Promise<{ ok: true }> {
-    await this.escalation.dispatchT0ForAlert(alertId)
+    // 'engine-alert-generator' — the label handleAlertCreated uses for the same
+    // T+0 dispatch, so a driven T+0 audits identically to an event-driven one.
+    await runAsCronActor(this.cls, 'engine-alert-generator', () =>
+      this.escalation.dispatchT0ForAlert(alertId),
+    )
     return { ok: true }
   }
 
@@ -61,18 +85,26 @@ export class TestControlService {
    * assert on tier-selection + care-team fan-out counts, not just totals.
    */
   async runDailyReminderScan(now: Date): Promise<DailyReminderScanSummary> {
-    return this.dailyReminder.runScan(now)
+    return runAsCronActor(this.cls, 'cron-daily-reminder', () =>
+      this.dailyReminder.runScan(now),
+    )
   }
 
   async runMonthlyReaskScan(now: Date): Promise<{ scanned: number; reasked: number }> {
-    const sent = await this.monthlyReask.runScan(now)
+    const sent = await runAsCronActor(this.cls, 'cron-monthly-reask', () =>
+      this.monthlyReask.runScan(now),
+    )
     return { scanned: 1, reasked: sent }
   }
 
   async runMedicationHoldEscalationScan(
     now: Date,
   ): Promise<{ scanned: number; rungsFired: number }> {
-    const fired = await this.medicationHoldEscalation.runScan(now)
+    const fired = await runAsCronActor(
+      this.cls,
+      'cron-medication-hold-escalation',
+      () => this.medicationHoldEscalation.runScan(now),
+    )
     return { scanned: 1, rungsFired: fired }
   }
 
@@ -89,7 +121,11 @@ export class TestControlService {
     stickySkipped: number
     failedDetectors: number
   }> {
-    const summary = await this.auditExceptionReport.run(now)
+    const summary = await runAsCronActor(
+      this.cls,
+      'cron-audit-exception-report',
+      () => this.auditExceptionReport.run(now),
+    )
     return { scanned: 1, ...summary }
   }
 
