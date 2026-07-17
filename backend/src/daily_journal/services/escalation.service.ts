@@ -183,17 +183,27 @@ export class EscalationService {
    */
   @OnEvent(EMERGENCY_EVENTS.FLAGGED, { async: true })
   async onEmergencyFlagged(payload: EmergencyFlaggedPayload): Promise<void> {
-    try {
-      await this.dispatchEmergencyToCareTeam(payload)
-    } catch (err) {
-      this.logger.error(
-        // V-05: digest + userId, not the narrative — see chat.service.ts's
-        // emergency path for the reasoning. The dispatch failed, but the
-        // EmergencyEvent row that triggered it is persisted and audited.
-        `[SECURITY-CRITICAL] Emergency dispatch failed userId=${payload.userId} situation=${situationHash(payload.situation)}`,
-        err instanceof Error ? err.stack : err,
-      )
-    }
+    // N-2 residual (2026-07-17) — same fix handleAlertCreated got above, and
+    // for the same reason; this sibling was missed. emergency.flagged is
+    // emitted from the PATIENT's own request context (chat.service.ts:239 /
+    // voice-tools.service.ts:1832), so without a system-principal scope the
+    // emergency_dispatch_caregiver send below lands in EmailDisclosureLog
+    // either unattributed OR — worse — attributed to the patient, i.e. the
+    // audit trail claims the patient disclosed their own emergency to their
+    // caregiver. The system did.
+    return runAsCronActor(this.cls, 'emergency-dispatch', async () => {
+      try {
+        await this.dispatchEmergencyToCareTeam(payload)
+      } catch (err) {
+        this.logger.error(
+          // V-05: digest + userId, not the narrative — see chat.service.ts's
+          // emergency path for the reasoning. The dispatch failed, but the
+          // EmergencyEvent row that triggered it is persisted and audited.
+          `[SECURITY-CRITICAL] Emergency dispatch failed userId=${payload.userId} situation=${situationHash(payload.situation)}`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+    })
   }
 
   private async dispatchEmergencyToCareTeam(

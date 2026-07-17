@@ -167,11 +167,15 @@ describe('escalationEmailBody — HIPAA notify-and-link (PHI)', () => {
 describe('EscalationService', () => {
   let service: EscalationService
   let prisma: Record<string, any>
+  // Records every cls.set(k, v) so a test can prove which system principal a
+  // handler ran as. Reset per test in the beforeEach below.
+  let clsSets: Array<[string, unknown]> = []
   let eventEmitter: { emit: jest.Mock }
   let email: { sendEmail: jest.Mock }
   let createdEvents: Array<{ id: string; data: any }>
 
   beforeEach(async () => {
+    clsSets = []
     createdEvents = []
 
     prisma = {
@@ -271,10 +275,15 @@ describe('EscalationService', () => {
         },
         {
           // runAsCronActor wraps handleCron in cls.run — pass-through stub.
+          // `set` records so tests can assert WHICH system principal a handler
+          // ran as (see the N-2-residual test on onEmergencyFlagged) — the
+          // label is what lands in EmailDisclosureLog.senderPrincipal.
           provide: ClsService,
           useValue: {
             run: (fn: () => unknown) => fn(),
-            set: () => undefined,
+            set: (k: string, v: unknown) => {
+              clsSets.push([k, v])
+            },
             get: () => null,
           },
         },
@@ -455,6 +464,31 @@ describe('EscalationService', () => {
   // project_notification_tab_split_2026_06_04.
   // ────────────────────────────────────────────────────────────────────────
   describe('onEmergencyFlagged — care-team pages set EMERGENCY_FLAGGED', () => {
+    // N-2 residual (2026-07-17). N-2 wrapped the five named templates and the
+    // sibling handleAlertCreated, but missed this handler. emergency.flagged is
+    // emitted from the PATIENT's own request context, so unwrapped, the
+    // caregiver disclosure is logged either unattributed or — worse —
+    // attributed to the patient, i.e. the trail claims the patient disclosed
+    // their own emergency to their caregiver.
+    it('runs as the emergency-dispatch system principal, not the patient', async () => {
+      prisma.patientCaregiver = {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+      }
+      prisma.patientProviderAssignment = {
+        findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+      }
+
+      await service.onEmergencyFlagged({
+        userId: 'patient-1',
+        situation: 'Chest pain and dizziness',
+        source: 'voice-tool',
+      } as any)
+
+      // systemActorLabel is what resolves to EmailDisclosureLog.senderPrincipal.
+      expect(clsSets).toContainEqual(['systemActorLabel', 'emergency-dispatch'])
+      expect(clsSets).toContainEqual(['actorType', 'SYSTEM_ACTOR'])
+    })
+
     it('caregiver + provider DASHBOARD rows all carry EMERGENCY_FLAGGED (never ALERT_*)', async () => {
       prisma.patientCaregiver = {
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([
