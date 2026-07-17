@@ -993,7 +993,14 @@ const en = {
   // Support — public "locked out / can’t sign in" page (Fix 12).
   'support.locked.title': 'Need help signing in?',
   'support.locked.subtitle': 'Tell us what’s happening and our team will contact you to verify your identity before making any account changes.',
-  'support.locked.statusBanner': 'You can also check the status of an existing request by clicking the link in your confirmation email.',
+  // N-1 (Duwaragie 2026-07-14 triage). This promised "the link in your
+  // confirmation email"; the email has no link, and the only ticket view
+  // (/support/my-tickets) needs a sign-in — which the reader of THIS page
+  // cannot do, since it is the locked-out page. The triage fix allowed either
+  // sending the confirmation or removing the copy: the confirmation shipped,
+  // so this now describes what that email actually offers — a ticket number
+  // and a reply address.
+  'support.locked.statusBanner': 'Already sent a request? Your confirmation email has your ticket number — reply to that email and we\'ll add anything new to the same ticket.',
   'support.locked.email': 'Your account email',
   'support.locked.description': 'What’s happening? (e.g. I lost my authenticator app and recovery codes)',
   'support.locked.phone': 'Callback phone (optional)',

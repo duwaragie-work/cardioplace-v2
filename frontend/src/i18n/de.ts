@@ -971,7 +971,9 @@ const de: Record<TranslationKey, string> = {
   // Support — öffentliche Seite "Anmeldung nicht möglich" (Fix 12).
   'support.locked.title': 'Brauchen Sie Hilfe bei der Anmeldung?',
   'support.locked.subtitle': 'Sagen Sie uns, was los ist, und unser Team wird Sie kontaktieren, um Ihre Identität zu bestätigen, bevor Änderungen an Ihrem Konto vorgenommen werden.',
-  'support.locked.statusBanner': 'Sie können den Status einer bestehenden Anfrage auch über den Link in Ihrer Bestätigungs-E-Mail verfolgen.',
+  // N-1 (2026-07-14 triage) — see en.ts: the confirmation email carries a
+  // ticket number and a reply address, not a link.
+  'support.locked.statusBanner': 'Schon eine Anfrage gesendet? Ihre Bestätigungs-E-Mail enthält Ihre Ticketnummer — antworten Sie einfach darauf, und wir ergänzen dasselbe Ticket.',
   'support.locked.email': 'Ihre Konto-E-Mail-Adresse',
   'support.locked.description': 'Was ist los? (z. B. ich habe meine Authentifizierungs-App und die Wiederherstellungscodes verloren)',
   'support.locked.phone': 'Rückruftelefon (optional)',
