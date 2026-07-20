@@ -177,6 +177,9 @@ export interface ProfileResult {
   preferredLanguage?: string | null
   timezone: string | null
   onboardingStatus: OnboardingStatus
+  // Present on submit/patch responses so the client can route the onboarding
+  // steps without a follow-up GET.
+  reminderPreferenceSet?: boolean
 }
 
 function sha256(input: string): string {
@@ -2467,9 +2470,10 @@ export class AuthService {
   }
 
   // Public entry point used by the post-login consent gate (onboarding privacy
-  // step). Records the patient's Terms + Privacy agreement once, on the AuthLog
-  // audit trail (no new table). Idempotent in spirit — a returning user who
-  // already consented never reaches the gate, so it isn't called again.
+  // step). Records the patient's Terms + Privacy agreement. Two writes: the
+  // AuthLog `policy_acknowledged` event stays the immutable audit trail, and
+  // the User columns are the fast-read mirror onboarding checks so it can skip
+  // the privacy step on a re-ask (A5) — without an audit-log scan per load.
   async recordConsent(
     userId: string,
     policyVersion: string,
@@ -2481,6 +2485,13 @@ export class AuthService {
       ipAddress: context?.ipAddress,
       userAgent: context?.userAgent,
       via: 'onboarding',
+    })
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        policyAcknowledgedAt: new Date(),
+        acknowledgedPolicyVersion: policyVersion,
+      },
     })
     return { recorded: true }
   }
@@ -3288,9 +3299,34 @@ export class AuthService {
   async submitProfile(userId: string, dto: ProfileDto): Promise<ProfileResult> {
     const patch = this.buildProfilePatch(dto)
 
+    // Onboarding completion is IDENTITY-gated: only a non-empty name or a
+    // communication preference counts. Reminder prefs must never complete
+    // onboarding — they always fall back to a schema default (09:00/22:00/
+    // 07:00), so treating them as "the patient told us something" marked
+    // patients COMPLETED who had supplied nothing. A reminder-only payload
+    // still persists its fields; it just leaves onboardingStatus alone.
+    const hasIdentity =
+      (typeof dto.name === 'string' && dto.name.trim() !== '') ||
+      (dto.communicationPreference !== undefined &&
+        dto.communicationPreference !== null)
+
+    // Reminder step answered (any of the three fields posted). Recorded so a
+    // re-ask on another device shows the identity step only — localStorage is
+    // device-local and cannot carry this.
+    const hasReminderPrefs =
+      dto.reminderTime !== undefined ||
+      dto.quietHoursStart !== undefined ||
+      dto.quietHoursEnd !== undefined
+
     const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: { ...patch, onboardingStatus: OnboardingStatus.COMPLETED },
+      data: {
+        ...patch,
+        ...(hasIdentity
+          ? { onboardingStatus: OnboardingStatus.COMPLETED }
+          : {}),
+        ...(hasReminderPrefs ? { reminderPreferenceSet: true } : {}),
+      },
       select: {
         name: true,
         dateOfBirth: true,
@@ -3298,6 +3334,7 @@ export class AuthService {
         preferredLanguage: true,
         timezone: true,
         onboardingStatus: true,
+        reminderPreferenceSet: true,
       },
     })
 
@@ -3309,9 +3346,18 @@ export class AuthService {
   async patchProfile(userId: string, dto: ProfileDto): Promise<ProfileResult> {
     const patch = this.buildProfilePatch(dto)
 
+    // Editing reminders from the profile page counts as answering them, same
+    // as the onboarding step — otherwise a patient who set a time here would
+    // still be re-asked for reminders on their next device. PATCH never
+    // touches onboardingStatus; identity completion is submitProfile's job.
+    const hasReminderPrefs =
+      dto.reminderTime !== undefined ||
+      dto.quietHoursStart !== undefined ||
+      dto.quietHoursEnd !== undefined
+
     const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: patch,
+      data: { ...patch, ...(hasReminderPrefs ? { reminderPreferenceSet: true } : {}) },
       select: {
         name: true,
         dateOfBirth: true,
@@ -3324,6 +3370,7 @@ export class AuthService {
         quietHoursStart: true,
         quietHoursEnd: true,
         onboardingStatus: true,
+        reminderPreferenceSet: true,
       },
     })
 
@@ -3410,6 +3457,11 @@ export class AuthService {
         reminderTime: true,
         quietHoursStart: true,
         quietHoursEnd: true,
+        // Onboarding step routing — see the field comment in user.prisma.
+        reminderPreferenceSet: true,
+        // A5 — lets onboarding skip the privacy step when this already matches
+        // the current POLICY_VERSION.
+        acknowledgedPolicyVersion: true,
         // L3 (2026-07-14) — SMS reminders. The patient sees + manages their OWN
         // number, so it's decrypted below before returning. smsOptedOut is
         // surfaced (read-only) so Profile can explain why texts stopped after a
@@ -3509,6 +3561,11 @@ export class AuthService {
       reminderTime: user.reminderTime,
       quietHoursStart: user.quietHoursStart,
       quietHoursEnd: user.quietHoursEnd,
+      // Onboarding step routing — the re-ask on a second device shows the
+      // identity step only when this is already true.
+      reminderPreferenceSet: user.reminderPreferenceSet,
+      // A5 — onboarding skips the privacy step when this === POLICY_VERSION.
+      acknowledgedPolicyVersion: user.acknowledgedPolicyVersion,
       // L1 — SMS reminder prefs. phoneNumber is the DECRYPTED value (see the
       // envelope decrypt above) and is returned ONLY here, on the owner's own
       // profile read, so they can see/edit their number. smsConsentAt /

@@ -1099,38 +1099,81 @@ describe('AuthService', () => {
   // ─── submitProfile service method ─────────────────────────────────────────────
 
   describe('submitProfile', () => {
-    it('should always set onboardingStatus = COMPLETED even with an empty DTO', async () => {
+    // Onboarding completion is IDENTITY-gated. It used to be unconditional,
+    // which marked patients COMPLETED who had supplied nothing but a reminder
+    // time that was defaulted for them anyway.
+    it('should NOT complete onboarding for an empty DTO', async () => {
       ;(prisma.user.update as jest.Mock).mockResolvedValue({
-        name: mockUser.name,
+        name: null,
         dateOfBirth: null,
         communicationPreference: null,
         preferredLanguage: 'en',
         timezone: null,
-        onboardingStatus: OnboardingStatus.COMPLETED,
+        onboardingStatus: OnboardingStatus.NOT_COMPLETED,
+        reminderPreferenceSet: false,
       })
 
       const result = await service.submitProfile(mockUser.id, {})
       expect(result).toMatchObject({
         message: 'Profile saved',
-        name: mockUser.name,
+        onboardingStatus: OnboardingStatus.NOT_COMPLETED,
+      })
+      const data = (prisma.user.update as jest.Mock).mock.calls[0][0].data
+      expect(data).not.toHaveProperty('onboardingStatus')
+      expect(data).not.toHaveProperty('reminderPreferenceSet')
+    })
+
+    it('should NOT complete onboarding for a reminder-only payload, but records the preference', async () => {
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({
+        name: null,
+        dateOfBirth: null,
+        communicationPreference: null,
+        preferredLanguage: 'en',
+        timezone: null,
+        onboardingStatus: OnboardingStatus.NOT_COMPLETED,
+        reminderPreferenceSet: true,
+      })
+
+      await service.submitProfile(mockUser.id, {
+        reminderTime: '09:00',
+        quietHoursStart: '22:00',
+        quietHoursEnd: '07:00',
+      })
+
+      const data = (prisma.user.update as jest.Mock).mock.calls[0][0].data
+      expect(data).not.toHaveProperty('onboardingStatus')
+      expect(data).toMatchObject({
+        reminderTime: '09:00',
+        reminderPreferenceSet: true,
+      })
+    })
+
+    it('should NOT complete onboarding for a whitespace-only name', async () => {
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({
+        ...mockUser,
+        onboardingStatus: OnboardingStatus.NOT_COMPLETED,
+      })
+
+      await service.submitProfile(mockUser.id, { name: '   ' })
+
+      const data = (prisma.user.update as jest.Mock).mock.calls[0][0].data
+      expect(data).not.toHaveProperty('onboardingStatus')
+    })
+
+    it('should complete onboarding when only a communication preference is given', async () => {
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({
+        ...mockUser,
         onboardingStatus: OnboardingStatus.COMPLETED,
       })
-      expect(prisma.user.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: mockUser.id },
-          data: expect.objectContaining({
-            onboardingStatus: OnboardingStatus.COMPLETED,
-          }),
-          select: {
-            name: true,
-            dateOfBirth: true,
-            communicationPreference: true,
-            preferredLanguage: true,
-            timezone: true,
-            onboardingStatus: true,
-          },
-        }),
-      )
+
+      await service.submitProfile(mockUser.id, {
+        communicationPreference: 'TEXT_FIRST',
+      })
+
+      const data = (prisma.user.update as jest.Mock).mock.calls[0][0].data
+      expect(data).toMatchObject({
+        onboardingStatus: OnboardingStatus.COMPLETED,
+      })
     })
 
     it('should persist all provided profile fields', async () => {
@@ -1187,6 +1230,33 @@ describe('AuthService', () => {
 
       const call = (prisma.user.update as jest.Mock).mock.calls[0][0]
       expect(call.data).not.toHaveProperty('timezone')
+    })
+  })
+
+  // ─── recordConsent service method (A5) ────────────────────────────────────────
+
+  describe('recordConsent', () => {
+    it('persists policyAcknowledgedAt + version AND writes the audit event', async () => {
+      const logSpy = jest
+        .spyOn(
+          service as unknown as { logAuthEvent: (...a: unknown[]) => Promise<void> },
+          'logAuthEvent',
+        )
+        .mockResolvedValue(undefined)
+      ;(prisma.user.update as jest.Mock).mockResolvedValue({})
+
+      const res = await service.recordConsent(mockUser.id, '2026-05-25')
+
+      expect(res).toEqual({ recorded: true })
+      // Fast-read mirror on the User row.
+      const data = (prisma.user.update as jest.Mock).mock.calls[0][0].data
+      expect(data.acknowledgedPolicyVersion).toBe('2026-05-25')
+      expect(data.policyAcknowledgedAt).toBeInstanceOf(Date)
+      // Immutable audit trail still written.
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'policy_acknowledged' }),
+      )
+      logSpy.mockRestore()
     })
   })
 

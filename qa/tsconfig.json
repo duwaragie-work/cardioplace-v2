@@ -20,5 +20,5 @@
     }
   },
   "include": ["**/*.ts"],
-  "exclude": ["node_modules", "playwright-report", "test-results"]
+  "exclude": ["node_modules", "playwright-report", "test-results", "reports"]
 }

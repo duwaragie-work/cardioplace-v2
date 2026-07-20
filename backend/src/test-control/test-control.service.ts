@@ -743,6 +743,64 @@ export class TestControlService {
   }
 
   /**
+   * Full onboarding-state reset for the E2E onboarding suite (spec 03, A1–A5).
+   * Rolls a patient back to cold: NOT_COMPLETED, no identity, no reminder
+   * preference, no consent — AND deletes their `policy_acknowledged` AuthLog
+   * rows so the A5 "no duplicate consent write" assertion starts from zero
+   * every run. Keyed by email so specs don't need a userId round-trip first;
+   * returns the id they'll use for subsequent test-control calls.
+   *
+   * Replaces the `docker exec psql` reset the proof specs used, so the suite
+   * is CI-runnable over HTTP. Test-infra only — gated by the controller.
+   */
+  async resetOnboarding(email: string): Promise<{ userId: string }> {
+    const user = await this.prisma.user.update({
+      where: { email },
+      data: {
+        onboardingStatus: 'NOT_COMPLETED',
+        name: null,
+        communicationPreference: null,
+        reminderPreferenceSet: false,
+        policyAcknowledgedAt: null,
+        acknowledgedPolicyVersion: null,
+      },
+      select: { id: true },
+    })
+    await this.prisma.authLog.deleteMany({
+      where: { userId: user.id, event: 'policy_acknowledged' },
+    })
+    return { userId: user.id }
+  }
+
+  /**
+   * Count a user's `policy_acknowledged` AuthLog rows. Drives the A5
+   * duplicate-consent assertion: after a re-ask on a second device the count
+   * must stay 1 (consent is recorded once, not per device).
+   */
+  async countPolicyAck(userId: string): Promise<{ count: number }> {
+    const count = await this.prisma.authLog.count({
+      where: { userId, event: 'policy_acknowledged' },
+    })
+    return { count }
+  }
+
+  /**
+   * Force a stored `acknowledgedPolicyVersion` (+ a consent timestamp) without
+   * driving the consent flow. Lets the A5 version-aware test simulate a patient
+   * who consented to an OLD policy version: onboarding must re-show the privacy
+   * step because the stored version no longer matches the current POLICY_VERSION.
+   */
+  async setPolicyAckVersion(email: string, version: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { email },
+      data: {
+        acknowledgedPolicyVersion: version,
+        policyAcknowledgedAt: new Date(),
+      },
+    })
+  }
+
+  /**
    * Insert journal entries at exact timestamps. Used by tests that depend
    * on session windows (e.g. tachycardia 8h cross-session, AFib ≥3-reading
    * gate) — driving them via API + backdate is brittle when the tests

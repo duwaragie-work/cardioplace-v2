@@ -1040,7 +1040,7 @@ const de: Record<TranslationKey, string> = {
   'onboarding.sms.phoneInvalid': 'Bitte geben Sie Ihre Nummer mit Ländervorwahl an, z. B. +15550100 — oder lassen Sie das Feld leer.',
   'onboarding.reminders.title': 'Richten Sie Ihre Erinnerungen ein',
   'onboarding.reminders.subtitle': 'Wählen Sie, wann wir uns bei Ihnen melden. Sie können dies jederzeit in den Einstellungen ändern.',
-  'onboarding.stepIndicator': 'Schritt {n} von 2',
+  'onboarding.stepIndicator': 'Schritt {n} von {t}',
   'onboarding.back': 'Zurück',
   'onboarding.invalidDob': 'Bitte geben Sie ein gültiges Geburtsdatum ein.',
   'onboarding.continue': 'Weiter',

@@ -1067,7 +1067,7 @@ const am: Record<TranslationKey, string> = {
   'onboarding.sms.phoneInvalid': 'ቁጥርዎን ከአገር ኮድ ጋር ያስገቡ፣ ለምሳሌ +15550100 — ወይም ባዶ ይተዉት።',
   'onboarding.reminders.title': 'ማስታወሻዎችዎን ያዘጋጁ',
   'onboarding.reminders.subtitle': 'መቼ እንደምናገኝዎት ይምረጡ። ይህን በማንኛውም ጊዜ በቅንብሮች ውስጥ መቀየር ይችላሉ።',
-  'onboarding.stepIndicator': 'ደረጃ {n} ከ2',
+  'onboarding.stepIndicator': 'ደረጃ {n} ከ{t}',
   'onboarding.back': 'ተመለስ',
   'onboarding.invalidDob': 'እባክዎ ትክክለኛ የልደት ቀን ያስገቡ።',
   'onboarding.continue': 'ቀጥል',

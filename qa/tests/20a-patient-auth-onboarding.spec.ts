@@ -47,14 +47,20 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
   }
 
   /**
-   * Onboarding now opens on a privacy/trust step (V2-E Gap 7) that gates the
+   * Onboarding opens on a privacy/trust step (V2-E Gap 7) that gates the
    * profile form behind a Terms+Privacy consent. Click through it so the
-   * `#onboarding-name` field becomes reachable. No-ops if the privacy step
-   * isn't shown (e.g. a build that lands straight on the form).
+   * `#onboarding-name` field becomes reachable. No-ops when the privacy step is
+   * skipped (A5: an already-consented patient lands straight on identity).
    */
   async function advancePastPrivacyStep(page: Page): Promise<void> {
     const cont = page.locator(byTestId(T.onboarding.privacyContinueBtn))
-    if (await cont.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    const name = page.locator('#onboarding-name')
+    // A5 added a brief loading spinner (the page fetches reminder + consent
+    // flags before deciding which step to show), so the privacy step renders
+    // asynchronously. Wait for the page to settle onto EITHER step before
+    // deciding — a plain isVisible() check races the spinner and no-ops.
+    await expect(cont.or(name).first()).toBeVisible({ timeout: 20_000 })
+    if (await cont.isVisible()) {
       // The consent checkbox (16px) sits under an absolutely-positioned 44px
       // tap-target <span> overlay, which intercepts a normal check()'s click at
       // the input's center → the box never toggles and Continue stays disabled.
@@ -63,13 +69,18 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
       await page.locator(byTestId(T.onboarding.agreeTerms)).check({ force: true })
       await expect(cont).toBeEnabled({ timeout: 10_000 })
       await cont.click()
+      await expect(name).toBeVisible({ timeout: 10_000 })
     }
   }
 
   test('20a.1 — new user (onboardingStatus≠COMPLETED) lands on /onboarding', async ({
     page,
   }) => {
-    await tc.setOnboardingStatus(taylorId, 'NOT_COMPLETED')
+    // Full cold reset (not just setOnboardingStatus): under A2/A5 the reminder
+    // + consent columns also drive step routing, and the seed's `update:{}`
+    // never resets them on the shared Taylor persona. resetOnboarding clears
+    // them (name too — 20g uses Taylor by email/profile, not name).
+    await tc.resetOnboarding(PATIENTS.taylor.email)
     await otpSignIn(page, PATIENTS.taylor.email)
     // Fresh browser context → no `healplace_onboarding_skipped_*` flag, so
     // shouldShowOnboardingForUser() returns true for a NOT_COMPLETED user.
@@ -82,7 +93,7 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
   test('20a.2 — onboarding completion leaves /onboarding + flips status', async ({
     page,
   }) => {
-    await tc.setOnboardingStatus(taylorId, 'NOT_COMPLETED')
+    await tc.resetOnboarding(PATIENTS.taylor.email)
     await otpSignIn(page, PATIENTS.taylor.email)
     await page.waitForURL(/\/onboarding/, { timeout: 30_000 })
     await advancePastPrivacyStep(page)
@@ -176,7 +187,9 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
   test('20a.6 — privacy-trust step shows FIRST and gates the name form', async ({
     page,
   }) => {
-    await tc.setOnboardingStatus(taylorId, 'NOT_COMPLETED')
+    // Full cold reset: A5 skips the privacy step for a consented patient, so
+    // reset clears consent (and reminder state) to keep this idempotent.
+    await tc.resetOnboarding(PATIENTS.taylor.email)
     await otpSignIn(page, PATIENTS.taylor.email)
     await page.waitForURL(/\/onboarding/, { timeout: 30_000 })
 
@@ -201,57 +214,12 @@ test.describe('Phase 4a — patient auth + onboarding', () => {
 
   // ─── Two-step onboarding: identity (step 1) → reminders (step 2) ──────────
 
-  test('20a.7 — skipping BOTH steps leaves onboardingStatus NOT_COMPLETED (re-asked elsewhere)', async ({
-    page,
-  }) => {
-    await tc.setOnboardingStatus(taylorId, 'NOT_COMPLETED')
-    await otpSignIn(page, PATIENTS.taylor.email)
-    await page.waitForURL(/\/onboarding/, { timeout: 30_000 })
-    await advancePastPrivacyStep(page)
-
-    // Step 1 Skip → must advance to the reminders step, NOT the dashboard.
-    await page.locator(byTestId(T.onboarding.skipBtn)).click()
-    await expect(
-      page.locator(byTestId(T.onboarding.remindersSkipBtn)),
-    ).toBeVisible({ timeout: 15_000 })
-    await expect(page).toHaveURL(/\/onboarding/)
-
-    // Step 2 Skip → leaves onboarding (this browser is satisfied via the
-    // localStorage flag)…
-    await page.locator(byTestId(T.onboarding.remindersSkipBtn)).click()
-    await expect(page).not.toHaveURL(/\/onboarding/, { timeout: 30_000 })
-
-    // …but nothing was persisted server-side, so another browser re-asks:
-    // onboardingStatus must NOT have flipped to COMPLETED.
-    await page.waitForTimeout(1500)
-    expect(
-      (await tc.findUser(PATIENTS.taylor.email)).onboardingStatus,
-    ).not.toBe('COMPLETED')
-  })
-
-  test('20a.8 — skipping identity but continuing reminders marks COMPLETED', async ({
-    page,
-  }) => {
-    await tc.setOnboardingStatus(taylorId, 'NOT_COMPLETED')
-    await otpSignIn(page, PATIENTS.taylor.email)
-    await page.waitForURL(/\/onboarding/, { timeout: 30_000 })
-    await advancePastPrivacyStep(page)
-
-    // Skip identity → reminders step.
-    await page.locator(byTestId(T.onboarding.skipBtn)).click()
-    await expect(
-      page.locator(byTestId(T.onboarding.remindersSubmitBtn)),
-    ).toBeVisible({ timeout: 15_000 })
-
-    // Continue on reminders → any real "Continue" onboards the patient.
-    await page.locator(byTestId(T.onboarding.remindersSubmitBtn)).click()
-    await expect(page).not.toHaveURL(/\/onboarding/, { timeout: 30_000 })
-    await expect
-      .poll(
-        async () =>
-          (await tc.findUser(PATIENTS.taylor.email)).onboardingStatus,
-        { timeout: 12_000 },
-      )
-      .toBe('COMPLETED')
-  })
+  // 20a.7 (skip-both leaves NOT_COMPLETED, via a reminders Skip) and 20a.8
+  // (reminder-only → COMPLETED) were removed: both asserted the pre-fix
+  // behavior (the reminders Skip is gone per A3, and reminder-only no longer
+  // completes onboarding per A1). Their replacements — identity-gated
+  // completion, the no-Skip reminders step, the re-ask, and the route guard —
+  // live in 03-onboarding-and-layer-a-gate.spec.ts (A1–A5), which drives the
+  // dedicated un-onboarded `e2e-onboarding` patient and resets it over HTTP so
+  // it stays idempotent (unlike mutating the shared Taylor persona here).
 })

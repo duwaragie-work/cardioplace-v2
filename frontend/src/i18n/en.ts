@@ -1081,7 +1081,7 @@ const en = {
   'onboarding.sms.phoneInvalid': 'Please enter your number with a country code, like +15550100 — or leave it blank.',
   'onboarding.reminders.title': 'Set up your reminders',
   'onboarding.reminders.subtitle': 'Choose when we check in with you. You can change this anytime in Settings.',
-  'onboarding.stepIndicator': 'Step {n} of 2',
+  'onboarding.stepIndicator': 'Step {n} of {t}',
   'onboarding.back': 'Back',
   'onboarding.invalidDob': 'Please enter a valid date of birth.',
   'onboarding.continue': 'Continue',

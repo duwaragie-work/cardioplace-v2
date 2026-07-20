@@ -1040,7 +1040,7 @@ const fr: Record<TranslationKey, string> = {
   'onboarding.sms.phoneInvalid': "Saisissez votre numéro avec l'indicatif du pays, par exemple +15550100, ou laissez le champ vide.",
   'onboarding.reminders.title': 'Configurez vos rappels',
   'onboarding.reminders.subtitle': 'Choisissez quand nous prenons de vos nouvelles. Vous pouvez modifier cela à tout moment dans les Paramètres.',
-  'onboarding.stepIndicator': 'Étape {n} sur 2',
+  'onboarding.stepIndicator': 'Étape {n} sur {t}',
   'onboarding.back': 'Retour',
   'onboarding.invalidDob': 'Veuillez entrer une date de naissance valide.',
   'onboarding.continue': 'Continuer',

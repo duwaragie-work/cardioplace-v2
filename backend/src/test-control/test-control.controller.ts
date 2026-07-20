@@ -593,6 +593,43 @@ export class TestControlController {
     return { ok: true }
   }
 
+  // Onboarding suite (spec 03, A1–A5) — roll a patient back to cold un-onboarded
+  // state (clears identity/reminder/consent + policy_acknowledged AuthLog rows).
+  // Keyed by email; returns the id for follow-up calls. Replaces the proof
+  // specs' `docker exec psql` reset so the suite runs in CI over HTTP.
+  @Post('reset/onboarding')
+  @HttpCode(200)
+  async resetOnboarding(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { email: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.resetOnboarding(body.email)
+  }
+
+  // A5 duplicate-consent assertion — count a user's policy_acknowledged rows.
+  @Get('audit/policy-ack-count')
+  async countPolicyAck(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('userId') userId: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.countPolicyAck(userId)
+  }
+
+  // A5 version-awareness — force a stale acknowledged version so onboarding
+  // re-shows the privacy step (simulates a POLICY_VERSION bump).
+  @Post('user/set-policy-ack-version')
+  @HttpCode(200)
+  async setPolicyAckVersion(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { email: string; version: string },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setPolicyAckVersion(body.email, body.version)
+    return { ok: true }
+  }
+
   @Post('user/set-profile-verification')
   @HttpCode(200)
   async setProfileVerification(
