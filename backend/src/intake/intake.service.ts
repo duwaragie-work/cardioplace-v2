@@ -478,10 +478,12 @@ export class IntakeService {
             },
           })
         } else {
+          // V-05 sweep — drug names are PHI when tied to a patient id. The
+          // count preserves the operational signal (how many contraindicated
+          // re-adds went un-notified); the drugs themselves are on the
+          // PatientMedication rows for `userId`.
           this.logger.warn(
-            `F13 — contraindicated ACE/ARB re-add for user ${userId} but no primary provider to notify (${contraindicatedReadd
-              .map((m) => m.drugName)
-              .join(', ')})`,
+            `F13 — ${contraindicatedReadd.length} contraindicated ACE/ARB re-add(s) for user ${userId} but no primary provider to notify`,
           )
         }
       }

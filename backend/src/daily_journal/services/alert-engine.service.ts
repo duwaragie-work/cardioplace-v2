@@ -761,10 +761,13 @@ export class AlertEngineService {
           claimedRule === 'RULE_SYMPTOM_OVERRIDE_PREGNANCY' &&
           session.symptoms.ruqPain
         ) {
+          // V-05 sweep — the message names pregnancy + ruqPain, so pairing it
+          // with user=<id> discloses "patient X is pregnant with RUQ pain".
+          // Keep the opaque entry handle only (access-controlled to resolve).
           this.logger.log(
             `Symptom-override suppressed: pregnancy override ` +
               `fired on ruqPain — RULE_SYMPTOM_OVERRIDE_GENERAL skipped. ` +
-              `user=${session.userId} entry=${session.entryId}`,
+              `entry=${session.entryId}`,
           )
         }
         continue
@@ -1250,8 +1253,13 @@ export class AlertEngineService {
       this.logger,
     )
 
+    // V-05 sweep — `result.reason` embeds raw clinical values (e.g. "confirmatory
+    // reading 180/120 …" for a confirmed emergency). ruleId + tier + userId
+    // already say WHAT fired for WHOM; the narrative + all vitals live on the
+    // DeviationAlert row (`upserted.id`), access-controlled and audited. Log the
+    // row id as the correlation handle instead of the PHI-bearing reason.
     this.logger.log(
-      `Alert fired: ${result.ruleId} (${result.tier}) for user ${session.userId} — ${result.reason}`,
+      `Alert fired: ${result.ruleId} (${result.tier}) for user ${session.userId} — alert=${upserted.id}`,
     )
 
     // Phase/7 — renamed from ANOMALY_TRACKED and enriched with tier + ruleId so
@@ -1270,8 +1278,12 @@ export class AlertEngineService {
     // threshold first changed 160→140. Fire-and-forget; never blocks the
     // alert. Idempotent: only on the patient's FIRST RULE_CAD_HIGH alert.
     void this.maybeNotifyCadThresholdRamp(session, ctx, result).catch((err) =>
+      // V-05 sweep — only CAD patients reach this path, so `user=<id>` here is
+      // a condition disclosure (patient X has CAD). Log the opaque entry handle
+      // instead — resolves to the patient only via the access-controlled DB,
+      // matching the AFib-gate log's standard below.
       this.logger.warn(
-        `CAD threshold-ramp notice failed for user ${session.userId}: ${
+        `CAD threshold-ramp notice failed for entry ${session.entryId}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       ),

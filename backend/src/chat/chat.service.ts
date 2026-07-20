@@ -577,6 +577,16 @@ export class ChatService {
       }
 
       contents.push({ role: 'user', parts: functionResponseParts })
+
+      // #2a (2026-07-18) — once submit_checkin has been blocked for a missing
+      // field, STOP iterating. Feeding the `{saved:false,_internal:true}` result
+      // back in only made the model re-fire submit_checkin (observed 6×), still
+      // without the field — nothing here converts "blocked" into "ask the
+      // patient". Break instead: the silent-block fallback below surfaces the
+      // one missing-field question and control returns to the patient (the
+      // correct one-question-per-turn flow). The next user turn supplies the
+      // answer and the save proceeds.
+      if (blockedCheckinNextAction) break
     }
 
     // Strip any leaked internal guard messages from the AI response
@@ -802,6 +812,12 @@ export class ChatService {
         }
 
         contents.push({ role: 'user', parts: functionResponseParts })
+
+        // #2a (2026-07-18) — mirror runToolLoop: once submit_checkin is blocked
+        // for a missing field, stop iterating rather than feed the block back
+        // and let the model re-fire. The silent-block fallback below asks the
+        // one missing question; the next user turn supplies it.
+        if (blockedCheckinNextAction) break
       }
 
       // Fallback: if a tool succeeded but the model produced no user-facing

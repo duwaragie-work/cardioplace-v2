@@ -92,6 +92,29 @@ export function situationHash(value: string | null | undefined): string {
   return `sha256:${digest}`
 }
 
+/**
+ * Stable, non-reversible reference to an email (or any identifier that is
+ * itself PII): `sha256:a1b2c3d4`. Same construction as {@link situationHash}.
+ *
+ * The V-05 sweep found PHI/PII in stdout beyond chat/voice: EmailService logs
+ * the recipient on every send (patient email + a clinical subject line), the
+ * audit write-with-retry sink spreads `recipientEmail` / auth `identifier`, and
+ * several cron/error paths print the login identifier. Hashing the address
+ * keeps the one thing those lines needed — "is it the SAME recipient across
+ * these log lines?" (equal input → equal hash) — while removing the ability to
+ * read WHO. Correlate to the DB row (EmailDisclosureLog / AuthLog) for the
+ * real address, which is access-controlled and audited.
+ *
+ * Deliberately hashes the WHOLE address, domain included: a preserved domain
+ * would still leak "this person is a patient at <external domain>" once paired
+ * with a clinical subject, which is exactly the linkage the finding is about.
+ */
+export function redactEmail(value: string | null | undefined): string {
+  if (value == null) return 'sha256:none'
+  const digest = createHash('sha256').update(value).digest('hex').slice(0, 8)
+  return `sha256:${digest}`
+}
+
 /** JSON.stringify that cannot throw on cycles/BigInt — debug path only. */
 function safeStringify(value: unknown): string {
   try {

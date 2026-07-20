@@ -112,7 +112,10 @@ describe('writeAuditWithRetry', () => {
     expect(parsed.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/) // ISO-8601
   })
 
-  it('auth-log context is preserved through the failure report', async () => {
+  it('auth-log: identifier (login email) is HASHED, never raw — span + console sink', async () => {
+    // V-05 sweep. The failure report feeds both the OTEL span AND
+    // console.error(JSON) → CloudWatch. `identifier` is the login email, so it
+    // must appear only as a sha256 handle in BOTH.
     const op = jest.fn<() => Promise<void>>().mockRejectedValue(new Error('boom'))
 
     await writeAuditWithRetryMocked(op, {
@@ -122,24 +125,26 @@ describe('writeAuditWithRetry', () => {
       identifier: 'x@example.com',
     })
 
-    expect(startSpan).toHaveBeenCalledWith(
-      'audit.write.failed',
-      expect.objectContaining({
-        attributes: expect.objectContaining({
-          'audit.kind': 'auth-log',
-          'audit.event': 'refresh_failed',
-          'audit.userId': 'u-1',
-          'audit.identifier': 'x@example.com',
-        }),
-      }),
-    )
+    const spanAttrs = (startSpan as jest.Mock).mock.calls[0]?.[1] as {
+      attributes: Record<string, string>
+    }
+    expect(spanAttrs.attributes['audit.event']).toBe('refresh_failed')
+    expect(spanAttrs.attributes['audit.userId']).toBe('u-1')
+    // Hashed, not raw.
+    expect(spanAttrs.attributes['audit.identifierHash']).toMatch(/^sha256:[0-9a-f]{8}$/)
+    expect(spanAttrs.attributes['audit.identifier']).toBeUndefined()
+
+    // The CloudWatch sink (console.error JSON) must also be clean.
+    const emitted = (console.error as jest.Mock).mock.calls[0]?.[0] as string
+    expect(emitted).not.toContain('x@example.com')
+    expect(emitted).not.toContain('@example.com')
+    expect(emitted).toContain('sha256:')
   })
 
-  it('email-disclosure-log context is preserved through the failure report', async () => {
-    // N6 (2026-07-10) — third variant of AuditWriteContext. Verifies the
-    // failure-span attributes include template + version + patient + recipient
-    // so an operator can locate the affected §164.528 disclosure surface
-    // without reading source.
+  it('email-disclosure-log: recipientEmail is HASHED, never raw — span + console sink', async () => {
+    // N6 kept template/version/patient/purpose for triage; V-05 sweep hashes the
+    // recipient address. An operator still locates the §164.528 surface by
+    // template + patientUserId without the raw email reaching the sink.
     const op = jest.fn<() => Promise<void>>().mockRejectedValue(new Error('disclosure write blew up'))
 
     await writeAuditWithRetryMocked(op, {
@@ -147,21 +152,26 @@ describe('writeAuditWithRetry', () => {
       template: 'escalation_tier_1_staff',
       templateVersion: '2026-07-10',
       patientUserId: 'patient-77',
-      recipientEmail: 'provider@clinic.test',
+      recipientEmail: 'fatima.diallo@patient.test',
+      purpose: 'CARE_COORDINATION',
     })
 
-    expect(startSpan).toHaveBeenCalledWith(
-      'audit.write.failed',
-      expect.objectContaining({
-        attributes: expect.objectContaining({
-          'audit.kind': 'email-disclosure-log',
-          'audit.template': 'escalation_tier_1_staff',
-          'audit.templateVersion': '2026-07-10',
-          'audit.patientUserId': 'patient-77',
-          'audit.recipientEmail': 'provider@clinic.test',
-        }),
-      }),
-    )
+    const spanAttrs = (startSpan as jest.Mock).mock.calls[0]?.[1] as {
+      attributes: Record<string, string>
+    }
+    // Triage fields preserved.
+    expect(spanAttrs.attributes['audit.template']).toBe('escalation_tier_1_staff')
+    expect(spanAttrs.attributes['audit.patientUserId']).toBe('patient-77')
+    expect(spanAttrs.attributes['audit.purpose']).toBe('CARE_COORDINATION')
+    // Recipient hashed, not raw.
+    expect(spanAttrs.attributes['audit.recipientEmailHash']).toMatch(/^sha256:[0-9a-f]{8}$/)
+    expect(spanAttrs.attributes['audit.recipientEmail']).toBeUndefined()
+
+    // CloudWatch sink clean.
+    const emitted = (console.error as jest.Mock).mock.calls[0]?.[0] as string
+    expect(emitted).not.toContain('fatima')
+    expect(emitted).not.toContain('@patient.test')
+    expect(emitted).toContain('sha256:')
   })
 
   it('never rethrows even when the tracer itself errors', async () => {

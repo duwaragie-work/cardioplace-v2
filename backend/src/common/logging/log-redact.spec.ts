@@ -1,6 +1,7 @@
 import {
   argKeys,
   phiDebugEnabled,
+  redactEmail,
   redactText,
   situationHash,
 } from './log-redact.js'
@@ -110,6 +111,29 @@ describe('log-redact (V-05 stdout PHI helpers)', () => {
 
     it('handles null', () => {
       expect(situationHash(null)).toBe('sha256:none')
+    })
+  })
+
+  describe('redactEmail', () => {
+    it('never emits the address, local part, or domain', () => {
+      const out = redactEmail('fatima.diallo@example.com')
+      expect(out).toMatch(/^sha256:[0-9a-f]{8}$/)
+      expect(out).not.toContain('@')
+      expect(out).not.toContain('fatima')
+      expect(out).not.toContain('example.com')
+    })
+
+    it('is stable so ops can tell "same recipient" across log lines', () => {
+      expect(redactEmail('a@x.com')).toBe(redactEmail('a@x.com'))
+    })
+
+    it('distinguishes different recipients', () => {
+      expect(redactEmail('a@x.com')).not.toBe(redactEmail('b@x.com'))
+    })
+
+    it('handles null (missing recipient)', () => {
+      expect(redactEmail(null)).toBe('sha256:none')
+      expect(redactEmail(undefined)).toBe('sha256:none')
     })
   })
 })
