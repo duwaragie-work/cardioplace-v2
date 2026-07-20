@@ -113,6 +113,15 @@ export class EmbeddingService implements OnModuleInit {
     const { pipeline, env } = await import('@huggingface/transformers')
     // Disable local model check warnings.
     env.allowLocalModels = false
+    // #3-img — when the Docker image bakes the model into a cache dir (set via
+    // EMBEDDING_MODEL_CACHE_DIR), point transformers.js at it. It loads
+    // cache-first, so a populated cache means a deterministic, offline-safe
+    // cold boot with zero huggingface.co dependency; if the cache is absent
+    // (local dev), it falls back to the default cache + network, guarded by the
+    // retry above. No hard-coded infra path in the code — the Dockerfile owns it.
+    if (process.env.EMBEDDING_MODEL_CACHE_DIR) {
+      env.cacheDir = process.env.EMBEDDING_MODEL_CACHE_DIR
+    }
     this.logger.log('Loading embedding model: all-MiniLM-L6-v2 ...')
     this.extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')
     this.ready = true
