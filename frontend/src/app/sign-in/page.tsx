@@ -8,6 +8,7 @@ import { getOrCreateDeviceId } from "@/lib/device";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { TranslationKey } from "@/i18n";
 import { shouldShowOnboardingForUser } from "@/lib/onboarding";
+import { stashSupportEmail } from "@/lib/support-prefill";
 import LandingHeader from "@/components/cardio/LandingHeader";
 import LandingFooter from "@/components/cardio/LandingFooter";
 import SessionExpiredBanner from "@/components/auth/SessionExpiredBanner";
@@ -263,20 +264,33 @@ export default function RegisterPage() {
         setErrorKey(backendMsgToKey(data.message) ?? 'register.verificationFailed');
         throw new Error(data.message || "Verification failed.");
       }
-      // Admin-role users belong on the admin subdomain. Bridge tokens via
-      // URL params instead of calling local login() — otherwise the patient
-      // proxy redirects to admin which has no cookie and re-prompts sign-in.
+      // Admin/provider whose OTP verified but who still needs a SECOND FACTOR
+      // (TOTP) or practice selection. Both are privileged-role-only responses
+      // (patients use WebAuthn, handled below). The backend sets NO session
+      // cookie until these complete, so the cookie bridge can't carry them —
+      // and we must not put the short-lived challenge token in a URL (§1.8,
+      // which CloudFront/S3 would log). Finish sign-in on the admin app, which
+      // owns the MFA-challenge / practice-select flow end-to-end.
+      if (
+        data?.status === 'MFA_REQUIRED' ||
+        data?.status === 'PRACTICE_SELECT_REQUIRED'
+      ) {
+        const adminUrl = process.env.NEXT_PUBLIC_ADMIN_URL || 'http://localhost:3001';
+        window.location.href = `${adminUrl}/sign-in`;
+        return;
+      }
+      // Admin-role users belong on the admin subdomain. 1.2 — COOKIE-ONLY
+      // bridge: this OTP verify already set the admin-scoped HttpOnly
+      // access+refresh cookies (auth.controller scopes them by role, even when
+      // the request Origin is the patient app), so we hand off with NO tokens
+      // in the URL — they would otherwise leak into the admin static-host
+      // access log, browser history, and the cross-origin Referer. The admin
+      // /auth/magic-link page (public route) refreshes from that cookie on
+      // mount. Worst case (cookie unreadable) is a re-prompt at admin sign-in,
+      // never a leaked credential.
       if (hasAdminRole(data.roles)) {
         const adminUrl = process.env.NEXT_PUBLIC_ADMIN_URL || 'http://localhost:3001';
-        const params = new URLSearchParams({
-          accessToken: data.accessToken ?? '',
-          refreshToken: data.refreshToken ?? '',
-          userId: String(data.userId ?? ''),
-          email: data.email ?? '',
-          name: data.name ?? '',
-          roles: (data.roles as string[]).join(','),
-        });
-        window.location.href = `${adminUrl}/auth/magic-link?${params.toString()}`;
+        window.location.href = `${adminUrl}/auth/magic-link`;
         return;
       }
       // Patient biometric second factor — a patient with a registered device
@@ -514,7 +528,8 @@ export default function RegisterPage() {
                 {errorKey === 'register.accountDeactivated' && (
                   <p className="mt-2">
                     <a
-                      href={`/support/locked-out${emailTrimmed ? `?email=${encodeURIComponent(emailTrimmed)}` : ''}`}
+                      href="/support/locked-out"
+                      onClick={() => stashSupportEmail(emailTrimmed)}
                       data-testid="signin-reactivate-cta"
                       className="text-xs lg:text-sm font-semibold text-[#7B00E0] hover:underline"
                     >
@@ -561,7 +576,8 @@ export default function RegisterPage() {
                 {/* Locked out — public support form (no auth required). */}
                 <p className="text-center mt-3">
                   <a
-                    href={`/support/locked-out${emailTrimmed ? `?email=${encodeURIComponent(emailTrimmed)}` : ''}`}
+                    href="/support/locked-out"
+                    onClick={() => stashSupportEmail(emailTrimmed)}
                     data-testid="signin-need-help"
                     className="text-[0.6875rem] lg:text-xs font-medium text-[#7B00E0] hover:underline"
                   >

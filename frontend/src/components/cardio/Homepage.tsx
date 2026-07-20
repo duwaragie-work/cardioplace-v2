@@ -8,6 +8,7 @@ import { Mic, Send, Activity, Heart, MessageCircle, CheckCircle, AlertTriangle, 
 import { BsSoundwave } from "react-icons/bs";
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/lib/auth-context';
+import { CHAT_PROMPTS, type ChatPromptId } from '@/lib/chat-prompts';
 import LandingHeader from './LandingHeader';
 import LandingFooter from './LandingFooter';
 
@@ -155,20 +156,22 @@ export default function Homepage() {
                 {/* Prompt chips — single row */}
                 <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                   <span className="text-white/70 text-[0.625rem] sm:text-xs font-semibold uppercase tracking-wider shrink-0">Try now</span>
-                  {(['home.chip1', 'home.chip2', 'home.chip3'] as const).map((key) => (
+                  {(Object.keys(CHAT_PROMPTS) as ChatPromptId[]).map((id) => (
                     <button
-                      key={key}
+                      key={id}
                       onClick={() => {
-                        const text = t(key);
                         if (isAuthenticated) {
-                          router.push(`/chat?q=${encodeURIComponent(text)}`);
+                          // 1.9 — pass an opaque prompt ID, NOT the text. The
+                          // chat page localizes it; nothing free-text (→ PHI)
+                          // ever reaches the URL / access log.
+                          router.push(`/chat?prompt=${id}`);
                         } else {
                           router.push('/sign-in');
                         }
                       }}
                       className="backdrop-blur-md bg-white/15 border border-white/25 text-white text-[0.5rem] sm:text-xs md:text-sm px-2.5 sm:px-3 md:px-4 py-1 sm:py-1.5 rounded-full hover:bg-white/25 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
                     >
-                      {t(key)}
+                      {t(CHAT_PROMPTS[id])}
                     </button>
                   ))}
                 </div>

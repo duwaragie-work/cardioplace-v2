@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { submitLockedOut } from '@/lib/services/support.service';
+import { takeSupportEmail } from '@/lib/support-prefill';
 
 export default function LockedOutPage() {
   const { t } = useLanguage();
@@ -16,11 +17,12 @@ export default function LockedOutPage() {
   const [done, setDone] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // Pre-fill the email from the sign-in "reactivate" CTA (?email=...). Read the
-  // URL directly so this page needs no Suspense boundary for useSearchParams.
+  // Pre-fill the email from the sign-in "reactivate" CTA. 1.5 — carried via
+  // sessionStorage, NOT a `?email=` query param, so patient PII never lands in
+  // the URL / access log. One-shot read (cleared on take).
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
-    const e = new URLSearchParams(window.location.search).get('email');
+    const e = takeSupportEmail();
     if (e) setEmail(e);
   }, []);
 

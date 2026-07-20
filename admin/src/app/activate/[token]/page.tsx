@@ -10,6 +10,7 @@ import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, ShieldAlert } from 'lucide-react';
 import { useAuth, type AdminAuthResponse } from '@/lib/auth-context';
+import { stashSignInEmail } from '@/lib/signin-prefill';
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -104,10 +105,10 @@ export default function ActivateInvitePage({ params }: PageProps) {
       // in via OTP (then MFA), so don't persist any session locally. Send
       // them to the sign-in page with their email prefilled.
       if ('status' in data && data.status === 'SIGN_IN_REQUIRED') {
-        const email = preview?.email ?? '';
-        window.location.href = `/sign-in?activated=1${
-          email ? `&email=${encodeURIComponent(email)}` : ''
-        }`;
+        // 1.6 — email prefill via sessionStorage, not the URL. `activated=1`
+        // is a benign non-PII flag and stays in the query string.
+        stashSignInEmail(preview?.email ?? '');
+        window.location.href = '/sign-in?activated=1';
         return;
       }
       login(data as AdminAuthResponse);

@@ -4,19 +4,24 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, type AdminAuthResponse } from "@/lib/auth-context";
 
-// Bridges sign-in tokens passed via URL params into admin auth state.
-// Two callers redirect here:
-//   1. Backend magic-link verify (auth.controller.ts) — for SUPER_ADMIN users
-//      who clicked a magic link from email.
-//   2. Patient sign-in (frontend/src/app/sign-in/page.tsx) — when an admin
-//      user authenticated on the patient app, so they don't have to sign in
-//      twice across origins.
+// Bridges a cross-origin admin sign-in into admin auth state. Two callers:
+//   1. Backend magic-link verify (auth.controller.ts) — a SUPER_ADMIN who
+//      clicked a link from email; still arrives with tokens in the URL (that's
+//      audit finding 1.1, a backend-owned fix). Handled by the TOKEN path.
+//   2. Patient sign-in (frontend/src/app/sign-in/page.tsx) — an admin who
+//      authenticated on the patient app. As of 1.2 this arrives with NO tokens
+//      in the URL; the OTP verify already set the admin-scoped HttpOnly
+//      cookies, so we authenticate via the COOKIE path (AuthProvider's mount
+//      rehydrate calls /auth/refresh with that cookie).
 function MagicLinkHandler() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { login } = useAuth();
+  const { login, user, isLoading } = useAuth();
   const [error, setError] = useState("");
   const [processing, setProcessing] = useState(true);
+  // 'token'  → tokens present in the URL (legacy email flow)
+  // 'cookie' → no tokens; wait for the mount rehydrate to authenticate
+  const [flow, setFlow] = useState<"token" | "cookie">("token");
   const calledRef = useRef(false);
 
   useEffect(() => {
@@ -38,9 +43,11 @@ function MagicLinkHandler() {
     const refreshToken = searchParams.get("refreshToken");
     const userId = searchParams.get("userId");
 
+    // No tokens in the URL → cookie bridge (1.2). Do NOT error here; the
+    // AuthProvider's mount rehydrate is already refreshing from the HttpOnly
+    // cookie. The effect below routes once that resolves.
     if (!accessToken || !userId) {
-      setError("Invalid sign-in link.");
-      setProcessing(false);
+      setFlow("cookie");
       return;
     }
 
@@ -59,6 +66,19 @@ function MagicLinkHandler() {
     window.location.href = "/dashboard";
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Cookie bridge (1.2): once the mount rehydrate settles, route on the result.
+  // A live session → dashboard; nothing → the same "invalid/expired" UI the
+  // token path shows (so a stale bridge doesn't spin forever).
+  useEffect(() => {
+    if (flow !== "cookie" || isLoading) return;
+    if (user) {
+      window.location.href = "/dashboard";
+    } else {
+      setError("This sign-in link is invalid or has expired.");
+      setProcessing(false);
+    }
+  }, [flow, isLoading, user]);
 
   if (processing) {
     return (
