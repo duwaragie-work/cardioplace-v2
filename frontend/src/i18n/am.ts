@@ -990,7 +990,11 @@ const am: Record<TranslationKey, string> = {
   // required before ship per spec §N10 (do not machine-translate as final).
   'support.locked.title': 'ለመግባት እገዛ ይፈልጋሉ?',
   'support.locked.subtitle': 'ምን እየተከሰተ እንዳለ ይንገሩን፤ ማንኛውንም የመለያ ለውጥ ከማድረጋችን በፊት ቡድናችን ማንነትዎን ለማረጋገጥ ያገኝዎታል።',
-  'support.locked.statusBanner': 'ነባር ጥያቄዎን ሁኔታ በማረጋገጫ ኢሜይልዎ ውስጥ ያለውን አገናኝ ጠቅ በማድረግ ማየት ይችላሉ።',
+  // N-1 (2026-07-14 triage) — see en.ts: the confirmation email carries a
+  // ticket number and a reply address, not a link.
+  // ⚠️ Amharic wording needs a native-speaker review before pilot (Ward 7/8
+  // cohort) — the meaning is right, the phrasing is unverified.
+  'support.locked.statusBanner': 'ጥያቄ ልከዋል? የማረጋገጫ ኢሜይልዎ የቲኬት ቁጥርዎን ይዟል — ተጨማሪ ነገር ማከል ከፈለጉ ለዚያ ኢሜይል መልስ ይስጡ፣ በዚያው ቲኬት ላይ እንጨምረዋለን።',
   'support.locked.email': 'የመለያዎ ኢሜይል',
   'support.locked.description': 'ምን እየተከሰተ ነው? (ለምሳሌ የማረጋገጫ መተግበሪያዬንና የመልሶ ማግኛ ኮዶቼን አጣሁ)',
   'support.locked.phone': 'የመልስ ስልክ (አማራጭ)',

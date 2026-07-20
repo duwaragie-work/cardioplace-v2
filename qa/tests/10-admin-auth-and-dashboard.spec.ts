@@ -28,6 +28,12 @@ test.describe('Admin app — per-role sign-in', () => {
     const fixtureOnly =
       key === 'multiPracticeProvider' &&
       process.env.SEED_TEST_FIXTURES !== 'true'
+    // `outOfScopeProvider` is a purpose-built spec-76 harness: PROVIDER role
+    // with ONE PracticeProvider membership (seed-idor-harness), no patient
+    // assignments. The single membership lets sign-in auto-resolve (satisfies
+    // auth.service.ts's "No practice membership" guard) while keeping the
+    // actor out-of-scope for every real Cedar Hill patient — which is what
+    // spec 76 needs. This smoke covers that the sign-in path itself works.
     test(`${key} (${account.roles.join(',')}) signs in and lands on the admin app`, async ({ page }) => {
       test.skip(fixtureOnly, 'account only seeded under SEED_TEST_FIXTURES=true')
       await signInAdmin(page, account.email, ADMIN_BASE_URL, landing)

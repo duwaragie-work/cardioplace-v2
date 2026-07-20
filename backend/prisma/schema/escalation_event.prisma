@@ -4,6 +4,7 @@ model EscalationEvent {
   userId             String
   escalationLevel    EscalationLevel
   reason             String?
+  reasonEncrypted    String?
   triggeredAt        DateTime        @default(now())
   notificationSentAt DateTime?
 

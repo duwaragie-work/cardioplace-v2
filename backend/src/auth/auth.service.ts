@@ -260,6 +260,31 @@ const MFA_SOFT_LOCK_WINDOW_MS = 15 * 60_000
 const MFA_HARD_LOCK_THRESHOLD = 10
 const MFA_HARD_LOCK_WINDOW_MS = 60 * 60_000
 
+/**
+ * V-03 (Humaira assessment 2026-07-14) — account-scoped OTP failure lock.
+ *
+ * THE HOLE. The existing 5-attempt lock lives on the OtpCode ROW
+ * (`otpRecord.attempts`), and on trip it DELETES that row. `otp/send` then
+ * mints a brand-new row with attempts: 0. So the ceiling was 5 guesses per
+ * 60s send-cooldown, forever, with no account ever locking — the assessment's
+ * "persistent per-account lockout" was unmet. Counting AuthLog `otp_failed`
+ * rows by identifier accumulates ACROSS OtpCode rows, so re-sending no longer
+ * resets the budget.
+ *
+ * 10 / 15 min, above the per-row 5 so the familiar per-OTP message still comes
+ * first for an ordinary typo, and this only bites the re-send loop.
+ *
+ * DELIBERATELY SOFT AND SELF-HEALING — no hard, admin-reset tier like MFA's
+ * (:260). MFA gates staff; OTP gates PATIENTS, and a patient locked out of
+ * sign-in cannot log a BP reading or answer an escalation. An admin-reset lock
+ * on that path converts a brute-force defence into a clinical-availability
+ * risk. The window simply rolls off.
+ */
+// Exported so the spec asserts against the real threshold instead of a copy
+// that can silently drift from it.
+export const OTP_ACCOUNT_LOCK_THRESHOLD = 10
+const OTP_ACCOUNT_LOCK_WINDOW_MS = 15 * 60_000
+
 /** True if any of the user's roles makes TOTP mandatory. */
 function requiresMfa(roles: UserRole[]): boolean {
   return roles.some((r) => MFA_REQUIRED_ROLES.includes(r))
@@ -1459,6 +1484,54 @@ export class AuthService {
         errorCode: 'mfa_locked_temporary',
       })
     }
+  }
+
+  /** V-03 — failed OTP verifies for one identifier inside `sinceMs`. Keyed on
+   *  `identifier` (the email), not userId, because OTP verification runs before
+   *  a User row is guaranteed to exist. Mirrors countRecentFailedMfa. */
+  private async countRecentFailedOtp(
+    identifier: string,
+    sinceMs: number,
+  ): Promise<number> {
+    return this.prisma.authLog.count({
+      where: {
+        identifier,
+        event: 'otp_failed',
+        createdAt: { gt: new Date(Date.now() - sinceMs) },
+      },
+    })
+  }
+
+  /**
+   * V-03 — throw if this identifier has failed too many OTP verifies recently,
+   * regardless of how many times the OTP was re-sent. Soft + self-healing by
+   * design; see OTP_ACCOUNT_LOCK_THRESHOLD.
+   */
+  private async assertNotOtpLocked(
+    identifier: string,
+    context?: { deviceId?: string; ipAddress?: string; userAgent?: string },
+  ): Promise<void> {
+    const failures = await this.countRecentFailedOtp(
+      identifier,
+      OTP_ACCOUNT_LOCK_WINDOW_MS,
+    )
+    if (failures < OTP_ACCOUNT_LOCK_THRESHOLD) return
+
+    await this.logAuthEvent({
+      event: 'otp_locked',
+      identifier,
+      method: 'otp',
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: { failures, windowMs: OTP_ACCOUNT_LOCK_WINDOW_MS, scope: 'account' },
+      success: false,
+      errorCode: 'otp_account_locked_temporary',
+    })
+    throw new ForbiddenException({
+      message: 'Too many incorrect attempts. Please wait a few minutes and try again.',
+      errorCode: 'otp_account_locked_temporary',
+    })
   }
 
   private async loadActiveUser(userId: string): Promise<MinimalUser> {
@@ -2996,6 +3069,13 @@ export class AuthService {
     if (context?.appContext === 'admin') {
       await this.assertAdminAccessAllowed(normalizedEmail)
     }
+
+    // V-03 — account-scoped lock, checked BEFORE the OtpCode lookup and before
+    // bcrypt, so a locked identifier costs an index count and nothing else.
+    // The per-row `attempts` check below still runs first for a normal typo
+    // (5 < 10), so ordinary UX is unchanged; this only catches the delete-and-
+    // resend loop that resets `attempts` to 0.
+    await this.assertNotOtpLocked(normalizedEmail, context)
 
     // Find the most recent unexpired OTP
     const otpRecord = await this.prisma.otpCode.findFirst({

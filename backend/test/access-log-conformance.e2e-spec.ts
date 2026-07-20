@@ -318,6 +318,50 @@ describe('AccessLog conformance — every PHI-model write produces an audit row 
     expect(after).toBeGreaterThan(before)
   })
 
+  // ── N-3 (Duwaragie 2026-07-14 triage) — no "system: unknown" rows on the ─
+  //    authenticated request path. Pre-fix, JwtStrategy.validate() did a
+  //    User.findUnique before the CLS interceptor set the actor, so every
+  //    authenticated request produced one AccessLog row with
+  //    actorType=SYSTEM_ACTOR + actorId=null + systemActorLabel=null. Fix:
+  //    switched CLS to middleware mount + stamp actor from payload.sub at
+  //    the top of validate(). This spec is the guard: any regression that
+  //    re-introduces the pre-N-3 shape trips here immediately.
+  it('N-3 — an authenticated request produces ZERO unknown-system AccessLog rows', async () => {
+    // Snapshot the pre-fix shape count so we ignore rows written by unrelated
+    // suites that share the DB. The assertion is delta = 0 within our own
+    // request window, not "zero rows in the whole table."
+    const before = await prisma.accessLog.count({
+      where: {
+        actorType: 'SYSTEM_ACTOR',
+        actorId: null,
+        systemActorLabel: null,
+      },
+    })
+
+    // A representative authenticated PHI-touching request. /provider/patients
+    // exercises the same guard → validate() → controller path every other
+    // authenticated route uses — no reason a fix that works for one route
+    // wouldn't work for the others.
+    const res = await request(app.getHttpServer())
+      .get('/provider/patients')
+      .set('Authorization', `Bearer ${providerToken}`)
+    expect(res.status).toBe(200)
+
+    // Give the fire-and-forget audit-write pipeline a beat to settle.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    const after = await prisma.accessLog.count({
+      where: {
+        actorType: 'SYSTEM_ACTOR',
+        actorId: null,
+        systemActorLabel: null,
+      },
+    })
+    // Zero-delta: the request produced no unattributed rows. A regression that
+    // brings back the JwtStrategy no-actor read would spike this by ≥1.
+    expect(after - before).toBe(0)
+  })
+
   // ── READ conformance (Task 3.3): one representative signed-in read path ─────
   it('authenticated GET /provider/patients (provider) produces AccessLog READ rows', async () => {
     const before = await prisma.accessLog.count({

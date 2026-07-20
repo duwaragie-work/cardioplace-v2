@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { PatientAccessService } from '../common/patient-access.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
 import { EnrollmentService } from './enrollment.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
+import { encryptionMock } from '../common/test/encryption.mock.js'
 
 // Covers the IVR-04-completion behaviour:
 //   • completeEnrollment writes a user.enrollmentStatus audit row (so the manual
@@ -88,6 +90,7 @@ describe('EnrollmentService', () => {
           provide: PatientAccessService,
           useValue: { assertCanAccessPatient: jest.fn() },
         },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
 

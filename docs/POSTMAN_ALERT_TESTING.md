@@ -468,7 +468,7 @@ Payload `132/68, pulse 66`. **Expected:** `RULE_CAD_DBP_CRITICAL`, `type: "DIAST
 | DCM only (custom) | 82/55 | `RULE_DCM_LOW` |
 | Age 40-64 default | 88/58 | `RULE_STANDARD_L1_LOW` |
 | AFib + 3 readings | pulse 48 | `RULE_AFIB_HR_LOW` (3-reading session) |
-| Bradycardia (custom) | pulse 38 | `RULE_BRADY_HR_ASYMPTOMATIC` |
+| Bradycardia (custom) | pulse 38 | `RULE_BRADY_ABSOLUTE` |
 
 ---
 
@@ -598,7 +598,7 @@ Payload `135/82, pulse 118` (one reading, no `sessionId`). **Expected:** no row.
 
 | Patient | custom with `hasBradycardia: true` + BB med |
 
-Payload `118/72, pulse 55` (within BB suppression window 50–60). **Expected:** no row. Drop pulse to 38 → fires `RULE_BRADY_HR_ASYMPTOMATIC`.
+Payload `118/72, pulse 55` (within BB suppression window 50–60). **Expected:** no row. Drop pulse to 38 → fires `RULE_BRADY_ABSOLUTE`.
 
 ---
 
@@ -834,7 +834,7 @@ For a fast read of "what should I send / what should I see":
 | 20 | aisha | HTN + suboptimal | 164/96 + checklist false | `RULE_STANDARD_L1_HIGH` + retake | BP_L1_HIGH | ❌ |
 | **31** | **custom + threshold + 7 readings** | **threshold(110, 130)** | **108/70** | `RULE_PERSONALIZED_LOW` | BP_L1_LOW | **✅** |
 | 32 | custom 40-64 | default | 88/58 | `RULE_STANDARD_L1_LOW` | BP_L1_LOW | ❌ |
-| 36 | custom Brady | hasBradycardia | 115/70 p38 | `RULE_BRADY_HR_ASYMPTOMATIC` | BP_L1_LOW | ❌ |
+| 36 | custom Brady | hasBradycardia | 115/70 p38 | `RULE_BRADY_ABSOLUTE` | TIER_1 | ❌ |
 | 37 | aisha | HTN | 145/80 (PP=65) | `RULE_PULSE_PRESSURE_WIDE` | TIER_3 | ❌ |
 | 38 | custom + Furosemide | LOOP_DIURETIC | 92/60 | `RULE_LOOP_DIURETIC_HYPOTENSION` | TIER_3 | ❌ |
 | 51 | priya | Pregnant + ACE | 195/130 | `RULE_PREGNANCY_ACE_ARB` (Tier 1 beats L2) | TIER_1 | ❌ |

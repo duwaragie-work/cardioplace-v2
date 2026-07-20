@@ -222,12 +222,13 @@ function axisFor(r: RuleResult): Axis {
   // axis so it co-fires with the SBP cadHighRule 'bp-high' row.
   if (r.ruleId === 'RULE_CAD_DBP_HIGH') return 'dbp-high'
   // HR rules emit BP_LEVEL_1_HIGH / LOW tiers but represent a different axis.
+  // N-7 (2026-07-14 triage) — RULE_BRADY_HR_ASYMPTOMATIC removed from this
+  // branch; superseded by RULE_BRADY_ABSOLUTE (Manisha 2026-05-10 Cluster 6).
   if (
     r.ruleId === 'RULE_AFIB_HR_HIGH' ||
     r.ruleId === 'RULE_AFIB_HR_LOW' ||
     r.ruleId === 'RULE_TACHY_HR' ||
-    r.ruleId === 'RULE_BRADY_HR_SYMPTOMATIC' ||
-    r.ruleId === 'RULE_BRADY_HR_ASYMPTOMATIC'
+    r.ruleId === 'RULE_BRADY_HR_SYMPTOMATIC'
   ) {
     return 'hr'
   }
@@ -1315,7 +1316,10 @@ export class AlertEngineService {
     })
   }
 
-  private legacyTypeFor(result: RuleResult, session: SessionAverage): 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'WEIGHT' | 'MEDICATION_ADHERENCE' {
+  // N-7 (Duwaragie 2026-07-14 triage) — 'WEIGHT' removed from the return
+  // union. No branch has returned it since the Cluster 6 rewrite; enum
+  // value dropped from DeviationType in the same PR (schema + migration).
+  private legacyTypeFor(result: RuleResult, session: SessionAverage): 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'MEDICATION_ADHERENCE' {
     // Map new tier/ruleId back to legacy DeviationType for the @@unique
     // constraint until it can be dropped (phase/7+).
     if (

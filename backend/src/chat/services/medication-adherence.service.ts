@@ -116,8 +116,10 @@ export class MedicationAdherenceService {
     try {
       const result = await this.journal.create(userId, dto as never)
       const entryId = (result as { data?: { id?: string } }).data?.id
+      // V-05: "user X takes drug Y" is PHI (a medication implies a condition).
+      // medId + entryId let ops resolve it from the access-controlled DB.
       this.logger.log(
-        `Adherence logged for user ${userId}: ${input.status} — ${med.drugName}` +
+        `Adherence logged for user ${userId} medId=${med.id}` +
           (entryId ? ` → entry ${entryId}` : ''),
       )
       return {

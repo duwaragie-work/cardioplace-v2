@@ -714,7 +714,8 @@ describe('AlertEngine — multi-axis pipeline emission', () => {
         profile: { hasCAD: true, hasBradycardia: true },
       }),
     )
-    // Two rows: bp-high (CAD_HIGH) + hr (BRADY_HR_ASYMPTOMATIC).
+    // Two rows: bp-high (CAD_HIGH) + hr (BRADY_ABSOLUTE — was
+    // BRADY_HR_ASYMPTOMATIC pre-Cluster 6, removed N-7 2026-07-14).
     expect(calls).toHaveLength(2)
     const ids = ruleIds(calls)
     expect(ids).toContain('RULE_CAD_HIGH')

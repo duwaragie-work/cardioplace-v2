@@ -37,14 +37,11 @@ const REPO_ROOT = resolve(_dirname, '..', '..', '..', '..')
  */
 const ALLOWLIST: Record<string, string> = {
   // Cluster 7 audit (Niva, 2026-05-15): post-Cluster-6 brady split removed
-  // the asymptomatic HR-40-49 rule from the live engine — HR 40-49 + symptom
-  // owns RULE_BRADY_HR_SYMPTOMATIC, HR 40-49 + NO symptom is now Cluster 8's
-  // RULE_BRADY_SURVEILLANCE. The asymptomatic-band rule stays registered as
-  // a placeholder for a future clinical sign-off (a new "asymptomatic brady
-  // in NON-cardiac-med patients" rule could re-use the slot). Not testable
-  // until Manisha signs off — fixme-allowed per Phase 4b §C.
-  RULE_BRADY_HR_ASYMPTOMATIC:
-    'pre-cluster-8 placeholder; HR 40-49 no-symptom is now BRADY_SURVEILLANCE',
+  // N-7 (Duwaragie 2026-07-14 triage) — RULE_BRADY_HR_ASYMPTOMATIC removed
+  // from RULE_IDS entirely. Superseded by RULE_BRADY_ABSOLUTE (Cluster 6,
+  // Manisha 2026-05-10). The Cluster 8 allowlist entry that used to sit
+  // here is deleted alongside the enum value — leaving it would trip the
+  // stale-allowlist guard at rule-coverage.spec.ts:131.
 
   // ─── PRE-EXISTING TECH DEBT (surfaced by Cluster 8 §F.1) ────────────────
   // The gate caught Cluster 5/6/7 rules that shipped with zero test

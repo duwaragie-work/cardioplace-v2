@@ -972,7 +972,9 @@ const fr: Record<TranslationKey, string> = {
   // Support — page publique "impossible de se connecter" (Fix 12).
   'support.locked.title': 'Besoin d’aide pour vous connecter ?',
   'support.locked.subtitle': 'Dites-nous ce qui se passe et notre équipe vous contactera pour vérifier votre identité avant toute modification de votre compte.',
-  'support.locked.statusBanner': 'Vous pouvez aussi suivre l’état d’une demande existante grâce au lien dans votre e-mail de confirmation.',
+  // N-1 (2026-07-14 triage) — see en.ts: the confirmation email carries a
+  // ticket number and a reply address, not a link.
+  'support.locked.statusBanner': 'Vous avez déjà envoyé une demande ? Votre e-mail de confirmation contient votre numéro de ticket : répondez à cet e-mail et nous ajouterons tout complément au même ticket.',
   'support.locked.email': 'Votre adresse e-mail de compte',
   'support.locked.description': 'Que se passe-t-il ? (ex. : j’ai perdu mon application d’authentification et mes codes de récupération)',
   'support.locked.phone': 'Téléphone de rappel (facultatif)',

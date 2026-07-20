@@ -1,6 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import {
+  redactedFieldValue,
+  snapshotHash,
+  SNAPSHOT_HASH_KEY,
+} from '../common/audit/snapshot-hash.js'
+import {
   ActorUser,
   PatientAccessService,
 } from '../common/patient-access.service.js'
@@ -34,6 +39,7 @@ import type {
   PatientProfile,
 } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import {
   pickDisplayName,
   pickDisplayRole,
@@ -64,6 +70,19 @@ type PrismaTx = Omit<
 // burst load — proxy round-trips can eat past 5s when the pool needs a
 // fresh connection.
 const TX_OPTIONS = { timeout: 20_000, maxWait: 15_000 } as const
+
+/**
+ * V-06 audit-log leak (2026-07-17) — PatientMedication fields whose values are
+ * free-text clinical narrative. These are exactly the columns V-06 encrypts
+ * into `*Encrypted` siblings, so their raw values must never be written into
+ * the unencrypted `ProfileVerificationLog.previousValue` / `newValue` Json.
+ * Kept in sync with the V-06 spec set in scripts/v06-backfill-encryption.ts.
+ */
+const FREE_TEXT_MED_FIELDS: ReadonlySet<string> = new Set([
+  'rawInputText',
+  'notes',
+  'plainLanguageDescription',
+])
 
 // Clinical fields on PatientProfile that participate in verification logs.
 // Any change to one of these fields produces a ProfileVerificationLog row.
@@ -138,6 +157,7 @@ export class IntakeService {
     private readonly drugEnrichment: DrugEnrichmentService,
     private readonly access: PatientAccessService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly encryption: EncryptionService,
   ) {}
 
   /**
@@ -172,6 +192,9 @@ export class IntakeService {
           data: {
             pillImageUrl: enrichment.pillImageUrl,
             plainLanguageDescription: enrichment.plainLanguageDescription,
+            plainLanguageDescriptionEncrypted: this.encryption.encryptNullable(
+              enrichment.plainLanguageDescription,
+            ),
           },
         })
       }),
@@ -388,7 +411,9 @@ export class IntakeService {
               combinationComponents: item.combinationComponents ?? [],
               source: item.source ?? 'PATIENT_SELF_REPORT',
               rawInputText: item.rawInputText,
+              rawInputTextEncrypted: this.encryption.encryptNullable(item.rawInputText),
               notes: item.notes,
+              notesEncrypted: this.encryption.encryptNullable(item.notes),
               // Patient self-report starts unverified; voice/photo cannot
               // fire automated alerts until a provider verifies (see
               // BUILD_PLAN §3.4 safety-net table). F13 — a re-added ACE/ARB on
@@ -535,10 +560,12 @@ export class IntakeService {
       }
       if (dto.rawInputText !== undefined) {
         data.rawInputText = dto.rawInputText
+        data.rawInputTextEncrypted = this.encryption.encryptNullable(dto.rawInputText)
         changedFields.push('rawInputText')
       }
       if (dto.notes !== undefined) {
         data.notes = dto.notes
+        data.notesEncrypted = this.encryption.encryptNullable(dto.notes)
         changedFields.push('notes')
       }
 
@@ -564,17 +591,31 @@ export class IntakeService {
       })
 
       await tx.profileVerificationLog.createMany({
-        data: changedFields.map((field) => ({
-          userId,
-          fieldPath: `medication:${medicationId}.${field}`,
-          previousValue: this.toJsonValue(
-            existing[field as keyof PatientMedication],
-          ),
-          newValue: this.toJsonValue(updated[field as keyof PatientMedication]),
-          changedBy: userId,
-          changedByRole: VerifierRole.PATIENT,
-          changeType: VerificationChangeType.PATIENT_REPORT,
-        })),
+        data: changedFields.map((field) => {
+          // V-06 audit-log leak: `rawInputText` / `notes` are free-text that
+          // V-06 encrypts into *Encrypted siblings a few lines above — writing
+          // the raw value here would put the exact same bytes into an
+          // UNENCRYPTED Json column. fieldPath already names the field; the
+          // digest attests the value without duplicating it.
+          const isFreeText = FREE_TEXT_MED_FIELDS.has(field)
+          const prev = existing[field as keyof PatientMedication]
+          const next = updated[field as keyof PatientMedication]
+          return {
+            userId,
+            fieldPath: `medication:${medicationId}.${field}`,
+            // Route through toJsonValue either way so null → Prisma.JsonNull
+            // (a bare null is not a valid Json input) stays consistent.
+            previousValue: this.toJsonValue(
+              isFreeText ? redactedFieldValue(prev) : prev,
+            ),
+            newValue: this.toJsonValue(
+              isFreeText ? redactedFieldValue(next) : next,
+            ),
+            changedBy: userId,
+            changedByRole: VerifierRole.PATIENT,
+            changeType: VerificationChangeType.PATIENT_REPORT,
+          }
+        }),
       })
 
       await this.flipProfileToUnverified(tx, userId)
@@ -654,7 +695,9 @@ export class IntakeService {
             combinationComponents: item.combinationComponents ?? [],
             source: item.source ?? 'PATIENT_SELF_REPORT',
             rawInputText: item.rawInputText,
+            rawInputTextEncrypted: this.encryption.encryptNullable(item.rawInputText),
             notes: item.notes,
+            notesEncrypted: this.encryption.encryptNullable(item.notes),
             verificationStatus:
               item.source === 'PATIENT_VOICE' || item.source === 'PATIENT_PHOTO'
                 ? MedicationVerificationStatus.AWAITING_PROVIDER
@@ -674,6 +717,7 @@ export class IntakeService {
           changedByRole: VerifierRole.PATIENT,
           changeType: VerificationChangeType.PATIENT_REPORT,
           rationale: 'patient self-edit post-verification',
+          rationaleEncrypted: this.encryption.encryptNullable('patient self-edit post-verification'),
         })),
         ...created.map((med) => ({
           userId,
@@ -684,6 +728,7 @@ export class IntakeService {
           changedByRole: VerifierRole.PATIENT,
           changeType: VerificationChangeType.PATIENT_REPORT,
           rationale: 'patient self-edit post-verification',
+          rationaleEncrypted: this.encryption.encryptNullable('patient self-edit post-verification'),
         })),
       ]
       if (logRows.length) {
@@ -767,6 +812,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_VERIFY,
           rationale: dto.rationale,
+          rationaleEncrypted: this.encryption.encryptNullable(dto.rationale),
           practiceContext: ctx?.practiceId ?? null,
         },
       }),
@@ -827,6 +873,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_VERIFY,
           rationale: dto.rationale,
+          rationaleEncrypted: this.encryption.encryptNullable(dto.rationale),
           practiceContext: ctx?.practiceId ?? null,
         })),
       })
@@ -943,6 +990,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_REJECT,
           rationale: dto.rationale,
+          rationaleEncrypted: this.encryption.encryptNullable(dto.rationale),
           discrepancyFlag: true,
           practiceContext: ctx?.practiceId ?? null,
         },
@@ -959,6 +1007,9 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType: VerificationChangeType.ADMIN_REJECT,
           rationale: `Reverted to unverified — ${dto.field} rejected`,
+          rationaleEncrypted: this.encryption.encryptNullable(
+            `Reverted to unverified — ${dto.field} rejected`,
+          ),
           practiceContext: ctx?.practiceId ?? null,
         },
       }),
@@ -1094,6 +1145,7 @@ export class IntakeService {
             changeType: VerificationChangeType.ADMIN_CORRECT,
             discrepancyFlag: true,
             rationale: dto.rationale,
+            rationaleEncrypted: this.encryption.encryptNullable(dto.rationale),
             practiceContext: ctx?.practiceId ?? null,
           },
         })
@@ -1188,6 +1240,7 @@ export class IntakeService {
           changedByRole: VerifierRole.ADMIN,
           changeType,
           rationale: dto.rationale,
+          rationaleEncrypted: this.encryption.encryptNullable(dto.rationale),
           discrepancyFlag: changeType === VerificationChangeType.ADMIN_REJECT,
           // Phase/practice-identity (Manisha 2026-06-12 §1, HIPAA 45 CFR
           // §164.312(a)(2)(i)) — capture WHICH practice the admin/provider
@@ -1396,6 +1449,7 @@ export class IntakeService {
     const role = this.adminVerifierRole(actor.roles)
 
     const created = await this.prisma.$transaction(async (tx) => {
+      const composedNotes = this.composeNotes(dto.dose, dto.notes)
       const med = await tx.patientMedication.create({
         data: {
           userId: patientUserId,
@@ -1403,7 +1457,8 @@ export class IntakeService {
           drugClass: effectiveDrugClass,
           canonicalDrugId,
           frequency: dto.frequency,
-          notes: this.composeNotes(dto.dose, dto.notes),
+          notes: composedNotes,
+          notesEncrypted: this.encryption.encryptNullable(composedNotes),
           source: 'PROVIDER_ENTERED',
           addedByUserId: actor.id,
           addedByRole: role,
@@ -1435,6 +1490,11 @@ export class IntakeService {
           rationale: angioedemaHold
             ? 'Admin-added ACE/ARB on angioedema-contraindicated patient — auto-held (PROVIDER_DIRECTED_HOLD).'
             : 'Admin-added medication.',
+          rationaleEncrypted: this.encryption.encryptNullable(
+            angioedemaHold
+              ? 'Admin-added ACE/ARB on angioedema-contraindicated patient — auto-held (PROVIDER_DIRECTED_HOLD).'
+              : 'Admin-added medication.',
+          ),
           practiceContext: ctx?.practiceId ?? null,
         },
       })
@@ -1512,6 +1572,7 @@ export class IntakeService {
     if (dto.frequency != null) data.frequency = dto.frequency
     if (dto.dose != null || dto.notes != null) {
       data.notes = this.composeNotes(dto.dose, dto.notes ?? med.notes ?? undefined)
+      data.notesEncrypted = this.encryption.encryptNullable(data.notes)
     }
     if (nameChanged) data.canonicalDrugId = canonicalDrugId
     if (angioedemaHold && med.verificationStatus !== MedicationVerificationStatus.HOLD) {
@@ -1543,6 +1604,11 @@ export class IntakeService {
           rationale: angioedemaHold
             ? 'Admin edit to ACE/ARB on angioedema-contraindicated patient — auto-held.'
             : 'Admin edit to medication.',
+          rationaleEncrypted: this.encryption.encryptNullable(
+            angioedemaHold
+              ? 'Admin edit to ACE/ARB on angioedema-contraindicated patient — auto-held.'
+              : 'Admin edit to medication.',
+          ),
           practiceContext: ctx?.practiceId ?? null,
         },
       })
@@ -1717,6 +1783,9 @@ export class IntakeService {
         discrepancyFlag: true,
         rationale:
           'Enrollment auto-reverted — a threshold-mandatory condition (HFrEF / HCM / DCM) was added without a configured threshold.',
+        rationaleEncrypted: this.encryption.encryptNullable(
+          'Enrollment auto-reverted — a threshold-mandatory condition (HFrEF / HCM / DCM) was added without a configured threshold.',
+        ),
       },
     })
     return true
@@ -1954,6 +2023,7 @@ export class IntakeService {
     },
   ) {
     if (!params.changes.length) return
+    const rationaleEncrypted = this.encryption.encryptNullable(params.rationale)
     await tx.profileVerificationLog.createMany({
       data: params.changes.map((change) => ({
         userId: params.userId,
@@ -1965,6 +2035,7 @@ export class IntakeService {
         changeType: params.changeType,
         discrepancyFlag: params.discrepancyFlag ?? false,
         rationale: params.rationale,
+        rationaleEncrypted,
         practiceContext: params.practiceContext ?? null,
       })),
     })
@@ -2034,13 +2105,52 @@ export class IntakeService {
     }
   }
 
+  /**
+   * V-06 audit-log leak (2026-07-17). This used to `...med` — spreading the
+   * WHOLE row into `ProfileVerificationLog.newValue`, an UNENCRYPTED Json
+   * column. That copied `notes` / `rawInputText` / `plainLanguageDescription`
+   * verbatim in plaintext — the exact bytes V-06 encrypts — and, once the
+   * siblings existed, the ciphertext right beside them, i.e. a known-plaintext
+   * pair in a single blob. Phase 3 drops the plaintext columns, at which point
+   * the audit log would have been the last plaintext copy standing.
+   *
+   * Now an explicit allowlist of STRUCTURED fields. Verified against every
+   * reader: the admin Timeline reads only drugName/drugClass/frequency
+   * (`TimelineTab.tsx` formatMedicationObject), and nothing anywhere reads the
+   * free-text keys off these rows. Mirrors the 4-key snapshot
+   * `adminAddMedication` already writes.
+   *
+   * §164.312(c) reconstructability (N5's 2026-07-09 rationale for widening this
+   * to a full snapshot) is preserved by `_snapshotHash` — see
+   * common/audit/snapshot-hash.ts. `pillImageUrl` is excluded too: it points at
+   * an image of the patient's own medication and no reader wants it here.
+   */
   private serializeMedication(med: PatientMedication) {
-    return {
-      ...med,
+    const snapshot = {
+      id: med.id,
+      drugName: med.drugName,
+      drugClass: med.drugClass,
+      isCombination: med.isCombination,
+      combinationComponents: med.combinationComponents,
+      frequency: med.frequency,
+      source: med.source,
+      verificationStatus: med.verificationStatus,
+      verifiedByAdminId: med.verifiedByAdminId,
+      canonicalDrugId: med.canonicalDrugId,
+      holdReason: med.holdReason,
+      holdSetAt: med.holdSetAt?.toISOString() ?? null,
+      holdEscalationLevel: med.holdEscalationLevel,
+      addedByUserId: med.addedByUserId,
+      addedByRole: med.addedByRole,
+      addedAt: med.addedAt?.toISOString() ?? null,
+      lastEditedByUserId: med.lastEditedByUserId,
+      lastEditedByRole: med.lastEditedByRole,
+      lastEditedAt: med.lastEditedAt?.toISOString() ?? null,
       reportedAt: med.reportedAt.toISOString(),
       verifiedAt: med.verifiedAt?.toISOString() ?? null,
       discontinuedAt: med.discontinuedAt?.toISOString() ?? null,
     }
+    return { ...snapshot, [SNAPSHOT_HASH_KEY]: snapshotHash(med) }
   }
 }
 

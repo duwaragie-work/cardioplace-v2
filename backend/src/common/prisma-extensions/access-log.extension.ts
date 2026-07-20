@@ -1,6 +1,7 @@
 import type { ClsService } from 'nestjs-cls'
 import { Prisma } from '../../generated/prisma/client.js'
 import type { PrismaClient } from '../../generated/prisma/client.js'
+import type { AccessLogWriter } from '../audit/access-log-writer.js'
 import { writeAuditWithRetry } from '../audit/write-with-retry.js'
 
 /**
@@ -382,6 +383,12 @@ export async function auditAndReturn(
   },
   cls: ClsService,
   basePrisma: Pick<PrismaClient, 'accessLog'>,
+  // V-17 (2026-07-16) — shadow-mode Pino writer. Optional so the existing
+  // unit spec that constructs the extension without a writer still runs.
+  // Prod path (PrismaService) passes the CommonModule-registered writer;
+  // its default PhiRedactor binding is NullRedactor, so no lines hit disk
+  // until V-05 lands. See backend/src/common/audit/access-log-writer.ts.
+  writer?: AccessLogWriter | null,
 ): Promise<unknown> {
   // Inline audit stamps BEFORE the write runs, so the actor columns are
   // persisted with the row itself (not just in AccessLog). Both are no-ops for
@@ -417,16 +424,31 @@ export async function auditAndReturn(
     recordId: data.recordId,
   })
 
+  // V-17 shadow write — runs alongside the DB path. The writer is dormant
+  // (LOG_SINK unset) or drop-only (NullRedactor default binding) in prod
+  // today, so this is a no-op. The flip PR after V-05 lands swaps the
+  // NullRedactor binding + deletes the DB write above.
+  writer?.logAccess(data)
+
   return result
 }
 
-export function accessLogExtension(cls: ClsService, basePrisma: PrismaClient) {
+export function accessLogExtension(
+  cls: ClsService,
+  basePrisma: PrismaClient,
+  writer?: AccessLogWriter | null,
+) {
   return Prisma.defineExtension({
     name: 'access-log',
     query: {
       $allModels: {
         $allOperations: ({ model, operation, args, query }) =>
-          auditAndReturn({ model, operation, args, query }, cls, basePrisma),
+          auditAndReturn(
+            { model, operation, args, query },
+            cls,
+            basePrisma,
+            writer,
+          ),
       },
     },
   })

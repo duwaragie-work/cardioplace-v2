@@ -10,6 +10,7 @@ import {
 import { Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
+import { redactText } from '../common/logging/log-redact.js'
 import { Server, Socket } from 'socket.io'
 import { VoiceService } from './voice.service.js'
 
@@ -161,12 +162,16 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
         onTranscript: (text: string, isFinal: boolean, speaker: 'user' | 'agent') => {
           if (isFinal && text.trim()) {
-            this.logger.log(`[VOICE NestJS→WS] emit transcript [${speaker}] isFinal=${isFinal} "${text.slice(0, 60)}" [socket=${client.id}]`)
+            // V-05: `text` is the patient's verbatim speech. speaker/isFinal +
+            // the length are the flow signal; the words were pure disclosure.
+            this.logger.log(`[VOICE NestJS→WS] emit transcript [${speaker}] isFinal=${isFinal} ${redactText(text)} [socket=${client.id}]`)
           }
           client.emit('transcript', { text, isFinal, speaker })
         },
         onAction: (type: string, detail: string) => {
-          this.logger.log(`[VOICE NestJS→WS] emit action type=${type} detail="${detail.slice(0, 80)}" [socket=${client.id}]`)
+          // V-05: `detail` is clinical narrative. type= is the signal — mirrors
+          // the action_complete line below, which already logs type= only.
+          this.logger.log(`[VOICE NestJS→WS] emit action type=${type} detail=${redactText(detail)} [socket=${client.id}]`)
           client.emit('action', { type, detail })
         },
         onActionComplete: (type: string, success: boolean, detail: string) => {
@@ -174,7 +179,10 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
           client.emit('action_complete', { type, success, detail })
         },
         onCheckinSaved: (summary) => {
-          this.logger.log(`[VOICE NestJS→WS] emit checkin_saved BP=${summary.systolicBP}/${summary.diastolicBP} saved=${summary.saved} [socket=${client.id}]`)
+          // V-05: this printed the patient's blood pressure literally. saved=
+          // + entryId are what the flow trace needs; the reading is PHI and is
+          // already persisted (and audited) on JournalEntry.
+          this.logger.log(`[VOICE NestJS→WS] emit checkin_saved saved=${summary.saved} [socket=${client.id}]`)
           this.voiceService.invalidateContextCache(userId)
           client.emit('checkin_saved', summary)
         },
@@ -189,7 +197,9 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
           client.emit('checkin_deleted', summary)
         },
         onError: (message: string) => {
-          this.logger.log(`[VOICE NestJS→WS] emit session_error msg="${message}" [socket=${client.id}]`)
+          // V-05: session_error messages can echo model/tool text back, so the
+          // body is treated as untrusted for PHI.
+          this.logger.log(`[VOICE NestJS→WS] emit session_error msg=${redactText(message)} [socket=${client.id}]`)
           client.emit('session_error', { message })
         },
         onClose: () => {

@@ -7,6 +7,8 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import type { Prisma } from '../generated/prisma/client.js'
 import {
   NotificationChannel,
@@ -21,6 +23,7 @@ import {
   supportOpsNotifyHtml,
   supportReplyEmailHtml,
   supportResolvedEmailHtml,
+  supportTicketReceivedEmailHtml,
 } from '../email/email-templates.js'
 import { AuthService, type SessionContext } from '../auth/auth.service.js'
 import { TicketNumberService } from './ticket-number.service.js'
@@ -65,6 +68,7 @@ export class SupportService {
     private readonly auth: AuthService,
     private readonly ticketNumbers: TicketNumberService,
     config: ConfigService,
+    private readonly cls: ClsService,
   ) {
     // Deep-link ops into the admin ticket detail from notification emails
     // (notify-and-link — the email itself carries no requester PHI).
@@ -116,7 +120,14 @@ export class SupportService {
         userAgent: ctx.userAgent ?? null,
       },
     })
-    await this.notifyOpsNewTicket(ticket)
+    // N-1 (Duwaragie 2026-07-14 triage) — fire both notifications concurrently.
+    // Ops routing and submitter confirmation are independent; awaiting one
+    // before the other would delay the response for no gain. Both are
+    // fire-and-forget at the email layer (EmailService never throws).
+    await Promise.all([
+      this.notifyOpsNewTicket(ticket),
+      this.notifyRequesterTicketReceived(ticket),
+    ])
     return { ticketNumber: ticket.ticketNumber }
   }
 
@@ -162,7 +173,15 @@ export class SupportService {
         userAgent: ctx.userAgent ?? null,
       },
     })
-    await this.notifyOpsNewTicket(ticket)
+    // N-1 — same concurrent dispatch as createContactTicket. The locked-out
+    // flow shows "check the link in your confirmation email" copy directly
+    // on the success screen (frontend/src/i18n/en.ts:996), so a missing
+    // requester email is user-visibly wrong. Ops still gets its routing
+    // notification alongside.
+    await Promise.all([
+      this.notifyOpsNewTicket(ticket),
+      this.notifyRequesterTicketReceived(ticket),
+    ])
     return { ticketNumber: ticket.ticketNumber }
   }
 
@@ -508,6 +527,41 @@ export class SupportService {
     })
   }
 
+  /**
+   * N-1 (Duwaragie 2026-07-14 triage) — submitter confirmation email fired on
+   * ticket create. The intake flows (both authenticated contact + public
+   * locked-out) show copy promising "check the link in your confirmation
+   * email"; before this method existed, the promise was hollow. Wrapped in
+   * the `support-ops-notify` CLS scope (same principal PR 2 introduced) so
+   * `EmailDisclosureLog.senderPrincipal` doesn't fall back to
+   * `system-principal-unknown`. Fire-and-forget — never delay the intake
+   * response on mail delivery.
+   */
+  private async notifyRequesterTicketReceived(ticket: {
+    email: string
+    ticketNumber: string
+    category: string
+    userId: string | null
+  }) {
+    if (!ticket.email) return
+    return runAsCronActor(this.cls, 'support-ops-notify', async () => {
+      void this.email.sendEmail(
+        ticket.email,
+        `[Support] ${ticket.ticketNumber} — we've received your request`,
+        supportTicketReceivedEmailHtml(ticket.ticketNumber, ticket.category),
+        {
+          template: 'support_ticket_received',
+          templateVersion: EMAIL_TEMPLATE_VERSION,
+          patientUserId: ticket.userId,
+          metadata: {
+            ticketNumber: ticket.ticketNumber,
+            category: ticket.category,
+          },
+        },
+      )
+    })
+  }
+
   private async notifyOpsNewTicket(ticket: {
     id: string
     ticketNumber: string
@@ -515,50 +569,60 @@ export class SupportService {
     priority: string
     subject: string
   }) {
-    // Notify-and-link — the ops email carries NO requester email or message
-    // body (mirrors the clinical-alert PHI refactor); ops opens the dashboard
-    // for full, audit-logged context (Fix 10). Fire-and-forget — never make the
-    // intake request wait on mail delivery (EmailService never throws).
-    // N6 — ops-team internal notification. Ticket may reference PHI, but the
-    // notify-and-link body itself carries NO requester email or message content
-    // (Fix 10 refactor). Classifying as PHI-adjacent anyway because the ticket
-    // subject is a specific patient in most cases; ticketUserId lets audit
-    // reconstruct which patient the disclosure was ABOUT.
-    void this.email.sendEmail(
-      OPS_INBOX,
-      `[Support] ${ticket.ticketNumber} — ${ticket.priority} ${ticket.category}`,
-      supportOpsNotifyHtml(
-        ticket.ticketNumber,
-        ticket.priority,
-        ticket.category,
-        `${this.adminBaseUrl}/support/${ticket.id}`,
-      ),
-      {
-        template: 'support_ops_notify',
-        templateVersion: EMAIL_TEMPLATE_VERSION,
-        patientUserId: null,
-        metadata: {
-          ticketId: ticket.id,
-          ticketNumber: ticket.ticketNumber,
-          category: ticket.category,
-          priority: ticket.priority,
+    // N-2 (Duwaragie 2026-07-14 triage) — wrap the whole ops-notify body in
+    // a registered system-principal CLS scope so `EmailDisclosureLog
+    // .senderPrincipal` and every AccessLog row emitted here attribute to
+    // the `support-ops-notify` principal instead of the placeholder
+    // `system-principal-unknown` that N7's unattributed-disclosure detector
+    // flags. Runs from the HTTP intake path (createContactTicket /
+    // createLockedOutTicket), NOT a cron — but the CLS-actor pattern is
+    // the same. See backend/src/common/cls/system-principals.ts.
+    return runAsCronActor(this.cls, 'support-ops-notify', async () => {
+      // Notify-and-link — the ops email carries NO requester email or message
+      // body (mirrors the clinical-alert PHI refactor); ops opens the dashboard
+      // for full, audit-logged context (Fix 10). Fire-and-forget — never make the
+      // intake request wait on mail delivery (EmailService never throws).
+      // N6 — ops-team internal notification. Ticket may reference PHI, but the
+      // notify-and-link body itself carries NO requester email or message content
+      // (Fix 10 refactor). Classifying as PHI-adjacent anyway because the ticket
+      // subject is a specific patient in most cases; ticketUserId lets audit
+      // reconstruct which patient the disclosure was ABOUT.
+      void this.email.sendEmail(
+        OPS_INBOX,
+        `[Support] ${ticket.ticketNumber} — ${ticket.priority} ${ticket.category}`,
+        supportOpsNotifyHtml(
+          ticket.ticketNumber,
+          ticket.priority,
+          ticket.category,
+          `${this.adminBaseUrl}/support/${ticket.id}`,
+        ),
+        {
+          template: 'support_ops_notify',
+          templateVersion: EMAIL_TEMPLATE_VERSION,
+          patientUserId: null,
+          metadata: {
+            ticketId: ticket.id,
+            ticketNumber: ticket.ticketNumber,
+            category: ticket.category,
+            priority: ticket.priority,
+          },
         },
-      },
-    )
-    const opsUsers = await this.prisma.user.findMany({
-      where: { roles: { has: UserRole.HEALPLACE_OPS } },
-      select: { id: true },
-    })
-    if (opsUsers.length) {
-      await this.prisma.notification.createMany({
-        data: opsUsers.map((u) => ({
-          userId: u.id,
-          channel: NotificationChannel.DASHBOARD,
-          title: `New support ticket ${ticket.ticketNumber}`,
-          body: `${ticket.category} · ${ticket.subject}`,
-          dispatchTrigger: 'SUPPORT_TICKET_CREATED',
-        })),
+      )
+      const opsUsers = await this.prisma.user.findMany({
+        where: { roles: { has: UserRole.HEALPLACE_OPS } },
+        select: { id: true },
       })
-    }
+      if (opsUsers.length) {
+        await this.prisma.notification.createMany({
+          data: opsUsers.map((u) => ({
+            userId: u.id,
+            channel: NotificationChannel.DASHBOARD,
+            title: `New support ticket ${ticket.ticketNumber}`,
+            body: `${ticket.category} · ${ticket.subject}`,
+            dispatchTrigger: 'SUPPORT_TICKET_CREATED',
+          })),
+        })
+      }
+    })
   }
 }

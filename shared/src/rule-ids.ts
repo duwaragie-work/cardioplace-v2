@@ -53,7 +53,9 @@ export const RULE_IDS = {
   AFIB_HR_LOW: 'RULE_AFIB_HR_LOW',
   TACHY_HR: 'RULE_TACHY_HR',
   BRADY_HR_SYMPTOMATIC: 'RULE_BRADY_HR_SYMPTOMATIC',
-  BRADY_HR_ASYMPTOMATIC: 'RULE_BRADY_HR_ASYMPTOMATIC',
+  // N-7 (Duwaragie 2026-07-14 triage) — BRADY_HR_ASYMPTOMATIC removed.
+  // Superseded by RULE_BRADY_ABSOLUTE (Manisha 2026-05-10, Cluster 6). No
+  // engine branch has returned this rule id since the Cluster 6 rewrite.
 
   // Physician-only
   PULSE_PRESSURE_WIDE: 'RULE_PULSE_PRESSURE_WIDE',
@@ -198,7 +200,6 @@ export const RULE_AXIS: Record<RuleId, RuleAxis> = {
   [RULE_IDS.TACHY_HR]: 'hr',
   [RULE_IDS.BRADY_ABSOLUTE]: 'hr',
   [RULE_IDS.BRADY_HR_SYMPTOMATIC]: 'hr',
-  [RULE_IDS.BRADY_HR_ASYMPTOMATIC]: 'hr',
   [RULE_IDS.BRADY_SURVEILLANCE]: 'hr',
 
   // Diastolic-axis rule

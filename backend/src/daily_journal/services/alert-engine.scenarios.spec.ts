@@ -975,7 +975,8 @@ describe('AlertEngine — end-to-end scenarios (ALERT_SCENARIOS.md)', () => {
   })
 
   // Cluster 6 (Manisha 5/10/26) — HR<40 retiered to Tier 1 (was Tier 2
-  // BP_LEVEL_1_LOW). Rule renamed BRADY_HR_ASYMPTOMATIC → BRADY_ABSOLUTE.
+  // BP_LEVEL_1_LOW). RULE_BRADY_ABSOLUTE replaced RULE_BRADY_HR_ASYMPTOMATIC;
+  // the retired id was deleted from RULE_IDS entirely under N-7 (2026-07-14).
   it('Scenario 36 — Brady + pulse 38 (asymptomatic) → RULE_BRADY_ABSOLUTE (Tier 1)', async () => {
     const { result, createArgs } = await run(
       buildSession({ systolicBP: 115, diastolicBP: 70, pulse: 38 }),

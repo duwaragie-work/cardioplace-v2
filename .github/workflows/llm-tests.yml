@@ -18,8 +18,25 @@ concurrency:
 env:
   GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
   GEMINI_CHAT_MODEL: gemini-2.5-flash
-  JWT_ACCESS_SECRET: ci-test-jwt-secret
-  JWT_REFRESH_SECRET: ci-test-jwt-refresh-secret
+  # CI-only throwaway JWT secrets, sourced from repo GitHub Secrets so they
+  # never appear inline in git history. Must be REAL random values (not
+  # placeholder-shaped) — the boot guard at
+  # backend/src/common/config/secret-guard.ts rejects short / all-zero /
+  # repeated-pattern strings. Generate each with:
+  #   openssl rand -base64 48 | tr -d '=+/' | head -c 64
+  # Missing secret → empty env → boot guard trips → CI fails loudly, which
+  # is the desired signal (no silent fallback to a weak default).
+  # Same GitHub Secrets are shared with e2e.yml.
+  JWT_ACCESS_SECRET: ${{ secrets.CI_JWT_ACCESS_SECRET }}
+  JWT_REFRESH_SECRET: ${{ secrets.CI_JWT_REFRESH_SECRET }}
+  # V-06 (Ruhaim 2026-07-16) — ConversationHistoryService.saveConversation and
+  # the Session.title/summary Prisma writes call EncryptionService.encryptNullable
+  # on every chat turn. Without the key the call throws, the try/catch swallows
+  # the error, and no Conversation row is written — breaking multi-turn tests
+  # (Test 4 "Full check-in" and Test 9 "Multi-turn context") because turn 2
+  # sees no prior conversation history. Shares the CI_MFA_ENCRYPTION_KEY secret
+  # with e2e.yml (32-byte key as 64 hex chars, format ^[0-9a-fA-F]{64}$).
+  MFA_ENCRYPTION_KEY: ${{ secrets.CI_MFA_ENCRYPTION_KEY }}
   LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
   LANGSMITH_PROJECT: healplace-cardio-ci
   LANGSMITH_TRACING_V2: 'true'

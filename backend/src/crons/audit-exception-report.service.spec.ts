@@ -24,7 +24,29 @@ function makePrisma(opts: {
   users?: Record<string, any>
   existingException?: { id: string; status: string } | null
 }) {
-  const accessFindMany = jest.fn<any>().mockResolvedValue(opts.accessLogRows ?? [])
+  // N-3 (2026-07-14 triage) — the mock now filters the "system: unknown"
+  // shape used by UnattributedAccessLogDetector so mixed fixtures (some
+  // rows attributed, one unattributed) don't accidentally flood the new
+  // detector with the bulk/off-hours/cross-practice rows.
+  const accessFindMany = jest.fn<any>().mockImplementation((args: any) => {
+    const rows: any[] = opts.accessLogRows ?? []
+    const w = args?.where
+    if (
+      w?.actorType === 'SYSTEM_ACTOR' &&
+      w?.actorId === null &&
+      w?.systemActorLabel === null
+    ) {
+      return Promise.resolve(
+        rows.filter(
+          (r) =>
+            r.actorType === 'SYSTEM_ACTOR' &&
+            r.actorId === null &&
+            r.systemActorLabel === null,
+        ),
+      )
+    }
+    return Promise.resolve(rows)
+  })
   const authFindMany = jest.fn<any>().mockResolvedValue(opts.authLogRows ?? [])
   const emailFindMany = jest.fn<any>().mockResolvedValue(opts.emailDisclosureRows ?? [])
   const tallyFindMany = jest.fn<any>().mockResolvedValue(opts.tallyRows ?? [])
@@ -88,6 +110,22 @@ function buildAllDetectorFixtures() {
       createdAt: new Date('2026-07-10T09:00:00Z'),
     },
   ]
+  // N-3 (2026-07-14 triage) — one genuine "system: unknown" AccessLog row
+  // to trip UnattributedAccessLogDetector. Shape produced by any query
+  // fired outside a CLS scope (the pre-fix jwt.strategy pattern).
+  const unattributedAccessLogRows = [
+    {
+      actorType: 'SYSTEM_ACTOR',
+      actorId: null,
+      systemActorLabel: null,
+      modelName: 'User',
+      action: 'READ',
+      recordId: 'user-victim',
+      ip: '10.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date('2026-07-10T06:00:00Z'),
+    },
+  ]
   const users = {
     'provider-cross': {
       id: 'provider-cross',
@@ -125,7 +163,12 @@ function buildAllDetectorFixtures() {
     },
   ]
   return {
-    accessLogRows: [...bulkReadRows, ...offHoursRows, ...crossPracticeRows],
+    accessLogRows: [
+      ...bulkReadRows,
+      ...offHoursRows,
+      ...crossPracticeRows,
+      ...unattributedAccessLogRows,
+    ],
     authLogRows: authRows,
     emailDisclosureRows: emailRows,
     tallyRows,
@@ -134,19 +177,20 @@ function buildAllDetectorFixtures() {
 }
 
 describe('AuditExceptionReportService — N7 cron', () => {
-  it('runs all 6 detectors and writes one row per fired candidate', async () => {
+  it('runs all 7 detectors and writes one row per fired candidate', async () => {
     const { prisma, createSpy } = makePrisma(buildAllDetectorFixtures())
     const writer = new AuditExceptionWriter(prisma)
     const svc = new AuditExceptionReportService(prisma, writer, makeCls())
 
     const summary = await svc.run(NOW)
 
-    // 6 candidates expected — one per detector fixture.
+    // 7 candidates expected — one per detector fixture (added
+    // UNATTRIBUTED_ACCESS_LOG under N-3, 2026-07-14 triage).
     expect(summary.failedDetectors).toBe(0)
-    expect(summary.created).toBe(6)
+    expect(summary.created).toBe(7)
     expect(summary.updated).toBe(0)
     expect(summary.stickySkipped).toBe(0)
-    expect(createSpy).toHaveBeenCalledTimes(6)
+    expect(createSpy).toHaveBeenCalledTimes(7)
     const detectorIds = createSpy.mock.calls
       .map((c) => (c[0] as any).data.detectorId)
       .sort()
@@ -156,6 +200,7 @@ describe('AuditExceptionReportService — N7 cron', () => {
       'DROPPED_AUDIT_WRITES',
       'OFF_HOURS_PHI_ACCESS',
       'REPEATED_FAILED_AUTH',
+      'UNATTRIBUTED_ACCESS_LOG',
       'UNATTRIBUTED_SYSTEM_DISCLOSURE',
     ])
   })
@@ -171,16 +216,17 @@ describe('AuditExceptionReportService — N7 cron', () => {
     const summary = await svc.run(NOW)
 
     expect(createSpy).not.toHaveBeenCalled()
-    expect(updateSpy).toHaveBeenCalledTimes(6)
-    expect(summary.updated).toBe(6)
+    expect(updateSpy).toHaveBeenCalledTimes(7)
+    expect(summary.updated).toBe(7)
     expect(summary.created).toBe(0)
   })
 
   it('a detector crash does NOT abort the remaining detectors', async () => {
     const { prisma, createSpy } = makePrisma(buildAllDetectorFixtures())
     // Force the AccessLog findMany to throw — kills BULK_PHI_READ +
-    // OFF_HOURS_PHI_ACCESS + CROSS_PRACTICE_ACCESS. The other 3 detectors
-    // read different tables and must still fire.
+    // OFF_HOURS_PHI_ACCESS + CROSS_PRACTICE_ACCESS + UNATTRIBUTED_ACCESS_LOG
+    // (all four scan AccessLog). The other 3 detectors read different tables
+    // and must still fire.
     ;(prisma.accessLog.findMany as jest.Mock<any>).mockRejectedValue(
       new Error('accessLog scan crashed'),
     )
@@ -189,7 +235,7 @@ describe('AuditExceptionReportService — N7 cron', () => {
 
     const summary = await svc.run(NOW)
 
-    expect(summary.failedDetectors).toBe(3)
+    expect(summary.failedDetectors).toBe(4)
     expect(summary.created).toBe(3)
     expect(createSpy).toHaveBeenCalledTimes(3)
   })

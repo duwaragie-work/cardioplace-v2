@@ -14,6 +14,7 @@ import {
   VerificationChangeType,
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import type { CreateAssignmentDto } from './dto/create-assignment.dto.js'
 import type { UpdateAssignmentDto } from './dto/update-assignment.dto.js'
 
@@ -35,6 +36,7 @@ export class AssignmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: PatientAccessService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   async create(
@@ -254,6 +256,7 @@ export class AssignmentService {
         changedByRole: VerifierRole.ADMIN,
         changeType: VerificationChangeType.ADMIN_ASSIGNMENT_CHANGE,
         rationale: null,
+        rationaleEncrypted: this.encryption.encryptNullable(null),
         practiceContext,
       },
     })
