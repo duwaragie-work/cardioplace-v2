@@ -4,6 +4,7 @@
 
 import { RULE_IDS, getPulsePressure } from '@cardioplace/shared'
 import type { ResolvedContext } from '@cardioplace/shared'
+import { kgDeltaToLbs } from '../../common/units.js'
 import type { RuleFunction, RuleResult } from './types.js'
 
 const HFREF_DEFAULT_LOWER = 85
@@ -311,6 +312,11 @@ const HF_WEIGHT_DELTA_MS = 24 * 60 * 60 * 1000
  * in 24h. The HF-ARC 2024 panel calls these out as primary decompensation
  * indicators. Tier 2 alert on its own dedicated axis so it co-exists with
  * any HFREF / HFPEF / DCM SBP rule that also fires.
+ *
+ * UNITS: the DB stores weight in kg. Until 2026-07-14 the kg delta was compared
+ * straight against HF_WEIGHT_DELTA_LBS, so the rule fired at 2 kg (4.41 lbs) —
+ * 2.2x less sensitive than this docstring's signed-off 2 lbs — and reported the
+ * kg figure to the physician labelled "lbs". Convert before comparing.
  */
 export const hfDecompensationRule: RuleFunction = (session, ctx) => {
   const isHF =
@@ -323,7 +329,9 @@ export const hfDecompensationRule: RuleFunction = (session, ctx) => {
   const reasons: string[] = []
   if (session.symptoms.legSwelling) reasons.push('leg-swelling')
 
-  const weightDeltaPounds = computeWeightDelta(session, ctx)
+  const weightDeltaKg = computeWeightDeltaKg(session, ctx)
+  const weightDeltaPounds =
+    weightDeltaKg != null ? kgDeltaToLbs(weightDeltaKg) : null
   if (weightDeltaPounds != null && weightDeltaPounds > HF_WEIGHT_DELTA_LBS) {
     reasons.push(`weight-+${weightDeltaPounds.toFixed(1)}lbs/24h`)
   }
@@ -371,12 +379,18 @@ export const dhpCcbLegSwellingRule: RuleFunction = (session, ctx) => {
 }
 
 /**
- * Returns the pound difference between the current session's weight and the
+ * Returns the KILOGRAM difference between the current session's weight and the
  * most-recent prior weight within 24h, or null if either side is missing.
  * Reads from optional `priorWeight` / `priorWeightAt` fields populated by
  * the orchestrator via a one-shot Prisma lookup (added in Step 4).
+ *
+ * `JournalEntry.weight` is `Decimal kg` — the browser converts lbs→kg before
+ * POSTing (frontend/src/lib/units.ts). So this difference is in kg and MUST be
+ * converted before being compared against any pound-denominated threshold. It
+ * previously said "pound difference" and was compared straight against
+ * `HF_WEIGHT_DELTA_LBS`, which is the unit bug this name now prevents.
  */
-function computeWeightDelta(
+function computeWeightDeltaKg(
   session: Parameters<RuleFunction>[0],
   _ctx: Parameters<RuleFunction>[1],
 ): number | null {

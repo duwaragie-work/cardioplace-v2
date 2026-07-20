@@ -30,12 +30,14 @@ const ALL_TEMPLATES: EmailTemplateName[] = [
   'support_reply',
   'support_resolved',
   'support_ops_notify',
+  'support_ticket_received',
   'contact_form',
   'gap_alert',
   'medication_reask',
   'daily_reminder',
   'care_team_gap_alert',
   'monthly_report',
+  'security_alert',
 ]
 
 describe('EMAIL_TEMPLATE_REGISTRY — N6 extension', () => {

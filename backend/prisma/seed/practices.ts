@@ -47,7 +47,32 @@ export async function seedPractices() {
     console.log(`  practice: ${practiceB.name} (SEED_TEST_FIXTURES)`)
   }
 
-  return { practiceA, practiceB }
+  // Harness practice for spec 76 (V-01/V-04 IDOR). Purpose: give the seeded
+  // outOfScopeProvider EXACTLY one PracticeProvider membership so
+  // resolvePracticeContext() returns 'auto' (they can sign in) — but attach
+  // that membership to a practice that holds ZERO patients, so every seed
+  // alert is in a DIFFERENT practice than the actor's active context.
+  // PatientAccessService.assertCanAccessPatient's inActiveScope() check then
+  // trips the 403 branch, which is what the V-01/V-04 test needs to observe.
+  //
+  // Unconditional (unlike Practice B) because spec 76 is a security-critical
+  // finding that must run in every CI shard — the ~2 extra seed rows are the
+  // whole cost, and no patient / assignment / staff-link touches this row.
+  const practiceIdorHarness = await prisma.practice.upsert({
+    where: { id: 'seed-idor-harness' },
+    update: {},
+    create: {
+      id: 'seed-idor-harness',
+      name: 'IDOR Harness Practice (spec 76 only — no patients)',
+      businessHoursStart: '09:00',
+      businessHoursEnd: '17:00',
+      businessHoursTimezone: 'America/New_York',
+      afterHoursProtocol: 'N/A — test-harness practice, never receives clinical traffic.',
+    },
+  })
+  console.log(`  practice: ${practiceIdorHarness.name}`)
+
+  return { practiceA, practiceB, practiceIdorHarness }
 }
 
 export type SeededPractices = Awaited<ReturnType<typeof seedPractices>>

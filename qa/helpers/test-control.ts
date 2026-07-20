@@ -77,6 +77,47 @@ export class TestControl {
   }
 
   /**
+   * Turn the V-03 auth rate limiter on/off at runtime (2026-07-17).
+   *
+   * The suite runs with the limiter disabled (AUTH_THROTTLE_DISABLED=1) so the
+   * ~100 specs that sign in as shared seed accounts don't trip 5/60s on their
+   * own auth. tests/75 — the spec that proves the limiter — flips it back on
+   * around its own block and off again after. The guard reads the flag live per
+   * request, so no backend restart is needed.
+   */
+  async setAuthThrottle(enabled: boolean): Promise<{ throttleEnabled: boolean }> {
+    return this.post('test-control/auth/throttle', { enabled })
+  }
+
+  /**
+   * Seed `count` failed-auth rows for one identifier (2026-07-17).
+   *
+   * Use this instead of POSTing wrong OTPs in a loop. V-03's rate limiter caps
+   * /otp/verify at 5 per 60s per ip:email — that limiter exists precisely to
+   * make "N rapid failed logins for one account from one client" impossible, so
+   * an HTTP-driven loop can no longer reach the CRITICAL threshold and never
+   * should again.
+   *
+   * This is not a shortcut around the system under test: the rows are written
+   * through the same `authLog.create` that `authFailureExtension` wraps, so the
+   * real AUTH_EVENTS.FAILURE evaluator fires exactly as in production — only
+   * the HTTP hop is skipped. IPs vary per row by default, which also makes this
+   * a truer model of the distributed burst the CRITICAL tier is meant to catch
+   * (the per-ip:email limiter does not stop 50 IPs × 1 attempt each).
+   */
+  async seedFailedAuth(
+    identifier: string,
+    count: number,
+    ipAddress?: string,
+  ): Promise<{ seeded: number }> {
+    return this.post('test-control/auth/seed-failed', {
+      identifier,
+      count,
+      ...(ipAddress ? { ipAddress } : {}),
+    })
+  }
+
+  /**
    * Deterministically fire T+0 for one alert. Unlike runEscalationScan (which
    * only advances overdue ladders + fires queued events), this awaits the real
    * fireT0 dispatch for a fresh alert, so the T+0 Notification rows are

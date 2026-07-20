@@ -101,7 +101,12 @@ export class AuditExceptionWriter {
       data: {
         detectorId,
         severity,
-        // status defaults to OPEN via Prisma default.
+        // N-5 (2026-07-14 triage) — auto-ACK on CREATE for by-design
+        // fires (currently only HEALPLACE_OPS cross-practice access).
+        // Omitting this field lets Prisma apply the schema default OPEN;
+        // passing ACKNOWLEDGED here means the row still exists for
+        // compliance review but never enters the reviewer's OPEN queue.
+        ...(candidate.initialStatus ? { status: candidate.initialStatus } : {}),
         windowStart,
         windowEnd,
         summary: candidate.summary.slice(0, 200),

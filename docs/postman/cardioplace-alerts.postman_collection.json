@@ -504,7 +504,7 @@
             },
             {
               "name": "Scenario 36 — Brady asymptomatic pulse 38 (custom hasBradycardia, no BB)",
-              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_BRADY_HR_ASYMPTOMATIC');"] } }],
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('202', () => pm.response.to.have.status(202));", "const r = pm.response.json();", "if (r.data && r.data.id) pm.environment.set('entryId', r.data.id);", "console.log('Expected: RULE_BRADY_ABSOLUTE');"] } }],
               "request": {
                 "method": "POST",
                 "header": [{ "key": "Content-Type", "value": "application/json" }],

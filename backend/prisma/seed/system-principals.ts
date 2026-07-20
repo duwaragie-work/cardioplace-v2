@@ -9,34 +9,32 @@
 // staff-list queries. displayId is minted through the normal ledger path with a
 // dedicated SYSTEM class (CP-SYS-XXXXXXX-C).
 //
-// Labels here MUST match SYSTEM_PRINCIPAL_LABELS in
-// src/common/cls/system-principals.ts and the resolver's email convention
-// (system-<label>@internal.cardioplace.test).
+// The list below is DERIVED from SYSTEM_PRINCIPAL_LABELS in
+// src/common/cls/system-principals.ts — it is deliberately not a second copy.
+// A seed row is load-bearing: without it `resolveCronActorId` returns null and
+// the writer silently reverts to senderPrincipal='system-principal-unknown'
+// (the N-2 bug) with every test still passing. Deriving means a new principal
+// cannot be added to the runtime allowlist without also being seeded here.
+//
+// Note the sets are the same by construction, including the exclusions: the
+// N3 (2026-07-13) gap-alert principal is absent from the allowlist, so it is
+// not re-seeded — its existing DB row stays put (the upsert never deletes), and
+// historical AccessLog rows joined against that principal id remain resolvable.
 import { AccountStatus, DisplayIdClass } from '../../src/generated/prisma/enums.js'
+import {
+  SYSTEM_PRINCIPAL_LABELS,
+  SYSTEM_PRINCIPAL_DISPLAY_NAMES,
+} from '../../src/common/cls/system-principals.js'
 import {
   getOrGenerateDisplayIdForEmail,
   formatForDisplay,
 } from './display-ids.js'
 import { prisma } from './helpers.js'
 
-const SYSTEM_PRINCIPALS = [
-  { label: 'engine-alert-generator', displayName: 'Alert Engine' },
-  { label: 'escalation-ladder', displayName: 'Escalation Ladder' },
-  { label: 'session-finalize', displayName: 'Session Finalize Cron' },
-  // N3 (2026-07-13) — gap-alert cron deleted; its principal is intentionally
-  // NOT re-seeded here. Existing rows in the DB stay in place (idempotent
-  // upsert on missing labels means we neither delete nor rotate them), so
-  // historical AccessLog rows joined against that principal id remain
-  // resolvable. Superseded by 'daily-reminder' below.
-  { label: 'monthly-reask', displayName: 'Monthly Re-ask Cron' },
-  { label: 'medication-hold-escalation', displayName: 'Medication Hold Escalation' },
-  { label: 'monthly-report', displayName: 'Monthly Report Cron' },
-  { label: 'content-scheduler', displayName: 'Content Scheduler' },
-  // N7 (2026-07-11) — §164.308(a)(1)(ii)(D) Information System Activity Review.
-  { label: 'audit-exception-report', displayName: 'Audit Exception Report Cron' },
-  // N2 (2026-07-13) — daily patient reminder cron (Reminder & Engagement).
-  { label: 'daily-reminder', displayName: 'Daily Reminder Cron' },
-] as const
+const SYSTEM_PRINCIPALS = SYSTEM_PRINCIPAL_LABELS.map((label) => ({
+  label,
+  displayName: SYSTEM_PRINCIPAL_DISPLAY_NAMES[label],
+}))
 
 export function systemPrincipalEmail(label: string): string {
   return `system-${label}@internal.cardioplace.test`

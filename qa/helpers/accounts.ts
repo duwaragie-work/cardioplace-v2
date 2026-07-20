@@ -154,6 +154,20 @@ export const ADMINS = {
     roles: ['COORDINATOR'],
     name: 'Lakshitha Fernando',
   },
+  // 2026-07-17 — PROVIDER with NO PracticeProvider row and NO patient
+  // assignment. By construction, PatientAccessService rejects every patient
+  // for this actor, which is exactly the "scoped PROVIDER outside the alert's
+  // scope" case that spec 76 (V-01/V-04 IDOR) needs to assert. The three
+  // other provider-role personas (primary, backup, multiPractice) are all
+  // assigned to Cedar Hill and would legitimately return 200 on a Cedar Hill
+  // alert. See backend/prisma/seed/admins.ts for the seed rationale.
+  outOfScopeProvider: {
+    email:
+      process.env.ADMIN_OUT_OF_SCOPE_PROVIDER_EMAIL ??
+      'outofscope-provider@cardioplace.test',
+    roles: ['PROVIDER'],
+    name: 'Dr. Ines Vega',
+  },
   // June 2026 — phase/practice-identity (Manisha 2026-06-12 §1). Seeded
   // ONLY when SEED_TEST_FIXTURES=true so production seed stays single-
   // practice. Member of BOTH seed-cedar-hill and seed-bridgepoint to drive

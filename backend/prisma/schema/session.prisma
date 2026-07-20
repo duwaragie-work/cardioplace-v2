@@ -1,8 +1,10 @@
 model Session {
   id           String   @id @default(uuid())
-  title        String?
-  userId       String?
-  summary      String?
+  title            String?
+  titleEncrypted   String?
+  userId           String?
+  summary          String?
+  summaryEncrypted String?
   messageCount Int      @default(0)
   user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())

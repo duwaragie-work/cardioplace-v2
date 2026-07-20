@@ -10,6 +10,7 @@ import {
   VerificationChangeType,
 } from '../generated/prisma/client.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 
 // Manisha 5/24 Med §4 — medication-reconciliation escalation ladder for meds
 // stuck on HOLD. A hold is supposed to be a short administrative pause; if it
@@ -77,6 +78,7 @@ export class MedicationHoldEscalationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cls: ClsService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   @Cron('0 15 * * *') // daily 15:00 UTC
@@ -174,6 +176,9 @@ export class MedicationHoldEscalationService {
               changeType: VerificationChangeType.SYSTEM_CRON_MEDICATION_HOLD_ESCALATION,
               discrepancyFlag: false,
               rationale: `Auto-escalated hold level from ${med.holdEscalationLevel} to ${rung.level} after T+${ageDays}d`,
+              rationaleEncrypted: this.encryption.encryptNullable(
+                `Auto-escalated hold level from ${med.holdEscalationLevel} to ${rung.level} after T+${ageDays}d`,
+              ),
               practiceContext: null,
             },
           })

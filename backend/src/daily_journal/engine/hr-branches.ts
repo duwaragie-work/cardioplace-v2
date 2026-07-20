@@ -120,7 +120,7 @@ export function buildTachyRule(priorElevated: boolean): RuleFunction {
 
 /**
  * Cluster 6 (Manisha 5/10/26) — HR<40 is Tier 1 regardless of symptoms per
- * v1.0 spec §5.6. Renamed from `RULE_BRADY_HR_ASYMPTOMATIC` (was Tier 2) to
+ * v1.0 spec §5.6. Renamed from the retired `RULE_BRADY_HR_ASYMPTOMATIC` (was Tier 2, deleted 2026-07-14) to
  * `RULE_BRADY_ABSOLUTE` (Tier 1). The escalation ladder picks up the new
  * tier automatically; admin dashboard treats it as non-dismissable. Gate:
  * patient must have hasBradycardia OR be on a beta-blocker — we don't fire

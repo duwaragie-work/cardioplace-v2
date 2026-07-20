@@ -8,6 +8,8 @@ import { EmailService } from '../../email/email.service.js'
 import { SmsService } from '../../sms/sms.service.js'
 import { EscalationService } from './escalation.service.js'
 import type { AlertCreatedEvent } from '../interfaces/events.interface.js'
+import { EncryptionService } from '../../common/encryption.service.js'
+import { encryptionMock } from '../../common/test/encryption.mock.js'
 
 // Gap 5 — caregiver dispatch unit coverage.
 //
@@ -132,6 +134,7 @@ describe('EscalationService — caregiver dispatch (Gap 5)', () => {
             get: () => null,
           },
         },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
 

@@ -73,4 +73,7 @@ enum NotificationTrigger {
   SYSTEM_ONBOARDING // onboarding system notice
   SYSTEM_SEED // seeded demo notification
   SYSTEM_OTHER // catch-all for un-classified legacy rows (backfill default)
+
+  // ── Security-class — VISIBLE in the bell. ──
+  SECURITY_EXCEPTION // real-time audit exception paged to HEALPLACE_OPS (repeated-failed-auth burst, §164.308(a)(6))
 }

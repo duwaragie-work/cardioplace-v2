@@ -1,5 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import { AuditExceptionReportService } from '../crons/audit-exception-report.service.js'
 import { DailyReminderService, type DailyReminderScanSummary } from '../crons/daily-reminder.service.js'
 import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
@@ -15,6 +18,19 @@ import { createHash, randomBytes } from 'node:crypto'
 /**
  * Helpers backing the /test-control HTTP endpoints. Pure delegation —
  * the controller layer handles auth/secret + DTO shape.
+ *
+ * N-2 residual (2026-07-17) — the cron drivers below call each service's inner
+ * `runScan` / `run` / `dispatchT0ForAlert` DIRECTLY, which skips the `@Cron`
+ * (or `@OnEvent`) method that establishes the system-principal CLS scope. Every
+ * PHI write and email those scans emit was therefore attributed to whoever hit
+ * the test-control endpoint — or to nobody (`system-principal-unknown`) —
+ * instead of the cron's principal. That is the same defect N-2 fixed on the
+ * production paths, arriving through the back door: these routes are @Public()
+ * and HTTP-reachable wherever ENABLE_TEST_CONTROL is on (see V-08).
+ *
+ * Each driver now re-establishes the SAME label its real scheduler uses, so a
+ * test-driven run is audited identically to a scheduled one — which is the
+ * point of driving the real cron rather than a copy of it.
  */
 @Injectable()
 export class TestControlService {
@@ -22,6 +38,9 @@ export class TestControlService {
 
   constructor(
     private readonly prisma: PrismaService,
+    // N-2 residual — needed to re-establish the cron actor scope the @Cron
+    // wrappers would otherwise provide.
+    private readonly cls: ClsService,
     // N3 (2026-07-13) — gap-alert is replaced by daily-reminder. Test-control
     // now drives the new cron; the qa helper's old runGapAlert() call is
     // rewired to hit runDailyReminderScan() below.
@@ -32,12 +51,15 @@ export class TestControlService {
     // N7 (2026-07-11) — Playwright coverage for the audit-exception-report
     // cron. Same pattern as the other cron drivers above.
     private readonly auditExceptionReport: AuditExceptionReportService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   // ─── Cron drivers ───────────────────────────────────────────────────────
   async runEscalationScan(now: Date): Promise<{ scanned: number; dispatched: number }> {
     const before = await this.prisma.escalationEvent.count()
-    await this.escalation.runScan(now)
+    await runAsCronActor(this.cls, 'cron-escalation-ladder', () =>
+      this.escalation.runScan(now),
+    )
     const after = await this.prisma.escalationEvent.count()
     return { scanned: 1, dispatched: Math.max(0, after - before) }
   }
@@ -49,7 +71,11 @@ export class TestControlService {
    * Idempotent + error-propagating (see EscalationService.dispatchT0ForAlert).
    */
   async fireEscalationT0(alertId: string): Promise<{ ok: true }> {
-    await this.escalation.dispatchT0ForAlert(alertId)
+    // 'engine-alert-generator' — the label handleAlertCreated uses for the same
+    // T+0 dispatch, so a driven T+0 audits identically to an event-driven one.
+    await runAsCronActor(this.cls, 'engine-alert-generator', () =>
+      this.escalation.dispatchT0ForAlert(alertId),
+    )
     return { ok: true }
   }
 
@@ -59,18 +85,26 @@ export class TestControlService {
    * assert on tier-selection + care-team fan-out counts, not just totals.
    */
   async runDailyReminderScan(now: Date): Promise<DailyReminderScanSummary> {
-    return this.dailyReminder.runScan(now)
+    return runAsCronActor(this.cls, 'cron-daily-reminder', () =>
+      this.dailyReminder.runScan(now),
+    )
   }
 
   async runMonthlyReaskScan(now: Date): Promise<{ scanned: number; reasked: number }> {
-    const sent = await this.monthlyReask.runScan(now)
+    const sent = await runAsCronActor(this.cls, 'cron-monthly-reask', () =>
+      this.monthlyReask.runScan(now),
+    )
     return { scanned: 1, reasked: sent }
   }
 
   async runMedicationHoldEscalationScan(
     now: Date,
   ): Promise<{ scanned: number; rungsFired: number }> {
-    const fired = await this.medicationHoldEscalation.runScan(now)
+    const fired = await runAsCronActor(
+      this.cls,
+      'cron-medication-hold-escalation',
+      () => this.medicationHoldEscalation.runScan(now),
+    )
     return { scanned: 1, rungsFired: fired }
   }
 
@@ -87,8 +121,60 @@ export class TestControlService {
     stickySkipped: number
     failedDetectors: number
   }> {
-    const summary = await this.auditExceptionReport.run(now)
+    const summary = await runAsCronActor(
+      this.cls,
+      'cron-audit-exception-report',
+      () => this.auditExceptionReport.run(now),
+    )
     return { scanned: 1, ...summary }
+  }
+
+  /**
+   * Seed N failed-auth rows for one identifier, so a spec can drive the
+   * repeated-failed-auth evaluator past a threshold.
+   *
+   * WHY THIS EXISTS (2026-07-17). qa/tests/74 used to drive the CRITICAL tier by
+   * POSTing 50 wrong OTPs to /otp/verify. V-03's rate limiter now (correctly)
+   * rejects that at 5/60s per ip:email — the limiter exists precisely to make
+   * "50 rapid failed logins for one account from one client" impossible, so the
+   * old driver can never reach 50 again. The scenario the CRITICAL tier is
+   * really for is a DISTRIBUTED attacker (50 IPs × 1 attempt each, which the
+   * per-ip:email limiter does not stop) — and a single test host cannot
+   * synthesise that over HTTP, because req.ip is the socket peer unless
+   * TRUST_PROXY_HOPS is set, and making it spoofable would be the bug main.ts
+   * deliberately avoids.
+   *
+   * So drive the evaluator at its real trigger instead of through the transport:
+   * `authFailureExtension` wraps `authLog.create` and emits AUTH_EVENTS.FAILURE
+   * for every `success: false` row. `this.prisma` IS the extended client, so
+   * these writes fire the evaluator on exactly the production path — only the
+   * HTTP hop (the part V-03 now blocks) is skipped.
+   *
+   * Rows mirror what verifyOtp's miss path writes (`otp_expired`, success:false,
+   * identifier = the email), so the detector groups them identically.
+   */
+  async seedFailedAuth(
+    identifier: string,
+    count: number,
+    ipAddress?: string,
+  ): Promise<{ seeded: number }> {
+    for (let i = 0; i < count; i += 1) {
+      await this.prisma.authLog.create({
+        data: {
+          event: 'otp_expired',
+          identifier,
+          method: 'otp',
+          // Vary the IP by default so the row set looks like the distributed
+          // burst the CRITICAL tier is meant to catch, and so the detector's
+          // distinctIpCount evidence is meaningful rather than always 1.
+          ipAddress: ipAddress ?? `203.0.113.${i % 254}`,
+          userAgent: 'test-control/seedFailedAuth',
+          success: false,
+          errorCode: 'otp_not_found_or_expired',
+        },
+      })
+    }
+    return { seeded: count }
   }
 
   // ─── N4/N5/N6/N7 audit-read helpers ────────────────────────────────────
@@ -618,6 +704,9 @@ export class TestControlService {
           changedBy: 'SYSTEM',
           changedByRole: VerifierRole.ADMIN,
           reason: 'Angioedema ACE/ARB contraindication flag set (#84 retro-upgrade)',
+          reasonEncrypted: this.encryption.encryptNullable(
+            'Angioedema ACE/ARB contraindication flag set (#84 retro-upgrade)',
+          ),
           now,
         })
       }
@@ -1144,6 +1233,7 @@ export class TestControlService {
           newValue: (e.newValue ?? undefined) as never,
           discrepancyFlag: e.discrepancyFlag ?? false,
           rationale: e.rationale ?? null,
+          rationaleEncrypted: this.encryption.encryptNullable(e.rationale ?? null),
           ...(e.createdAtIso ? { createdAt: new Date(e.createdAtIso) } : {}),
         },
       })
@@ -1261,6 +1351,7 @@ export class TestControlService {
           afterHours: false,
           triggeredByResolution: false,
           reason: 'test-control.advanceLadderSteps',
+          reasonEncrypted: this.encryption.encryptNullable('test-control.advanceLadderSteps'),
         },
       })
       advanced.push(step.step)

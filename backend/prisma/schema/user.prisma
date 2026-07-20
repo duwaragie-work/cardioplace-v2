@@ -47,6 +47,28 @@ model User {
   // legitimately re-consents to the new policy.
   policyAcknowledgedAt      DateTime?
   acknowledgedPolicyVersion String?
+
+  // ── SMS reminders (L1, 2026-07-14) ────────────────────────────────────────
+  // SMS is an ADDITIVE 4th channel on the N2 reminder dispatcher — it never
+  // replaces in-app / push / email. The message itself is PHI-free and purely
+  // directional ("You have a reminder waiting…"), so none of this carries
+  // clinical content.
+  //
+  // phoneNumber is stored as an EncryptionService envelope (AES-256-GCM) — the
+  // same at-rest treatment as the MFA TOTP secret, never plaintext. Decrypted
+  // in exactly two places: the SMS send path, and the owner's own profile read
+  // (so they can see/edit their number). Never logged — send logs carry a
+  // hashed recipient only (L8).
+  phoneNumber             String?
+  // Opt-in ONLY (never pre-checked). consentAt + consentMethod are the TCPA /
+  // §164.528 compliance record, retained for enrollment + 6 years.
+  smsConsent              Boolean                  @default(false)
+  smsConsentAt            DateTime?
+  smsConsentMethod        String? // e.g. "in_app_checkbox"
+  // Set when the patient replies STOP. Twilio honours it carrier-side, but we
+  // MUST refuse to send too — never rely on the provider alone.
+  smsOptedOut             Boolean                  @default(false)
+
   isVerified              Boolean                  @default(false)
   roles                   UserRole[]               @default([PATIENT])
   onboardingStatus        OnboardingStatus         @default(NOT_COMPLETED)

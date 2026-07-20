@@ -88,8 +88,10 @@ export class SymptomQuickLogService {
     try {
       const result = await this.journal.create(userId, dto as never)
       const entryId = (result as { data?: { id?: string } }).data?.id
+      // V-05: the symptom itself is clinical data. entryId resolves it from
+      // the access-controlled, audited JournalEntry row.
       this.logger.log(
-        `Symptom quick-log for user ${userId}: ${input.symptom}` +
+        `Symptom quick-log for user ${userId}` +
           (entryId ? ` → entry ${entryId}` : ''),
       )
       return {

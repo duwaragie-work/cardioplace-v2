@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsIn,
   IsOptional,
   IsString,
@@ -86,4 +87,23 @@ export class ProfileDto {
     message: 'quietHoursEnd must be a 30-min HH:mm slot (e.g. "07:00")',
   })
   quietHoursEnd?: string
+
+  // L3 (2026-07-14) — SMS reminders. Both are OPTIONAL: a patient can finish
+  // onboarding with no phone at all, and SMS is opt-in only.
+  //
+  // E.164 (+15550100) so Twilio accepts it without normalisation guesswork.
+  // `null` explicitly CLEARS the number (and, in the service, revokes consent —
+  // we must never keep a consent record for a number we no longer hold).
+  @IsOptional()
+  @Matches(/^\+[1-9]\d{7,14}$/, {
+    message: 'phoneNumber must be in E.164 format (e.g. "+15550100")',
+  })
+  phoneNumber?: string | null
+
+  // Opt-in only, never pre-checked in the UI. The service stamps smsConsentAt +
+  // smsConsentMethod; the client can never set those directly (they are the
+  // TCPA / §164.528 record).
+  @IsOptional()
+  @IsBoolean()
+  smsConsent?: boolean
 }

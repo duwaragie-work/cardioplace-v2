@@ -19,8 +19,9 @@ import {
 } from '../generated/prisma/enums.js'
 import { EmailService } from '../email/email.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
-import { AuthService } from './auth.service.js'
+import { AuthService, OTP_ACCOUNT_LOCK_THRESHOLD } from './auth.service.js'
 import { BcryptService } from './bcrypt.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import { DisplayIdService } from '../users/display-id.service.js'
 import { GeolocationService } from './geolocation.service.js'
 import { MfaService } from './mfa.service.js'
@@ -82,6 +83,10 @@ describe('AuthService', () => {
       authLog: {
         create: jest.fn(),
         findFirst: jest.fn(),
+        // V-03 — assertNotOtpLocked counts `otp_failed` rows per identifier on
+        // every verifyOtp. Default 0 = not locked, so existing tests are
+        // unaffected; the lock tests below override it.
+        count: jest.fn().mockResolvedValue(0),
       },
       otpCode: {
         create: jest.fn(),
@@ -291,6 +296,16 @@ describe('AuthService', () => {
                 createUserFn: (displayId: string) => Promise<unknown>,
               ) => createUserFn('CPPATTESTING0'),
             ),
+          },
+        },
+        {
+          // L3 (2026-07-14) — AuthService encrypts User.phoneNumber at rest.
+          // Identity round-trip stub: keeps the profile specs readable (a saved
+          // number comes back as itself) without pulling in a real key.
+          provide: EncryptionService,
+          useValue: {
+            encrypt: jest.fn((plaintext: string) => plaintext),
+            decrypt: jest.fn((envelope: string) => envelope),
           },
         },
       ],
@@ -590,6 +605,70 @@ describe('AuthService', () => {
 
       expect(status.acknowledged).toBe(false)
       expect(status.ackedAt).toBeNull()
+    })
+  })
+
+  // ── V-03: account-scoped OTP lock (Humaira 2026-07-14) ────────────────────
+  // The per-row 5-attempt lock DELETES the OtpCode on trip, so otp/send minted a
+  // fresh row with attempts: 0 — 5 guesses per 60s send-cooldown, forever, with
+  // no account ever locking. This counter accumulates across OtpCode rows.
+  describe('verifyOtp — account-scoped lock (V-03 re-send hole)', () => {
+    const email = 'attacker-target@example.com'
+
+    it('counts otp_failed by identifier — NOT by OtpCode row (re-send cannot reset it)', async () => {
+      ;(prisma.authLog.count as jest.Mock).mockResolvedValue(
+        OTP_ACCOUNT_LOCK_THRESHOLD,
+      )
+
+      await expect(service.verifyOtp(email, '000000')).rejects.toThrow(
+        ForbiddenException,
+      )
+
+      // Keyed on the email + event, with no OtpCode id anywhere in the filter:
+      // that is precisely why deleting the row no longer resets the budget.
+      expect(prisma.authLog.count).toHaveBeenCalledWith({
+        where: {
+          identifier: email,
+          event: 'otp_failed',
+          createdAt: { gt: expect.any(Date) },
+        },
+      })
+    })
+
+    it('locks BEFORE looking up the OTP or running bcrypt', async () => {
+      ;(prisma.authLog.count as jest.Mock).mockResolvedValue(99)
+
+      await expect(service.verifyOtp(email, '000000')).rejects.toThrow(
+        ForbiddenException,
+      )
+
+      // A locked identifier must cost an index count and nothing more.
+      expect(prisma.otpCode.findFirst).not.toHaveBeenCalled()
+      expect(bcryptService.compare).not.toHaveBeenCalled()
+    })
+
+    it('is self-healing — no admin-reset tier, so a patient is never stranded', async () => {
+      // MFA has a hard, admin-reset lock; OTP deliberately does not. A patient
+      // locked out of sign-in cannot log a BP reading or answer an escalation.
+      ;(prisma.authLog.count as jest.Mock).mockResolvedValue(99)
+      await expect(service.verifyOtp(email, '000000')).rejects.toMatchObject({
+        response: { errorCode: 'otp_account_locked_temporary' },
+      })
+    })
+
+    it('below the threshold, verification proceeds normally (typo UX unchanged)', async () => {
+      // 9 < 10 — the familiar per-row 5-attempt message still comes first for
+      // an ordinary typo; this lock only bites the delete-and-resend loop.
+      ;(prisma.authLog.count as jest.Mock).mockResolvedValue(
+        OTP_ACCOUNT_LOCK_THRESHOLD - 1,
+      )
+      ;(prisma.otpCode.findFirst as jest.Mock).mockResolvedValue(null)
+
+      await expect(service.verifyOtp(email, '000000')).rejects.toThrow(
+        BadRequestException,
+      )
+      // Reached the OTP lookup rather than being short-circuited by the lock.
+      expect(prisma.otpCode.findFirst).toHaveBeenCalled()
     })
   })
 

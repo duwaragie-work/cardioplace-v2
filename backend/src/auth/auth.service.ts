@@ -25,6 +25,7 @@ import {
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { writeAuditWithRetry } from '../common/audit/write-with-retry.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import { DisplayIdService } from '../users/display-id.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
@@ -263,6 +264,31 @@ const MFA_SOFT_LOCK_WINDOW_MS = 15 * 60_000
 const MFA_HARD_LOCK_THRESHOLD = 10
 const MFA_HARD_LOCK_WINDOW_MS = 60 * 60_000
 
+/**
+ * V-03 (Humaira assessment 2026-07-14) — account-scoped OTP failure lock.
+ *
+ * THE HOLE. The existing 5-attempt lock lives on the OtpCode ROW
+ * (`otpRecord.attempts`), and on trip it DELETES that row. `otp/send` then
+ * mints a brand-new row with attempts: 0. So the ceiling was 5 guesses per
+ * 60s send-cooldown, forever, with no account ever locking — the assessment's
+ * "persistent per-account lockout" was unmet. Counting AuthLog `otp_failed`
+ * rows by identifier accumulates ACROSS OtpCode rows, so re-sending no longer
+ * resets the budget.
+ *
+ * 10 / 15 min, above the per-row 5 so the familiar per-OTP message still comes
+ * first for an ordinary typo, and this only bites the re-send loop.
+ *
+ * DELIBERATELY SOFT AND SELF-HEALING — no hard, admin-reset tier like MFA's
+ * (:260). MFA gates staff; OTP gates PATIENTS, and a patient locked out of
+ * sign-in cannot log a BP reading or answer an escalation. An admin-reset lock
+ * on that path converts a brute-force defence into a clinical-availability
+ * risk. The window simply rolls off.
+ */
+// Exported so the spec asserts against the real threshold instead of a copy
+// that can silently drift from it.
+export const OTP_ACCOUNT_LOCK_THRESHOLD = 10
+const OTP_ACCOUNT_LOCK_WINDOW_MS = 15 * 60_000
+
 /** True if any of the user's roles makes TOTP mandatory. */
 function requiresMfa(roles: UserRole[]): boolean {
   return roles.some((r) => MFA_REQUIRED_ROLES.includes(r))
@@ -293,6 +319,9 @@ export class AuthService {
     private mfaService: MfaService,
     private webAuthnService: WebAuthnService,
     private displayIdService: DisplayIdService,
+    // L3 (2026-07-14) — encrypts User.phoneNumber at rest (same AES-256-GCM
+    // envelope as the MFA TOTP secret). CommonModule is @Global.
+    private encryption: EncryptionService,
   ) {}
 
   /**
@@ -1462,6 +1491,54 @@ export class AuthService {
         errorCode: 'mfa_locked_temporary',
       })
     }
+  }
+
+  /** V-03 — failed OTP verifies for one identifier inside `sinceMs`. Keyed on
+   *  `identifier` (the email), not userId, because OTP verification runs before
+   *  a User row is guaranteed to exist. Mirrors countRecentFailedMfa. */
+  private async countRecentFailedOtp(
+    identifier: string,
+    sinceMs: number,
+  ): Promise<number> {
+    return this.prisma.authLog.count({
+      where: {
+        identifier,
+        event: 'otp_failed',
+        createdAt: { gt: new Date(Date.now() - sinceMs) },
+      },
+    })
+  }
+
+  /**
+   * V-03 — throw if this identifier has failed too many OTP verifies recently,
+   * regardless of how many times the OTP was re-sent. Soft + self-healing by
+   * design; see OTP_ACCOUNT_LOCK_THRESHOLD.
+   */
+  private async assertNotOtpLocked(
+    identifier: string,
+    context?: { deviceId?: string; ipAddress?: string; userAgent?: string },
+  ): Promise<void> {
+    const failures = await this.countRecentFailedOtp(
+      identifier,
+      OTP_ACCOUNT_LOCK_WINDOW_MS,
+    )
+    if (failures < OTP_ACCOUNT_LOCK_THRESHOLD) return
+
+    await this.logAuthEvent({
+      event: 'otp_locked',
+      identifier,
+      method: 'otp',
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: { failures, windowMs: OTP_ACCOUNT_LOCK_WINDOW_MS, scope: 'account' },
+      success: false,
+      errorCode: 'otp_account_locked_temporary',
+    })
+    throw new ForbiddenException({
+      message: 'Too many incorrect attempts. Please wait a few minutes and try again.',
+      errorCode: 'otp_account_locked_temporary',
+    })
   }
 
   private async loadActiveUser(userId: string): Promise<MinimalUser> {
@@ -3008,6 +3085,13 @@ export class AuthService {
       await this.assertAdminAccessAllowed(normalizedEmail)
     }
 
+    // V-03 — account-scoped lock, checked BEFORE the OtpCode lookup and before
+    // bcrypt, so a locked identifier costs an index count and nothing else.
+    // The per-row `attempts` check below still runs first for a normal typo
+    // (5 < 10), so ordinary UX is unchanged; this only catches the delete-and-
+    // resend loop that resets `attempts` to 0.
+    await this.assertNotOtpLocked(normalizedEmail, context)
+
     // Find the most recent unexpired OTP
     const otpRecord = await this.prisma.otpCode.findFirst({
       where: {
@@ -3311,6 +3395,32 @@ export class AuthService {
       patch.quietHoursStart = dto.quietHoursStart
     if (dto.quietHoursEnd !== undefined) patch.quietHoursEnd = dto.quietHoursEnd
 
+    // L3 (2026-07-14) — SMS reminders.
+    if (dto.phoneNumber !== undefined) {
+      if (dto.phoneNumber === null || dto.phoneNumber === '') {
+        // Clearing the number MUST also revoke consent — keeping a consent
+        // record for a number we no longer hold would be a false TCPA record,
+        // and a later re-entry has to re-consent explicitly.
+        patch.phoneNumber = null
+        patch.smsConsent = false
+        patch.smsConsentAt = null
+        patch.smsConsentMethod = null
+      } else {
+        // Encrypted at rest (AES-256-GCM envelope) — same treatment as the MFA
+        // TOTP secret. Never stored or logged in plaintext.
+        patch.phoneNumber = this.encryption.encrypt(dto.phoneNumber)
+      }
+    }
+    if (dto.smsConsent !== undefined) {
+      patch.smsConsent = dto.smsConsent
+      // The consent RECORD is server-stamped — a client can never forge the
+      // timestamp/method. Revoking clears it rather than leaving a stale trail.
+      patch.smsConsentAt = dto.smsConsent ? new Date() : null
+      patch.smsConsentMethod = dto.smsConsent ? 'in_app_checkbox' : null
+      // Consenting again after a STOP is an explicit re-opt-in.
+      if (dto.smsConsent) patch.smsOptedOut = false
+    }
+
     return patch
   }
 
@@ -3352,12 +3462,31 @@ export class AuthService {
         // A5 — lets onboarding skip the privacy step when this already matches
         // the current POLICY_VERSION.
         acknowledgedPolicyVersion: true,
+        // L3 (2026-07-14) — SMS reminders. The patient sees + manages their OWN
+        // number, so it's decrypted below before returning. smsOptedOut is
+        // surfaced (read-only) so Profile can explain why texts stopped after a
+        // STOP reply. smsConsentAt/Method are the compliance record and are
+        // deliberately NOT exposed.
+        phoneNumber: true,
+        smsConsent: true,
+        smsOptedOut: true,
         createdAt: true,
       },
     })
 
     if (!user) {
       throw new NotFoundException('User not found')
+    }
+
+    // Stored as an AES-256-GCM envelope — decrypt for the owner's own profile.
+    // A corrupt/undecryptable value degrades to null rather than 500-ing the
+    // whole profile read.
+    if (user.phoneNumber) {
+      try {
+        user.phoneNumber = this.encryption.decrypt(user.phoneNumber)
+      } catch {
+        user.phoneNumber = null
+      }
     }
 
     // MFA status for the profile "Security" surface. mfaEnabled mirrors the
@@ -3437,6 +3566,14 @@ export class AuthService {
       reminderPreferenceSet: user.reminderPreferenceSet,
       // A5 — onboarding skips the privacy step when this === POLICY_VERSION.
       acknowledgedPolicyVersion: user.acknowledgedPolicyVersion,
+      // L1 — SMS reminder prefs. phoneNumber is the DECRYPTED value (see the
+      // envelope decrypt above) and is returned ONLY here, on the owner's own
+      // profile read, so they can see/edit their number. smsConsentAt /
+      // smsConsentMethod stay server-side: they are the TCPA record, not a
+      // client-editable field.
+      phoneNumber: user.phoneNumber,
+      smsConsent: user.smsConsent,
+      smsOptedOut: user.smsOptedOut,
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
       // MFA status (additive) — drives the profile Security pill.

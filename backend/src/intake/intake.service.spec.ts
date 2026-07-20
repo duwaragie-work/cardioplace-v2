@@ -5,6 +5,8 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { DrugEnrichmentService } from '../drug-enrichment/drug-enrichment.service.js'
 import { PatientAccessService } from '../common/patient-access.service.js'
 import { IntakeService } from './intake.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
+import { encryptionMock } from '../common/test/encryption.mock.js'
 
 // IVR-18 — listMedications filter scoping. The REJECTED exclusion is opt-out
 // (default ON) so rejected meds don't get re-asked in the check-in or
@@ -26,6 +28,7 @@ describe('IntakeService.listMedications filter scoping', () => {
         { provide: DrugEnrichmentService, useValue: {} },
         { provide: PatientAccessService, useValue: {} },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
 
@@ -126,6 +129,7 @@ async function makeService(prisma: unknown): Promise<IntakeService> {
       { provide: DrugEnrichmentService, useValue: {} },
       { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
       { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      { provide: EncryptionService, useValue: encryptionMock() },
     ],
   }).compile()
   return module.get<IntakeService>(IntakeService)
@@ -321,6 +325,7 @@ describe('IntakeService.listVerificationLogs caregiver resolution (Round 2 A4)',
         { provide: DrugEnrichmentService, useValue: {} },
         { provide: PatientAccessService, useValue: {} },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     service = module.get<IntakeService>(IntakeService)
@@ -446,6 +451,7 @@ describe('IntakeService.createMedications — F13 ACE/ARB contraindication', () 
         // Bug 11 — IntakeService emits intake.updated; sibling test helpers
         // (lines 28 / 128 / 322 / 632) already include this mock.
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     return module.get<IntakeService>(IntakeService)
@@ -555,6 +561,7 @@ describe('IntakeService.verifyMedication — F16 administrative hold dedup', () 
         // Bug 11 — IntakeService emits intake.updated; sibling test helpers
         // (lines 28 / 128 / 322 / 632) already include this mock.
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     return module.get<IntakeService>(IntakeService)
@@ -659,6 +666,7 @@ describe('IntakeService.adminAddMedication (#92)', () => {
         // push live "intake complete" notices into ongoing voice sessions.
         // Match the sibling test helpers at lines 28 / 128 / 322.
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     return module.get<IntakeService>(IntakeService)
@@ -810,6 +818,7 @@ describe('IntakeService.adminEditMedication (N5 audit snapshot)', () => {
         { provide: DrugEnrichmentService, useValue: { enrich: jest.fn() } },
         { provide: PatientAccessService, useValue: { assertCanAccessPatient: jest.fn() } },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     return module.get<IntakeService>(IntakeService)
@@ -842,30 +851,33 @@ describe('IntakeService.adminEditMedication (N5 audit snapshot)', () => {
     plainLanguageDescription: null,
   }
 
-  it('captures the FULL medication snapshot as previousValue + newValue (not just 3 fields)', async () => {
+  it('captures the structured medication snapshot + a digest, and NEVER the free-text (V-06)', async () => {
     const prisma = buildPrisma(existingMedFull)
     const service = await makeService(prisma)
 
-    // Edit only the notes field to a new value. The audit snapshot must still
-    // carry every clinical field so an auditor can reconstruct the row.
+    // Edit only the notes field. N5 (2026-07-09) widened this snapshot to the
+    // full row so that a notes-only edit was no longer INVISIBLE in the audit
+    // trail. V-06 (2026-07-17) keeps that property but stops paying for it with
+    // plaintext: `notes` is encrypted into notesEncrypted on the source row, so
+    // copying it into the unencrypted ProfileVerificationLog.newValue Json put
+    // the exact bytes V-06 protects back in the clear — and once phase 3 drops
+    // the plaintext columns the audit log would be the last plaintext copy.
     await service.adminEditMedication(actor, 'med-1', {
       notes: 'take with dinner instead',
     } as any)
 
     const auditCall = prisma.profileVerificationLog.create.mock.calls[0][0].data
-    // previousValue carries the full pre-edit shape — dose/notes/status/hold.
+
+    // The structured fields an auditor (and the admin Timeline) actually read
+    // are still captured in full.
     expect(auditCall.previousValue).toMatchObject({
       drugName: 'Losartan',
       drugClass: 'ARB',
       frequency: 'ONCE_DAILY',
-      notes: 'take with breakfast',
       verificationStatus: 'VERIFIED',
       holdEscalationLevel: 0,
       discontinuedAt: null,
     })
-    // newValue carries the full post-edit shape — critically, includes the
-    // changed field (notes) even though the pre-N5 code only tracked
-    // drugName/drugClass/frequency and would have missed this change entirely.
     expect(auditCall.newValue).toEqual(
       expect.objectContaining({
         drugName: 'Losartan',
@@ -873,8 +885,29 @@ describe('IntakeService.adminEditMedication (N5 audit snapshot)', () => {
         frequency: 'ONCE_DAILY',
       }),
     )
-    // The notes edit is now visible in the audit trail (was invisible pre-N5).
-    expect((auditCall.newValue as any).notes).toContain('dinner')
+
+    // The leak itself: no free-text, and no ciphertext sibling either (the old
+    // `...med` spread emitted BOTH, i.e. a known-plaintext pair per row).
+    for (const snap of [auditCall.previousValue, auditCall.newValue] as any[]) {
+      expect(snap).not.toHaveProperty('notes')
+      expect(snap).not.toHaveProperty('notesEncrypted')
+      expect(snap).not.toHaveProperty('rawInputText')
+      expect(snap).not.toHaveProperty('rawInputTextEncrypted')
+      expect(snap).not.toHaveProperty('plainLanguageDescription')
+      expect(snap).not.toHaveProperty('plainLanguageDescriptionEncrypted')
+    }
+    expect(JSON.stringify(auditCall)).not.toContain('take with breakfast')
+    expect(JSON.stringify(auditCall)).not.toContain('take with dinner')
+
+    // N5's property is preserved: a notes-only edit is STILL visible, because
+    // the §164.312(c) digest over the full record differs. The content itself
+    // is reconstructable from the source row's encrypted column.
+    expect((auditCall.previousValue as any)._snapshotHash).toEqual(
+      expect.stringMatching(/^[0-9a-f]{64}$/),
+    )
+    expect((auditCall.newValue as any)._snapshotHash).not.toEqual(
+      (auditCall.previousValue as any)._snapshotHash,
+    )
   })
 
   it('captures verificationStatus changes in the newValue snapshot', async () => {

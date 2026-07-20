@@ -713,6 +713,21 @@ const fr: Record<TranslationKey, string> = {
   'profile.reminders.saveButton': 'Enregistrer',
   'profile.reminders.savingButton': 'Enregistrement…',
   'profile.reminders.cancelButton': 'Annuler',
+  'profile.sms.heading': 'Rappels par SMS',
+  'profile.sms.editHeading': 'Modifier les rappels par SMS',
+  'profile.sms.phoneLabel': 'Numéro de mobile',
+  'profile.sms.phoneHelp': "Facultatif. Indiquez l'indicatif du pays, par exemple +1 555 010 0000.",
+  'profile.sms.phoneInvalid': "Saisissez votre numéro avec l'indicatif du pays, par exemple +15550100.",
+  'profile.sms.consentLabel': 'Envoyez-moi des rappels par SMS',
+  'profile.sms.consentFinePrint':
+    "Les SMS viennent de Cardioplace. Aucune information de santé n'y figure. Des frais de messagerie peuvent s'appliquer. Répondez STOP à tout moment.",
+  'profile.sms.optedOutNotice':
+    'Vous avez répondu STOP, les SMS sont donc désactivés. Cochez la case ci-dessus pour les réactiver.',
+  'profile.sms.statusLabel': 'Rappels par SMS',
+  'profile.sms.statusOn': 'Activés',
+  'profile.sms.statusOff': 'Désactivés',
+  'profile.sms.statusStopped': 'Arrêtés (vous avez répondu STOP)',
+  'profile.sms.notSet': 'Non renseigné',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'Mes Lectures',
@@ -972,7 +987,9 @@ const fr: Record<TranslationKey, string> = {
   // Support — page publique "impossible de se connecter" (Fix 12).
   'support.locked.title': 'Besoin d’aide pour vous connecter ?',
   'support.locked.subtitle': 'Dites-nous ce qui se passe et notre équipe vous contactera pour vérifier votre identité avant toute modification de votre compte.',
-  'support.locked.statusBanner': 'Vous pouvez aussi suivre l’état d’une demande existante grâce au lien dans votre e-mail de confirmation.',
+  // N-1 (2026-07-14 triage) — see en.ts: the confirmation email carries a
+  // ticket number and a reply address, not a link.
+  'support.locked.statusBanner': 'Vous avez déjà envoyé une demande ? Votre e-mail de confirmation contient votre numéro de ticket : répondez à cet e-mail et nous ajouterons tout complément au même ticket.',
   'support.locked.email': 'Votre adresse e-mail de compte',
   'support.locked.description': 'Que se passe-t-il ? (ex. : j’ai perdu mon application d’authentification et mes codes de récupération)',
   'support.locked.phone': 'Téléphone de rappel (facultatif)',
@@ -1017,6 +1034,10 @@ const fr: Record<TranslationKey, string> = {
   'onboarding.reminders.quietEndLabel': 'Fin des heures de silence',
   'onboarding.reminders.quietHoursHeading': 'Heures de silence (pas de rappels pendant cette période)',
   'onboarding.reminders.emergencyDisclaimer': "Les alertes d'urgence sont toujours transmises, même pendant les heures de silence.",
+  'onboarding.sms.phoneLabel': 'Numéro de mobile (facultatif)',
+  'onboarding.sms.phoneAudio': "Quel est votre numéro de mobile ? C'est facultatif — vous pouvez laisser vide.",
+  'onboarding.sms.phoneHelp': "Ajoutez-le seulement si vous voulez des rappels par SMS. Indiquez l'indicatif du pays, par exemple +1 555 010 0000.",
+  'onboarding.sms.phoneInvalid': "Saisissez votre numéro avec l'indicatif du pays, par exemple +15550100, ou laissez le champ vide.",
   'onboarding.reminders.title': 'Configurez vos rappels',
   'onboarding.reminders.subtitle': 'Choisissez quand nous prenons de vos nouvelles. Vous pouvez modifier cela à tout moment dans les Paramètres.',
   'onboarding.stepIndicator': 'Étape {n} sur {t}',

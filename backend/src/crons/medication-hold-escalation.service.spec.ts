@@ -3,6 +3,8 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { ClsService } from 'nestjs-cls'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { MedicationHoldEscalationService } from './medication-hold-escalation.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
+import { encryptionMock } from '../common/test/encryption.mock.js'
 
 // runAsCronActor wraps scheduledRun in cls.run — a pass-through stub is enough
 // for the unit tests, which call runScan directly.
@@ -66,6 +68,7 @@ describe('MedicationHoldEscalationService', () => {
         MedicationHoldEscalationService,
         { provide: PrismaService, useValue: prisma },
         { provide: ClsService, useValue: clsStub },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     service = module.get(MedicationHoldEscalationService)
@@ -136,6 +139,7 @@ describe('MedicationHoldEscalationService', () => {
         MedicationHoldEscalationService,
         { provide: PrismaService, useValue: prisma },
         { provide: ClsService, useValue: auditCls },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     const svc = mod.get(MedicationHoldEscalationService)

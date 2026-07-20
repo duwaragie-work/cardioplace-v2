@@ -11,6 +11,7 @@ model PatientThreshold {
   setAt           DateTime  @default(now())
   replacedAt      DateTime?
   notes           String?   @db.Text
+  notesEncrypted  String?   @db.Text
   // Inline audit (2026-07-03) — generic edit-actor, auto-stamped from the CLS
   // actor by the access-log extension. setByProviderId stays the clinical
   // "who set this threshold version" (required); createdByActorId/

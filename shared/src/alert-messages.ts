@@ -1048,14 +1048,8 @@ export const alertMessageRegistry: Record<RuleId, RuleMessages> = {
     physicianMessage: (ctx) =>
       `HR Level 1 Low — symptomatic bradycardia <50: ${hr(ctx)}.${physSuffix(ctx)}`,
   },
-  RULE_BRADY_HR_ASYMPTOMATIC: {
-    patientMessage: (ctx) =>
-      `Your heart rate is ${hr(ctx)}, which is low. Please contact your care team today.${suboptimalSuffix(ctx)}`,
-    caregiverMessage: (ctx) =>
-      `The patient's heart rate is low at ${hr(ctx)}.`,
-    physicianMessage: (ctx) =>
-      `HR Level 1 Low — asymptomatic bradycardia <40: ${hr(ctx)}.${physSuffix(ctx)}`,
-  },
+  // N-7 (Duwaragie 2026-07-14 triage) — RULE_BRADY_HR_ASYMPTOMATIC removed
+  // (superseded by RULE_BRADY_ABSOLUTE, Manisha 2026-05-10 Cluster 6).
 
   // ── Physician-only ───────────────────────────────────────────────────
   RULE_PULSE_PRESSURE_WIDE: {

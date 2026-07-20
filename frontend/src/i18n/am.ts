@@ -729,6 +729,24 @@ const am: Record<TranslationKey, string> = {
   'profile.reminders.saveButton': 'አስቀምጥ',
   'profile.reminders.savingButton': 'በማስቀመጥ ላይ…',
   'profile.reminders.cancelButton': 'ይቅር',
+  // L3 — TODO(l10n-am): native-speaker verification required before ship.
+  // NOTE: the consent line is the TCPA wording under counsel review — the
+  // Amharic rendering must be checked by a native speaker AND counsel.
+  'profile.sms.heading': 'የጽሑፍ መልእክት አስታዋሾች',
+  'profile.sms.editHeading': 'የጽሑፍ መልእክት አስታዋሾችን ያርትዑ',
+  'profile.sms.phoneLabel': 'የሞባይል ቁጥር',
+  'profile.sms.phoneHelp': 'አማራጭ። የአገር ኮድን ያካትቱ፣ ለምሳሌ +1 555 010 0000።',
+  'profile.sms.phoneInvalid': 'ቁጥርዎን ከአገር ኮድ ጋር ያስገቡ፣ ለምሳሌ +15550100።',
+  'profile.sms.consentLabel': 'የጽሑፍ አስታዋሾችን ይላኩልኝ',
+  'profile.sms.consentFinePrint':
+    'መልእክቶቹ ከCardioplace ይመጣሉ። ምንም የጤና መረጃ አይካተትም። የመልእክት ክፍያዎች ሊተገበሩ ይችላሉ። በማንኛውም ጊዜ STOP ብለው ይመልሱ።',
+  'profile.sms.optedOutNotice':
+    'STOP ብለው ስለመለሱ የጽሑፍ መልእክቶች ጠፍተዋል። እንደገና ለማብራት ከላይ ያለውን ሳጥን ምልክት ያድርጉ።',
+  'profile.sms.statusLabel': 'የጽሑፍ አስታዋሾች',
+  'profile.sms.statusOn': 'በርቷል',
+  'profile.sms.statusOff': 'ጠፍቷል',
+  'profile.sms.statusStopped': 'ቆሟል (STOP ብለው መልሰዋል)',
+  'profile.sms.notSet': 'አልተቀናበረም',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'ንባቦቼ',
@@ -990,7 +1008,11 @@ const am: Record<TranslationKey, string> = {
   // required before ship per spec §N10 (do not machine-translate as final).
   'support.locked.title': 'ለመግባት እገዛ ይፈልጋሉ?',
   'support.locked.subtitle': 'ምን እየተከሰተ እንዳለ ይንገሩን፤ ማንኛውንም የመለያ ለውጥ ከማድረጋችን በፊት ቡድናችን ማንነትዎን ለማረጋገጥ ያገኝዎታል።',
-  'support.locked.statusBanner': 'ነባር ጥያቄዎን ሁኔታ በማረጋገጫ ኢሜይልዎ ውስጥ ያለውን አገናኝ ጠቅ በማድረግ ማየት ይችላሉ።',
+  // N-1 (2026-07-14 triage) — see en.ts: the confirmation email carries a
+  // ticket number and a reply address, not a link.
+  // ⚠️ Amharic wording needs a native-speaker review before pilot (Ward 7/8
+  // cohort) — the meaning is right, the phrasing is unverified.
+  'support.locked.statusBanner': 'ጥያቄ ልከዋል? የማረጋገጫ ኢሜይልዎ የቲኬት ቁጥርዎን ይዟል — ተጨማሪ ነገር ማከል ከፈለጉ ለዚያ ኢሜይል መልስ ይስጡ፣ በዚያው ቲኬት ላይ እንጨምረዋለን።',
   'support.locked.email': 'የመለያዎ ኢሜይል',
   'support.locked.description': 'ምን እየተከሰተ ነው? (ለምሳሌ የማረጋገጫ መተግበሪያዬንና የመልሶ ማግኛ ኮዶቼን አጣሁ)',
   'support.locked.phone': 'የመልስ ስልክ (አማራጭ)',
@@ -1038,6 +1060,11 @@ const am: Record<TranslationKey, string> = {
   // TODO(l10n-am): Amharic native-speaker verification required.
   'onboarding.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
   'onboarding.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
+  // L3 — TODO(l10n-am): native-speaker verification required before ship.
+  'onboarding.sms.phoneLabel': 'የሞባይል ቁጥር (አማራጭ)',
+  'onboarding.sms.phoneAudio': 'የሞባይል ቁጥርዎ ስንት ነው? ይህ አማራጭ ነው — ባዶ መተው ይችላሉ።',
+  'onboarding.sms.phoneHelp': 'የጽሑፍ አስታዋሾችን ከፈለጉ ብቻ ያክሉ። የአገር ኮድን ያካትቱ፣ ለምሳሌ +1 555 010 0000።',
+  'onboarding.sms.phoneInvalid': 'ቁጥርዎን ከአገር ኮድ ጋር ያስገቡ፣ ለምሳሌ +15550100 — ወይም ባዶ ይተዉት።',
   'onboarding.reminders.title': 'ማስታወሻዎችዎን ያዘጋጁ',
   'onboarding.reminders.subtitle': 'መቼ እንደምናገኝዎት ይምረጡ። ይህን በማንኛውም ጊዜ በቅንብሮች ውስጥ መቀየር ይችላሉ።',
   'onboarding.stepIndicator': 'ደረጃ {n} ከ{t}',

@@ -12,6 +12,11 @@ import { SystemPromptService } from './services/system-prompt.service.js'
 import { RagService } from './services/rag.service.js'
 import { ConversationHistoryService } from './services/conversation-history.service.js'
 import type { EmergencyDetectionResult } from './services/emergency-detection.service.js'
+import {
+  argKeys,
+  redactText,
+  situationHash,
+} from '../common/logging/log-redact.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
 import { AlertEngineService } from '../daily_journal/services/alert-engine.service.js'
@@ -20,6 +25,7 @@ import {
   PATIENT_DEVIATION_ALERT_FIELDS_FOR_LLM_PROMPT,
   PATIENT_JOURNAL_FIELDS_FOR_LLM_PROMPT,
 } from '../common/prisma-selects.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import { GeminiService } from '../gemini/gemini.service.js'
 import { OcrService } from '../ocr/ocr.service.js'
 import { MedicationAdherenceService } from './services/medication-adherence.service.js'
@@ -76,6 +82,7 @@ export class ChatService {
     private readonly alertEngineService: AlertEngineService,
     private readonly intakeStatusService: IntakeStatusService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly encryption: EncryptionService,
   ) {}
 
   /**
@@ -214,8 +221,10 @@ export class ChatService {
           emergency_situation: emergencySituation,
         },
       })
+      // V-05: the row is persisted (access-controlled + audited) — the log line
+      // only needs to say it happened and let an investigator correlate.
       console.log(
-        `Recorded emergency event for session ${sessionId}: ${emergencySituation}`,
+        `Recorded emergency event for session ${sessionId} situation=${situationHash(emergencySituation)}`,
       )
       // Bug 11 — fan out to EscalationService.onEmergencyFlagged. Only emit
       // when we have a userId — anonymous emergencies (rare; admin sessions
@@ -230,8 +239,17 @@ export class ChatService {
         this.eventEmitter.emit(EMERGENCY_EVENTS.FLAGGED, payload)
       }
     } catch (error) {
+      // V-05: this line is ops' last-resort record of a life-safety event, so
+      // the free text is NOT simply deleted — it is replaced by a stable digest
+      // plus the identifiers that drive the actual response ("go look at this
+      // patient now"). The narrative stays recoverable: the situation comes
+      // from the patient's own turn, which saveConversation persists to
+      // Conversation on a SEPARATE write from the EmergencyEvent insert that
+      // failed here — so userId + sessionId still resolve it. What we refuse to
+      // do is duplicate it into a log sink that has none of the audit trail's
+      // access control (and may be a third-party aggregator with no BAA).
       console.error(
-        `[SECURITY-CRITICAL] emergency event persistence failed userId=${userId} sessionId=${sessionId} situation="${emergencySituation}" source=${source} error=${
+        `[SECURITY-CRITICAL] emergency event persistence failed userId=${userId} sessionId=${sessionId} situation=${situationHash(emergencySituation)} source=${source} error=${
           (error as Error).message ?? 'unknown'
         }`,
       )
@@ -495,7 +513,11 @@ export class ChatService {
         const toolName = fc.name!
         const toolArgs = (fc.args ?? {}) as Record<string, any>
 
-        console.log(`Executing tool: ${toolName}`, JSON.stringify(toolArgs))
+        // V-05: never JSON.stringify tool args — for submit_checkin they ARE
+        // the patient's BP / pulse / symptoms / missed meds. The arg KEYS are
+        // the diagnostic signal ("which fields did the model send?"); the
+        // values are pure PHI.
+        console.log(`Executing tool: ${toolName}`, argKeys(toolArgs))
 
         let resultStr: string
 
@@ -521,7 +543,9 @@ export class ChatService {
           resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(userId), userId)
         }
 
-        console.log(`Tool result [${toolName}]:`, resultStr.slice(0, 200))
+        // V-05: the tool result body is clinical (readings, med lists). Length
+        // preserves the "did it return anything?" signal without the content.
+        console.log(`Tool result [${toolName}]:`, redactText(resultStr))
 
         // Detect emergency from flag_emergency tool
         if (toolName === 'flag_emergency') {
@@ -708,7 +732,8 @@ export class ChatService {
           const toolName = fc.name
           const toolArgs = (fc.args ?? {}) as Record<string, any>
 
-          console.log(`Executing tool: ${toolName}`, JSON.stringify(toolArgs))
+          // V-05 — see the streaming loop above; same reasoning.
+          console.log(`Executing tool: ${toolName}`, argKeys(toolArgs))
 
           let resultStr: string
           // Bug 22 Fix 1 — track every tool fired this turn. Write tools
@@ -733,7 +758,8 @@ export class ChatService {
             resultStr = await executeJournalTool(toolName, toolArgs, this.toolContext(userId, ocrState), userId)
           }
 
-          console.log(`Tool result [${toolName}]:`, resultStr.slice(0, 200))
+          // V-05 — see the streaming loop above; same reasoning.
+          console.log(`Tool result [${toolName}]:`, redactText(resultStr))
 
           if (toolName === 'flag_emergency') {
             emergency = {
@@ -866,10 +892,16 @@ export class ChatService {
         else if (updateClaim.test(fullResponse) && !firedUpdate) claim = 'update'
         else if (deleteClaim.test(fullResponse) && !firedDelete) claim = 'delete'
         if (claim) {
+          // Still yielded to the caller below — that is the patient's own data
+          // going back to the patient's own authorized client over TLS, which
+          // is not what V-05 is about. V-05 is the stdout sink specifically.
           const excerpt = fullResponse.slice(0, 240).replace(/\s+/g, ' ').trim()
+          // V-05: the log line carried 240 chars of model prose about the
+          // patient's clinical data. type= + the fired-tool list are what
+          // actually diagnose a hallucinated "I saved it".
           console.error(
             `[CHAT hallucination_suspected] type=${claim} tools=[${[...writeToolsCalledThisTurn].join(',')}] ` +
-              `excerpt="${excerpt}" session=${sessionId}`,
+              `response=${redactText(fullResponse)} session=${sessionId}`,
           )
           yield { type: 'hallucinationSuspected', claim, excerpt }
         }
@@ -948,7 +980,14 @@ export class ChatService {
       const trimmedPrompt = prompt.trim().toLowerCase()
       const isExactEcho = trimmedResponse === trimmedPrompt && trimmedResponse.length > 0
       if (isExactEcho && !toolResults.length) {
-        console.log(`[AI echo detected] Response "${trimmedResponse}" = prompt "${trimmedPrompt}" — retrying`)
+        // V-05: this logged the patient's ENTIRE message and the model's
+        // entire reply, untruncated — the single worst PHI line in the
+        // codebase. The diagnostic value is "an echo happened", which the
+        // lengths carry; the content added nothing but disclosure.
+        console.log(
+          `[AI echo detected] response=${redactText(trimmedResponse)} ` +
+            `prompt=${redactText(trimmedPrompt)} session=${sessionId} — retrying`,
+        )
         const retry = await this.runToolLoop(
           systemPrompt + `\n\nThe patient just said: "${prompt}". This is NOT your response — it is the patient's message. You must respond to it naturally. If the patient is confirming something (yes/ok/sure), proceed with the action. If the patient said "now" for time, use the current time and ask the next question.`,
           contents,
@@ -1088,6 +1127,7 @@ export class ChatService {
         data: {
           id: sessionId,
           title: 'New Chat',
+          titleEncrypted: this.encryption.encryptNullable('New Chat'),
           userId: userId || null,
         },
       })
@@ -1108,9 +1148,16 @@ export class ChatService {
 
       await this.prisma.session.update({
         where: { id: sessionId },
-        data: { title },
+        data: {
+          title,
+          titleEncrypted: this.encryption.encryptNullable(title),
+        },
       })
-      console.log(`Generated session title for ${sessionId}: ${title}`)
+      // V-05: the title is an LLM summary of the clinical conversation
+      // ("Chest pain and high BP check-in") — and titleEncrypted above encrypts
+      // it at rest, so logging the plaintext here defeated that on the very
+      // next line.
+      console.log(`Generated session title for ${sessionId} ${redactText(title)}`)
       return title
     } catch (error) {
       console.error('Error generating session title:', error)

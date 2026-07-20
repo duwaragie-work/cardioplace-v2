@@ -1,6 +1,7 @@
 import type {
   AuditExceptionDetectorId,
   AuditExceptionSeverity,
+  AuditExceptionStatus,
 } from '../../generated/prisma/enums.js'
 import type { PrismaService } from '../../prisma/prisma.service.js'
 
@@ -64,6 +65,18 @@ export interface ExceptionCandidate {
    * escalation — e.g. BULK_PHI_READ bumps to CRITICAL at >10× threshold.
    */
   severityOverride?: AuditExceptionSeverity
+  /**
+   * N-5 (Duwaragie 2026-07-14 triage) — override the writer's default
+   * `AuditExceptionStatus.OPEN` on the CREATE path only. Existing rows
+   * ignore this field (their status is reviewer-set and must not regress).
+   *
+   * The single documented use case: expected/by-design activity that HIPAA
+   * still wants recorded but that a reviewer would rubber-stamp immediately.
+   * CROSS_PRACTICE_ACCESS uses this for `HEALPLACE_OPS` fires — cross-
+   * practice access is by design (ACCESS_SCOPE.md §5), so auto-ack keeps
+   * the audit row without polluting the worklist's OPEN pane.
+   */
+  initialStatus?: AuditExceptionStatus
 }
 
 /**
