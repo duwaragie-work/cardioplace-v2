@@ -10,6 +10,7 @@ import { seedState } from './state.js'
 import { seedE2EOnboardingPatient } from './e2e-onboarding.js'
 import { seedDisplayIds } from './display-ids.js'
 import { seedSystemPrincipals } from './system-principals.js'
+import { seedFaqContent } from './content-faq.js'
 import { prisma } from './helpers.js'
 
 export async function runSeed() {
@@ -24,6 +25,9 @@ export async function runSeed() {
   if (process.env.NODE_ENV !== 'production') {
     await seedState(practices, admins)
     await seedE2EOnboardingPatient(admins)
+    // Starter Help Center / FAQ fixtures — dev/test only. Production FAQ content
+    // comes through the content-authoring + admin review workflow, not a seed.
+    await seedFaqContent()
   }
 
   // System-principal registry (audit) — runs in EVERY environment, not just

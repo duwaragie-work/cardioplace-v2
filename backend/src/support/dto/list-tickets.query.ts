@@ -25,6 +25,11 @@ export class ListTicketsQuery {
   @IsString()
   search?: string
 
+  /** Filter by assignee: an ops user id, or the literal 'unassigned'. */
+  @IsOptional()
+  @IsString()
+  assignee?: string
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

@@ -12,7 +12,8 @@ function make() {
       count: jest.fn() as any,
       findUnique: jest.fn() as any,
       findMany: jest.fn() as any,
-      update: jest.fn() as any,
+      update: jest.fn((a: any) => Promise.resolve({ id: 'ticket-1', ...a.data })) as any,
+      updateMany: jest.fn(async () => ({ count: 3 })) as any,
     },
     user: { findUnique: jest.fn() as any, findMany: jest.fn() as any },
     notification: { create: jest.fn() as any, createMany: jest.fn() as any },
@@ -217,6 +218,205 @@ describe('SupportService', () => {
       const upd = prisma.supportTicket.update.mock.calls[0][0].data
       expect(upd.status).toBe('RESOLVED')
       expect(upd.resolvedAt).toBeInstanceOf(Date)
+    })
+  })
+
+  // ── Support System roadmap Phase 3 — clinical-vs-operational split ────────
+  describe('clinical deflect', () => {
+    it('refuses a CLINICAL contact ticket with a machine-readable code, no ticket created', async () => {
+      const { svc, prisma, email } = make()
+      let thrown: any
+      await svc
+        .createContactTicket(
+          { id: 'user-1', email: 'p@example.com', roles: ['PATIENT'] as any },
+          { subject: 'chest pain', body: 'my chest hurts', category: 'CLINICAL' as any },
+          CTX,
+        )
+        .catch((e) => {
+          thrown = e
+        })
+      expect(thrown).toBeInstanceOf(HttpException)
+      expect(thrown.getStatus()).toBe(422)
+      expect(thrown.getResponse()).toMatchObject({ code: 'CLINICAL_DEFLECTED' })
+      // The hard rule: it never becomes a ticket and never pings ops.
+      expect(prisma.supportTicket.create).not.toHaveBeenCalled()
+      expect(email.sendEmail).not.toHaveBeenCalled()
+    })
+  })
+
+  // ── Phase 2 — lifecycle: ops reply / patient reply / reopen / auto-close ──
+  describe('ops reply', () => {
+    it('an ops reply moves an OPEN ticket to AWAITING_REPLY and deep-links the bell', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(ticketRow({ status: 'OPEN' }))
+      await svc.reply(OPS, 'ticket-1', { body: 'we are looking into it' })
+      const upd = prisma.supportTicket.update.mock.calls[0][0].data
+      expect(upd.status).toBe('AWAITING_REPLY')
+      const notif = prisma.notification.create.mock.calls[0][0].data
+      expect(notif.dispatchTrigger).toBe('SUPPORT_REPLY')
+      expect(notif.supportTicketId).toBe('ticket-1')
+    })
+  })
+
+  describe('patient in-thread reply', () => {
+    const PATIENT: SupportActor = { id: 'user-1', email: 'p@example.com', roles: ['PATIENT'] as any }
+
+    it('appends a USER reply, hands the ball back to ops, and pings the queue', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(
+        ticketRow({ status: 'AWAITING_REPLY', userId: 'user-1' }),
+      )
+      await svc.replyAsUser(PATIENT, 'ticket-1', { body: 'here is the info' })
+      const reply = prisma.supportTicketReply.create.mock.calls[0][0].data
+      expect(reply.authorType).toBe('USER')
+      expect(reply.authorUserId).toBe('user-1')
+      expect(prisma.supportTicket.update.mock.calls[0][0].data.status).toBe('IN_PROGRESS')
+      const notif = prisma.notification.createMany.mock.calls[0][0].data
+      expect(notif[0].dispatchTrigger).toBe('SUPPORT_USER_REPLIED')
+      expect(notif[0].supportTicketId).toBe('ticket-1')
+    })
+
+    it("cannot reply to someone else's ticket (NotFound, non-enumeration)", async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(
+        ticketRow({ status: 'OPEN', userId: 'someone-else' }),
+      )
+      await expect(
+        svc.replyAsUser(PATIENT, 'ticket-1', { body: 'x' }),
+      ).rejects.toMatchObject({ status: 404 })
+      expect(prisma.supportTicketReply.create).not.toHaveBeenCalled()
+    })
+
+    it('cannot in-thread reply to a resolved ticket (must reopen first)', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(
+        ticketRow({ status: 'RESOLVED', userId: 'user-1' }),
+      )
+      await expect(
+        svc.replyAsUser(PATIENT, 'ticket-1', { body: 'x' }),
+      ).rejects.toBeInstanceOf(BadRequestException)
+    })
+  })
+
+  describe('reopen', () => {
+    const PATIENT: SupportActor = { id: 'user-1', email: 'p@example.com', roles: ['PATIENT'] as any }
+
+    it('reopens a recently-resolved ticket, clearing resolved/closed timestamps', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(
+        ticketRow({ status: 'RESOLVED', userId: 'user-1', resolvedAt: new Date() }),
+      )
+      await svc.reopen(PATIENT, 'ticket-1')
+      const upd = prisma.supportTicket.update.mock.calls[0][0].data
+      expect(upd.status).toBe('REOPENED')
+      expect(upd.reopenedAt).toBeInstanceOf(Date)
+      expect(upd.resolvedAt).toBeNull()
+      expect(upd.closedAt).toBeNull()
+      const notif = prisma.notification.createMany.mock.calls[0][0].data
+      expect(notif[0].dispatchTrigger).toBe('SUPPORT_REOPENED')
+    })
+
+    it('refuses to reopen outside the reopen window', async () => {
+      const { svc, prisma } = make()
+      const longAgo = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000)
+      prisma.supportTicket.findUnique.mockResolvedValue(
+        ticketRow({ status: 'CLOSED', userId: 'user-1', resolvedAt: longAgo, closedAt: longAgo }),
+      )
+      await expect(svc.reopen(PATIENT, 'ticket-1')).rejects.toBeInstanceOf(
+        BadRequestException,
+      )
+      expect(prisma.supportTicket.update).not.toHaveBeenCalled()
+    })
+
+    it('refuses to reopen a still-active ticket', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(
+        ticketRow({ status: 'IN_PROGRESS', userId: 'user-1' }),
+      )
+      await expect(svc.reopen(PATIENT, 'ticket-1')).rejects.toBeInstanceOf(
+        BadRequestException,
+      )
+    })
+  })
+
+  describe('auto-close sweep', () => {
+    it('closes RESOLVED tickets past the inactivity window and returns the count', async () => {
+      const { svc, prisma } = make()
+      const count = await svc.autoCloseResolvedTickets()
+      const call = prisma.supportTicket.updateMany.mock.calls[0][0]
+      expect(call.where.status).toBe('RESOLVED')
+      expect(call.where.resolvedAt.lt).toBeInstanceOf(Date)
+      expect(call.data.status).toBe('CLOSED')
+      expect(call.data.closedAt).toBeInstanceOf(Date)
+      expect(count).toBe(3)
+    })
+  })
+
+  // ── Phase 5 — assignment + priority ──────────────────────────────────────
+  describe('assignment', () => {
+    it('assign-to-me picks up an OPEN ticket (→ IN_PROGRESS) and records ASSIGNED', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(ticketRow({ status: 'OPEN' }))
+      await svc.assign(OPS, 'ticket-1', {})
+      const upd = prisma.supportTicket.update.mock.calls[0][0].data
+      expect(upd.assignedToOpsId).toBe('ops-1')
+      expect(upd.status).toBe('IN_PROGRESS')
+      const action = prisma.supportTicketAction.create.mock.calls[0][0].data
+      expect(action.actionType).toBe('ASSIGNED')
+      expect(action.metadata).toMatchObject({ assignedToOpsId: 'ops-1', self: true })
+    })
+
+    it('refuses to hand a ticket to a non-ops user', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(ticketRow({ status: 'OPEN' }))
+      prisma.user.findUnique.mockResolvedValue({ roles: ['PATIENT'] })
+      await expect(
+        svc.assign(OPS, 'ticket-1', { assigneeId: 'patient-9' }),
+      ).rejects.toBeInstanceOf(BadRequestException)
+      expect(prisma.supportTicket.update).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('priority', () => {
+    it('changes priority and records PRIORITY_CHANGED with from/to', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(ticketRow({ priority: 'HIGH' }))
+      await svc.changePriority(OPS, 'ticket-1', { priority: 'LOW' as any })
+      expect(prisma.supportTicket.update.mock.calls[0][0].data.priority).toBe('LOW')
+      const action = prisma.supportTicketAction.create.mock.calls[0][0].data
+      expect(action.actionType).toBe('PRIORITY_CHANGED')
+      expect(action.metadata).toMatchObject({ from: 'HIGH', to: 'LOW' })
+    })
+  })
+
+  // ── Phase 5 — ops queue list: assignee filter + priority ordering ────────
+  describe('listTickets', () => {
+    const setup = () => {
+      const m = make()
+      m.prisma.supportTicket.findMany.mockResolvedValue([])
+      m.prisma.supportTicket.count.mockResolvedValue(0)
+      return m
+    }
+
+    it('orders HIGH first, then newest (priority desc, createdAt desc)', async () => {
+      const { svc, prisma } = setup()
+      await svc.listTickets({})
+      expect(prisma.supportTicket.findMany.mock.calls[0][0].orderBy).toEqual([
+        { priority: 'desc' },
+        { createdAt: 'desc' },
+      ])
+    })
+
+    it('filters by a specific assignee id', async () => {
+      const { svc, prisma } = setup()
+      await svc.listTickets({ assignee: 'ops-7' } as any)
+      expect(prisma.supportTicket.findMany.mock.calls[0][0].where.assignedToOpsId).toBe('ops-7')
+    })
+
+    it("maps assignee='unassigned' to a null assignedToOpsId", async () => {
+      const { svc, prisma } = setup()
+      await svc.listTickets({ assignee: 'unassigned' } as any)
+      expect(prisma.supportTicket.findMany.mock.calls[0][0].where.assignedToOpsId).toBeNull()
     })
   })
 })

@@ -13,6 +13,8 @@ import { UserRole } from '../generated/prisma/enums.js'
 import { ListTicketsQuery } from './dto/list-tickets.query.js'
 import {
   ActionDto,
+  AssignDto,
+  PriorityDto,
   ReplyDto,
   ResolveDto,
   VerifyIdentityDto,
@@ -78,6 +80,22 @@ export class AdminSupportController {
     @Body() dto: ResolveDto,
   ) {
     return this.support.resolve(this.actorFrom(req), id, dto)
+  }
+
+  /** S4 — pick up / hand off a ticket (assign-to-me when body is empty). */
+  @Post('tickets/:id/assign')
+  assign(@Req() req: AuthedReq, @Param('id') id: string, @Body() dto: AssignDto) {
+    return this.support.assign(this.actorFrom(req), id, dto)
+  }
+
+  /** S5 — ops re-triages a ticket's priority. */
+  @Post('tickets/:id/priority')
+  priority(
+    @Req() req: AuthedReq,
+    @Param('id') id: string,
+    @Body() dto: PriorityDto,
+  ) {
+    return this.support.changePriority(this.actorFrom(req), id, dto)
   }
 
   @Post('tickets/:id/actions/mfa-reset')

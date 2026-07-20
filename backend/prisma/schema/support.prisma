@@ -37,13 +37,26 @@ model SupportTicket {
   userAgent       String?
 
   createdAt  DateTime  @default(now())
+  // @updatedAt bumps on every ticket write (status flip, reply-driven
+  // transition, assignment). @default(now()) gives existing rows + the DB
+  // column a value so the hand-authored migration's DEFAULT matches the schema
+  // (no future drift). Used by the ops queue for "recently active".
+  updatedAt  DateTime  @default(now()) @updatedAt
   resolvedAt DateTime?
+  // Set when the auto-close cron (or a future manual close) moves a RESOLVED
+  // ticket to CLOSED. The cron anchors on resolvedAt; closedAt records the event.
+  closedAt   DateTime?
+  // Set when a patient reopens a RESOLVED/CLOSED ticket within the reopen
+  // window. A reopened ticket is excluded from the auto-close sweep.
+  reopenedAt DateTime?
 
   replies SupportTicketReply[]
   actions SupportTicketAction[]
 
   @@index([status, createdAt])
   @@index([userId])
+  // Auto-close sweep scans RESOLVED tickets by resolvedAt.
+  @@index([status, resolvedAt])
 }
 
 model SupportTicketReply {
@@ -86,7 +99,13 @@ enum SupportCategory {
 enum SupportStatus {
   OPEN
   IN_PROGRESS
+  // Ball in the patient's court: ops replied and is waiting on the patient.
+  AWAITING_REPLY
   RESOLVED
+  // Patient reopened a RESOLVED/CLOSED ticket within the reopen window.
+  REOPENED
+  // Terminal. Set by the auto-close cron N days after RESOLVED with no activity.
+  CLOSED
 }
 
 enum SupportPriority {
@@ -112,4 +131,9 @@ enum SupportActionType {
   ACCOUNT_UNLOCKED
   IDENTITY_VERIFIED
   RESOLVED
+  // S4/S5 (ops queue) — both carry an opsUserId, so they fit the ops-only
+  // SupportTicketAction. Patient reopen + cron auto-close are NOT actions
+  // (no ops actor); they are tracked via status + reopenedAt/closedAt.
+  ASSIGNED
+  PRIORITY_CHANGED
 }

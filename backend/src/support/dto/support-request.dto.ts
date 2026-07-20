@@ -9,6 +9,7 @@ import {
 import {
   SupportCategory,
   SupportContactPref,
+  SupportPriority,
 } from '../../generated/prisma/enums.js'
 
 /** POST /v2/support/contact — a signed-in user raising a support ticket. */
@@ -87,4 +88,18 @@ export class ResolveDto {
   @IsString()
   @MaxLength(2000)
   resolutionNotes?: string
+}
+
+/** POST /v2/admin/support/tickets/:id/assign — pick up / hand off a ticket.
+ *  `assigneeId` omitted → assign to the acting ops user (assign-to-me). */
+export class AssignDto {
+  @IsOptional()
+  @IsString()
+  assigneeId?: string
+}
+
+/** POST /v2/admin/support/tickets/:id/priority — ops re-triages a ticket. */
+export class PriorityDto {
+  @IsEnum(SupportPriority)
+  priority!: SupportPriority
 }

@@ -13,6 +13,7 @@ import type { Prisma } from '../generated/prisma/client.js'
 import {
   NotificationChannel,
   SupportActionType,
+  SupportCategory,
   SupportContactPref,
   UserRole,
 } from '../generated/prisma/enums.js'
@@ -29,8 +30,10 @@ import { AuthService, type SessionContext } from '../auth/auth.service.js'
 import { TicketNumberService } from './ticket-number.service.js'
 import type {
   ActionDto,
+  AssignDto,
   ContactDto,
   LockedOutDto,
+  PriorityDto,
   ReplyDto,
   ResolveDto,
   VerifyIdentityDto,
@@ -48,10 +51,27 @@ export interface SupportContext {
 }
 
 const OPS_INBOX = 'ops@healplace.com'
+/**
+ * Machine-readable signal returned (HTTP 422) when a patient files a CLINICAL
+ * ticket. The frontend keys on this to render Manisha's approved care-team
+ * redirect + 911 carve-out copy — the server does NOT author clinical wording,
+ * only the neutral fallback below. The single most important healthcare rule of
+ * this system: a medical question must never sit silently in an ops queue.
+ * See continue-support-system roadmap Phase 3 (clinical vs operational split).
+ */
+export const CLINICAL_DEFLECTED_CODE = 'CLINICAL_DEFLECTED'
 const LOCKED_OUT_WINDOW_MS = 60 * 60 * 1000 // 1 hour
 const LOCKED_OUT_MAX = 5 // per IP per hour
 const CONTACT_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
 const CONTACT_MAX = 3 // authenticated tickets per user per 5-minute window
+// A patient can reopen a resolved/closed ticket within this window (anchored on
+// resolvedAt); past it, they raise a fresh request instead of resurrecting an
+// old thread. 14 days ≫ the 7-day auto-close, so a just-auto-closed ticket is
+// still reopenable for a week.
+const REOPEN_WINDOW_MS = 14 * 24 * 60 * 60 * 1000 // 14 days
+// The auto-close sweep moves a RESOLVED ticket to CLOSED after this much
+// inactivity (measured from resolvedAt). Well inside the reopen window.
+const AUTO_CLOSE_AFTER_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 /**
  * Support System Phase 1. Two intake paths (signed-in contact + public
@@ -83,6 +103,22 @@ export class SupportService {
     dto: ContactDto,
     ctx: SupportContext,
   ): Promise<{ ticketNumber: string }> {
+    // Clinical-vs-operational split — the hard healthcare rule. A CLINICAL
+    // question must NOT enter the administrative ops queue (support agents are
+    // not clinicians and there is no clinical SLA on this channel). Deflect at
+    // the API with a machine-readable code so the client renders the care-team
+    // redirect + emergency guidance; defense-in-depth behind the UI category
+    // picker. No ticket is created.
+    if (dto.category === SupportCategory.CLINICAL) {
+      throw new HttpException(
+        {
+          code: CLINICAL_DEFLECTED_CODE,
+          message:
+            'Support requests are for account and technical help. For anything about your health, symptoms, or medications, please contact your care team.',
+        },
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      )
+    }
     // Phone contact is not yet available (no call-center / HIPAA phone-ID
     // verification infrastructure) — reject at the API even if the UI guard is
     // bypassed (Fix 6, defense in depth).
@@ -200,7 +236,10 @@ export class SupportService {
         body: true,
         status: true,
         createdAt: true,
+        updatedAt: true,
         resolvedAt: true,
+        reopenedAt: true,
+        closedAt: true,
         replies: {
           orderBy: { sentAt: 'asc' },
           select: { authorType: true, body: true, sentAt: true },
@@ -220,6 +259,10 @@ export class SupportService {
     if (query.status) where.status = query.status
     if (query.category) where.category = query.category
     if (query.priority) where.priority = query.priority
+    if (query.assignee) {
+      where.assignedToOpsId =
+        query.assignee === 'unassigned' ? null : query.assignee
+    }
     if (query.search) {
       const term = query.search.trim()
       const idTerm = term.replace(/[\s-]/g, '').toUpperCase()
@@ -236,7 +279,9 @@ export class SupportService {
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        // HIGH first (enum order LOW<NORMAL<HIGH, so desc = HIGH→LOW), then
+        // newest within a priority band. S5 — priority-ordered ops queue.
+        orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
         select: {
           id: true,
           ticketNumber: true,
@@ -246,7 +291,9 @@ export class SupportService {
           status: true,
           priority: true,
           identityVerified: true,
+          assignedToOpsId: true,
           createdAt: true,
+          updatedAt: true,
           resolvedAt: true,
           user: { select: { name: true, displayId: true } },
         },
@@ -324,10 +371,17 @@ export class SupportService {
         body: dto.body,
       },
     })
-    if (ticket.status === 'OPEN') {
+    // An ops reply puts the ball in the patient's court → AWAITING_REPLY. Only
+    // advance from a still-open state; never downgrade a RESOLVED/CLOSED ticket
+    // (ops can reply on a resolved thread without silently un-resolving it).
+    if (
+      ticket.status === 'OPEN' ||
+      ticket.status === 'IN_PROGRESS' ||
+      ticket.status === 'REOPENED'
+    ) {
       await this.prisma.supportTicket.update({
         where: { id: ticket.id },
-        data: { status: 'IN_PROGRESS' },
+        data: { status: 'AWAITING_REPLY' },
       })
     }
     // Email the user + in-app bell (if they have an account). Fire-and-forget —
@@ -357,10 +411,90 @@ export class SupportService {
           title: 'Support replied to your request',
           body: `Ticket ${ticket.ticketNumber}`,
           dispatchTrigger: 'SUPPORT_REPLY',
+          supportTicketId: ticket.id,
         },
       })
     }
     return reply
+  }
+
+  // ── Requester in-thread actions ────────────────────────────────────────
+  /**
+   * In-thread patient reply. The patient adds a message to their own active
+   * ticket, moving the ball back to ops (→ IN_PROGRESS) and pinging the ops
+   * queue. A resolved/closed ticket must be reopened first — the reply composer
+   * is hidden in that state, and the server rejects it as defense-in-depth.
+   */
+  async replyAsUser(actor: SupportActor, ticketId: string, dto: ReplyDto) {
+    const ticket = await this.requireOwnedTicket(actor, ticketId)
+    if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
+      throw new BadRequestException(
+        'This request is resolved. Reopen it to add a reply.',
+      )
+    }
+    const reply = await this.prisma.supportTicketReply.create({
+      data: {
+        ticketId: ticket.id,
+        authorType: 'USER',
+        authorUserId: actor.id,
+        body: dto.body,
+      },
+    })
+    // Ball back to ops. A patient reply always needs an ops response next,
+    // whether the ticket was OPEN, IN_PROGRESS, AWAITING_REPLY, or REOPENED.
+    await this.prisma.supportTicket.update({
+      where: { id: ticket.id },
+      data: { status: 'IN_PROGRESS' },
+    })
+    await this.notifyOpsTicketActivity(ticket, 'SUPPORT_USER_REPLIED')
+    return reply
+  }
+
+  /**
+   * Patient reopens a resolved/closed ticket within the reopen window. Past the
+   * window they raise a fresh request instead. Clears resolvedAt/closedAt and
+   * flags reopenedAt so the auto-close sweep (which keys on status=RESOLVED)
+   * leaves it alone, and notifies ops.
+   */
+  async reopen(actor: SupportActor, ticketId: string) {
+    const ticket = await this.requireOwnedTicket(actor, ticketId)
+    if (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED') {
+      throw new BadRequestException(
+        'Only a resolved or closed request can be reopened.',
+      )
+    }
+    const anchor = ticket.resolvedAt ?? ticket.closedAt
+    if (!anchor || anchor.getTime() < Date.now() - REOPEN_WINDOW_MS) {
+      throw new BadRequestException(
+        'This request can no longer be reopened. Please raise a new request.',
+      )
+    }
+    const updated = await this.prisma.supportTicket.update({
+      where: { id: ticket.id },
+      data: {
+        status: 'REOPENED',
+        reopenedAt: new Date(),
+        resolvedAt: null,
+        closedAt: null,
+      },
+    })
+    await this.notifyOpsTicketActivity(ticket, 'SUPPORT_REOPENED')
+    return updated
+  }
+
+  /**
+   * Auto-close sweep (daily cron). Moves RESOLVED tickets with no activity for
+   * AUTO_CLOSE_AFTER_MS to CLOSED. A REOPENED ticket is never RESOLVED, so it is
+   * excluded by construction. Silent housekeeping — the requester was already
+   * notified at resolve time and can still reopen for a further week.
+   */
+  async autoCloseResolvedTickets(now: Date = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - AUTO_CLOSE_AFTER_MS)
+    const result = await this.prisma.supportTicket.updateMany({
+      where: { status: 'RESOLVED', resolvedAt: { lt: cutoff } },
+      data: { status: 'CLOSED', closedAt: now },
+    })
+    return result.count
   }
 
   async verifyIdentity(
@@ -411,12 +545,71 @@ export class SupportService {
           title: 'Support request closed',
           body: `Ticket ${ticket.ticketNumber} has been marked resolved.`,
           dispatchTrigger: 'SUPPORT_RESOLVE',
+          supportTicketId: ticket.id,
         },
       })
     }
     return this.recordAction(ticket.id, actor.id, SupportActionType.RESOLVED, {
       resolutionNotes: dto.resolutionNotes,
     })
+  }
+
+  /**
+   * S4 — assign / pick up a ticket. Omitting assigneeId assigns to the acting
+   * ops user (assign-to-me); passing another user's id hands it off (validated
+   * to be an ops/admin). Picking up an OPEN ticket auto-advances it to
+   * IN_PROGRESS, mirroring the audit-worklist assignIncident pattern.
+   */
+  async assign(actor: SupportActor, ticketId: string, dto: AssignDto) {
+    const ticket = await this.requireTicket(ticketId)
+    const assigneeId = dto.assigneeId ?? actor.id
+    // Only validate a hand-off to someone else; the actor is already ops (the
+    // controller RolesGuard gates HEALPLACE_OPS + SUPER_ADMIN).
+    if (assigneeId !== actor.id) {
+      const assignee = await this.prisma.user.findUnique({
+        where: { id: assigneeId },
+        select: { roles: true },
+      })
+      const isOps =
+        assignee?.roles.includes(UserRole.HEALPLACE_OPS) ||
+        assignee?.roles.includes(UserRole.SUPER_ADMIN)
+      if (!isOps) {
+        throw new BadRequestException(
+          'Tickets can only be assigned to a support agent.',
+        )
+      }
+    }
+    await this.prisma.supportTicket.update({
+      where: { id: ticket.id },
+      data: {
+        assignedToOpsId: assigneeId,
+        // Pickup advances an untouched OPEN ticket into the active lane.
+        ...(ticket.status === 'OPEN' ? { status: 'IN_PROGRESS' as const } : {}),
+      },
+    })
+    return this.recordAction(ticket.id, actor.id, SupportActionType.ASSIGNED, {
+      assignedToOpsId: assigneeId,
+      self: assigneeId === actor.id,
+    })
+  }
+
+  /**
+   * S5 — re-triage a ticket's priority. Records from/to in the action metadata
+   * for the ops timeline. A no-op change (same priority) still records, so the
+   * timeline reflects that ops looked at it.
+   */
+  async changePriority(actor: SupportActor, ticketId: string, dto: PriorityDto) {
+    const ticket = await this.requireTicket(ticketId)
+    await this.prisma.supportTicket.update({
+      where: { id: ticket.id },
+      data: { priority: dto.priority },
+    })
+    return this.recordAction(
+      ticket.id,
+      actor.id,
+      SupportActionType.PRIORITY_CHANGED,
+      { from: ticket.priority, to: dto.priority },
+    )
   }
 
   async actionMfaReset(
@@ -484,6 +677,81 @@ export class SupportService {
     const ticket = await this.prisma.supportTicket.findUnique({ where: { id } })
     if (!ticket) throw new NotFoundException('Support ticket not found')
     return ticket
+  }
+
+  /**
+   * Ownership gate for the requester in-thread endpoints. A NotFound (not
+   * Forbidden) on a mismatch so a patient cannot probe whether another user's
+   * ticket id exists — same non-enumeration posture as the rest of the app.
+   */
+  private async requireOwnedTicket(actor: SupportActor, id: string) {
+    const ticket = await this.prisma.supportTicket.findUnique({ where: { id } })
+    if (!ticket || ticket.userId !== actor.id) {
+      throw new NotFoundException('Support ticket not found')
+    }
+    return ticket
+  }
+
+  /**
+   * Ops-facing ping for patient-initiated activity (in-thread reply / reopen).
+   * Reuses the notify-and-link ops email (NO requester PHI in the body) and the
+   * ops dashboard bell, deep-linked via supportTicketId. Wrapped in the
+   * support-ops-notify principal scope so the disclosure attributes correctly.
+   */
+  private async notifyOpsTicketActivity(
+    ticket: {
+      id: string
+      ticketNumber: string
+      category: string
+      priority: string
+      subject: string
+    },
+    trigger: 'SUPPORT_USER_REPLIED' | 'SUPPORT_REOPENED',
+  ) {
+    const reopened = trigger === 'SUPPORT_REOPENED'
+    return runAsCronActor(this.cls, 'support-ops-notify', async () => {
+      void this.email.sendEmail(
+        OPS_INBOX,
+        `[Support] ${ticket.ticketNumber} — patient ${
+          reopened ? 'reopened' : 'replied'
+        } · ${ticket.priority} ${ticket.category}`,
+        supportOpsNotifyHtml(
+          ticket.ticketNumber,
+          ticket.priority,
+          ticket.category,
+          `${this.adminBaseUrl}/support/${ticket.id}`,
+        ),
+        {
+          template: 'support_ops_notify',
+          templateVersion: EMAIL_TEMPLATE_VERSION,
+          patientUserId: null,
+          metadata: {
+            ticketId: ticket.id,
+            ticketNumber: ticket.ticketNumber,
+            category: ticket.category,
+            priority: ticket.priority,
+          },
+        },
+      )
+      const opsUsers = await this.prisma.user.findMany({
+        where: { roles: { has: UserRole.HEALPLACE_OPS } },
+        select: { id: true },
+      })
+      if (opsUsers.length) {
+        await this.prisma.notification.createMany({
+          data: opsUsers.map((u) => ({
+            userId: u.id,
+            channel: NotificationChannel.DASHBOARD,
+            title: reopened
+              ? `Ticket ${ticket.ticketNumber} reopened`
+              : `New reply on ${ticket.ticketNumber}`,
+            body: `${ticket.category} · ${ticket.subject}`,
+            dispatchTrigger: trigger,
+            supportTicketId: ticket.id,
+          })),
+        })
+      }
+    })
   }
 
   /** Identity-verification gate — the sensitive reset actions are blocked
@@ -620,6 +888,7 @@ export class SupportService {
             title: `New support ticket ${ticket.ticketNumber}`,
             body: `${ticket.category} · ${ticket.subject}`,
             dispatchTrigger: 'SUPPORT_TICKET_CREATED',
+            supportTicketId: ticket.id,
           })),
         })
       }

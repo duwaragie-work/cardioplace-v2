@@ -56,7 +56,83 @@ test.describe('5X — support full flow', () => {
       await ops.dispose()
     }
   })
+
+  // Support System roadmap Phase 2/5 — the full extended lifecycle: two-way
+  // in-thread messaging with the AWAITING_REPLY ↔ IN_PROGRESS handoff, ops
+  // assignment + priority re-triage, resolve, then patient reopen.
+  test('two-way thread → assign → priority → resolve → patient reopen', async () => {
+    const patient = await authedApi(API_BASE_URL, PATIENTS.aisha.email, 'patient')
+    const ops = await authedApi(API_BASE_URL, ADMINS.ops.email, 'admin')
+    try {
+      // 1. Patient raises a ticket.
+      const subject = `Extended lifecycle ${Date.now()}`
+      const contactRes = await patient.post('v2/support/contact', {
+        data: { subject, body: 'walk me through the steps please', category: 'ACCOUNT' },
+      })
+      expect(contactRes.ok(), await contactRes.text()).toBeTruthy()
+      const { ticketNumber } = (await contactRes.json()) as { ticketNumber: string }
+      const id = await findTicketId(ops, ticketNumber)
+      expect(id).toBeTruthy()
+
+      // 2. Ops reply puts the ball in the patient's court → AWAITING_REPLY.
+      const opsReply = await ops.post(`v2/admin/support/tickets/${id}/reply`, {
+        data: { body: 'Happy to help — can you confirm your device?' },
+      })
+      expect(opsReply.ok(), await opsReply.text()).toBeTruthy()
+      expect(await mineStatus(patient, id!)).toBe('AWAITING_REPLY')
+
+      // 3. Patient in-thread reply hands the ball back to ops → IN_PROGRESS.
+      const patientReply = await patient.post(`v2/support/tickets/${id}/reply`, {
+        data: { body: 'It is an Android phone.' },
+      })
+      expect(patientReply.ok(), await patientReply.text()).toBeTruthy()
+      expect(await mineStatus(patient, id!)).toBe('IN_PROGRESS')
+
+      // 4. Ops picks it up (assign-to-me) and re-triages the priority.
+      const assign = await ops.post(`v2/admin/support/tickets/${id}/assign`, { data: {} })
+      expect(assign.ok(), await assign.text()).toBeTruthy()
+      const prio = await ops.post(`v2/admin/support/tickets/${id}/priority`, {
+        data: { priority: 'LOW' },
+      })
+      expect(prio.ok(), await prio.text()).toBeTruthy()
+
+      const detail = await getTicket(ops, id!)
+      expect(detail.assignedToOpsId).toBeTruthy()
+      expect(detail.priority).toBe('LOW')
+      expect(detail.replies.some((r) => r.authorType === 'USER')).toBe(true)
+      expect(detail.actions.some((a) => a.actionType === 'ASSIGNED')).toBe(true)
+      expect(detail.actions.some((a) => a.actionType === 'PRIORITY_CHANGED')).toBe(true)
+
+      // 5. Ops resolves → RESOLVED (patient sees it).
+      const resolve = await ops.post(`v2/admin/support/tickets/${id}/resolve`, {
+        data: { resolutionNotes: 'Guided through the steps.' },
+      })
+      expect(resolve.ok(), await resolve.text()).toBeTruthy()
+      expect(await mineStatus(patient, id!)).toBe('RESOLVED')
+
+      // 6. A resolved ticket cannot take an in-thread reply — must reopen first.
+      const lateReply = await patient.post(`v2/support/tickets/${id}/reply`, {
+        data: { body: 'actually one more thing' },
+      })
+      expect(lateReply.status(), 'reply on resolved is refused').toBe(400)
+
+      // 7. Patient reopens within the window → REOPENED.
+      const reopen = await patient.post(`v2/support/tickets/${id}/reopen`)
+      expect(reopen.ok(), await reopen.text()).toBeTruthy()
+      expect(await mineStatus(patient, id!)).toBe('REOPENED')
+    } finally {
+      await patient.dispose()
+      await ops.dispose()
+    }
+  })
 })
+
+async function mineStatus(patient: APIRequestContext, id: string): Promise<string> {
+  const res = await patient.get('v2/support/tickets/mine')
+  expect(res.ok(), await res.text()).toBeTruthy()
+  const { data } = (await res.json()) as { data: Array<{ id: string; status: string }> }
+  return data.find((t) => t.id === id)?.status ?? 'NOT_FOUND'
+}
 
 async function findTicketId(
   ops: APIRequestContext,
@@ -77,6 +153,8 @@ async function getTicket(ops: APIRequestContext, id: string) {
     status: string
     subject: string
     identityVerified: boolean
+    priority: string
+    assignedToOpsId: string | null
     replies: Array<{ authorType: string; body: string }>
     actions: Array<{ actionType: string }>
   }

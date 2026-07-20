@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Post, Req } from '@nestjs/common'
+import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common'
 import type { Request } from 'express'
 import { Public } from '../auth/decorators/public.decorator.js'
 import { UserRole } from '../generated/prisma/enums.js'
-import { ContactDto, LockedOutDto } from './dto/support-request.dto.js'
+import { ContactDto, LockedOutDto, ReplyDto } from './dto/support-request.dto.js'
 import { extractIp } from './http.util.js'
 import {
   SupportService,
@@ -45,6 +45,19 @@ export class SupportController {
   @Get('tickets/mine')
   myTickets(@Req() req: AuthedReq) {
     return this.support.listMyTickets(this.actorFrom(req))
+  }
+
+  /** Patient adds an in-thread reply to their own active ticket (→ ops).
+   *  Scoped to the requester in the service (NotFound on a non-owned id). */
+  @Post('tickets/:id/reply')
+  reply(@Req() req: AuthedReq, @Param('id') id: string, @Body() dto: ReplyDto) {
+    return this.support.replyAsUser(this.actorFrom(req), id, dto)
+  }
+
+  /** Patient reopens their own resolved/closed ticket within the reopen window. */
+  @Post('tickets/:id/reopen')
+  reopen(@Req() req: AuthedReq, @Param('id') id: string) {
+    return this.support.reopen(this.actorFrom(req), id)
   }
 
   /** Unauthenticated "I can't sign in" form — rate-limited 5/IP/hour in the
