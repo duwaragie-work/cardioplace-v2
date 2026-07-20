@@ -94,7 +94,20 @@ export class MedicationAdherenceService {
       case 'taken':
         dto.medicationTaken = true
         break
-      case 'missed':
+      case 'missed': {
+        // #2b (flag-gated, DEFAULT OFF — MED_ADHERENCE_CONFIRM_GUARD_ENABLED).
+        // An unconfirmed "missed" — no reason captured, i.e. the model never
+        // asked WHY — must not fire RULE_MEDICATION_MISSED. Record it as
+        // scheduled_later-like (non-alerting) instead of a genuine miss. When
+        // the model did ask, the reason is present and this is a real miss.
+        // OFF by default; enabling needs Manisha sign-off (changes alert-firing).
+        if (
+          process.env.MED_ADHERENCE_CONFIRM_GUARD_ENABLED === 'true' &&
+          input.reason == null
+        ) {
+          dto.medicationScheduledLater = true
+          break
+        }
         dto.medicationTaken = false
         dto.missedDoses = input.missedDoses && input.missedDoses > 0 ? input.missedDoses : 1
         dto.missedMedications = [{
@@ -105,6 +118,7 @@ export class MedicationAdherenceService {
           missedDoses: dto.missedDoses,
         }]
         break
+      }
       case 'scheduled_later':
         // Leave medicationTaken intentionally undefined so the adherence rule
         // skips this entry. Flag the entry as scheduled-later so the chat
