@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { redactText } from '../../common/logging/log-redact.js'
 import { GeminiService } from '../../gemini/gemini.service.js'
 
 export interface EmergencyDetectionResult {
@@ -80,7 +81,11 @@ export class EmergencyDetectionService {
       try {
         parsed = JSON.parse(raw)
       } catch (err) {
-        this.logger.warn(`Failed to parse emergency detector JSON, treating as non-emergency. Raw: ${raw}`)
+        // V-05: `raw` is untruncated model output over the patient's own text.
+        // The parse-failure fact + the length are the whole diagnostic.
+        this.logger.warn(
+          `Failed to parse emergency detector JSON, treating as non-emergency. raw=${redactText(raw)}`,
+        )
         return { isEmergency: false, emergencySituation: null }
       }
 

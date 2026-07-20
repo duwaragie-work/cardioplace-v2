@@ -31,8 +31,10 @@ export { Public }
     UsersModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
+      // getOrThrow, not get: a missing signing key must fail loudly at boot, not
+      // silently sign with `undefined`. Matches jwt.strategy.ts and voice.module.ts.
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_ACCESS_SECRET'),
+        secret: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
       }),
       inject: [ConfigService],
     }),

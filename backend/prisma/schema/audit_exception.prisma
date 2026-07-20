@@ -105,6 +105,13 @@ enum AuditExceptionDetectorId {
   REPEATED_FAILED_AUTH
   DROPPED_AUDIT_WRITES
   UNATTRIBUTED_SYSTEM_DISCLOSURE
+  // N-3 (Duwaragie 2026-07-14 triage) — sibling to
+  // UNATTRIBUTED_SYSTEM_DISCLOSURE (emails), but scans AccessLog for
+  // `actorType='SYSTEM_ACTOR' AND actorId IS NULL AND systemActorLabel IS NULL`
+  // — the shape produced by any query fired outside a CLS scope. The
+  // pre-fix jwt.strategy User.findUnique flooded this pattern; adding a
+  // dedicated detector so a future regression trips a review immediately.
+  UNATTRIBUTED_ACCESS_LOG
 }
 
 enum AuditExceptionSeverity {

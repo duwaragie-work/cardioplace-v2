@@ -9,6 +9,10 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import {
+  snapshotHash,
+  SNAPSHOT_HASH_KEY,
+} from '../common/audit/snapshot-hash.js'
 import { randomUUID } from 'node:crypto'
 import { SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared'
 import {
@@ -27,6 +31,7 @@ import {
 import type { NotificationTrigger } from '../generated/prisma/enums.js'
 import type { ActorUser } from '../common/patient-access.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import { JOURNAL_EVENTS } from './constants/events.js'
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto.js'
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto.js'
@@ -131,6 +136,7 @@ export class DailyJournalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly encryption: EncryptionService,
   ) {}
 
   /**
@@ -413,9 +419,15 @@ export class DailyJournalService {
             ...(dto.otherSymptoms ?? []),
             ...(dto.symptoms ?? []),
           ],
+          otherSymptomsEncrypted: this.encryption.encryptJson([
+            ...(dto.otherSymptoms ?? []),
+            ...(dto.symptoms ?? []),
+          ]),
           teachBackAnswer: dto.teachBackAnswer ?? null,
+          teachBackAnswerEncrypted: this.encryption.encryptNullable(dto.teachBackAnswer ?? null),
           teachBackCorrect: dto.teachBackCorrect ?? null,
           notes: dto.notes ?? null,
+          notesEncrypted: this.encryption.encryptNullable(dto.notes ?? null),
           source: actor
             ? EntrySource.ADMIN
             : dto.source
@@ -662,10 +674,17 @@ export class DailyJournalService {
           ...(dto.otherSymptoms ?? []),
           ...(dto.symptoms ?? []),
         ]
+        data.otherSymptomsEncrypted = this.encryption.encryptJson(data.otherSymptoms)
       }
-      if (dto.teachBackAnswer !== undefined) data.teachBackAnswer = dto.teachBackAnswer
+      if (dto.teachBackAnswer !== undefined) {
+        data.teachBackAnswer = dto.teachBackAnswer
+        data.teachBackAnswerEncrypted = this.encryption.encryptNullable(dto.teachBackAnswer)
+      }
       if (dto.teachBackCorrect !== undefined) data.teachBackCorrect = dto.teachBackCorrect
-      if (dto.notes !== undefined) data.notes = dto.notes
+      if (dto.notes !== undefined) {
+        data.notes = dto.notes
+        data.notesEncrypted = this.encryption.encryptNullable(dto.notes)
+      }
       if (dto.source !== undefined)
         data.source = dto.source ? SOURCE_MAP[dto.source] : EntrySource.MANUAL
       if (dto.sourceMetadata !== undefined)
@@ -919,6 +938,7 @@ export class DailyJournalService {
       throw new NotFoundException('Journal entry not found')
     }
     const trimmed = (reason ?? '').trim().slice(0, 500)
+    const rationaleText = trimmed || 'Patient flagged this reading as possibly incorrect.'
     await this.prisma.profileVerificationLog.create({
       data: {
         userId,
@@ -933,7 +953,8 @@ export class DailyJournalService {
         changedByRole: 'PATIENT',
         changeType: 'PATIENT_REPORT',
         discrepancyFlag: true,
-        rationale: trimmed || 'Patient flagged this reading as possibly incorrect.',
+        rationale: rationaleText,
+        rationaleEncrypted: this.encryption.encryptNullable(rationaleText),
       },
     })
     return { flagged: true, entryId }
@@ -1787,10 +1808,18 @@ export class DailyJournalService {
     source?: EntrySource
     [key: string]: unknown
   }): Prisma.InputJsonValue {
-    const symptoms: string[] = [
-      ...AUDIT_SYMPTOM_FLAGS.filter((flag) => entry[flag] === true),
-      ...(entry.otherSymptoms ?? []),
-    ]
+    // V-06 audit-log leak (2026-07-17): this spliced the patient's FREEFORM
+    // `otherSymptoms` into the symptom list and carried `notes` verbatim — both
+    // are encrypted at rest (otherSymptomsEncrypted / notesEncrypted), so
+    // writing them here put the same bytes into an UNENCRYPTED Json column.
+    // The structured symptom FLAGS are Manisha's signed-off boolean vocabulary,
+    // not free text, so they stay. `otherSymptomsCount` preserves the "did they
+    // report something off-catalog?" signal; the text lives on the encrypted
+    // column. `_snapshotHash` attests the full record — see
+    // common/audit/snapshot-hash.ts.
+    const symptoms: string[] = AUDIT_SYMPTOM_FLAGS.filter(
+      (flag) => entry[flag] === true,
+    )
     return {
       entryId: entry.id,
       measuredAt: entry.measuredAt.toISOString(),
@@ -1803,8 +1832,9 @@ export class DailyJournalService {
       medicationTaken: entry.medicationTaken ?? null,
       missedDoses: entry.missedDoses ?? null,
       symptoms,
-      notes: entry.notes ?? null,
+      otherSymptomsCount: entry.otherSymptoms?.length ?? 0,
       source: entry.source ? entry.source.toLowerCase() : null,
+      [SNAPSHOT_HASH_KEY]: snapshotHash(entry),
     }
   }
 
@@ -2329,16 +2359,26 @@ export class DailyJournalService {
         [...newSet].every((s) => existingSet.has(s))
       ) {
         delete data.otherSymptoms
+        // V-06 dual-write sibling — the encrypted envelope is recomputed on
+        // every writer call (fresh IV), so a plaintext no-op does not imply
+        // envelope equality. Strip it whenever the plaintext is a no-op so
+        // the "nothing changed" branch stays truly nothing-changed.
+        delete data.otherSymptomsEncrypted
       }
     }
-    if (data.teachBackAnswer !== undefined && data.teachBackAnswer === existing.teachBackAnswer)
+    if (data.teachBackAnswer !== undefined && data.teachBackAnswer === existing.teachBackAnswer) {
       delete data.teachBackAnswer
+      delete data.teachBackAnswerEncrypted
+    }
     if (
       data.teachBackCorrect !== undefined &&
       data.teachBackCorrect === existing.teachBackCorrect
     )
       delete data.teachBackCorrect
-    if (data.notes !== undefined && data.notes === existing.notes) delete data.notes
+    if (data.notes !== undefined && data.notes === existing.notes) {
+      delete data.notes
+      delete data.notesEncrypted
+    }
     if (data.source !== undefined && data.source === existing.source) delete data.source
   }
 

@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { situationHash } from '../../common/logging/log-redact.js'
 import { ConfigService } from '@nestjs/config'
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter'
 import {
@@ -10,6 +11,7 @@ import { Cron } from '@nestjs/schedule'
 import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from '../../common/cls/cron-actor.util.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
+import { EncryptionService } from '../../common/encryption.service.js'
 import { EmailService } from '../../email/email.service.js'
 import { EMAIL_TEMPLATE_VERSION, caregiverEmailHtml } from '../../email/email-templates.js'
 import type {
@@ -95,6 +97,7 @@ export class EscalationService {
     private readonly smsService: SmsService,
     config: ConfigService,
     private readonly cls: ClsService,
+    private readonly encryption: EncryptionService,
   ) {
     // Used by escalation emails to deep-link recipients into the right app.
     // Provider/admin recipients → admin app (/patients/{userId}?alert={id});
@@ -141,25 +144,33 @@ export class EscalationService {
 
   @OnEvent(JOURNAL_EVENTS.ALERT_CREATED, { async: true })
   async handleAlertCreated(payload: AlertCreatedEvent, now: Date = new Date()): Promise<void> {
-    try {
-      await this.fireT0(payload, now)
-    } catch (err) {
-      this.logger.error(
-        `T+0 dispatch failed for alert ${payload.alertId}`,
-        err instanceof Error ? err.stack : err,
-      )
-    }
-    // Cluster 7 A.6 — caregiver dispatch runs alongside the standard ladder.
-    // Tier 3 caregiver-routed rules (e.g. RULE_HF_CAREGIVER_EDEMA) have no
-    // ladder, so fireT0() exits early; this path is their only delivery.
-    try {
-      await this.dispatchCaregiverNotification(payload)
-    } catch (err) {
-      this.logger.error(
-        `Caregiver dispatch failed for alert ${payload.alertId}`,
-        err instanceof Error ? err.stack : err,
-      )
-    }
+    // N-2 (Duwaragie 2026-07-14 triage) — wrap the T+0 event body in the
+    // registered system-principal CLS scope. Without this, T+0 email sends
+    // land in EmailDisclosureLog with senderPrincipal='system-principal-
+    // unknown' (event handlers run outside the HTTP interceptor and outside
+    // the @Cron scheduledRun wrapper — the T+0 leak Duwaragie surfaced from
+    // the escalation_tier_1_staff template inspection).
+    return runAsCronActor(this.cls, 'engine-alert-generator', async () => {
+      try {
+        await this.fireT0(payload, now)
+      } catch (err) {
+        this.logger.error(
+          `T+0 dispatch failed for alert ${payload.alertId}`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+      // Cluster 7 A.6 — caregiver dispatch runs alongside the standard ladder.
+      // Tier 3 caregiver-routed rules (e.g. RULE_HF_CAREGIVER_EDEMA) have no
+      // ladder, so fireT0() exits early; this path is their only delivery.
+      try {
+        await this.dispatchCaregiverNotification(payload)
+      } catch (err) {
+        this.logger.error(
+          `Caregiver dispatch failed for alert ${payload.alertId}`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+    })
   }
 
   /**
@@ -172,14 +183,27 @@ export class EscalationService {
    */
   @OnEvent(EMERGENCY_EVENTS.FLAGGED, { async: true })
   async onEmergencyFlagged(payload: EmergencyFlaggedPayload): Promise<void> {
-    try {
-      await this.dispatchEmergencyToCareTeam(payload)
-    } catch (err) {
-      this.logger.error(
-        `[SECURITY-CRITICAL] Emergency dispatch failed userId=${payload.userId} situation="${payload.situation}"`,
-        err instanceof Error ? err.stack : err,
-      )
-    }
+    // N-2 residual (2026-07-17) — same fix handleAlertCreated got above, and
+    // for the same reason; this sibling was missed. emergency.flagged is
+    // emitted from the PATIENT's own request context (chat.service.ts:239 /
+    // voice-tools.service.ts:1832), so without a system-principal scope the
+    // emergency_dispatch_caregiver send below lands in EmailDisclosureLog
+    // either unattributed OR — worse — attributed to the patient, i.e. the
+    // audit trail claims the patient disclosed their own emergency to their
+    // caregiver. The system did.
+    return runAsCronActor(this.cls, 'emergency-dispatch', async () => {
+      try {
+        await this.dispatchEmergencyToCareTeam(payload)
+      } catch (err) {
+        this.logger.error(
+          // V-05: digest + userId, not the narrative — see chat.service.ts's
+          // emergency path for the reasoning. The dispatch failed, but the
+          // EmergencyEvent row that triggered it is persisted and audited.
+          `[SECURITY-CRITICAL] Emergency dispatch failed userId=${payload.userId} situation=${situationHash(payload.situation)}`,
+          err instanceof Error ? err.stack : err,
+        )
+      }
+    })
   }
 
   private async dispatchEmergencyToCareTeam(
@@ -382,14 +406,16 @@ export class EscalationService {
     escalationLevel?: 'LEVEL_1' | 'LEVEL_2'
   }): Promise<void> {
     const scheduledFor = new Date(args.now.getTime() + args.offsetMs)
+    const reasonText =
+      args.reason ??
+      `BP L2 retry — ${args.ladderStep} scheduled ${scheduledFor.toISOString()}`
     await this.prisma.escalationEvent.create({
       data: {
         alertId: args.alertId,
         userId: args.userId,
         escalationLevel: args.escalationLevel ?? 'LEVEL_2',
-        reason:
-          args.reason ??
-          `BP L2 retry — ${args.ladderStep} scheduled ${scheduledFor.toISOString()}`,
+        reason: reasonText,
+        reasonEncrypted: this.encryption.encryptNullable(reasonText),
         ladderStep: args.ladderStep,
         recipientIds: [],
         recipientRoles: args.recipientRoles,
@@ -704,7 +730,11 @@ export class EscalationService {
       ) {
         await this.prisma.escalationEvent.update({
           where: { id: row.id },
-          data: { notificationSentAt: now, reason: 'skipped — alert resolved or acknowledged' },
+          data: {
+            notificationSentAt: now,
+            reason: 'skipped — alert resolved or acknowledged',
+            reasonEncrypted: this.encryption.encryptNullable('skipped — alert resolved or acknowledged'),
+          },
         })
         continue
       }
@@ -715,7 +745,11 @@ export class EscalationService {
       if (row.triggeredByResolution && alert.status === 'RESOLVED') {
         await this.prisma.escalationEvent.update({
           where: { id: row.id },
-          data: { notificationSentAt: now, reason: 'skipped — alert resolved post-retry-schedule' },
+          data: {
+            notificationSentAt: now,
+            reason: 'skipped — alert resolved post-retry-schedule',
+            reasonEncrypted: this.encryption.encryptNullable('skipped — alert resolved post-retry-schedule'),
+          },
         })
         continue
       }
@@ -725,7 +759,11 @@ export class EscalationService {
       if (!ladder || !step) {
         await this.prisma.escalationEvent.update({
           where: { id: row.id },
-          data: { notificationSentAt: now, reason: 'skipped — no ladder match' },
+          data: {
+            notificationSentAt: now,
+            reason: 'skipped — no ladder match',
+            reasonEncrypted: this.encryption.encryptNullable('skipped — no ladder match'),
+          },
         })
         continue
       }
@@ -948,6 +986,9 @@ export class EscalationService {
               userId: alert.userId,
               escalationLevel: this.legacyLevelFor(args.ladderKind),
               reason: `Queued for business hours — ${step.step}${dispatchReason.suffix}`,
+              reasonEncrypted: this.encryption.encryptNullable(
+                `Queued for business hours — ${step.step}${dispatchReason.suffix}`,
+              ),
               ladderStep: step.step,
               // Persist what we'd dispatch when the queue fires. The cron will
               // re-resolve at fire time too (practice staff may change before
@@ -985,6 +1026,9 @@ export class EscalationService {
             userId: alert.userId,
             escalationLevel: this.legacyLevelFor(args.ladderKind),
             reason: `${step.step} dispatched${dispatchReason.suffix}`,
+            reasonEncrypted: this.encryption.encryptNullable(
+              `${step.step} dispatched${dispatchReason.suffix}`,
+            ),
             ladderStep: step.step,
             recipientIds: resolved.recipientIds,
             recipientRoles: resolved.recipientRoles,
@@ -1059,6 +1103,9 @@ export class EscalationService {
             recipientRoles: resolved.recipientRoles,
             afterHours,
             reason: `${args.step.step} dispatched${args.triggeredByResolution ? ' (retry)' : ''}${dispatchReason.suffix}`,
+            reasonEncrypted: this.encryption.encryptNullable(
+              `${args.step.step} dispatched${args.triggeredByResolution ? ' (retry)' : ''}${dispatchReason.suffix}`,
+            ),
           },
         })
 
@@ -1439,6 +1486,9 @@ export class EscalationService {
               userId: alert.userId,
               escalationLevel: 'LEVEL_1',
               reason: `Caregiver notified (${caregiver.notifyChannel.toLowerCase()})`,
+              reasonEncrypted: this.encryption.encryptNullable(
+                `Caregiver notified (${caregiver.notifyChannel.toLowerCase()})`,
+              ),
               ladderStep: 'T0',
               recipientIds: [caregiver.caregiverUserId ?? caregiver.id],
               recipientRoles: ['CAREGIVER'],

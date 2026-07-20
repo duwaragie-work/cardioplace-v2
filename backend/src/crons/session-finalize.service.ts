@@ -5,6 +5,7 @@ import { SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared'
 import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { DailyJournalService } from '../daily_journal/daily_journal.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import {
   Prisma,
   VerifierRole,
@@ -36,6 +37,7 @@ export class SessionFinalizeService {
     private readonly prisma: PrismaService,
     private readonly dailyJournal: DailyJournalService,
     private readonly cls: ClsService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   @Cron('*/2 * * * *') // every 2 min — ~2 min latency vs the frontend timer
@@ -142,6 +144,9 @@ export class SessionFinalizeService {
           changeType: VerificationChangeType.SYSTEM_CRON_FINALIZE,
           discrepancyFlag: false,
           rationale: 'Cron flipped singleReadingFinalized after buffer window elapsed',
+          rationaleEncrypted: this.encryption.encryptNullable(
+            'Cron flipped singleReadingFinalized after buffer window elapsed',
+          ),
           practiceContext: null,
         },
       })

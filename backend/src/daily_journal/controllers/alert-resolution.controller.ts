@@ -85,8 +85,33 @@ export class AlertResolutionController {
     )
   }
 
+  /**
+   * V-01 (Humaira assessment 2026-07-14, CRITICAL) — this handler used to take
+   * no actor at all: `audit(@Param('id') id)` → `buildAuditPayload(id)`, guarded
+   * only by the class-level @Roles. Any staff account in that role set could
+   * enumerate alertIds and read the full 15-field audit payload (BP readings,
+   * patient/caregiver/physician messages, resolution rationale) for patients at
+   * other practices — the audit endpoint itself became the exfiltration channel.
+   *
+   * The scope check lives in the service (like `acknowledge`/`resolve` above)
+   * rather than here: `buildAuditPayload` already loads the alert, so it can
+   * gate on `alert.userId` with no extra query. HEALPLACE_OPS still reads
+   * everything — `isUnscoped()` short-circuits them, per the READ note above.
+   */
   @Get(':id/audit')
-  audit(@Param('id') id: string) {
-    return this.service.buildAuditPayload(id)
+  audit(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @ActiveContext() ctx: { practiceId: string | null },
+  ) {
+    const { id: actorId, roles } = req.user as {
+      id: string
+      roles: UserRole[]
+    }
+    return this.service.buildAuditPayload(id, {
+      id: actorId,
+      roles,
+      activePracticeId: ctx.practiceId,
+    })
   }
 }

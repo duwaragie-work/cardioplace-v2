@@ -1,8 +1,10 @@
 model Conversation {
   id          String                      @id @default(uuid())
   sessionId   String
-  userMessage String
-  aiSummary   String
+  userMessage          String
+  userMessageEncrypted String?
+  aiSummary            String
+  aiSummaryEncrypted   String?
   source      String                      @default("text")
   embedding   Unsupported("vector(384)")?
   timestamp   DateTime                    @default(now())

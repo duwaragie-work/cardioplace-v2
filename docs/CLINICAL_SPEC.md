@@ -1109,7 +1109,7 @@ This appendix enumerates every rule the engine can fire. Adding a rule requires 
 | `RULE_AFIB_HR_HIGH` / `RULE_AFIB_HR_LOW` | BP_LEVEL_1_HIGH / LOW | AFib + HR >110 / <50 |
 | `RULE_TACHY_HR` | BP_LEVEL_1_HIGH | `hasTachycardia` + HR >100 with prior reading >100 within 8h, OR HR >130 single-reading (Cluster 6 Q5) |
 | `RULE_BRADY_HR_SYMPTOMATIC` | BP_LEVEL_1_LOW | HR 40–49 + symptom + (`hasBradycardia` ∥ β-blocker) |
-| `RULE_BRADY_HR_ASYMPTOMATIC` | BP_LEVEL_1_LOW | Legacy — superseded by `RULE_BRADY_ABSOLUTE` Tier 1. Retained as enum entry; not currently fired. |
+| `RULE_BRADY_HR_ASYMPTOMATIC` | BP_LEVEL_1_LOW | **Removed from code 2026-07-16** (N-7 triage). Superseded by `RULE_BRADY_ABSOLUTE` Tier 1 (Manisha 2026-05-10). Was previously "retained as enum entry, not currently fired" — the enum entry and registry entry are now gone, so nothing can emit it. No clinical gap: HR <40 → `RULE_BRADY_ABSOLUTE`; asymptomatic HR 40–49 → `RULE_BRADY_SURVEILLANCE` (Q1, signed off 2026-05-18, §5.6). ⚠️ Deleted on the strength of the 2026-05-10 supersession, **not** a fresh sign-off — flag to Manisha for confirmation. |
 | `RULE_ORTHOSTATIC_HYPOTENSION` | BP_LEVEL_1_LOW | Dizziness + SBP drop ≥15 from prior — Cluster 6 |
 | `RULE_BETA_BLOCKER_DIZZINESS` | TIER_3_INFO | Dizziness + SBP <100 + β-blocker — Cluster 6 |
 | `RULE_AFIB_PALPITATIONS` | BP_LEVEL_1_LOW | Palpitations + AFib — Cluster 6 |

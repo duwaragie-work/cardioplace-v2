@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { DailyJournalModule } from '../daily_journal/daily_journal.module.js'
 import { AuditExceptionReportService } from './audit-exception-report.service.js'
 import { AuditExceptionWriter } from './audit-exception-report/audit-exception-writer.js'
+import { RealtimeFailedAuthService } from './audit-exception-report/realtime-failed-auth.service.js'
 import { DailyReminderService } from './daily-reminder.service.js'
 import { ReminderDispatcherService } from './daily-reminder/reminder-dispatcher.service.js'
 import { MedicationHoldEscalationService } from './medication-hold-escalation.service.js'
@@ -17,6 +18,9 @@ import { SessionFinalizeService } from './session-finalize.service.js'
     // N7 (2026-07-11) — audit exception-report cron + writer.
     AuditExceptionReportService,
     AuditExceptionWriter,
+    // Real-time repeated-failed-auth paging (2026-07-15) — @OnEvent evaluator
+    // that pages ops the moment a burst is detected, without waiting for 03:00.
+    RealtimeFailedAuthService,
     // N2 (2026-07-13) — daily reminder cron + dispatcher. Replaces the
     // deleted GapAlertService (N3).
     DailyReminderService,
@@ -28,6 +32,7 @@ import { SessionFinalizeService } from './session-finalize.service.js'
     SessionFinalizeService,
     AuditExceptionReportService,
     AuditExceptionWriter,
+    RealtimeFailedAuthService,
     DailyReminderService,
     ReminderDispatcherService,
   ],

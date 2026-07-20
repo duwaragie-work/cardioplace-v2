@@ -27,6 +27,19 @@ describe('Auth OTP Flow (e2e)', () => {
   const testEmail = 'test-otp@example.com' // Test email
 
   beforeAll(async () => {
+    // V-03 (2026-07-17) — auth endpoints are now rate limited (5/60s per
+    // ip:email on otp/send + otp/verify). This suite drives ~15 calls against
+    // ONE shared testEmail from one host, and deliberately loops otp/verify to
+    // prove the OtpCode lockout — so the limiter would trip mid-suite. The
+    // beforeEach below cannot help: it truncates tables, but the throttler
+    // counts in an in-memory Map that no DB cleanup can reach.
+    //
+    // The flag is double-gated and ignored when NODE_ENV=production
+    // (auth-throttler.guard.ts), so it cannot weaken a real deployment. The
+    // limiter itself is proven by the "V-03 rate limiting" block at the bottom
+    // of this file, which turns it back on for its own unique email.
+    process.env.AUTH_THROTTLE_DISABLED = '1'
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile()
@@ -37,6 +50,7 @@ describe('Auth OTP Flow (e2e)', () => {
   }, 30000) // 30 second timeout for app initialization
 
   afterAll(async () => {
+    delete process.env.AUTH_THROTTLE_DISABLED
     await app.close()
   })
 
@@ -103,8 +117,27 @@ describe('Auth OTP Flow (e2e)', () => {
       expect(authLog?.success).toBe(true)
     })
 
-    it('should replace existing OTP when sending new one', async () => {
-      // Send first OTP
+    /**
+     * Rewritten 2026-07-17. This was titled "should replace existing OTP when
+     * sending new one" and was BROKEN two ways — it contradicted the test at
+     * "should prevent sending OTP twice within 60 seconds" below, which sends
+     * the same two requests and (correctly) expects the second to 400:
+     *
+     *  1. UNREACHABLE — it slept 100 ms and expected the second send to 200,
+     *     but the cooldown rejects any send within 60 s of the last OTP for
+     *     that email (auth.service.ts, "Please wait 60 seconds…"). The second
+     *     send always 400s, so the test could never pass. Nobody noticed: this
+     *     suite is not in CI (only text-chat / voice-chat e2e are).
+     *  2. WRONG PREMISE — nothing is "replaced". `sendOtp` only INSERTs; no
+     *     delete of prior rows exists. `verifyOtp` simply takes the newest via
+     *     `orderBy: { createdAt: 'desc' }` and older rows linger until they
+     *     expire. The old assertion also used `findFirst` with NO `orderBy`,
+     *     so which row it read was arbitrary.
+     *
+     * Now tests the behaviour that actually exists: past the cooldown, a fresh
+     * send adds a NEWER code, and the newest is the one verification will use.
+     */
+    it('a new OTP supersedes the previous one once the cooldown has passed', async () => {
       await request(app.getHttpServer())
         .post('/v2/auth/otp/send')
         .send({ email: testEmail })
@@ -112,29 +145,36 @@ describe('Auth OTP Flow (e2e)', () => {
 
       const firstOtp = await prisma.otpCode.findFirst({
         where: { email: testEmail },
+        orderBy: { createdAt: 'desc' },
+      })
+      expect(firstOtp).toBeDefined()
+
+      // Age the first code past the 60s cooldown instead of sleeping 60s. This
+      // makes the real behaviour reachable; it does not weaken the check — the
+      // cooldown itself is asserted by its own test below.
+      await prisma.otpCode.update({
+        where: { id: firstOtp!.id },
+        data: { createdAt: new Date(Date.now() - 61_000) },
       })
 
-      // Wait a moment to ensure different timestamps
-      await new Promise((resolve) => setTimeout(resolve, 100))
-
-      // Send second OTP
       await request(app.getHttpServer())
         .post('/v2/auth/otp/send')
         .send({ email: testEmail })
         .expect(200)
 
-      const secondOtp = await prisma.otpCode.findFirst({
+      // Newest wins — this is the row verifyOtp will pick.
+      const newest = await prisma.otpCode.findFirst({
         where: { email: testEmail },
+        orderBy: { createdAt: 'desc' },
       })
 
-      // Should be replaced, not duplicated
-      expect(secondOtp).toBeDefined()
-      expect(secondOtp?.codeHash).not.toBe(firstOtp?.codeHash)
-      expect(secondOtp?.createdAt.getTime()).toBeGreaterThan(
+      expect(newest).toBeDefined()
+      expect(newest?.id).not.toBe(firstOtp!.id)
+      expect(newest?.codeHash).not.toBe(firstOtp!.codeHash)
+      expect(newest!.createdAt.getTime()).toBeGreaterThan(
         firstOtp!.createdAt.getTime(),
       )
 
-      // Should have 2 AuthLog entries
       const authLogs = await prisma.authLog.findMany({
         where: {
           identifier: testEmail,
@@ -319,6 +359,87 @@ describe('Auth OTP Flow (e2e)', () => {
         .expect(400)
 
       expect(response.body.message).toContain('60 seconds')
+    })
+  })
+  /**
+   * V-03 (Humaira assessment 2026-07-14, CRITICAL) — "Authentication endpoints
+   * have no rate limiting (throttler configured but never enforced)".
+   *
+   * The rest of this suite runs with AUTH_THROTTLE_DISABLED=1 (see beforeAll),
+   * so these tests re-arm the limiter for themselves. Each uses its OWN email:
+   * buckets are keyed ip:email, so a dedicated address both isolates this block
+   * from the shared testEmail and keeps its own two tests from colliding.
+   */
+  describe('V-03 rate limiting', () => {
+    beforeAll(() => {
+      delete process.env.AUTH_THROTTLE_DISABLED
+    })
+    afterAll(() => {
+      process.env.AUTH_THROTTLE_DISABLED = '1'
+    })
+
+    // Fresh address per run so a previous run's in-memory bucket (which no DB
+    // cleanup can clear) cannot make this pass or fail spuriously.
+    const throttleEmail = () => `throttle-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`
+
+    it('otp/verify → 429 once the 5/60s budget is spent', async () => {
+      const email = throttleEmail()
+
+      // 5 allowed. They 400/401 on their own merits (no OTP exists) — the point
+      // is only that they are not rejected BY THE LIMITER.
+      for (let i = 0; i < 5; i++) {
+        const res = await request(app.getHttpServer())
+          .post('/v2/auth/otp/verify')
+          .send({ email, otp: '000000', deviceId: 'throttle-test-device' })
+        expect(res.status).not.toBe(429)
+      }
+
+      // 6th — this is the assertion the whole finding is about.
+      await request(app.getHttpServer())
+        .post('/v2/auth/otp/verify')
+        .send({ email, otp: '000000', deviceId: 'throttle-test-device' })
+        .expect(429)
+    })
+
+    it('otp/send → 429 once the 5/60s budget is spent', async () => {
+      const email = throttleEmail()
+
+      // The 60s per-email cooldown 400s sends 2..5; that is a different control
+      // and does not consume the throttler differently — every request counts.
+      for (let i = 0; i < 5; i++) {
+        const res = await request(app.getHttpServer())
+          .post('/v2/auth/otp/send')
+          .send({ email })
+        expect(res.status).not.toBe(429)
+      }
+
+      await request(app.getHttpServer())
+        .post('/v2/auth/otp/send')
+        .send({ email })
+        .expect(429)
+    })
+
+    it('a DIFFERENT email is a different bucket (keying is ip:email, not ip)', async () => {
+      const victim = throttleEmail()
+
+      for (let i = 0; i < 6; i++) {
+        await request(app.getHttpServer())
+          .post('/v2/auth/otp/verify')
+          .send({ email: victim, otp: '000000', deviceId: 'throttle-test-device' })
+      }
+      // victim is now throttled.
+      await request(app.getHttpServer())
+        .post('/v2/auth/otp/verify')
+        .send({ email: victim, otp: '000000', deviceId: 'throttle-test-device' })
+        .expect(429)
+
+      // A bystander on the same IP must still be able to sign in — otherwise
+      // one attacker could lock out an entire NAT'd clinic.
+      const bystander = throttleEmail()
+      const res = await request(app.getHttpServer())
+        .post('/v2/auth/otp/verify')
+        .send({ email: bystander, otp: '000000', deviceId: 'throttle-test-device' })
+      expect(res.status).not.toBe(429)
     })
   })
 })

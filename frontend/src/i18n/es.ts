@@ -987,7 +987,9 @@ const es: Record<TranslationKey, string> = {
   // Support — pagina publica "no puedo iniciar sesion" (Fix 12).
   'support.locked.title': '¿Necesita ayuda para iniciar sesión?',
   'support.locked.subtitle': 'Cuéntenos qué ocurre y nuestro equipo se pondrá en contacto para verificar su identidad antes de realizar cambios en la cuenta.',
-  'support.locked.statusBanner': 'También puede consultar el estado de una solicitud existente con el enlace de su correo de confirmación.',
+  // N-1 (2026-07-14 triage) — see en.ts: the confirmation email carries a
+  // ticket number and a reply address, not a link.
+  'support.locked.statusBanner': '¿Ya envió una solicitud? Su correo de confirmación incluye su número de ticket: responda a ese correo y añadiremos cualquier novedad al mismo ticket.',
   'support.locked.email': 'Su correo electrónico de la cuenta',
   'support.locked.description': '¿Qué ocurre? (p. ej. perdí mi aplicación de autenticación y los códigos de recuperación)',
   'support.locked.phone': 'Teléfono de contacto (opcional)',

@@ -1541,11 +1541,16 @@ export async function executeJournalTool(
           // compared against "17:36" (UTC) — every delete bounced with
           // "0 readings removed / 1 could not be deleted".
           const tz = ctx.timezone ?? 'America/New_York'
-          console.log(`[delete_checkin] Found ${entries.length} entries, looking for date=${argDate} time=${origTime} (tz=${tz})`)
-          for (const e of entries) {
-            const local = tzWallclockFromIso(e.measuredAt, tz)
-            console.log(`  entry: date=${local.date} time=${local.time} id=${e.id}`)
-          }
+          // V-05: this loop printed EVERY one of the patient's readings with
+          // its local wall-clock time — dates tied to an individual are Safe
+          // Harbor identifiers, and the enumeration reveals their whole
+          // monitoring cadence. The count + the id list keep the delete
+          // dispatcher debuggable; ids resolve against the audited DB.
+          console.log(
+            `[delete_checkin] Found ${entries.length} entries (tz=${tz}), ids=[${entries
+              .map((e: { id: string }) => e.id)
+              .join(',')}]`,
+          )
 
           const match = entries.find((e: any) => {
             const local = tzWallclockFromIso(e.measuredAt, tz)

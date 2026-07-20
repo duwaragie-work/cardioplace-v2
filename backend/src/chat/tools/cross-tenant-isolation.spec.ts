@@ -36,6 +36,8 @@ import { VoiceToolsService } from '../../voice/tools/voice-tools.service.js'
 import { AlertEngineService } from '../../daily_journal/services/alert-engine.service.js'
 import { IntakeStatusService } from '../../intake/intake-status.service.js'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import { EncryptionService } from '../../common/encryption.service.js'
+import { encryptionMock } from '../../common/test/encryption.mock.js'
 import {
   executeJournalTool,
   getJournalToolDeclarations,
@@ -73,6 +75,7 @@ describe('Tool dispatcher userId guard', () => {
         { provide: IntakeStatusService, useValue: { getStatus: jest.fn() } },
         { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -118,6 +121,7 @@ describe('userId source — LLM args never override dispatch context', () => {
         { provide: IntakeStatusService, useValue: { getStatus: jest.fn() } },
         { provide: PrismaService, useValue: { emergencyEvent: { create: jest.fn() } } },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     const svc = moduleRef.get(VoiceToolsService)
@@ -199,6 +203,7 @@ describe('ConversationHistoryService.getConversationHistory ownership guard', ()
         { provide: PrismaService, useValue: prisma },
         { provide: GeminiService, useValue: {} },
         { provide: EmbeddingService, useValue: { getEmbeddings: jest.fn() } },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     svc = moduleRef.get(ConversationHistoryService)

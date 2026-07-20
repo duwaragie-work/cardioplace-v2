@@ -11,6 +11,8 @@ import { EntrySource, DelayBand, Prisma } from '../generated/prisma/client.js';
 import { DailyJournalService, computeDelayBand } from './daily_journal.service.js';
 import { JOURNAL_EVENTS } from './constants/events.js';
 import { SESSION_WINDOW_MS } from '@cardioplace/shared';
+import { EncryptionService } from '../common/encryption.service.js';
+import { encryptionMock } from '../common/test/encryption.mock.js';
 
 const mockPrisma = {
   journalEntry: {
@@ -48,6 +50,7 @@ describe('DailyJournalService', () => {
         DailyJournalService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EventEmitter2, useValue: mockEventEmitter },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile();
 

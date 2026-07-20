@@ -200,13 +200,25 @@ export class ProviderController {
   }
 
   @Patch('alerts/:alertId/acknowledge')
-  acknowledgeAlert(
+  async acknowledgeAlert(
     @Req() req: AuthedReq,
     @Param('alertId') alertId: string,
   ) {
-    // Phase 1 polish Finding 1+3 — thread the acting clinician so the ack
-    // writes DeviationAlert.acknowledgedByUserId + propagates the actor to
-    // the EscalationEvent rows (was: anonymous, no propagation).
+    // V-04 (Humaira assessment 2026-07-14, HIGH) — this WRITE path had no scope
+    // check while its read sibling getAlertDetail (directly above) did. Any
+    // authenticated provider could acknowledge another practice's alert: it
+    // makes an unaddressed patient-safety alert look handled AND stamps their
+    // own id as the actor, poisoning the escalation audit trail.
+    //
+    // "Phase 1 polish Finding 1+3" threaded req.user.id through for
+    // attribution — but attribution is not authorization; the gate below is.
+    // Same shape as getAlertDetail, incl. 404-before-403 so ids don't leak.
+    const alert = await this.prisma.deviationAlert.findUnique({
+      where: { id: alertId },
+      select: { userId: true },
+    })
+    if (!alert) throw new NotFoundException('Alert not found')
+    await this.assertCanViewPatient(req, alert.userId)
     return this.providerService.acknowledgeAlert(alertId, req.user.id)
   }
 

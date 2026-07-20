@@ -6,6 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import { situationHash } from '../../common/logging/log-redact.js'
 import { Type } from '@google/genai'
 import type { FunctionDeclaration } from '@google/genai'
 import { DailyJournalService } from '../../daily_journal/daily_journal.service.js'
@@ -535,7 +536,8 @@ export class VoiceToolsService {
     const sbpProvided = sbp > 0
     const dbpProvided = dbp > 0
     if (sbpProvided !== dbpProvided) {
-      this.logger.warn(`Asymmetric BP rejected: sbp=${sbp} dbp=${dbp} — likely hallucination`)
+      // V-05: the rejection reason is the diagnostic; the values are PHI.
+      this.logger.warn('Asymmetric BP rejected — likely hallucination')
       return {
         llmResponse: {
           saved: false,
@@ -549,7 +551,8 @@ export class VoiceToolsService {
       }
     }
     if (sbpProvided && dbpProvided && (sbp < 60 || sbp > 250 || dbp < 40 || dbp > 150)) {
-      this.logger.warn(`BP out of range: ${sbp}/${dbp} — rejecting`)
+      // V-05 — see above; the values are PHI, the rejection is the signal.
+      this.logger.warn('BP out of range — rejecting')
       return {
         llmResponse: {
           saved: false,
@@ -565,7 +568,8 @@ export class VoiceToolsService {
     // re-ask instead of the model retrying the same flipped values.
     // Clinical copy — placeholder pending Dr. Singal sign-off.
     if (sbpProvided && dbpProvided && dbp >= sbp) {
-      this.logger.warn(`BP transposed: ${sbp}/${dbp} (dbp >= sbp) — re-ask`)
+      // V-05 — see above.
+      this.logger.warn('BP transposed (dbp >= sbp) — re-ask')
       return {
         llmResponse: {
           saved: false,
@@ -1827,8 +1831,12 @@ export class VoiceToolsService {
       }
       this.eventEmitter.emit(EMERGENCY_EVENTS.FLAGGED, payload)
     } catch (err) {
+      // V-05: last-resort ops record of a life-safety event — the free text is
+      // replaced by a stable digest plus the identifier that drives the actual
+      // response, not deleted. The narrative stays recoverable from the
+      // persisted voice transcript for this user/session.
       this.logger.error(
-        `[SECURITY-CRITICAL] voice emergency persistence failed userId=${ctx.userId} situation="${situation}" error=${
+        `[SECURITY-CRITICAL] voice emergency persistence failed userId=${ctx.userId} situation=${situationHash(situation)} error=${
           (err as Error).message ?? 'unknown'
         }`,
       )

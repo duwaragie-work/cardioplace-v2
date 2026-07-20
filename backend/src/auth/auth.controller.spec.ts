@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals'
 import { BadRequestException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { ThrottlerModule } from '@nestjs/throttler'
 import { Test, TestingModule } from '@nestjs/testing'
 import type { Request, Response } from 'express'
 import { AuthController } from './auth.controller.js'
@@ -13,6 +14,13 @@ describe('AuthController - OTP device ID enforcement', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
+      // V-03 (2026-07-17) — AuthController is now @UseGuards(AuthThrottlerGuard),
+      // so building it requires the throttler's DI (THROTTLER:MODULE_OPTIONS +
+      // ThrottlerStorage). Mirror app.module.ts's real config rather than
+      // stubbing the guard out: these tests then exercise the controller as it
+      // is actually mounted. The limits are irrelevant here — each test makes
+      // one request, far under 20/60s.
+      imports: [ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 20 }])],
       controllers: [AuthController],
       providers: [
         {

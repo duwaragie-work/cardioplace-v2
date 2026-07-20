@@ -223,10 +223,20 @@ describe('AccessLog PHI audit (e2e)', () => {
 
   // ── Regression guard: real authenticated HTTP request → actorType=USER ──────
   // This is the case my other tests miss: they set CLS manually via asActor().
-  // A real request must flow JwtAuthGuard (sets req.user) → ClsInterceptor
-  // (reads req.user) → handler → Prisma. If CLS is mounted as MIDDLEWARE it runs
-  // before the guard, req.user is undefined, and the handler's PatientProfile
-  // write is mis-logged as SYSTEM_ACTOR. Mounted as an interceptor, it's USER.
+  // A real request must flow JwtAuthGuard → handler → Prisma with the actor
+  // surviving the whole way.
+  //
+  // ⚠️ Updated 2026-07-17 — this comment used to say CLS "must" be an
+  // interceptor because middleware runs before the guard, leaving req.user
+  // undefined and mis-logging the write as SYSTEM_ACTOR. N-3 (2026-07-13) then
+  // deliberately moved CLS to MIDDLEWARE (cls.module.ts:42-44,
+  // `middleware: { mount: true }`) precisely so a context exists before the
+  // guards run — and removed the req.user dependency instead: JwtStrategy
+  // stamps the actor from the verified token payload (jwt.strategy.ts:107-109,
+  // `cls.set('actorId', payload.sub)`) before it reads User. So the old
+  // either/or was a false dilemma, and the warning now describes the shipped
+  // architecture as if it were the bug. The assertion below is unchanged and
+  // still the right guard.
   // PatientProfile is only touched by the handler here (the guard's validate()
   // reads User, not PatientProfile), so a USER-attributed PatientProfile row is
   // unambiguous proof the actor propagated through the full pipeline.

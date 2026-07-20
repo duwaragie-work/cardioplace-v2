@@ -3,6 +3,7 @@ import { CrossPracticeAccessDetector } from './cross-practice-access.detector.js
 import { DroppedAuditWritesDetector } from './dropped-audit-writes.detector.js'
 import { OffHoursPhiAccessDetector } from './off-hours-phi-access.detector.js'
 import { RepeatedFailedAuthDetector } from './repeated-failed-auth.detector.js'
+import { UnattributedAccessLogDetector } from './unattributed-access-log.detector.js'
 import { UnattributedSystemDisclosureDetector } from './unattributed-system-disclosure.detector.js'
 import type { ExceptionDetector } from '../detector.types.js'
 
@@ -25,4 +26,5 @@ export const ALL_DETECTORS: ExceptionDetector[] = [
   new RepeatedFailedAuthDetector(),
   new DroppedAuditWritesDetector(),
   new UnattributedSystemDisclosureDetector(),
+  new UnattributedAccessLogDetector(),
 ]

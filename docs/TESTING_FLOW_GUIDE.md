@@ -419,7 +419,7 @@ Rule engine (`alert-engine.service.ts`) runs in strict pipeline order. Possible 
 | AFib + HR <50 | `RULE_AFIB_HR_LOW` |
 | Tachycardia + HR >100 AND prior reading also >100 | `RULE_TACHY_HR` |
 | Bradycardia + HR <50 symptomatic | `RULE_BRADY_HR_SYMPTOMATIC` |
-| Bradycardia + HR <40 asymptomatic | `RULE_BRADY_HR_ASYMPTOMATIC` |
+| Bradycardia + HR <40 asymptomatic | `RULE_BRADY_ABSOLUTE` |
 | Bradycardia + HR 50–60 + beta-blocker in contextMeds | suppressed, no alert |
 | Pulse pressure >60 | `RULE_PULSE_PRESSURE_WIDE` `TIER_3_INFO` (rides as annotation on primary if any) |
 | HCM + vasodilator / nitrate / loop-diuretic in meds | `RULE_HCM_VASODILATOR` `TIER_3_INFO` |

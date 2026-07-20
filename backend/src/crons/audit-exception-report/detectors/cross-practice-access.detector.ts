@@ -1,6 +1,7 @@
 import {
   AuditExceptionDetectorId,
   AuditExceptionSeverity,
+  AuditExceptionStatus,
   UserRole,
 } from '../../../generated/prisma/enums.js'
 import type {
@@ -21,9 +22,12 @@ import type {
  *   • SUPER_ADMIN — unscoped by policy. Never fire.
  *   • MEDICAL_DIRECTOR — practice-scoped via PracticeMedicalDirector.
  *     Fire ONLY when the target's practice isn't in the MD's set.
- *   • HEALPLACE_OPS — cross-practice by design, BUT every action still
- *     needs justification. Fire and tag evidence.role='HEALPLACE_OPS' so
- *     triage can filter noise.
+ *   • HEALPLACE_OPS — cross-practice by design (docs/ACCESS_SCOPE.md §5: ops
+ *     handles debugging, escalation handoff and audit follow-up across every
+ *     practice). Still recorded for the compliance trail, but N-5 (Duwaragie
+ *     2026-07-14 triage) downgraded it to MEDIUM and auto-ACKNOWLEDGED on
+ *     create: firing it HIGH-open buried the reviewer's worklist under
+ *     expected, by-design activity, which trains people to ignore the queue.
  *   • COORDINATOR — clinical-data access forbidden by policy. Fire and
  *     bump severity to CRITICAL — coordinator + PHI is a role-boundary
  *     violation.
@@ -35,7 +39,9 @@ import type {
  * A follow-up iteration can extend; MVP captures the highest-signal case
  * (looking at a patient chart across a practice line).
  *
- * Severity: HIGH by default, CRITICAL for COORDINATOR + any clinical read.
+ * Severity: HIGH by default; CRITICAL for COORDINATOR + any clinical read;
+ * MEDIUM + auto-ACKNOWLEDGED for HEALPLACE_OPS (N-5, above). MEDIUM is the
+ * floor — AuditExceptionSeverity is MEDIUM | HIGH | CRITICAL, there is no LOW.
  * One candidate per unique (actorId, targetPatientUserId) — repeated hits
  * on the same pair collapse to a single row for the reviewer.
  */
@@ -163,16 +169,33 @@ export class CrossPracticeAccessDetector implements ExceptionDetector {
         continue
       }
 
-      // Ops is cross-practice by design; still fire with a role tag so
-      // triage can filter noise.
+      // Ops is cross-practice by design; still record the audit row so
+      // HIPAA has the trail, but N-5 (Duwaragie 2026-07-14 triage) — file
+      // the row at MEDIUM + already-ACKNOWLEDGED so it never enters the
+      // worklist's OPEN pane. Pre-fix, every ops access filed HIGH-open and
+      // drowned the reviewer's queue with rubber-stamp work. See
+      // ACCESS_SCOPE.md §5 ("HEALPLACE_OPS cross-practice visibility
+      // intentionally") for the policy backing the auto-ack.
+      //
+      // MEDIUM, not LOW: AuditExceptionSeverity is MEDIUM | HIGH | CRITICAL
+      // (audit_exception.prisma:117-121) — there is no LOW, so MEDIUM is the
+      // floor. This comment said "LOW severity" until 2026-07-17; the code was
+      // always right, the word never existed.
       if (isOps) {
         out.push(
-          candidate(p, {
-            role: 'HEALPLACE_OPS',
-            reason: 'ops accessed patient PHI (cross-practice by design; audit for justification)',
-            actorPractices: [...actorPractices],
+          candidate(
+            p,
+            {
+              role: 'HEALPLACE_OPS',
+              reason:
+                'ops accessed patient PHI (cross-practice by design; auto-acknowledged for compliance-trail retention)',
+              actorPractices: [...actorPractices],
+              targetPractice,
+            },
+            AuditExceptionSeverity.MEDIUM,
             targetPractice,
-          }, undefined, targetPractice),
+            AuditExceptionStatus.ACKNOWLEDGED,
+          ),
         )
         continue
       }
@@ -198,6 +221,7 @@ function candidate(
   extra: Record<string, unknown>,
   severityOverride: AuditExceptionSeverity | undefined,
   practiceContext: string,
+  initialStatus?: AuditExceptionStatus,
 ): ExceptionCandidate {
   return {
     subjectKey: `actor:${pair.actorId}::target:${pair.targetId}`,
@@ -212,5 +236,6 @@ function candidate(
     },
     practiceContext,
     severityOverride,
+    initialStatus,
   }
 }
