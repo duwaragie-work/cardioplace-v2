@@ -46,17 +46,22 @@ function firstName(fullName: string | null | undefined, fallback: string): strin
 const IDEMPOTENCY_HOURS = 20
 
 /** Channels every patient receives by default, per spec §N2: "in-app
- *  (DASHBOARD) + PUSH + EMAIL". SMS is a spec-defined channel on the
- *  ReminderChannel type but is NOT included here — Lakshitha's L5 wires
- *  SMS in with its own gates (phone, consent, opt-in, feature flag),
- *  either by extending this array conditionally per-patient at the
- *  dispatch call site or by adding SMS to the channel list once the
- *  L4 enum + L5 send logic land. Never re-add SMS to the default fan-out
- *  without those gates — SMS to a non-consenting patient is a TCPA breach. */
+ *  (DASHBOARD) + PUSH + EMAIL", plus SMS.
+ *
+ *  SMS being listed here does NOT mean every patient gets texted. Listing it
+ *  only lets the dispatcher REACH its SMS branch; that branch then applies the
+ *  gates L5 requires and returns early unless ALL of them pass:
+ *    flag (SMS_REMINDERS_ENABLED + Twilio creds) → phone on file → smsConsent
+ *    → not smsOptedOut.
+ *  See ReminderDispatcherService.sendSms. A patient with no number or no
+ *  consent is silently skipped, so this can never text a non-consenting
+ *  patient (TCPA). Removing 'SMS' from this array is the clean off-switch and
+ *  affects no other channel. */
 const DEFAULT_REMINDER_CHANNELS: readonly ReminderChannel[] = [
   'DASHBOARD',
   'PUSH',
   'EMAIL',
+  'SMS',
 ] as const
 
 /** Provider-facing gap alert only fans out to DASHBOARD + EMAIL — no push

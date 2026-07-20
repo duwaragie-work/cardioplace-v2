@@ -224,6 +224,12 @@ enum NotificationChannel {
   EMAIL
   PHONE
   DASHBOARD
+  // L4 (2026-07-14) — SMS reminders. Additive 4th channel on the N2 reminder
+  // dispatcher; an SMS Notification row is the §164.528 send record (the body
+  // stored is the PHI-free directional nudge, never the reminder's own copy).
+  // NOTE: `PHONE` above is the escalation ladder's voice-call channel — it is
+  // NOT SMS. Keep them distinct.
+  SMS
 }
 
 enum EscalationLevel {

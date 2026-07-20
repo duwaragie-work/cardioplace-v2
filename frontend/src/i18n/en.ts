@@ -730,6 +730,30 @@ const en = {
   'profile.reminders.saveButton': 'Save',
   'profile.reminders.savingButton': 'Saving…',
   'profile.reminders.cancelButton': 'Cancel',
+  // L3 (2026-07-14) — text reminders (SMS). The consent line is the exact TCPA
+  // wording under counsel review (packet Q3) — do not reword without sign-off.
+  'profile.sms.heading': 'Text reminders',
+  'profile.sms.editHeading': 'Edit text reminders',
+  'profile.sms.phoneLabel': 'Mobile number',
+  'profile.sms.phoneHelp': 'Optional. Include your country code, like +1 555 010 0000.',
+  'profile.sms.phoneInvalid': 'Please enter your number with a country code, like +15550100.',
+  // The checkbox says the ACTION in plain words (≤5th-grade); the required TCPA
+  // disclosures sit under it as fine print. Both together still carry all four
+  // mandated elements — what you agree to, rates, no-health-info, STOP — so the
+  // pair must be reviewed by counsel TOGETHER (packet Q3). The old separate
+  // "sender explainer" line was dropped: it existed only to explain why texts
+  // came from "Healplace" and not "Cardioplace", which is moot now the sender
+  // IS Cardioplace.
+  'profile.sms.consentLabel': 'Text me reminders',
+  'profile.sms.consentFinePrint':
+    'Texts come from Cardioplace. No health information is included. Message rates may apply. Reply STOP anytime.',
+  'profile.sms.optedOutNotice':
+    'You replied STOP, so texts are turned off. Tick the box above to turn them back on.',
+  'profile.sms.statusLabel': 'Text reminders',
+  'profile.sms.statusOn': 'On',
+  'profile.sms.statusOff': 'Off',
+  'profile.sms.statusStopped': 'Stopped (you replied STOP)',
+  'profile.sms.notSet': 'Not set',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'My Readings',
@@ -1050,6 +1074,11 @@ const en = {
   'onboarding.reminders.quietEndLabel': 'Quiet hours end',
   'onboarding.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
   'onboarding.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
+  // L3 (2026-07-14) — optional SMS reminders during onboarding.
+  'onboarding.sms.phoneLabel': 'Mobile number (optional)',
+  'onboarding.sms.phoneAudio': 'What is your mobile number? This is optional — you can leave it blank.',
+  'onboarding.sms.phoneHelp': 'Add it only if you want text reminders. Include your country code, like +1 555 010 0000.',
+  'onboarding.sms.phoneInvalid': 'Please enter your number with a country code, like +15550100 — or leave it blank.',
   'onboarding.reminders.title': 'Set up your reminders',
   'onboarding.reminders.subtitle': 'Choose when we check in with you. You can change this anytime in Settings.',
   'onboarding.stepIndicator': 'Step {n} of 2',

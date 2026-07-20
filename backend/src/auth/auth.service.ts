@@ -25,6 +25,7 @@ import {
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { writeAuditWithRetry } from '../common/audit/write-with-retry.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import { DisplayIdService } from '../users/display-id.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
@@ -315,6 +316,9 @@ export class AuthService {
     private mfaService: MfaService,
     private webAuthnService: WebAuthnService,
     private displayIdService: DisplayIdService,
+    // L3 (2026-07-14) — encrypts User.phoneNumber at rest (same AES-256-GCM
+    // envelope as the MFA TOTP secret). CommonModule is @Global.
+    private encryption: EncryptionService,
   ) {}
 
   /**
@@ -3344,6 +3348,32 @@ export class AuthService {
       patch.quietHoursStart = dto.quietHoursStart
     if (dto.quietHoursEnd !== undefined) patch.quietHoursEnd = dto.quietHoursEnd
 
+    // L3 (2026-07-14) — SMS reminders.
+    if (dto.phoneNumber !== undefined) {
+      if (dto.phoneNumber === null || dto.phoneNumber === '') {
+        // Clearing the number MUST also revoke consent — keeping a consent
+        // record for a number we no longer hold would be a false TCPA record,
+        // and a later re-entry has to re-consent explicitly.
+        patch.phoneNumber = null
+        patch.smsConsent = false
+        patch.smsConsentAt = null
+        patch.smsConsentMethod = null
+      } else {
+        // Encrypted at rest (AES-256-GCM envelope) — same treatment as the MFA
+        // TOTP secret. Never stored or logged in plaintext.
+        patch.phoneNumber = this.encryption.encrypt(dto.phoneNumber)
+      }
+    }
+    if (dto.smsConsent !== undefined) {
+      patch.smsConsent = dto.smsConsent
+      // The consent RECORD is server-stamped — a client can never forge the
+      // timestamp/method. Revoking clears it rather than leaving a stale trail.
+      patch.smsConsentAt = dto.smsConsent ? new Date() : null
+      patch.smsConsentMethod = dto.smsConsent ? 'in_app_checkbox' : null
+      // Consenting again after a STOP is an explicit re-opt-in.
+      if (dto.smsConsent) patch.smsOptedOut = false
+    }
+
     return patch
   }
 
@@ -3380,12 +3410,31 @@ export class AuthService {
         reminderTime: true,
         quietHoursStart: true,
         quietHoursEnd: true,
+        // L3 (2026-07-14) — SMS reminders. The patient sees + manages their OWN
+        // number, so it's decrypted below before returning. smsOptedOut is
+        // surfaced (read-only) so Profile can explain why texts stopped after a
+        // STOP reply. smsConsentAt/Method are the compliance record and are
+        // deliberately NOT exposed.
+        phoneNumber: true,
+        smsConsent: true,
+        smsOptedOut: true,
         createdAt: true,
       },
     })
 
     if (!user) {
       throw new NotFoundException('User not found')
+    }
+
+    // Stored as an AES-256-GCM envelope — decrypt for the owner's own profile.
+    // A corrupt/undecryptable value degrades to null rather than 500-ing the
+    // whole profile read.
+    if (user.phoneNumber) {
+      try {
+        user.phoneNumber = this.encryption.decrypt(user.phoneNumber)
+      } catch {
+        user.phoneNumber = null
+      }
     }
 
     // MFA status for the profile "Security" surface. mfaEnabled mirrors the
@@ -3460,6 +3509,14 @@ export class AuthService {
       reminderTime: user.reminderTime,
       quietHoursStart: user.quietHoursStart,
       quietHoursEnd: user.quietHoursEnd,
+      // L1 — SMS reminder prefs. phoneNumber is the DECRYPTED value (see the
+      // envelope decrypt above) and is returned ONLY here, on the owner's own
+      // profile read, so they can see/edit their number. smsConsentAt /
+      // smsConsentMethod stay server-side: they are the TCPA record, not a
+      // client-editable field.
+      phoneNumber: user.phoneNumber,
+      smsConsent: user.smsConsent,
+      smsOptedOut: user.smsOptedOut,
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
       // MFA status (additive) — drives the profile Security pill.

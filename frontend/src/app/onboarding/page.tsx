@@ -9,7 +9,7 @@ import {
   shouldShowOnboardingForUser,
 } from "@/lib/onboarding";
 import { POLICY_VERSION } from "@cardioplace/shared";
-import { CheckCircle2, ShieldCheck, Ban, UserCheck, Lock } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ShieldCheck, Ban, UserCheck, Lock } from "lucide-react";
 import SpinnerIndicator from "@/components/ui/SpinnerIndicator";
 import { useLanguage } from "@/contexts/LanguageContext";
 import LandingHeader from "@/components/cardio/LandingHeader";
@@ -45,6 +45,9 @@ function halfHourSlots(startHour: number, endHour: number, includeHalfAtEnd = tr
 const ONBOARDING_REMINDER_SLOTS = halfHourSlots(6, 21, false);
 // Quiet hours: 00:00 → 23:30 inclusive.
 const ONBOARDING_QUIET_SLOTS = halfHourSlots(0, 23, true);
+// L3 — E.164, mirroring the backend ProfileDto so we fail in the UI rather than
+// round-tripping a 400.
+const SMS_PHONE_RE = /^\+[1-9]\d{7,14}$/;
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -57,6 +60,12 @@ export default function OnboardingPage() {
   const [reminderTime, setReminderTime] = useState("09:00");
   const [quietHoursStart, setQuietHoursStart] = useState("22:00");
   const [quietHoursEnd, setQuietHoursEnd] = useState("07:00");
+  // L3 (2026-07-14) — SMS reminders. Both OPTIONAL: leaving the phone blank is
+  // a valid outcome and the patient still gets in-app + push + email reminders.
+  // Consent is OPT-IN ONLY (starts false, never pre-checked) and the checkbox
+  // is hidden entirely until a number is entered.
+  const [smsPhone, setSmsPhone] = useState("");
+  const [smsConsent, setSmsConsent] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -210,7 +219,23 @@ export default function OnboardingPage() {
   // per product, any Continue counts as onboarded).
   async function handleRemindersContinue() {
     if (isSubmitting) return;
-    const ok = await postProfile({ reminderTime, quietHoursStart, quietHoursEnd });
+    // L3 — phone is optional; only send it when the patient typed a valid one.
+    // Consent can never travel without a number (it'd be a consent to text
+    // nothing), so it's forced false when the field is blank.
+    const phone = smsPhone.trim();
+    const sendPhone = phone.length > 0 && SMS_PHONE_RE.test(phone);
+    if (phone.length > 0 && !sendPhone) {
+      setError(t('onboarding.sms.phoneInvalid'));
+      return;
+    }
+    const ok = await postProfile({
+      reminderTime,
+      quietHoursStart,
+      quietHoursEnd,
+      ...(sendPhone
+        ? { phoneNumber: phone, smsConsent }
+        : { smsConsent: false }),
+    });
     if (!ok) return;
     finishOnboarded();
   }
@@ -357,12 +382,42 @@ export default function OnboardingPage() {
           {/* Left side - Form */}
           <div className="flex-1 w-full max-w-[400px] md:max-w-105 lg:max-w-130">
 
-            {/* Step indicator (Step 1 of 2 / 2 of 2) */}
+            {/* Back — sits directly ABOVE the step indicator so it reads as
+                "leave this step", the conventional place for a wizard Back.
+                Only step 2 has somewhere to go back to. */}
+            {/* Back + step indicator share ONE row, Back on the left — it reads
+                as "leave this step" without competing with Continue/Skip at the
+                bottom. Only step 2 has somewhere to go back to; step 1 keeps the
+                indicator in its original position (centred on mobile). */}
             <div
-              data-testid="onboarding-step-indicator"
-              className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#7B00E0] text-center md:text-left"
+              className={`mb-2 flex items-center gap-2 ${
+                step === 'reminders' ? 'justify-start' : 'justify-center md:justify-start'
+              }`}
             >
-              {t('onboarding.stepIndicator').replace('{n}', step === 'reminders' ? '2' : '1')}
+              {step === 'reminders' && (
+                <button
+                  type="button"
+                  data-testid="onboarding-reminders-back-btn"
+                  onClick={handleRemindersBack}
+                  disabled={isSubmitting}
+                  aria-label={t('onboarding.back')}
+                  className="inline-flex items-center gap-0.5 text-xs font-semibold uppercase tracking-wider text-[#7B00E0] hover:text-[#6600BC] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  <ChevronLeft aria-hidden="true" className="w-3.5 h-3.5" />
+                  {t('onboarding.back')}
+                </button>
+              )}
+              {step === 'reminders' && (
+                <span aria-hidden="true" className="text-[#e5d9f2] select-none">
+                  |
+                </span>
+              )}
+              <div
+                data-testid="onboarding-step-indicator"
+                className="text-xs font-semibold uppercase tracking-wider text-[#7B00E0]"
+              >
+                {t('onboarding.stepIndicator').replace('{n}', step === 'reminders' ? '2' : '1')}
+              </div>
             </div>
 
             {/* Heading — step-aware */}
@@ -508,6 +563,66 @@ export default function OnboardingPage() {
                   {t('onboarding.reminders.emergencyDisclaimer')}
                 </p>
               </div>
+
+              {/* L3 (2026-07-14) — text reminders. OPTIONAL: no number is a
+                  valid outcome (in-app + push + email still work). Consent is
+                  opt-in only and the checkbox stays hidden until a number is
+                  entered — per spec §2D, never offer consent with no number.
+                  Same `w-full max-w-105` as every other field so the column
+                  stays flush; vertical rhythm comes from the parent space-y-6. */}
+              <div className="w-full max-w-105">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label htmlFor="onboarding-sms-phone" className="block font-semibold text-[#171717] text-xs lg:text-sm">
+                    {t('onboarding.sms.phoneLabel')}
+                  </label>
+                  <AudioButton text={t('onboarding.sms.phoneAudio')} size="sm" />
+                </div>
+                <input
+                  id="onboarding-sms-phone"
+                  data-testid="onboarding-sms-phone"
+                  type="tel"
+                  inputMode="tel"
+                  value={smsPhone}
+                  onChange={(e) => setSmsPhone(e.target.value)}
+                  placeholder="+15550100"
+                  className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                />
+                <p className="mt-2 text-xs text-[#737373] leading-relaxed">
+                  {t('onboarding.sms.phoneHelp')}
+                </p>
+
+                {smsPhone.trim().length > 0 && (
+                  <div className="mt-3 rounded-lg border border-[#e5d9f2] bg-[rgba(243,232,255,0.25)] p-3">
+                    {/* `data-no-min-target` is the sanctioned opt-out of the
+                        global 44px tap-target rule (globals.css §Tap-target
+                        minimum) — that rule is why the box rendered huge. The
+                        WCAG intent is preserved WITHOUT the giant box: the
+                        <label> wraps the control, so the whole padded row
+                        (well over 44px) toggles it. Shaky-handed patients keep
+                        a big hit area; the visual box just matches the text. */}
+                    <label className="flex items-center gap-2 cursor-pointer py-1.5">
+                      <input
+                        type="checkbox"
+                        data-testid="onboarding-sms-consent"
+                        data-no-min-target
+                        checked={smsConsent}
+                        onChange={(e) => setSmsConsent(e.target.checked)}
+                        className="w-3.5 h-3.5 shrink-0 accent-[#7B00E0] cursor-pointer"
+                      />
+                      <span className="text-xs font-medium text-[#171717]">
+                        {t('profile.sms.consentLabel')}
+                      </span>
+                    </label>
+                    {/* Required TCPA disclosures (rates / no-health-info / STOP)
+                        as fine print under the plain-language action above. The
+                        two together carry all four mandated elements — counsel
+                        must review them AS A PAIR (packet Q3). */}
+                    <p className="pl-5.5 text-[0.6875rem] text-[#737373] leading-relaxed">
+                      {t('profile.sms.consentFinePrint')}
+                    </p>
+                  </div>
+                )}
+              </div>
               </>
               )}
 
@@ -565,6 +680,9 @@ export default function OnboardingPage() {
                   >
                     {isSubmitting ? t('common.saving') : t('onboarding.continue')}
                   </button>
+                  {/* Back moved to the top of the step (above the step
+                      indicator) — it reads as "leave this step", not as a
+                      third action competing with Continue/Skip. */}
                   <button
                     type="button"
                     data-testid="onboarding-reminders-skip-btn"
@@ -574,24 +692,20 @@ export default function OnboardingPage() {
                   >
                     {t('onboarding.skip')}
                   </button>
-                  <button
-                    type="button"
-                    data-testid="onboarding-reminders-back-btn"
-                    onClick={handleRemindersBack}
-                    disabled={isSubmitting}
-                    className="w-full text-sm text-[#7B00E0] font-medium cursor-pointer disabled:opacity-50"
-                  >
-                    ← {t('onboarding.back')}
-                  </button>
                 </div>
               )}
               {/* (Privacy note and sign out text removed per design) */}
             </div>
           </div>
 
-          {/* Right side - Info Panel (match register panel) */}
-          <div className="hidden md:flex flex-1 items-center justify-center lg:justify-end">
-            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl md:p-6 lg:p-10 md:w-80 md:h-80 lg:w-110 lg:h-auto flex">
+          {/* Right side - Info Panel (match register panel).
+              `self-center` pins the card to the vertical middle of the row
+              regardless of how tall the form column gets — step 2 is taller
+              than step 1, and without this the card rides with the column.
+              Height is content-driven (no fixed md:h-80) so it stays centred
+              instead of stretching. */}
+          <div className="hidden md:flex flex-1 self-center items-center justify-center lg:justify-end">
+            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl md:p-6 lg:p-10 md:w-80 lg:w-110 flex">
               <div className="space-y-4 my-auto w-full">
                 <div className="flex items-center gap-3">
                   <div className="bg-[#7B00E0] size-10 lg:size-16 rounded-2xl flex items-center justify-center shrink-0">

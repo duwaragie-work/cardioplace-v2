@@ -713,6 +713,21 @@ const es: Record<TranslationKey, string> = {
   'profile.reminders.saveButton': 'Guardar',
   'profile.reminders.savingButton': 'Guardando…',
   'profile.reminders.cancelButton': 'Cancelar',
+  'profile.sms.heading': 'Recordatorios por mensaje de texto',
+  'profile.sms.editHeading': 'Editar recordatorios por mensaje de texto',
+  'profile.sms.phoneLabel': 'Número de móvil',
+  'profile.sms.phoneHelp': 'Opcional. Incluye el código de país, por ejemplo +1 555 010 0000.',
+  'profile.sms.phoneInvalid': 'Escribe tu número con el código de país, por ejemplo +15550100.',
+  'profile.sms.consentLabel': 'Envíenme recordatorios por mensaje',
+  'profile.sms.consentFinePrint':
+    'Los mensajes vienen de Cardioplace. No incluyen información de salud. Pueden aplicarse tarifas de mensajería. Responde STOP en cualquier momento.',
+  'profile.sms.optedOutNotice':
+    'Respondiste STOP, así que los mensajes están desactivados. Marca la casilla de arriba para volver a activarlos.',
+  'profile.sms.statusLabel': 'Recordatorios por texto',
+  'profile.sms.statusOn': 'Activados',
+  'profile.sms.statusOff': 'Desactivados',
+  'profile.sms.statusStopped': 'Detenidos (respondiste STOP)',
+  'profile.sms.notSet': 'Sin configurar',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'Mis Lecturas',
@@ -1019,6 +1034,10 @@ const es: Record<TranslationKey, string> = {
   'onboarding.reminders.quietEndLabel': 'Fin de horas silenciosas',
   'onboarding.reminders.quietHoursHeading': 'Horas silenciosas (sin recordatorios durante este tiempo)',
   'onboarding.reminders.emergencyDisclaimer': 'Las alertas de emergencia siempre llegan, incluso durante las horas silenciosas.',
+  'onboarding.sms.phoneLabel': 'Número de móvil (opcional)',
+  'onboarding.sms.phoneAudio': '¿Cuál es tu número de móvil? Es opcional: puedes dejarlo en blanco.',
+  'onboarding.sms.phoneHelp': 'Agrégalo solo si quieres recordatorios por mensaje de texto. Incluye el código de país, por ejemplo +1 555 010 0000.',
+  'onboarding.sms.phoneInvalid': 'Escribe tu número con el código de país, por ejemplo +15550100, o déjalo en blanco.',
   'onboarding.reminders.title': 'Configura tus recordatorios',
   'onboarding.reminders.subtitle': 'Elige cuándo queremos saber de ti. Puedes cambiarlo en cualquier momento en Ajustes.',
   'onboarding.stepIndicator': 'Paso {n} de 2',
