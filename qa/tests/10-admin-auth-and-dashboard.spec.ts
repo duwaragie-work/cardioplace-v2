@@ -125,8 +125,11 @@ test.describe('Admin app — patient list', () => {
   test('manisha sees the patient list with seeded archetypes', async ({ page }) => {
     await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
     await page.goto(`${ADMIN_BASE_URL}/patients`)
-    // The 5 seed patients should all surface
+    // The seeded named archetypes should all surface. The e2e-onboarding
+    // persona is deliberately un-onboarded (name: null) and cannot surface by
+    // name, so skip nameless entries in this by-name assertion.
     for (const p of Object.values(PATIENTS)) {
+      if (!p.name) continue
       await expect(
         page.getByText(p.name),
         `expected ${p.name} in patient list`,
