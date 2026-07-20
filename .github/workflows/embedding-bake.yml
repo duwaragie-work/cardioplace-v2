@@ -1,0 +1,77 @@
+name: Embedding model bake (offline cold-boot)
+
+# PR #148 bakes the HuggingFace `Xenova/all-MiniLM-L6-v2` embedding model into
+# the backend image so prod boots WITHOUT fetching it from huggingface.co (an
+# HF blip used to leave RAG silently degraded). This job is the regression
+# guard: it rebuilds the image and proves the model both ships inside it AND
+# loads with the network fully cut. If the bake ever breaks — Dockerfile prefetch
+# removed, cache path renamed, transformers bump changes the loader — this fails
+# loudly instead of the offline boot regressing unnoticed in prod.
+#
+# Separate from e2e.yml / llm-tests.yml because it's a full multi-stage image
+# build (slower). Gated on the files that actually affect the bake, so ordinary
+# PRs don't pay the build cost.
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+    paths:
+      - backend/Dockerfile
+      - backend/src/common/embedding.service.ts
+      - backend/package.json
+      - .github/workflows/embedding-bake.yml
+
+# Cancel older runs when a new commit lands on the same PR (matches e2e.yml /
+# llm-tests.yml) — saves runner minutes on fixup pushes.
+concurrency:
+  group: embed-bake-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bake-offline-boot:
+    name: Build image + offline cold-boot the embedding model
+    runs-on: ubuntu-latest
+    # The multi-stage build does a full npm install + backend build + a ~50MB
+    # model download. ~10-15 min cold on a GH runner; generous ceiling so a
+    # slow HF download isn't a false failure.
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Build context is the repo root; Dockerfile lives at backend/Dockerfile.
+      # The builder stage's `node -e` prefetch calls process.exit(1) on any HF
+      # failure, so an unreachable-HF build fails HERE, which is the right place.
+      - name: Build backend image
+        run: docker build -f backend/Dockerfile -t cp-backend:ci .
+
+      # Assert the model actually shipped in the runtime image (Part A step 1).
+      # Expect a populated cache (~87MB) with at least one .onnx weight file.
+      - name: Assert model is baked into the image
+        run: |
+          echo "── /app/.hf-cache contents ──"
+          docker run --rm cp-backend:ci sh -c 'du -sh /app/.hf-cache && find /app/.hf-cache -type f'
+          onnx_count=$(docker run --rm cp-backend:ci sh -c 'find /app/.hf-cache -name "*.onnx" | wc -l')
+          echo "onnx files: $onnx_count"
+          if [ "$onnx_count" -lt 1 ]; then
+            echo "::error::No .onnx model file in /app/.hf-cache — the build-time prefetch did not bake the model."
+            exit 1
+          fi
+
+      # The real guard: load + run the model with ALL network cut (--network
+      # none). Uses the image's baked ENV EMBEDDING_MODEL_CACHE_DIR=/app/.hf-cache
+      # — the exact prod config. A correct offline boot prints "OK dims 384";
+      # anything else (e.g. a huggingface.co fetch → EAI_AGAIN) fails the job.
+      - name: Offline cold-boot the model (--network none)
+        run: |
+          out=$(docker run --rm --network none cp-backend:ci \
+            node -e "import('@huggingface/transformers').then(async m=>{const{pipeline,env}=m;env.cacheDir=process.env.EMBEDDING_MODEL_CACHE_DIR;env.allowLocalModels=false;const p=await pipeline('feature-extraction','Xenova/all-MiniLM-L6-v2');const o=await p('hi',{pooling:'mean',normalize:true});console.log('OK dims',o.data.length)}).catch(e=>{console.error('FAIL',e);process.exit(1)})" 2>&1) || true
+          echo "$out"
+          if ! echo "$out" | grep -q "OK dims 384"; then
+            echo "::error::Offline embedding load failed — the baked model did not load with the network cut. See output above."
+            exit 1
+          fi
+          echo "Offline cold-boot OK — embedding model loaded from the baked cache with no network."
