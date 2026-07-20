@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import { OnEvent } from '@nestjs/event-emitter'
 import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from '../../common/cls/cron-actor.util.js'
+import { redactEmail } from '../../common/logging/log-redact.js'
 import { getSystemPrincipalId } from '../../common/cls/system-principals.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { EmailService } from '../../email/email.service.js'
@@ -76,7 +77,7 @@ export class RealtimeFailedAuthService {
       )
     } catch (err) {
       this.logger.error(
-        `Real-time failed-auth evaluation errored for identifier=${event.identifier}`,
+        `Real-time failed-auth evaluation errored for identifier=${redactEmail(event.identifier)}`,
         err instanceof Error ? err.stack : String(err),
       )
     }
@@ -135,7 +136,7 @@ export class RealtimeFailedAuthService {
     // Belt-and-suspenders: never let the page take down the write path.
     await this.page(identifier, candidate, evidence, isCritical).catch((err) =>
       this.logger.error(
-        `Real-time failed-auth page failed for identifier=${identifier}`,
+        `Real-time failed-auth page failed for identifier=${redactEmail(identifier)}`,
         err instanceof Error ? err.stack : String(err),
       ),
     )

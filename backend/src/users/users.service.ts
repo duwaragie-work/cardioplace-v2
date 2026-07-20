@@ -9,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config'
 import { createHash, randomBytes } from 'crypto'
 import { EmailService } from '../email/email.service.js'
+import { redactEmail } from '../common/logging/log-redact.js'
 import { EMAIL_TEMPLATE_VERSION, activationEmailHtml, roleLabel } from '../email/email-templates.js'
 import type { Prisma } from '../generated/prisma/client.js'
 import { AccountStatus, UserRole } from '../generated/prisma/enums.js'
@@ -1499,7 +1500,7 @@ export class UsersService {
       })
     } catch (err) {
       this.logger.error(
-        `Failed to dispatch activation email to ${params.invite.email}`,
+        `Failed to dispatch activation email to ${redactEmail(params.invite.email)}`,
         err instanceof Error ? err.stack : String(err),
       )
     }

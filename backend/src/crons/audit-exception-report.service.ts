@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
 import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from '../common/cls/cron-actor.util.js'
+import { redactEmail } from '../common/logging/log-redact.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { AuditExceptionWriter } from './audit-exception-report/audit-exception-writer.js'
 import { ALL_DETECTORS } from './audit-exception-report/detectors/index.js'
@@ -90,8 +91,15 @@ export class AuditExceptionReportService {
           } catch (err) {
             // Single-candidate write failure — log and continue. The whole
             // run should still surface as much detection as possible.
+            // V-05 sweep — most subjectKeys are opaque (`actor:<id>`,
+            // `template:<name>`, `kind:<name>`), but the repeated-failed-auth
+            // detector's is `identifier:<login-email>`. Redact only that prefix;
+            // everything else stays readable for triage.
+            const safeSubject = c.subjectKey.startsWith('identifier:')
+              ? `identifier:${redactEmail(c.subjectKey.slice('identifier:'.length))}`
+              : c.subjectKey
             this.logger.error(
-              `AuditException write failed for detector=${detector.id} subject=${c.subjectKey}`,
+              `AuditException write failed for detector=${detector.id} subject=${safeSubject}`,
               err instanceof Error ? err.stack : String(err),
             )
           }

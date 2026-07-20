@@ -1250,8 +1250,13 @@ export class AlertEngineService {
       this.logger,
     )
 
+    // V-05 sweep — `result.reason` embeds raw clinical values (e.g. "confirmatory
+    // reading 180/120 …" for a confirmed emergency). ruleId + tier + userId
+    // already say WHAT fired for WHOM; the narrative + all vitals live on the
+    // DeviationAlert row (`upserted.id`), access-controlled and audited. Log the
+    // row id as the correlation handle instead of the PHI-bearing reason.
     this.logger.log(
-      `Alert fired: ${result.ruleId} (${result.tier}) for user ${session.userId} — ${result.reason}`,
+      `Alert fired: ${result.ruleId} (${result.tier}) for user ${session.userId} — alert=${upserted.id}`,
     )
 
     // Phase/7 — renamed from ANOMALY_TRACKED and enriched with tier + ruleId so
