@@ -5,48 +5,118 @@
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 
+/**
+ * Retry `op` with exponential backoff. Returns true on the first success,
+ * false once all attempts are exhausted. Pure + exported so the retry control
+ * flow is unit-testable without loading ONNX (inject `sleep` to skip real
+ * delays). #3-svc (2026-07-18).
+ */
+export async function retryWithBackoff(
+  op: () => Promise<void>,
+  opts: {
+    attempts: number
+    baseMs: number
+    maxMs: number
+    sleep?: (ms: number) => Promise<void>
+    onRetry?: (attempt: number, err: unknown) => void
+  },
+): Promise<boolean> {
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
+  for (let attempt = 1; attempt <= opts.attempts; attempt++) {
+    try {
+      await op()
+      return true
+    } catch (err) {
+      opts.onRetry?.(attempt, err)
+      if (attempt < opts.attempts) {
+        await sleep(Math.min(opts.maxMs, opts.baseMs * 2 ** (attempt - 1)))
+      }
+    }
+  }
+  return false
+}
+
 @Injectable()
 export class EmbeddingService implements OnModuleInit {
   private readonly logger = new Logger(EmbeddingService.name)
   private extractor: any = null
   private ready = false
+  // Dedup handle: concurrent callers (boot warm + inbound chat) share ONE
+  // in-flight load instead of stampeding the HF Hub. #3-svc.
+  private loadingPromise: Promise<void> | null = null
+
+  private static readonly MAX_LOAD_ATTEMPTS = 5
 
   async onModuleInit() {
     // Kick off model load asynchronously — don't block Nest boot on the
     // first-time HuggingFace download (~50MB). Callers using getEmbeddings()
-    // before the model is ready hit the existing graceful fallback below
-    // (empty vectors + warn), so the chat surface degrades gracefully for
-    // the first ~15s after a cold boot instead of refusing to start.
-    void this.loadModel()
+    // before the model is ready hit the graceful fallback below (empty vectors
+    // + warn), so the chat surface degrades gracefully rather than refusing to
+    // start. #3-svc: this is now retrying + lazily recoverable.
+    void this.ensureLoaded()
   }
 
-  private async loadModel(): Promise<void> {
-    // Skip the embedding model in test mode. Jest's
-    // `--experimental-vm-modules` runs ONNX in a separate JS realm —
-    // the WASM binding's Float32Array doesn't match the test runner's,
-    // so the Tensor constructor's `instanceof Float32Array` check
-    // throws "A float32 tensor's data must be type of Float32Array()".
-    // Production (vanilla `node main.js`, single realm) is unaffected.
-    // Leaving `ready=false` here means the existing graceful path in
-    // getEmbeddings() returns empty vectors, RagService skips, and the
-    // chatbot E2E tests stop emitting noisy ONNX stack traces.
+  /**
+   * Idempotent, deduped loader. Returns immediately if ready; otherwise shares
+   * the single in-flight load. Safe to call on every getEmbeddings() miss — a
+   * container that failed its boot load recovers without a restart. #3-svc.
+   */
+  private ensureLoaded(): Promise<void> {
+    if (this.ready) return Promise.resolve()
+    if (this.loadingPromise) return this.loadingPromise
+    this.loadingPromise = this.loadModelWithRetry().finally(() => {
+      this.loadingPromise = null
+    })
+    return this.loadingPromise
+  }
+
+  private async loadModelWithRetry(): Promise<void> {
+    // Skip the embedding model in test mode. Jest's `--experimental-vm-modules`
+    // runs ONNX in a separate JS realm — the WASM binding's Float32Array
+    // doesn't match the test runner's, so the Tensor constructor's
+    // `instanceof Float32Array` check throws. Production (vanilla node, single
+    // realm) is unaffected. Leaving ready=false here means getEmbeddings()
+    // returns empty vectors and RagService skips.
     if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
       this.logger.log(
         'Embedding model load skipped in test mode (Jest VM-modules realm boundary)',
       )
       return
     }
-    try {
-      const { pipeline, env } = await import('@huggingface/transformers')
-      // Disable local model check warnings
-      env.allowLocalModels = false
-      this.logger.log('Loading embedding model: all-MiniLM-L6-v2 ...')
-      this.extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')
-      this.ready = true
-      this.logger.log('Embedding model loaded (384 dims)')
-    } catch (err) {
-      this.logger.error('Failed to load embedding model', err)
+
+    const ok = await retryWithBackoff(() => this.attemptLoad(), {
+      attempts: EmbeddingService.MAX_LOAD_ATTEMPTS,
+      baseMs: 1000,
+      maxMs: 30_000,
+      onRetry: (attempt, err) =>
+        this.logger.error(
+          `Embedding model load attempt ${attempt}/${EmbeddingService.MAX_LOAD_ATTEMPTS} failed; will retry with backoff`,
+          err instanceof Error ? err.stack : String(err),
+        ),
+    })
+
+    if (!ok) {
+      // Stable, monitorable key — a CloudWatch/Loki metric filter can alert on
+      // it. Previously the only signal was a per-request warn, invisible to
+      // monitoring; RAG ran silently degraded. #3-svc.
+      this.logger.error(
+        'EMBEDDING_MODEL_UNAVAILABLE — all load attempts failed; RAG + KB ' +
+          'retrieval degraded to empty until recovery. Check huggingface.co ' +
+          'reachability / model cache. Next getEmbeddings() will re-attempt.',
+      )
     }
+  }
+
+  /** One load attempt — the un-testable ONNX bit, isolated so the retry loop
+   *  around it stays pure. */
+  private async attemptLoad(): Promise<void> {
+    const { pipeline, env } = await import('@huggingface/transformers')
+    // Disable local model check warnings.
+    env.allowLocalModels = false
+    this.logger.log('Loading embedding model: all-MiniLM-L6-v2 ...')
+    this.extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')
+    this.ready = true
+    this.logger.log('Embedding model loaded (384 dims)')
   }
 
   async getEmbeddings(input: string | string[]): Promise<{
@@ -55,7 +125,14 @@ export class EmbeddingService implements OnModuleInit {
     const inputs = Array.isArray(input) ? input : [input]
 
     if (!this.ready || !this.extractor) {
-      this.logger.warn('Embedding model not ready, returning empty embeddings')
+      // #3-svc — kick off a background (deduped) recovery load so a container
+      // that missed or failed its boot load heals without a restart. Non-
+      // blocking: this request still degrades gracefully (empty vectors), the
+      // next one benefits once the load completes.
+      void this.ensureLoaded()
+      this.logger.warn(
+        'Embedding model not ready, returning empty embeddings (recovery load in progress)',
+      )
       return { data: inputs.map(() => ({ embedding: [] })) }
     }
 
