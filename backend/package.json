@@ -62,6 +62,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.4",
     "cookie-parser": "^1.4.7",
+    "dayjs": "^1.11.21",
     "dotenv": "^17.3.1",
     "helmet": "^8.2.0",
     "langchain": "^1.2.21",
