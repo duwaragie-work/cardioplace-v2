@@ -1,51 +1,221 @@
-import { test, expect } from '@playwright/test'
-import { signInPatient, apiSignIn, authedApi } from '../helpers/auth.js'
+import { test, expect, type Page, type Browser } from '@playwright/test'
+import { POLICY_VERSION } from '@cardioplace/shared'
+import { signInPatient, authedApi } from '../helpers/auth.js'
 import { PATIENTS } from '../helpers/accounts.js'
-import { newTestControl } from '../helpers/test-control.js'
+import { newTestControl, type TestControl } from '../helpers/test-control.js'
+import { byTestId, T } from '../helpers/selectors.js'
 import { API_BASE_URL } from '../playwright.config.js'
 
 /**
- * Onboarding (identity-level) and the Layer A journaling gate. Per
- * TESTING_FLOW_GUIDE §6, a patient must have a `PatientProfile` row before
- * `POST /daily-journal` accepts a reading — the backend returns 403
- * `{ message: "clinical-intake-required" }` otherwise.
+ * Onboarding fixes A1–A5, end-to-end against the running stack. Guards the
+ * fixes proven live in qa/reports/onboarding-fix-proof-*: identity-gated
+ * completion (A1), the cross-device re-ask that shows identity only (A2),
+ * the removal of the reminders Skip (A3), the route guard (A4), and
+ * consent-asked-once (A5).
  *
- * The seed patients (Priya/James/Rita/Charles/Aisha) are all already past
- * onboarding + intake, so to test the gate we use the test-control endpoint
- * to wipe a seed patient's PatientProfile (NOT done — destructive and
- * irreversible without a reseed). Instead, use a fresh ad-hoc email and walk
- * the journey from cold.
+ * State is reset over HTTP via test-control (NOT `docker exec psql`) so this
+ * runs in CI. The subject is the dedicated un-onboarded seed patient
+ * (`e2e-onboarding@cardioplace.test`) — every other persona is COMPLETED.
+ * "Another device" is a fresh browser context (empty localStorage), which is
+ * exactly what the A2/A5 re-ask exercises.
  */
 
-const AD_HOC_EMAIL = `qa-onboarding-${Date.now()}@cardioplace.test`
+const EMAIL = PATIENTS.e2eOnboarding.email
+const TC_SECRET = process.env.TEST_CONTROL_SECRET
 
-test.describe.serial('Patient onboarding journey (ad-hoc account)', () => {
+// Not serial: each test resets the e2e patient in beforeEach, so they're
+// independent. A plain describe lets each guard fail on its own (a serial
+// describe would skip the rest after the first failure and mask regressions).
+// The suite still runs sequentially — playwright.config sets fullyParallel:
+// false and CI runs --workers=1, so there's no same-patient collision.
+test.describe('Onboarding A1–A5', () => {
   test.skip(
     !process.env.RUN_WRITE_TESTS,
-    'Write tests gated behind RUN_WRITE_TESTS=1 (creates new user)',
+    'Write tests gated behind RUN_WRITE_TESTS=1 (mutates the e2e-onboarding patient)',
   )
 
-  test('cold sign-in lands on /onboarding for fresh email', async ({ page }) => {
-    // Step 1 — OTP send via API (real OTP would normally email out; in dev
-    // the auth.service should accept seed perma-OTP only for seeded accounts.
-    // This ad-hoc flow needs a real sent OTP — see backend logs for the
-    // `OTP for <email>: NNNNNN` line.
-    test.skip(
-      true,
-      'TODO(next-pass): seed a blank-archetype patient in seed.ts that uses the perma-OTP ' +
-        '666666, then exercise the onboarding redirect end-to-end. Until then the ad-hoc ' +
-        'flow needs a fresh OTP from backend logs and cannot run unattended.',
-    )
-    await page.goto('/sign-in')
+  let tc: TestControl
+  let userId: string
+
+  test.beforeAll(async () => {
+    tc = await newTestControl(API_BASE_URL, TC_SECRET)
+  })
+  test.afterAll(async () => {
+    await tc.dispose()
+  })
+
+  // Cold un-onboarded state before every test — clears identity, reminder
+  // preference, consent, and the policy_acknowledged audit rows.
+  test.beforeEach(async () => {
+    const res = await tc.resetOnboarding(EMAIL)
+    userId = res.userId
+  })
+
+  /** Terms/Privacy step → identity step. */
+  async function passPrivacy(page: Page): Promise<void> {
+    // A decorative <span> overlays the checkbox and intercepts pointer events.
+    await page.locator(byTestId(T.onboarding.agreeTerms)).check({ force: true })
+    await page.locator(byTestId(T.onboarding.privacyContinueBtn)).click()
+    await expect(page.locator(byTestId(T.onboarding.nameInput))).toBeVisible()
+  }
+
+  /** Fresh-context sign-in (a "new device"). Caller closes the context. */
+  async function signInFreshDevice(browser: Browser) {
+    const ctx = await browser.newContext({ timezoneId: 'America/New_York' })
+    const page = await ctx.newPage()
+    await signInPatient(page, EMAIL)
+    return { ctx, page }
+  }
+
+  test('A1 — skip identity + Continue reminders stays NOT_COMPLETED', async ({ page }) => {
+    await signInPatient(page, EMAIL)
+    await expect(page).toHaveURL(/\/onboarding/)
+    await passPrivacy(page)
+
+    await page.locator(byTestId(T.onboarding.skipBtn)).click()
+    await expect(page.locator(byTestId(T.onboarding.reminderTime))).toBeVisible()
+    await page.locator(byTestId(T.onboarding.remindersSubmitBtn)).click()
+    await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
+
+    // The regression: a reminder-only pass must NOT complete onboarding.
+    const user = await tc.findUser(EMAIL)
+    expect(user.onboardingStatus).toBe('NOT_COMPLETED')
+  })
+
+  test('A2 — re-ask on a fresh device shows identity only → COMPLETED', async ({ browser }) => {
+    // Device 1: consent + reminders, identity skipped → NOT_COMPLETED.
+    {
+      const { ctx, page } = await signInFreshDevice(browser)
+      await passPrivacy(page)
+      await page.locator(byTestId(T.onboarding.skipBtn)).click()
+      await page.locator(byTestId(T.onboarding.remindersSubmitBtn)).click()
+      await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
+      await ctx.close()
+    }
+    expect((await tc.findUser(EMAIL)).onboardingStatus).toBe('NOT_COMPLETED')
+
+    // Device 2: reminders already set on device 1, so the reminders step must
+    // not reappear — identity only, and completing it onboards the patient.
+    const { ctx, page } = await signInFreshDevice(browser)
+    await expect(page).toHaveURL(/\/onboarding/)
+    await expect(page.locator(byTestId(T.onboarding.nameInput))).toBeVisible()
+    await expect(page.locator(byTestId(T.onboarding.stepIndicator))).toHaveText(/1 of 1/i)
+
+    await page.locator(byTestId(T.onboarding.nameInput)).fill('E2E Reask')
+    await page.locator(byTestId(T.onboarding.submitBtn)).click()
+    await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
+    // Reminders step must not have appeared on the way out.
+    await expect(page.locator(byTestId(T.onboarding.reminderTime))).toHaveCount(0)
+
+    expect((await tc.findUser(EMAIL)).onboardingStatus).toBe('COMPLETED')
+    await ctx.close()
+  })
+
+  test('A3 — reminders step has no Skip (Continue/Back only)', async ({ page }) => {
+    await signInPatient(page, EMAIL)
+    await passPrivacy(page)
+    await page.locator(byTestId(T.onboarding.skipBtn)).click()
+    await expect(page.locator(byTestId(T.onboarding.reminderTime))).toBeVisible()
+
+    // Continue + Back present; no Skip on the reminders step.
+    await expect(page.locator(byTestId(T.onboarding.remindersSubmitBtn))).toBeVisible()
+    await expect(page.locator(byTestId(T.onboarding.remindersBackBtn))).toBeVisible()
+    await expect(page.locator(byTestId('onboarding-reminders-skip-btn'))).toHaveCount(0)
+  })
+
+  test('A4 — protected routes redirect an un-onboarded patient to /onboarding', async ({ page }) => {
+    await signInPatient(page, EMAIL)
+    await expect(page).toHaveURL(/\/onboarding/)
+
+    for (const route of ['/dashboard', '/check-in', '/readings']) {
+      await page.goto(route)
+      await expect(page, `${route} should be gated`).toHaveURL(/\/onboarding/, {
+        timeout: 15_000,
+      })
+    }
+    // State unchanged — a pure UX gate, not a mutation.
+    expect((await tc.findUser(EMAIL)).onboardingStatus).toBe('NOT_COMPLETED')
+  })
+
+  test('A4 — device-skipped patient reaches the dashboard (no redirect loop)', async ({ page }) => {
+    await signInPatient(page, EMAIL)
+    await passPrivacy(page)
+    await page.locator(byTestId(T.onboarding.skipBtn)).click()
+    await page.locator(byTestId(T.onboarding.remindersSubmitBtn)).click()
+    await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
+
+    // Skipping set the device flag → the guard must honour it via the cookie.
+    await page.goto('/dashboard')
+    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
+  })
+
+  test('A5 — consent is asked once: no re-ask, no duplicate audit row', async ({ browser }) => {
+    expect((await tc.countPolicyAck(userId)).count).toBe(0)
+
+    // Device 1: give consent (privacy step), skip identity, set reminders.
+    {
+      const { ctx, page } = await signInFreshDevice(browser)
+      await passPrivacy(page)
+      await page.locator(byTestId(T.onboarding.skipBtn)).click()
+      await page.locator(byTestId(T.onboarding.remindersSubmitBtn)).click()
+      await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
+      await ctx.close()
+    }
+    // Consent recorded exactly once, and the column mirror is set.
+    expect((await tc.countPolicyAck(userId)).count).toBe(1)
+
+    // Device 2: consent already given for the current version → NO privacy step.
+    const { ctx, page } = await signInFreshDevice(browser)
+    await expect(page.locator(byTestId(T.onboarding.nameInput))).toBeVisible()
+    await expect(page.locator(byTestId(T.onboarding.agreeTerms))).toHaveCount(0)
+
+    await page.locator(byTestId(T.onboarding.nameInput)).fill('E2E Consented')
+    await page.locator(byTestId(T.onboarding.submitBtn)).click()
+    await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
+    await ctx.close()
+
+    // The whole point of A5: the re-ask wrote no second consent row.
+    expect((await tc.countPolicyAck(userId)).count).toBe(1)
+  })
+
+  test('A5 — a stale acknowledged version re-shows the privacy step', async ({ browser }) => {
+    // Consent to the CURRENT version on device 1.
+    {
+      const { ctx, page } = await signInFreshDevice(browser)
+      await passPrivacy(page)
+      await page.locator(byTestId(T.onboarding.skipBtn)).click()
+      await page.locator(byTestId(T.onboarding.remindersSubmitBtn)).click()
+      await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
+      await ctx.close()
+    }
+
+    // Control: a fresh device with the CURRENT stored version skips privacy.
+    {
+      const { ctx, page } = await signInFreshDevice(browser)
+      await expect(page.locator(byTestId(T.onboarding.nameInput))).toBeVisible()
+      await expect(page.locator(byTestId(T.onboarding.agreeTerms))).toHaveCount(0)
+      await ctx.close()
+    }
+
+    // Version-aware: simulate a POLICY_VERSION bump by rolling the stored
+    // acknowledged version back to a stale (non-null) value. A fresh device
+    // must now re-show the privacy step because stored !== current.
+    expect(POLICY_VERSION).not.toBe('2000-01-01')
+    await tc.setPolicyAckVersion(EMAIL, '2000-01-01')
+    const { ctx, page } = await signInFreshDevice(browser)
+    await expect(page).toHaveURL(/\/onboarding/)
+    await expect(page.locator(byTestId(T.onboarding.agreeTerms))).toBeVisible()
+    await ctx.close()
   })
 })
 
-test.describe('Layer A journaling gate (no PatientProfile → 403)', () => {
-  test('seed patient with profile can POST /daily-journal (control case)', async ({}, testInfo) => {
-    // Confirm the gate doesn't fire for an enrolled seed patient. Aisha is
-    // the no-alert control — her existing PatientProfile means the engine
-    // accepts the reading and runs the rule pipeline (which produces no alert
-    // for 124/78/72).
+/**
+ * Layer A journaling gate — a patient with a PatientProfile can POST a reading
+ * (control case). Kept as the orthogonal clinical-intake gate check; the
+ * onboarding fixes above are identity-only and do not touch it.
+ */
+test.describe('Layer A journaling gate', () => {
+  test('seed patient with profile can POST /daily-journal (control case)', async () => {
     const api = await authedApi(API_BASE_URL, PATIENTS.aisha.email)
     const res = await api.post('daily-journal', {
       data: {
@@ -59,19 +229,4 @@ test.describe('Layer A journaling gate (no PatientProfile → 403)', () => {
     expect(res.status(), `aisha control reading: ${await res.text()}`).toBe(202)
     await api.dispose()
   })
-
-  test(
-    'patient WITHOUT PatientProfile gets 403 clinical-intake-required',
-    async () => {
-      // Drive via test-control to flip a seed patient back to no-profile is
-      // destructive — we'd need to delete + reseed PatientProfile. Skip until
-      // the test-control endpoint adds a `wipe-profile` helper, OR until
-      // seed.ts adds a blank patient archetype.
-      test.skip(
-        true,
-        'TODO(next-pass): add /test-control/profile/wipe endpoint OR a "blank" seed archetype, ' +
-          'then assert 403 + body.message="clinical-intake-required".',
-      )
-    },
-  )
 })

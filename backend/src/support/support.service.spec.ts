@@ -115,14 +115,15 @@ describe('SupportService', () => {
       )
       await svc.createLockedOutTicket(
         { email: 'p@example.com', description: 'cant sign in' },
+        { email: 'p@example.com', description: 'cant sign in' },
         CTX,
       )
       const created = prisma.supportTicket.create.mock.calls[0][0].data
       expect(created.identityVerified).toBe(false)
       expect(created.priority).toBe('HIGH')
-      // L-3 — contactPhone was removed from the locked-out form; the ticket
-      // body is now just the patient's description verbatim (no callback-phone
-      // folding). See support-request.dto.ts:49-52.
+      // L-3 (2026-07-14) — the locked-out form no longer collects a callback
+      // phone (the phone-callback implication was dropped in Fix 6/7), so the
+      // body is the patient's description verbatim with nothing folded in.
       expect(created.body).toBe('cant sign in')
     })
 

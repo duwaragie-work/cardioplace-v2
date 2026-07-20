@@ -9,7 +9,7 @@ import {
   shouldShowOnboardingForUser,
 } from "@/lib/onboarding";
 import { POLICY_VERSION } from "@cardioplace/shared";
-import { CheckCircle2, ShieldCheck, Ban, UserCheck, Lock } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ShieldCheck, Ban, UserCheck, Lock } from "lucide-react";
 import SpinnerIndicator from "@/components/ui/SpinnerIndicator";
 import { useLanguage } from "@/contexts/LanguageContext";
 import LandingHeader from "@/components/cardio/LandingHeader";
@@ -45,6 +45,9 @@ function halfHourSlots(startHour: number, endHour: number, includeHalfAtEnd = tr
 const ONBOARDING_REMINDER_SLOTS = halfHourSlots(6, 21, false);
 // Quiet hours: 00:00 → 23:30 inclusive.
 const ONBOARDING_QUIET_SLOTS = halfHourSlots(0, 23, true);
+// L3 — E.164, mirroring the backend ProfileDto so we fail in the UI rather than
+// round-tripping a 400.
+const SMS_PHONE_RE = /^\+[1-9]\d{7,14}$/;
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -57,6 +60,12 @@ export default function OnboardingPage() {
   const [reminderTime, setReminderTime] = useState("09:00");
   const [quietHoursStart, setQuietHoursStart] = useState("22:00");
   const [quietHoursEnd, setQuietHoursEnd] = useState("07:00");
+  // L3 (2026-07-14) — SMS reminders. Both OPTIONAL: leaving the phone blank is
+  // a valid outcome and the patient still gets in-app + push + email reminders.
+  // Consent is OPT-IN ONLY (starts false, never pre-checked) and the checkbox
+  // is hidden entirely until a number is entered.
+  const [smsPhone, setSmsPhone] = useState("");
+  const [smsConsent, setSmsConsent] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -65,21 +74,29 @@ export default function OnboardingPage() {
   // employer / anyone else" promise BEFORE they disclose any clinical info,
   // or they won't enroll.
   //   "privacy"   → reassurance + Terms/Privacy consent
-  //   "profile"   → Step 1 of 2: identity fields (name + comm preference)
-  //   "reminders" → Step 2 of 2: daily reminder time + quiet hours
-  // Onboarding is NOT finished until the patient leaves the reminders step
-  // (via Continue or Skip) — see the flow handlers below.
+  //   "profile"   → identity fields (name + comm preference)
+  //   "reminders" → daily reminder time + quiet hours
+  // Only the identity step completes onboarding. Reminders always have a
+  // usable default, so answering them says nothing about who the patient is.
   const [step, setStep] = useState<"privacy" | "profile" | "reminders">("privacy");
   // True once the patient has committed the identity step with data (Continue,
-  // not Skip). Drives whether a reminders-step Skip still counts as onboarded:
-  // if either step was continued, the server row is already COMPLETED, so we
-  // finalize locally; if BOTH were skipped, nothing was persisted server-side
-  // and only the this-browser localStorage flag is set — so another browser
-  // re-asks. See handleRemindersSkip.
+  // not Skip) — i.e. the server row is now COMPLETED. If they skipped it, the
+  // only thing that lets them out of onboarding is this device's skip flag.
   const [profileSubmitted, setProfileSubmitted] = useState(false);
-  // Terms + Privacy consent — collected once here on the privacy step. Only new
-  // users reach onboarding, so returning users are never re-asked. Recorded on
-  // the AuthLog audit trail (event 'policy_acknowledged') via POST /v2/auth/consent.
+  // Server-side "reminders were already answered" (any device). null = not
+  // loaded yet; treated as false so a fresh patient still sees the step. On a
+  // re-ask (second device) this is true and the reminders step is skipped
+  // entirely — reminders already have a value, so asking again is noise.
+  const [reminderPreferenceSet, setReminderPreferenceSet] = useState<boolean | null>(null);
+  // False until the profile fetch (reminder + consent flags) resolves. Gates
+  // the first render so an already-consented patient doesn't flash the privacy
+  // step before A5 auto-advances past it.
+  const [flagsLoaded, setFlagsLoaded] = useState(false);
+  // Terms + Privacy consent — collected once on the privacy step. A5: a patient
+  // who already agreed to the current POLICY_VERSION skips this step on every
+  // later device (see the profile-fetch effect). Recorded both on the AuthLog
+  // audit trail (event 'policy_acknowledged') and in User.acknowledgedPolicyVersion
+  // via POST /v2/auth/consent.
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   useEffect(() => {
@@ -109,6 +126,40 @@ export default function OnboardingPage() {
     }
   }, [user, isLoading, router]);
 
+  // The auth response carries onboarding_required but not the reminder /
+  // consent flags, so read them from the profile. Resolves on mount, while the
+  // patient is still on the (possibly-to-be-skipped) privacy step.
+  useEffect(() => {
+    if (isLoading || !user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchWithAuth(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/v2/auth/profile`,
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setReminderPreferenceSet(!!data.reminderPreferenceSet);
+        // A5 — consent is asked once. A patient who already agreed to the
+        // CURRENT policy version skips the privacy step entirely (a re-ask on
+        // another device lands straight on identity). Only auto-advance from
+        // the untouched privacy step; never yank someone out of a later step.
+        if (data.acknowledgedPolicyVersion === POLICY_VERSION) {
+          setStep((s) => (s === "privacy" ? "profile" : s));
+        }
+      } catch {
+        // Best-effort — the null/privacy defaults are correct for a patient
+        // who has never answered these.
+      } finally {
+        if (!cancelled) setFlagsLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isLoading]);
+
   const isFormPartiallyFilled = name.trim() !== "" || communicationPreference !== "";
 
   // Synchronous "should we redirect?" check — if shouldShowOnboardingForUser
@@ -123,7 +174,7 @@ export default function OnboardingPage() {
       onboardingRequiredHint: user.onboardingRequired,
     });
 
-  if (isLoading || !user || isRedirecting || willRedirectAway) {
+  if (isLoading || !user || isRedirecting || willRedirectAway || !flagsLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <SpinnerIndicator size={40} className="text-[#7B00E0]" />
@@ -132,11 +183,12 @@ export default function OnboardingPage() {
   }
 
   /**
-   * POST the given fields to /v2/auth/profile. The endpoint sets
-   * onboardingStatus=COMPLETED server-side, so ANY successful call here means
-   * "onboarded" on every browser. Returns true on success. Deliberately does
-   * NOT navigate or flip local onboarding state — callers own that, because
-   * step 1's Continue must land on the reminders step, not the dashboard.
+   * POST the given fields to /v2/auth/profile. The endpoint marks
+   * onboardingStatus=COMPLETED only for payloads carrying identity (name or
+   * comm preference); a reminder-only payload persists its fields and leaves
+   * onboarding alone. Returns true on success. Deliberately does NOT navigate
+   * or flip local onboarding state — callers own that, because the identity
+   * step's Continue must land on the reminders step, not the dashboard.
    */
   async function postProfile(body: Record<string, unknown>): Promise<boolean> {
     setError("");
@@ -181,10 +233,27 @@ export default function OnboardingPage() {
     router.push("/dashboard");
   }
 
-  // ─── Step 1 (identity) ──────────────────────────────────────────────────
-  // Continue: persist the identity fields (marks COMPLETED server-side), then
-  // advance to reminders. We do NOT finalize locally yet — flipping
-  // onboardingStatus here would trip the redirect-away effect and skip step 2.
+  /**
+   * Leave onboarding without identity. Nothing is persisted server-side, so
+   * `onboardingStatus` stays NOT_COMPLETED and another device still asks. The
+   * device flag (and the marker cookie it writes) is what stops the route
+   * guard bouncing this browser straight back here.
+   */
+  function finishSkipped() {
+    if (!user) {
+      router.push("/sign-in");
+      return;
+    }
+    markOnboardingSkipped(user.id);
+    router.push("/dashboard");
+  }
+
+  // ─── Identity step ──────────────────────────────────────────────────────
+  // Continue: persist identity (this is what marks COMPLETED server-side).
+  // Advance to reminders unless they're already answered — on a re-ask there
+  // is nothing left to ask, so finish here. We do NOT finalize locally before
+  // the reminders step: flipping onboardingStatus trips the redirect-away
+  // effect and would skip it.
   async function handleProfileContinue() {
     if (!isFormPartiallyFilled || isSubmitting) return;
     const ok = await postProfile({
@@ -193,46 +262,56 @@ export default function OnboardingPage() {
     });
     if (!ok) return;
     setProfileSubmitted(true);
+    if (reminderPreferenceSet) {
+      finishOnboarded();
+      return;
+    }
     setStep("reminders");
   }
 
-  // Skip: no server call — advance to reminders WITHOUT marking onboarded.
-  // Whether the patient ends up onboarded is decided on the reminders step.
+  // Skip: no server call. Advance to reminders if they still need answering,
+  // otherwise leave as un-onboarded-but-dismissed.
   function handleProfileSkip() {
     if (isSubmitting) return;
     setError("");
+    if (reminderPreferenceSet) {
+      finishSkipped();
+      return;
+    }
     setStep("reminders");
   }
 
-  // ─── Step 2 (reminders) ─────────────────────────────────────────────────
-  // Continue: persist reminder prefs. POST forces COMPLETED, so this onboards
-  // the patient even when step 1 was skipped (setting reminders is real data —
-  // per product, any Continue counts as onboarded).
+  // ─── Reminders step ─────────────────────────────────────────────────────
+  // Continue is the only exit (no Skip — daily reminders are always-on per
+  // Manisha's Patient Reminder spec §1D, so a Skip would just apply the 09:00
+  // default while implying it had opted out). Persisting reminders marks
+  // reminderPreferenceSet but never completes onboarding: if identity was
+  // skipped, the patient leaves as NOT_COMPLETED + device-dismissed.
   async function handleRemindersContinue() {
     if (isSubmitting) return;
-    const ok = await postProfile({ reminderTime, quietHoursStart, quietHoursEnd });
-    if (!ok) return;
-    finishOnboarded();
-  }
-
-  // Skip: the outcome depends on step 1.
-  //  • Step 1 was continued → server row is already COMPLETED → finalize.
-  //  • Step 1 was ALSO skipped → nothing persisted server-side. Set only the
-  //    this-browser localStorage flag so the patient isn't nagged again here,
-  //    but leave onboardingStatus untouched so another browser re-asks (both
-  //    steps were skipped — that's the sole "re-ask elsewhere" condition).
-  function handleRemindersSkip() {
-    if (isSubmitting) return;
-    if (!user) {
-      router.push("/sign-in");
+    // L3 — phone is optional; only send it when the patient typed a valid one.
+    // Consent can never travel without a number (it'd be a consent to text
+    // nothing), so it's forced false when the field is blank.
+    const phone = smsPhone.trim();
+    const sendPhone = phone.length > 0 && SMS_PHONE_RE.test(phone);
+    if (phone.length > 0 && !sendPhone) {
+      setError(t('onboarding.sms.phoneInvalid'));
       return;
     }
+    const ok = await postProfile({
+      reminderTime,
+      quietHoursStart,
+      quietHoursEnd,
+      ...(sendPhone
+        ? { phoneNumber: phone, smsConsent }
+        : { smsConsent: false }),
+    });
+    if (!ok) return;
     if (profileSubmitted) {
       finishOnboarded();
       return;
     }
-    markOnboardingSkipped(user.id);
-    router.push("/dashboard");
+    finishSkipped();
   }
 
   function handleRemindersBack() {
@@ -357,12 +436,48 @@ export default function OnboardingPage() {
           {/* Left side - Form */}
           <div className="flex-1 w-full max-w-[400px] md:max-w-105 lg:max-w-130">
 
-            {/* Step indicator (Step 1 of 2 / 2 of 2) */}
+            {/* Back + step indicator share ONE row, Back on the left — it reads
+                as "leave this step" without competing with Continue/Skip at the
+                bottom. Only step 2 has somewhere to go back to; step 1 keeps the
+                indicator in its original position (centred on mobile).
+                Step indicator: two steps normally; on a re-ask (reminders
+                already answered on another device) identity is the only step,
+                so the total collapses to 1 rather than promising a step 2
+                that never comes. */}
             <div
-              data-testid="onboarding-step-indicator"
-              className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#7B00E0] text-center md:text-left"
+              className={`mb-2 flex items-center gap-2 ${
+                step === 'reminders' ? 'justify-start' : 'justify-center md:justify-start'
+              }`}
             >
-              {t('onboarding.stepIndicator').replace('{n}', step === 'reminders' ? '2' : '1')}
+              {step === 'reminders' && (
+                <button
+                  type="button"
+                  data-testid="onboarding-reminders-back-btn"
+                  onClick={handleRemindersBack}
+                  disabled={isSubmitting}
+                  aria-label={t('onboarding.back')}
+                  className="inline-flex items-center gap-0.5 text-xs font-semibold uppercase tracking-wider text-[#7B00E0] hover:text-[#6600BC] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  <ChevronLeft aria-hidden="true" className="w-3.5 h-3.5" />
+                  {t('onboarding.back')}
+                </button>
+              )}
+              {step === 'reminders' && (
+                <span aria-hidden="true" className="text-[#e5d9f2] select-none">
+                  |
+                </span>
+              )}
+              <div
+                data-testid="onboarding-step-indicator"
+                className="text-xs font-semibold uppercase tracking-wider text-[#7B00E0]"
+              >
+                {/* A2 re-ask: total collapses to 1 when reminders were already
+                    set on another device, so we never promise a step 2 that
+                    the identity-only re-ask won't show. */}
+                {t('onboarding.stepIndicator')
+                  .replace('{n}', step === 'reminders' ? '2' : '1')
+                  .replace('{t}', reminderPreferenceSet ? '1' : '2')}
+              </div>
             </div>
 
             {/* Heading — step-aware */}
@@ -391,6 +506,7 @@ export default function OnboardingPage() {
                 <div className="flex items-center gap-2">
                   <input
                     id="onboarding-name"
+                    data-testid="onboarding-name-input"
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -508,6 +624,66 @@ export default function OnboardingPage() {
                   {t('onboarding.reminders.emergencyDisclaimer')}
                 </p>
               </div>
+
+              {/* L3 (2026-07-14) — text reminders. OPTIONAL: no number is a
+                  valid outcome (in-app + push + email still work). Consent is
+                  opt-in only and the checkbox stays hidden until a number is
+                  entered — per spec §2D, never offer consent with no number.
+                  Same `w-full max-w-105` as every other field so the column
+                  stays flush; vertical rhythm comes from the parent space-y-6. */}
+              <div className="w-full max-w-105">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label htmlFor="onboarding-sms-phone" className="block font-semibold text-[#171717] text-xs lg:text-sm">
+                    {t('onboarding.sms.phoneLabel')}
+                  </label>
+                  <AudioButton text={t('onboarding.sms.phoneAudio')} size="sm" />
+                </div>
+                <input
+                  id="onboarding-sms-phone"
+                  data-testid="onboarding-sms-phone"
+                  type="tel"
+                  inputMode="tel"
+                  value={smsPhone}
+                  onChange={(e) => setSmsPhone(e.target.value)}
+                  placeholder="+15550100"
+                  className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                />
+                <p className="mt-2 text-xs text-[#737373] leading-relaxed">
+                  {t('onboarding.sms.phoneHelp')}
+                </p>
+
+                {smsPhone.trim().length > 0 && (
+                  <div className="mt-3 rounded-lg border border-[#e5d9f2] bg-[rgba(243,232,255,0.25)] p-3">
+                    {/* `data-no-min-target` is the sanctioned opt-out of the
+                        global 44px tap-target rule (globals.css §Tap-target
+                        minimum) — that rule is why the box rendered huge. The
+                        WCAG intent is preserved WITHOUT the giant box: the
+                        <label> wraps the control, so the whole padded row
+                        (well over 44px) toggles it. Shaky-handed patients keep
+                        a big hit area; the visual box just matches the text. */}
+                    <label className="flex items-center gap-2 cursor-pointer py-1.5">
+                      <input
+                        type="checkbox"
+                        data-testid="onboarding-sms-consent"
+                        data-no-min-target
+                        checked={smsConsent}
+                        onChange={(e) => setSmsConsent(e.target.checked)}
+                        className="w-3.5 h-3.5 shrink-0 accent-[#7B00E0] cursor-pointer"
+                      />
+                      <span className="text-xs font-medium text-[#171717]">
+                        {t('profile.sms.consentLabel')}
+                      </span>
+                    </label>
+                    {/* Required TCPA disclosures (rates / no-health-info / STOP)
+                        as fine print under the plain-language action above. The
+                        two together carry all four mandated elements — counsel
+                        must review them AS A PAIR (packet Q3). */}
+                    <p className="pl-5.5 text-[0.6875rem] text-[#737373] leading-relaxed">
+                      {t('profile.sms.consentFinePrint')}
+                    </p>
+                  </div>
+                )}
+              </div>
               </>
               )}
 
@@ -565,33 +741,24 @@ export default function OnboardingPage() {
                   >
                     {isSubmitting ? t('common.saving') : t('onboarding.continue')}
                   </button>
-                  <button
-                    type="button"
-                    data-testid="onboarding-reminders-skip-btn"
-                    onClick={handleRemindersSkip}
-                    disabled={isSubmitting}
-                    className="w-full text-sm text-[#737373] mt-4 cursor-pointer disabled:opacity-50"
-                  >
-                    {t('onboarding.skip')}
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="onboarding-reminders-back-btn"
-                    onClick={handleRemindersBack}
-                    disabled={isSubmitting}
-                    className="w-full text-sm text-[#7B00E0] font-medium cursor-pointer disabled:opacity-50"
-                  >
-                    ← {t('onboarding.back')}
-                  </button>
+                  {/* No Skip (A3 — daily reminders are always-on; a Skip would
+                      just apply the 09:00 default while implying opt-out) and no
+                      bottom Back: Back lives at the top of the step, above the
+                      step indicator. Continue is the only bottom action. */}
                 </div>
               )}
               {/* (Privacy note and sign out text removed per design) */}
             </div>
           </div>
 
-          {/* Right side - Info Panel (match register panel) */}
-          <div className="hidden md:flex flex-1 items-center justify-center lg:justify-end">
-            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl md:p-6 lg:p-10 md:w-80 md:h-80 lg:w-110 lg:h-auto flex">
+          {/* Right side - Info Panel (match register panel).
+              `self-center` pins the card to the vertical middle of the row
+              regardless of how tall the form column gets — step 2 is taller
+              than step 1, and without this the card rides with the column.
+              Height is content-driven (no fixed md:h-80) so it stays centred
+              instead of stretching. */}
+          <div className="hidden md:flex flex-1 self-center items-center justify-center lg:justify-end">
+            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl md:p-6 lg:p-10 md:w-80 lg:w-110 flex">
               <div className="space-y-4 my-auto w-full">
                 <div className="flex items-center gap-3">
                   <div className="bg-[#7B00E0] size-10 lg:size-16 rounded-2xl flex items-center justify-center shrink-0">

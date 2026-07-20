@@ -97,6 +97,18 @@ export const PATIENTS = {
     archetype: 'Young adult (18–29 bucket) — general adult HTN',
     expectedRuleId: null,
   },
+
+  // ─── Onboarding E2E fixture (spec 03, A1–A5) ─────────────────────────────
+  // Seeded UN-onboarded (NOT_COMPLETED, no name/comm/reminder/consent, no
+  // PatientProfile). The only persona that walks the onboarding flow from
+  // cold; reset back to this state via test-control `resetOnboarding`.
+  e2eOnboarding: {
+    email:
+      process.env.PATIENT_E2E_ONBOARDING_EMAIL ?? 'e2e-onboarding@cardioplace.test',
+    name: null,
+    archetype: 'Un-onboarded — onboarding flow subject',
+    expectedRuleId: null,
+  },
 } as const
 
 export type SeedPatientKey = keyof typeof PATIENTS
