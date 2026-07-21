@@ -46,7 +46,6 @@ import {
   type RegisterMode,
 } from '@/lib/services/webauthn.service';
 import RecoveryCodesPanel from '@/components/cardio/RecoveryCodesPanel';
-import SupportContactForm from '@/components/SupportContactForm';
 import NotificationSettings from '@/components/cardio/NotificationSettings';
 
 function formatDate(iso: string | null): string {
@@ -873,7 +872,10 @@ export default function SettingsPage() {
           )}
         </section>
 
-        {/* Contact support — in-app form for signed-in patients. */}
+        {/* Support has moved OUT of Settings. Everything now lives on the one
+            adaptive /support hub (the consolidation Lakshitha asked for — it
+            used to be split across Settings, the sign-in page and the footer).
+            All that remains here is a signpost. */}
         <p
           className="mb-2 mt-6 px-1 text-[11px] font-bold uppercase tracking-wide"
           style={{ color: 'var(--brand-text-muted)' }}
@@ -888,14 +890,13 @@ export default function SettingsPage() {
           <p className="text-[13px] mb-4" style={{ color: 'var(--brand-text-muted)' }}>
             {t('settings.support.intro')}
           </p>
-          <SupportContactForm />
           <a
-            href="/support/my-tickets"
-            data-testid="settings-my-requests-link"
-            className="mt-4 inline-flex items-center gap-1 text-[13px] font-semibold"
+            href="/support"
+            data-testid="settings-support-link"
+            className="inline-flex items-center gap-1 text-[13px] font-semibold"
             style={{ color: 'var(--brand-primary-purple)' }}
           >
-            {t('settings.support.myRequests')}
+            {t('settings.support.goToSupport')}
           </a>
         </section>
       </div>

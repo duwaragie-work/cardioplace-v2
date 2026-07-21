@@ -632,6 +632,7 @@ const en = {
   'settings.support.intro':
     "Need help with your account, sign-in, or something in the app? Send our team a message and we'll follow up by email.",
   'settings.support.myRequests': 'View my requests →',
+  'settings.support.goToSupport': 'Go to Support →',
 
   // Contact-support form (embedded in Settings)
   'support.form.categoryAccount': 'Account',
@@ -649,6 +650,8 @@ const en = {
   'support.form.comingSoon': '(coming soon)',
   'support.form.sending': 'Sending…',
   'support.form.send': 'Send message',
+  /** Transient confirmation shown alongside the inline success card. */
+  'support.form.sentToast': 'Request sent.',
   'support.form.error': 'Could not send your message.',
   'support.form.successPrefix': 'Thanks — your request',
   'support.form.successSuffix': "was received. We'll get back to you by email.",
@@ -1030,7 +1033,6 @@ const en = {
   'support.locked.statusBanner': 'Already sent a request? Your confirmation email has your ticket number — reply to that email and we\'ll add anything new to the same ticket.',
   'support.locked.email': 'Your account email',
   'support.locked.description': 'What’s happening? (e.g. I lost my authenticator app and recovery codes)',
-  'support.locked.phone': 'Callback phone (optional)',
   'support.locked.submit': 'Request help',
   'support.locked.submitting': 'Submitting…',
   'support.locked.successLead': 'Thanks — your request',
@@ -1038,7 +1040,7 @@ const en = {
   'support.locked.error': 'Could not submit your request.',
   'support.locked.backToSignIn': 'Back to sign in',
   // Support — patient "My support requests" history page (Fix 9).
-  'support.mytickets.back': 'Back to settings',
+  'support.mytickets.back': 'Back to support',
   'support.mytickets.title': 'My support requests',
   'support.mytickets.subtitle': 'Track the status of requests you’ve sent our team.',
   'support.mytickets.loading': 'Loading…',
@@ -1047,10 +1049,82 @@ const en = {
   'support.mytickets.statusOpen': 'Open',
   'support.mytickets.statusInProgress': 'In progress',
   'support.mytickets.statusResolved': 'Resolved',
+  'support.mytickets.statusClosed': 'Closed',
   'support.mytickets.replies': 'replies',
   'support.mytickets.support': 'Support',
   'support.mytickets.you': 'You',
   'support.mytickets.resolvedNote': 'This request was resolved.',
+  'support.mytickets.closedNote': 'This request is closed.',
+  // Derived from the last reply's author (backend `awaitingParty`), not a status.
+  'support.mytickets.yourTurn': 'Your reply needed',
+  'support.mytickets.replyPlaceholder': 'Write a reply…',
+  'support.mytickets.replySend': 'Send reply',
+  'support.mytickets.replySending': 'Sending…',
+  'support.mytickets.replyError': 'Could not send your reply.',
+  'support.mytickets.replySent': 'Reply sent.',
+  'support.mytickets.reopen': 'Reopen this request',
+  'support.mytickets.reopening': 'Reopening…',
+  'support.mytickets.reopenError': 'Could not reopen this request.',
+  'support.mytickets.reopenNote': 'Still need help? You can reopen this for 7 days.',
+  'support.mytickets.reopened': 'Request reopened.',
+  'support.mytickets.close': 'Yes, this is resolved',
+  'support.mytickets.closing': 'Closing…',
+  'support.mytickets.closed': 'Request closed.',
+  'support.mytickets.closeError': 'Could not close this request.',
+  'support.mytickets.closeNote': 'The reopen window has passed. You can confirm this is done.',
+
+  // ── /support hub — one adaptive surface for signed-out and signed-in ────
+  'support.hub.title': 'Support',
+  'support.hub.subtitle': 'Get help with your account, sign-in, or the app.',
+  'support.hub.loading': 'Loading…',
+  'support.hub.emergencyTitle': 'If this is an emergency',
+  // Reuses the Manisha-approved 911 sentence from register.medicalDisclaimer
+  // (Handoff 4 A1) rather than authoring new emergency wording.
+  'support.hub.emergencyBody': 'In an emergency, call 911.',
+  'support.hub.cantSignIn': 'I can’t sign in',
+  'support.hub.cantSignInBody': 'Locked out, lost your authenticator, or not getting your code.',
+  'support.hub.generalContact': 'Send us a message',
+  'support.hub.generalContactBody': 'A general question about Cardioplace.',
+  'support.hub.signInPrompt': 'Already have an account?',
+  'support.hub.signInCta': 'Sign in to track your requests',
+  'support.hub.raiseTitle': 'Raise a request',
+  'support.hub.raiseBody': 'Account, sign-in, or something not working in the app.',
+  'support.hub.myRequests': 'My requests',
+  'support.hub.myRequestsBody': 'Track status and reply to our team.',
+  'support.hub.accountSecurity': 'Account & security',
+  'support.hub.accountSecurityBody': 'Sign-in, two-step verification, and recovery codes.',
+  'support.hub.legal': 'Privacy & terms',
+  'support.hub.helpCenter': 'Help Center',
+  'support.hub.helpCenterBody': 'Answers to common questions about the app.',
+
+  // Help Center / FAQ (public, reads contentType=FAQ).
+  'support.help.title': 'Help Center',
+  'support.help.subtitle': 'Answers to the questions we get most often.',
+  'support.help.loading': 'Loading…',
+  'support.help.searchPlaceholder': 'Search help articles',
+  'support.help.noResults': 'No articles match your search.',
+  'support.help.empty': 'No articles yet — please check back soon.',
+  'support.help.stillNeedHelp': 'Still need help?',
+
+  // Clinical-vs-operational split. ⚠ PLACEHOLDER WORDING — pending Dr. Singal
+  // sign-off (patient-safety copy, same bar as the alert messages). Only the
+  // 911 sentence below is already-approved text.
+  'support.clinical.title': 'This looks like a medical question',
+  'support.clinical.body': 'Support can help with your account and the app, but not with your health. For anything about your symptoms, your readings, or your medicines, please reach your care team.',
+  'support.clinical.ctaChat': 'Message my care team',
+  'support.clinical.ctaSignedOut': 'Sign in to reach your care team',
+  'support.clinical.emergency': 'In an emergency, call 911.',
+
+  // Public (signed-out) contact form → POST /v2/support/public-contact.
+  'support.publiccontact.email': 'Your email',
+  'support.publiccontact.subject': 'Subject',
+  'support.publiccontact.message': 'How can we help?',
+  'support.publiccontact.noPhi': 'Please don’t include health information in this form.',
+  'support.publiccontact.send': 'Send message',
+  'support.publiccontact.sending': 'Sending…',
+  'support.publiccontact.successLead': 'Thanks — your request',
+  'support.publiccontact.successTail': 'is in. We’ll reply by email.',
+  'support.publiccontact.error': 'Could not send your message.',
   // Handoff 4 A1 — medical disclaimer (Manisha Doc 1). MVP US-only: 911 stays
   // hardcoded per CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   'register.medicalDisclaimer': 'Cardioplace helps you track your health and stay connected to your care team. It is not a substitute for medical advice, diagnosis, or treatment. In an emergency, call 911.',
@@ -1116,9 +1190,16 @@ const en = {
   'landing.legal': 'Legal',
   'landing.privacy': 'Privacy Policy',
   'landing.terms': 'Terms of Service',
+  'landing.hipaaNotice': 'HIPAA Notice',
+  'landing.cookiePolicy': 'Cookie Policy',
+  'landing.accessibility': 'Accessibility',
+  'landing.nondiscrimination': 'Nondiscrimination',
+  'landing.telehealthConsent': 'Telehealth Consent',
   'landing.contact': 'Contact',
   'landing.dashboard': 'Dashboard',
   'landing.getInTouch': 'Get in Touch',
+  'landing.supportBlurb': 'Questions about your account or the app? Our support team is here to help.',
+  'landing.goToSupport': 'Go to Support',
   'landing.messageSent': 'Message sent!',
   'landing.messageReply': "We'll get back to you soon.",
   'landing.yourEmail': 'Your email',

@@ -51,6 +51,15 @@ export const SYSTEM_PRINCIPAL_LABELS = [
   // caregiver, when the system did. Distinct from 'engine-alert-generator':
   // this path is emergency detection, not the rule engine.
   'emergency-dispatch',
+  // Support System (2026-07-20) — daily auto-close sweep that moves long-idle
+  // RESOLVED tickets to CLOSED. A real @Cron (unlike support-ops-notify), so
+  // its SupportTicket writes run outside any request context and need an actor.
+  'support-auto-close',
+  // Support System (2026-07-21) — "waiting on the patient" nudge sweep. Its own
+  // principal rather than reusing support-auto-close: this one DISCLOSES to the
+  // patient (notification + email), so the audit trail must distinguish it from
+  // the silent housekeeping close.
+  'support-nudge',
 ] as const
 
 export type SystemPrincipalLabel = (typeof SYSTEM_PRINCIPAL_LABELS)[number]
@@ -83,6 +92,8 @@ export const SYSTEM_PRINCIPAL_DISPLAY_NAMES: Readonly<
   'daily-reminder': 'Daily Reminder Cron',
   'support-ops-notify': 'Support Ops Notify',
   'emergency-dispatch': 'Emergency Care-Team Dispatch',
+  'support-auto-close': 'Support Auto-Close Cron',
+  'support-nudge': 'Support Awaiting-Reply Nudge Cron',
 }
 
 /**
@@ -113,6 +124,10 @@ export const CRON_LABEL_TO_PRINCIPAL: Readonly<Record<string, SystemPrincipalLab
   'support-ops-notify': 'support-ops-notify',
   // N-2 residual (2026-07-17) — @OnEvent handler; no cron prefix.
   'emergency-dispatch': 'emergency-dispatch',
+  // Support System (2026-07-20) — daily auto-close sweep.
+  'cron-support-auto-close': 'support-auto-close',
+  // Support System (2026-07-21) — awaiting-reply nudge sweep.
+  'cron-support-nudge': 'support-nudge',
 }
 
 // Derive the principal label from a seed row's email:

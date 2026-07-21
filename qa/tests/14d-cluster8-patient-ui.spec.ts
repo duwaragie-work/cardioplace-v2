@@ -139,8 +139,12 @@ async function clickSymptomButtonViaUI(
  * reached by SUBMITTING the check-in, not by an inline takeover. Walk to the
  * B3 symptoms step, select the airway symptom, then submit (B3 is the last
  * step, so its footer button is checkin-submit-btn - CheckIn.tsx:3330). The
- * post-submit handler (routeToFiredEmergencyAlert) polls the async engine and
- * deep-links to /alerts/[id]; we return once the URL has settled there.
+ * post-submit handler (routeToFiredEmergencyAlert) polls the async engine, then
+ * stashes the fired alert id off-URL and pushes the BARE /alerts route
+ * (CheckIn.tsx: stashNavId('alertDetail', …) → router.push('/alerts')). It used
+ * to deep-link to /alerts/<id>; F1 took the ULID off the wire. We return once
+ * the URL has settled on /alerts — the EmergencyAlertScreen assertions in each
+ * test are what actually prove the airway emergency rendered.
  */
 async function submitAngioedemaCheckInViaUI(
   page: Page,
@@ -154,7 +158,7 @@ async function submitAngioedemaCheckInViaUI(
   const submit = page.locator(byTestId(T.checkin.submit))
   await submit.scrollIntoViewIfNeeded({ timeout: 5_000 }).catch(() => {})
   await submit.click({ timeout: 10_000 })
-  await page.waitForURL(/\/alerts\/[^/]+$/, { timeout: 30_000 })
+  await page.waitForURL(/\/alerts(?:\?|$)/, { timeout: 30_000 })
 }
 
 test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert treatment', () => {
@@ -177,7 +181,7 @@ test.describe('Cluster 8 §D-PATIENT — angioedema symptom buttons + red alert 
     try {
       await signInPatient(page, PATIENTS.aisha.email)
       // Bug 16 - click->submit->navigate: selecting the airway symptom + submitting
-      // routes the patient straight to the full-screen 911 alert at /alerts/[id].
+      // routes the patient straight to the full-screen 911 alert on /alerts.
       await submitAngioedemaCheckInViaUI(page, 'FACE_SWELLING')
       // Post-FIX 1 (commit 388b816): angioedema routes to EmergencyAlertScreen -
       // full-screen red, 911 button, signed-off body.

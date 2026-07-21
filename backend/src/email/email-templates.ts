@@ -543,6 +543,35 @@ export function supportTicketReceivedEmailHtml(
   `)
 }
 
+/**
+ * Support System — "we're waiting to hear back from you" nudge. Fired by the
+ * support housekeeping cron when ops replied and the thread then went quiet, so
+ * a patient whose question is half-answered isn't left to drift into auto-close.
+ *
+ * Carries NO reply content — just the ticket number and a prompt to come back —
+ * so the nudge itself stays free of whatever clinical detail the thread holds.
+ * Wrapped → standard HIPAA confidentiality footer.
+ */
+export function supportAwaitingReplyEmailHtml(ticketNumber: string): string {
+  return wrap(`
+    <span style="display: inline-block; padding: 4px 12px; border-radius: 4px;
+                 background: #7B00E0; color: #fff; font-size: 12px; font-weight: 700;
+                 letter-spacing: 1px; text-transform: uppercase;">
+      Waiting on you
+    </span>
+    <h2 style="margin: 16px 0 8px; color: #1a1a2e;">We're waiting to hear back from you</h2>
+    <p style="color: #6b7280; font-size: 13px; margin: 0 0 12px;">Ticket ${ticketNumber}</p>
+    <p style="color: #1f2937; font-size: 14px; line-height: 1.7;">
+      Our team replied to your support request and we haven't heard back yet. If you
+      still need help, reply to this email or open the request in the app and we'll
+      pick it straight back up.
+    </p>
+    <p style="color: #6b7280; font-size: 13px; line-height: 1.6; margin-top: 16px;">
+      If everything is sorted, you can ignore this — the request will close on its own.
+    </p>
+  `)
+}
+
 /** Support System — ticket-resolved confirmation to the requester. Wrapped →
  *  carries the standardized HIPAA confidentiality footer. */
 export function supportResolvedEmailHtml(ticketNumber: string): string {

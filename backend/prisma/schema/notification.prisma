@@ -9,6 +9,12 @@ model Notification {
   // admin bell/notifications page can deep-link to /patients/{patientUserId}.
   // Alert-linked rows leave this null and derive the patient via `alert.userId`.
   patientUserId     String?
+  // Deep-link target for SUPPORT_* notifications so the in-app bell can route
+  // into the specific ticket thread (patient → /support my-tickets, ops →
+  // admin ticket detail). Plain nullable scalar, mirroring patientUserId — a
+  // routing hint, not an enforced FK (no cascade need). Null on all non-support
+  // rows. See continue-support-system roadmap Phase 2.5.
+  supportTicketId   String?
   channel           NotificationChannel
   title             String
   body              String
@@ -63,9 +69,12 @@ enum NotificationTrigger {
   MEDICATION_CONTRAINDICATION // intake contraindication flag
   PROFILE_REJECTED // profile correction / rejection
   CALL_SCHEDULED // scheduled-call notice
-  SUPPORT_REPLY // support ticket reply
+  SUPPORT_REPLY // support ticket reply (ops → patient)
   SUPPORT_TICKET_CREATED // support ticket created
   SUPPORT_RESOLVE // support ticket resolved
+  SUPPORT_USER_REPLIED // patient replied in-thread (→ ops); ball back to ops
+  SUPPORT_REOPENED // patient reopened a resolved/closed ticket (→ ops)
+  SUPPORT_AWAITING_REPLY // nudge (→ patient): ops replied and the thread went quiet
   MFA_RESET // MFA reset notice
 
   // ── System-class — VISIBLE in the bell. ──

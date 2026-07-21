@@ -213,9 +213,21 @@ test.describe('Phase 3 §C — admin dashboard triage', () => {
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
     await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
     await page.locator(byTestId(T.admin.dashboardAlertOpen(alertId))).click()
-    // F1 — in-app click lands on the BARE /patients/detail route (the id is
-    // handed off via sessionStorage, so it never appears in the URL / CDN log).
-    await expect(page).toHaveURL(/\/patients\/detail$/, { timeout: 20_000 })
+    // An alert-driven click carries the OPAQUE alert id — `?alert=<alertId>` —
+    // and the detail shell resolves the patient from it server-side. That is
+    // the allowed form: the alert id is not PHI, the patient id would be. (The
+    // sessionStorage hand-off, i.e. a bare /patients/detail, is what a
+    // patient-row click uses, where there is no alert to key off.)
+    await expect(page).toHaveURL(
+      new RegExp(`/patients/detail\\?alert=${alertId}$`),
+      { timeout: 20_000 },
+    )
+    // …and the patient actually renders, i.e. the alert really did resolve.
+    await expect(
+      page.locator(byTestId(T.admin.detailHeader)),
+    ).toBeVisible({ timeout: 20_000 })
+    // The patient id never appears in the URL.
+    expect(page.url()).not.toContain(aisha.id)
   })
 
   test('30a.4 — tier filter + search narrow the queue', async ({ page }) => {

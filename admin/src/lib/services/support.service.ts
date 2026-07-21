@@ -5,7 +5,20 @@ import { fetchWithAuth } from './token'
 
 const API = process.env.NEXT_PUBLIC_API_URL
 
-export type SupportStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED'
+export type SupportStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED'
+/** Whose turn it is — derived server-side from the last reply's author, never
+ *  stored. Null when the ticket is new, resolved, or closed. */
+export type AwaitingParty = 'PATIENT' | 'OPS' | null
+
+/** First-response SLA, derived server-side from the reply history. Never stored,
+ *  so it cannot drift from the thread it describes. */
+export interface SupportSla {
+  /** Minutes from createdAt to the first OPS reply; null if still unanswered. */
+  firstResponseMinutes: number | null
+  targetMinutes: number
+  /** Answered late, OR unanswered with the target already elapsed. */
+  breached: boolean
+}
 export type SupportPriority = 'LOW' | 'NORMAL' | 'HIGH'
 export type SupportCategory = 'ACCOUNT' | 'MFA' | 'CLINICAL' | 'BUG' | 'OTHER'
 export type SupportAction = 'mfa-reset' | 'recovery-codes-regen' | 'webauthn-reset'
@@ -19,8 +32,19 @@ export interface SupportTicketRow {
   status: SupportStatus
   priority: SupportPriority
   identityVerified: boolean
+  assignedToOpsId: string | null
   createdAt: string
+  updatedAt: string
   resolvedAt: string | null
+  /** Patient-initiated reopen / close (and the cron auto-close) are deliberately
+   *  NOT SupportTicketAction rows — that table is ops-only (every row carries an
+   *  opsUserId). The events are recorded as these timestamps instead, so the ops
+   *  timeline merges them in rather than the lifecycle looking like it stopped
+   *  at "Resolved". See the SupportActionType comment in support.prisma. */
+  reopenedAt: string | null
+  closedAt: string | null
+  awaitingParty: AwaitingParty
+  sla: SupportSla
   user: { name: string | null; displayId: string | null } | null
 }
 
@@ -41,6 +65,9 @@ export interface SupportTicketActionRow {
 export interface SupportTicketDetail extends Omit<SupportTicketRow, 'user'> {
   body: string
   userId: string | null
+  /** Resolved from `assignedToOpsId` server-side so the UI shows a name, not a
+   *  raw ULID. Null when unassigned (or if the ops user row is gone). */
+  assignedToOps: { id: string; name: string | null } | null
   user: {
     id: string
     name: string | null
@@ -124,6 +151,34 @@ export async function resolveTicket(
     { method: 'POST', body: JSON.stringify({ resolutionNotes }) },
   )
   await jsonOrThrow(res, 'Could not resolve ticket')
+}
+
+/**
+ * S4 — pick up / hand off a ticket. Omitting `assigneeId` assigns to the acting
+ * ops user (assign-to-me); the server auto-advances an OPEN ticket to
+ * IN_PROGRESS on pickup and records an ASSIGNED action.
+ */
+export async function assignTicket(
+  id: string,
+  assigneeId?: string,
+): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/v2/admin/support/tickets/${id}/assign`,
+    { method: 'POST', body: JSON.stringify(assigneeId ? { assigneeId } : {}) },
+  )
+  await jsonOrThrow(res, 'Could not assign ticket')
+}
+
+/** S5 — re-triage priority; the server records from/to in the action timeline. */
+export async function changePriority(
+  id: string,
+  priority: SupportPriority,
+): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/v2/admin/support/tickets/${id}/priority`,
+    { method: 'POST', body: JSON.stringify({ priority }) },
+  )
+  await jsonOrThrow(res, 'Could not change priority')
 }
 
 export async function runTicketAction(

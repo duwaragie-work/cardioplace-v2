@@ -573,7 +573,11 @@ export default function RegisterPage() {
                   </a>
                   .
                 </p>
-                {/* Locked out — public support form (no auth required). */}
+                {/* "Need help signing in?" — locked-out public support form (no
+                    auth required). The typed email is handed over via
+                    sessionStorage (stashSupportEmail), never as an `?email=`
+                    query param: A1/A4 keep patient identifiers out of URLs.
+                    Spec 74-no-credentials-in-url asserts exactly this. */}
                 <p className="text-center mt-3">
                   <a
                     href="/support/locked-out"

@@ -1,9 +1,20 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react'
 import CaregiversCard from './CaregiversCard'
+import { LanguageProvider } from '@/contexts/LanguageContext'
 import {
   getCaregivers,
   addCaregiver,
 } from '@/lib/services/caregiver.service'
+
+/**
+ * These assertions match rendered ENGLISH copy, so the component has to be
+ * inside a LanguageProvider. Without one, `useLanguage()` falls back to the
+ * context default — `t: (key) => key` — and every string renders as its raw
+ * key ("caregiver.description"), so text-based queries can never match.
+ * Rendering bare was the whole reason this suite was red.
+ */
+const render = (ui: React.ReactElement) =>
+  rtlRender(<LanguageProvider>{ui}</LanguageProvider>)
 
 // F14 — patient CaregiversCard now mirrors admin CaregiversPanel's row layout:
 // consent renders as a compact STATUS line on the left (no longer an oversized

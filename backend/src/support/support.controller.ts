@@ -1,8 +1,13 @@
-import { Body, Controller, Get, Post, Req } from '@nestjs/common'
+import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common'
 import type { Request } from 'express'
 import { Public } from '../auth/decorators/public.decorator.js'
 import { UserRole } from '../generated/prisma/enums.js'
-import { ContactDto, LockedOutDto } from './dto/support-request.dto.js'
+import {
+  ContactDto,
+  LockedOutDto,
+  PublicContactDto,
+  ReplyDto,
+} from './dto/support-request.dto.js'
 import { extractIp } from './http.util.js'
 import {
   SupportService,
@@ -47,11 +52,40 @@ export class SupportController {
     return this.support.listMyTickets(this.actorFrom(req))
   }
 
+  /** Patient adds an in-thread reply to their own active ticket (→ ops).
+   *  Scoped to the requester in the service (NotFound on a non-owned id). */
+  @Post('tickets/:id/reply')
+  reply(@Req() req: AuthedReq, @Param('id') id: string, @Body() dto: ReplyDto) {
+    return this.support.replyAsUser(this.actorFrom(req), id, dto)
+  }
+
+  /** Patient reopens their own resolved/closed ticket within the reopen window. */
+  @Post('tickets/:id/reopen')
+  reopen(@Req() req: AuthedReq, @Param('id') id: string) {
+    return this.support.reopen(this.actorFrom(req), id)
+  }
+
+  /** Patient confirms a resolved request is done → CLOSED, without waiting out
+   *  the 14-day auto-close sweep. RESOLVED-only; owner-only. */
+  @Post('tickets/:id/close')
+  close(@Req() req: AuthedReq, @Param('id') id: string) {
+    return this.support.closeByUser(this.actorFrom(req), id)
+  }
+
   /** Unauthenticated "I can't sign in" form — rate-limited 5/IP/hour in the
    *  service; lands identity-UNverified pending ops phone verification. */
   @Public()
   @Post('locked-out')
   lockedOut(@Req() req: Request, @Body() dto: LockedOutDto) {
     return this.support.createLockedOutTicket(dto, this.ctxFrom(req))
+  }
+
+  /** Unauthenticated non-PHI "send us a message" from the public /support hub.
+   *  Same 5/IP/hour guard; category is forced to OTHER server-side. Replaces the
+   *  legacy POST /contact, which emailed ops without creating a trackable ticket. */
+  @Public()
+  @Post('public-contact')
+  publicContact(@Req() req: Request, @Body() dto: PublicContactDto) {
+    return this.support.createPublicContactTicket(dto, this.ctxFrom(req))
   }
 }

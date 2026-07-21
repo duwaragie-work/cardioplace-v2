@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { ClsService } from 'nestjs-cls'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { TestControlService } from './test-control.service.js'
+import { SupportService } from '../support/support.service.js'
 import { AuditExceptionReportService } from '../crons/audit-exception-report.service.js'
 import { DailyReminderService } from '../crons/daily-reminder.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
@@ -69,6 +70,9 @@ describe('TestControlService — medication-hold escalation cron driver (F33)', 
           useValue: {},
         },
         { provide: EncryptionService, useValue: encryptionMock() },
+        // Support sweep drivers (auto-close / awaiting-reply nudge) — unused by
+        // the medication-hold path, but a constructor dep, so it must resolve.
+        { provide: SupportService, useValue: {} },
       ],
     }).compile()
     service = module.get(TestControlService)

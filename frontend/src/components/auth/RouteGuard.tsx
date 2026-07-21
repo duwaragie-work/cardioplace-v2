@@ -28,8 +28,20 @@ import SpinnerIndicator from '@/components/ui/SpinnerIndicator';
 const PUBLIC_ROUTES = [
   '/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/terms',
   '/privacy', '/auth/callback', '/auth/magic-link', '/activate',
-  '/support/locked-out',
+  '/support', '/support/locked-out',
+  // Healthcare legal set — mirrors proxy.ts. Routes exist and resolve; copy
+  // is pending legal, so each is noindex (per-route metadata).
+  '/hipaa-notice', '/cookies', '/accessibility', '/nondiscrimination',
+  '/telehealth-consent',
 ];
+/**
+ * Routes that must stay GATED even though a broader PUBLIC_ROUTES prefix
+ * covers them — mirrors proxy.ts. PUBLIC_ROUTES is prefix-matched, so
+ * allow-listing the adaptive `/support` hub (which renders a signed-out
+ * subset) would otherwise drag every `/support/*` child public with it.
+ * `/support/my-tickets` renders a patient's own support threads.
+ */
+const PRIVATE_ROUTE_EXCEPTIONS = ['/support/my-tickets'];
 const ONBOARDING_GATED_ROUTES = [
   '/dashboard', '/readings', '/check-in', '/chat', '/profile', '/notifications',
 ];
@@ -61,7 +73,11 @@ function hasAdminRole(rolesValue: string | undefined): boolean {
 export default function RouteGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const isPublic = isMatch(pathname, PUBLIC_ROUTES);
+  // A private exception wins over a broader public prefix (see the const
+  // above) — same precedence as proxy.ts.
+  const isPublic =
+    !isMatch(pathname, PRIVATE_ROUTE_EXCEPTIONS) &&
+    isMatch(pathname, PUBLIC_ROUTES);
   // Which path the guard has cleared. Public routes are cleared synchronously
   // (nothing to leak); non-public routes render only after the effect clears
   // THIS path, so a logged-out visitor never flashes protected content. Keyed

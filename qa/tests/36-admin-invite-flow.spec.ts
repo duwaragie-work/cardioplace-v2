@@ -80,8 +80,16 @@ test.describe('Spec 36 — admin invite flow', () => {
     // the auth/MFA specs; here we assert the activation→sign-in handoff.
     await activateInviteViaUI(page, ADMIN_BASE_URL, token, /\/sign-in\?activated=1/)
     await expect(page).toHaveURL(/\/sign-in\?activated=1/)
-    // Email is prefilled for the OTP step.
-    await expect(page).toHaveURL(/email=/)
+    // Email is prefilled for the OTP step — but 1.6 moved it OFF the URL:
+    // activate stashes it (stashSignInEmail) and sign-in reads it back
+    // (takeSignInEmail). `activated=1` is a benign non-PII flag and stays.
+    // So assert the FIELD is prefilled, and that the email is not in the URL.
+    await expect(page.locator(byTestId(T.admin.signInEmail))).toHaveValue(
+      email,
+      { timeout: 20_000 },
+    )
+    expect(page.url()).not.toContain('email=')
+    expect(page.url()).not.toContain(email)
   })
 
   test('36.3 — invite scoping: disallowed caller→role pairs return 403', async ({}, testInfo) => {

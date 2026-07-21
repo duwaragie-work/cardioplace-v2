@@ -37,7 +37,8 @@ function makeService(prisma: ReturnType<typeof mockPrisma>) {
   // Constructor order (test-control.service.ts) — keep in sync:
   //   1 prisma · 2 cls (N-2 residual 2026-07-17) · 3 dailyReminder ·
   //   4 monthlyReask · 5 escalation · 6 medicationHoldEscalation ·
-  //   7 auditExceptionReport (N7) · 8 encryption (V-06)
+  //   7 auditExceptionReport (N7) · 8 encryption (V-06) ·
+  //   9 support (support auto-close / awaiting-reply nudge drivers, 2026-07-21)
   // `cls` is only touched by the cron drivers, which §H does not exercise.
   return new TestControlService(
     prisma as never,
@@ -48,6 +49,7 @@ function makeService(prisma: ReturnType<typeof mockPrisma>) {
     {} as never,
     {} as never,
     encryptionMock() as never,
+    {} as never,
   )
 }
 

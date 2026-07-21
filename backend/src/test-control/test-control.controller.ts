@@ -166,6 +166,39 @@ export class TestControlController {
   // F33 — drive the medication-hold escalation ladder on demand instead of
   // waiting for the daily 15:00 UTC cron. Lets the audit + Playwright suites
   // backdate a hold then fire the scan synchronously.
+  // Support housekeeping — drive both sweeps on demand. `autoCloseResolvedTickets`
+  // and `nudgeAwaitingPatientTickets` take an injectable `now`, so a spec proves
+  // RESOLVED → CLOSED (or a 3-day-silent nudge) by passing a future timestamp
+  // instead of backdating rows or waiting for the 03:00/04:00 crons.
+  @Post('cron/support-auto-close/run')
+  @HttpCode(200)
+  async runSupportAutoClose(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { now?: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.runSupportAutoClose(body?.now ? new Date(body.now) : new Date())
+  }
+
+  @Post('cron/support-nudge/run')
+  @HttpCode(200)
+  async runSupportNudge(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { now?: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.runSupportNudge(body?.now ? new Date(body.now) : new Date())
+  }
+
+  /** Clear test-scoped support tickets so the rate-limit counters reset —
+   *  without this the support specs 429 each other on a local re-run. */
+  @Post('support/reset')
+  @HttpCode(200)
+  async resetSupport(@Headers('x-test-control-secret') secret: string) {
+    this.assertAuthorized(secret)
+    return this.svc.resetSupportTickets()
+  }
+
   @Post('cron/medication-hold-escalation/run')
   @HttpCode(200)
   async runMedicationHoldEscalation(

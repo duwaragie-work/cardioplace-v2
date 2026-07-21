@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { LanguageProvider } from "@/contexts/LanguageContext";
+import { ToastProvider } from "@/contexts/ToastContext";
 import NavbarWrapper from "@/components/NavbarWrapper";
 import ScrollToTop from "@/components/ScrollToTop";
 import HardReloadOnNavigate from "@/components/HardReloadOnNavigate";
@@ -53,15 +54,25 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <AuthProvider>
           <LanguageProvider>
-            <SkipLink />
-            <ScrollToTop />
-            <HardReloadOnNavigate />
-            <IdleWarningToast />
-            <PushRegistrar />
-            <RouteGuard>
-              <NavbarWrapper>{children}</NavbarWrapper>
-            </RouteGuard>
-            <PoweredByFooter />
+            {/* Inside LanguageProvider so toast callers can pass translated
+                copy; wraps the tree so any page can confirm an action. */}
+            <ToastProvider>
+              <SkipLink />
+              <ScrollToTop />
+              <HardReloadOnNavigate />
+              <IdleWarningToast />
+              <PushRegistrar />
+              {/* RouteGuard is the client-side auth/onboarding guard that
+                  mirrors proxy.ts for the static export (no server middleware
+                  there). It must stay wrapped around the routed content —
+                  keeping the file without rendering it silently disables the
+                  guard. ToastProvider sits outside it so a redirect can still
+                  surface a toast. */}
+              <RouteGuard>
+                <NavbarWrapper>{children}</NavbarWrapper>
+              </RouteGuard>
+              <PoweredByFooter />
+            </ToastProvider>
           </LanguageProvider>
         </AuthProvider>
       </body>

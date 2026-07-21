@@ -1,10 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useToast } from '@/contexts/ToastContext';
 import type { TranslationKey } from '@/i18n';
+import ClinicalRedirectPanel from '@/components/support/ClinicalRedirectPanel';
 import {
+  ClinicalDeflectedError,
   submitContact,
   type SupportCategory,
 } from '@/lib/services/support.service';
@@ -12,17 +15,38 @@ import {
 const CATEGORIES: { value: SupportCategory; labelKey: TranslationKey }[] = [
   { value: 'ACCOUNT', labelKey: 'support.form.categoryAccount' },
   { value: 'MFA', labelKey: 'support.form.categoryMfa' },
+  // Kept as a visible, signposted option so a patient with a medical question
+  // has somewhere obvious to go — but choosing it REDIRECTS to the care team
+  // instead of submitting (see `isClinical` below). It never becomes a ticket.
   { value: 'CLINICAL', labelKey: 'support.form.categoryClinical' },
   { value: 'BUG', labelKey: 'support.form.categoryBug' },
   { value: 'OTHER', labelKey: 'support.form.categoryOther' },
 ];
 
 /** In-app "Contact support" form for signed-in patients → /v2/support/contact. */
-export default function SupportContactForm() {
+export default function SupportContactForm({
+  defaultOpenAccountFlow = false,
+}: {
+  /** Deep-link from the sign-in "Need help?" entry points (`/support?flow=account`)
+   *  — preselects the account/sign-in category so the user lands in that flow. */
+  defaultOpenAccountFlow?: boolean;
+} = {}) {
   const { t } = useLanguage();
+  const { showToast } = useToast();
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [category, setCategory] = useState<SupportCategory>('ACCOUNT');
+  // Server-side deflection (422 CLINICAL_DEFLECTED) — the defense-in-depth half.
+  // Normally unreachable because selecting CLINICAL already swaps the form out.
+  const [deflected, setDeflected] = useState(false);
+  // The sign-in "Need help?" deep-link should land the user *in* the form, not
+  // just on the page. ACCOUNT is already the default category, so the useful
+  // behaviour is focusing the first field. A ref rather than autoFocus, which
+  // trips the a11y lint rule and can't be made conditional cleanly.
+  const subjectRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (defaultOpenAccountFlow) subjectRef.current?.focus();
+  }, [defaultOpenAccountFlow]);
   // Phone contact isn't available yet (no call-center / phone-ID verification),
   // so Email is the default and the only selectable option (Fix 6).
   const [pref, setPref] = useState<'EMAIL' | 'PHONE'>('EMAIL');
@@ -30,8 +54,13 @@ export default function SupportContactForm() {
   const [done, setDone] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  // The healthcare rule, enforced before anything is sent: a medical question
+  // is redirected to the care team, not turned into an ops ticket.
+  const isClinical = category === 'CLINICAL';
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (isClinical) return; // belt-and-braces; the form is swapped out below
     if (!subject.trim() || !body.trim()) return;
     setBusy(true);
     setErr(null);
@@ -43,13 +72,44 @@ export default function SupportContactForm() {
         contactPreference: pref,
       });
       setDone(r.ticketNumber);
+      // Toast AND the inline card: the card carries the ticket number the
+      // patient may need to quote, the toast is the immediate "it went through"
+      // acknowledgement the agreed lifecycle calls for on Open.
+      showToast(t('support.form.sentToast'));
       setSubject('');
       setBody('');
     } catch (e2) {
+      // The server refused it as clinical — show the redirect rather than a
+      // raw error, so the outcome is identical whichever guard caught it.
+      if (e2 instanceof ClinicalDeflectedError) {
+        setDeflected(true);
+        return;
+      }
       setErr(e2 instanceof Error ? e2.message : t('support.form.error'));
     } finally {
       setBusy(false);
     }
+  }
+
+  // Selecting "medical question" (or the server refusing one) replaces the form
+  // entirely — there is deliberately no way to submit from this state.
+  if (isClinical || deflected) {
+    return (
+      <div className="space-y-3" data-testid="support-contact-clinical">
+        <ClinicalRedirectPanel isAuthenticated />
+        <button
+          type="button"
+          onClick={() => {
+            setDeflected(false);
+            setCategory('ACCOUNT');
+          }}
+          data-testid="support-contact-clinical-back"
+          className="text-[13px] text-slate-500 underline hover:text-slate-700"
+        >
+          {t('support.form.categoryAccount')}
+        </button>
+      </div>
+    );
   }
 
   if (done) {
@@ -70,6 +130,7 @@ export default function SupportContactForm() {
   return (
     <form onSubmit={submit} className="space-y-3" data-testid="support-contact-form">
       <input
+        ref={subjectRef}
         value={subject}
         onChange={(e) => setSubject(e.target.value)}
         placeholder={t('support.form.subject')}
