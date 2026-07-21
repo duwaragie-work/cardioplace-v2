@@ -85,34 +85,34 @@ const nextConfig: NextConfig = {
   // unaffected — it only activates on a real HTTPS response. Mirrors the
   // backend's always-on helmet HSTS. No `preload`; `includeSubDomains` is safe
   // (all prod subdomains are HTTPS).
-  async headers() {
-    // B4 — under static export (STATIC_EXPORT=1) headers() can't run (no server
-    // runtime), so these are supplied by CloudFront instead via a
-    // response-headers policy — see docs/CLOUDFRONT_SECURITY_HEADERS.md for the
-    // exact set. Returning [] keeps that hand-off explicit and avoids the
-    // misleading export-time warning. In standalone / dev they still apply, so
-    // V-12 is never dropped before the AWS cutover.
-    if (process.env.STATIC_EXPORT) return [];
-    return [
-      {
-        source: '/:path*',
-        headers: [
+  // F2/B4 — the `headers` KEY is omitted entirely under static export
+  // (STATIC_EXPORT=1). Next warns whenever the key is PRESENT with
+  // output:'export' — even when it returns [] — so gating the whole key silences
+  // it. Under export these are supplied by CloudFront (see
+  // docs/CLOUDFRONT_SECURITY_HEADERS.md); in standalone / dev V-12 applies as before.
+  ...(process.env.STATIC_EXPORT
+    ? {}
+    : {
+        headers: async () => [
           {
-            key: 'Strict-Transport-Security',
-            value: 'max-age=31536000; includeSubDomains',
+            source: '/:path*',
+            headers: [
+              {
+                key: 'Strict-Transport-Security',
+                value: 'max-age=31536000; includeSubDomains',
+              },
+              // V-12 — see the policy note above.
+              { key: 'Content-Security-Policy', value: csp },
+              // Legacy clickjacking header for browsers that predate
+              // frame-ancestors. Nothing may embed the admin console.
+              { key: 'X-Frame-Options', value: 'DENY' },
+              { key: 'X-Content-Type-Options', value: 'nosniff' },
+              // Admin URLs carry patient ids — never send them to another origin.
+              { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+            ],
           },
-          // V-12 — see the policy note above.
-          { key: 'Content-Security-Policy', value: csp },
-          // Legacy clickjacking header for browsers that predate
-          // frame-ancestors. Nothing may embed the admin console.
-          { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'X-Content-Type-Options', value: 'nosniff' },
-          // Admin URLs carry patient ids — never send them to another origin.
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         ],
-      },
-    ];
-  },
+      }),
 };
 
 export default nextConfig;

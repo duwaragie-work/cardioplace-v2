@@ -235,21 +235,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // happen whether or not this visitor turns out to be signed in.
     sweepStaleClinicalDrafts();
 
-    // Skip rehydrate when we're handling a fresh magic-link sign-in.
-    // MagicLinkHandler is about to call login() with the tokens from the
-    // URL params; running /refresh here would consume the just-issued
-    // refresh token and race with the destination page's own mount-time
-    // rehydrate. Refresh-token rotation is single-use, so whichever fetch
-    // reaches the backend second gets a 401 — and the loser's rehydrate
-    // clears user state, which bounces the destination page to /sign-in.
-    if (
-      typeof window !== 'undefined' &&
-      window.location.pathname === '/auth/magic-link' &&
-      new URLSearchParams(window.location.search).has('accessToken')
-    ) {
-      setIsLoading(false);
-      return;
-    }
+    // F4 — the old "skip rehydrate on /auth/magic-link?accessToken=" guard was
+    // removed: the backend no longer emits tokens in the magic-link redirect
+    // (A1/V-11), so that param never exists. The magic-link page now waits for
+    // this cookie rehydrate instead of racing it, so there's nothing to skip.
 
     let cancelled = false;
     async function rehydrate() {

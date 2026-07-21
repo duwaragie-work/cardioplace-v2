@@ -5,7 +5,7 @@
 // patient is signed in (they just requested it), and the backend also checks
 // the token's subject matches the session, so a stolen link is useless.
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -14,11 +14,20 @@ import { confirmSelfClose } from '@/lib/services/auth.service';
 function CloseAccountInner() {
   const { t } = useLanguage();
   const router = useRouter();
-  const params = useSearchParams();
-  const token = params.get('token') ?? '';
+  // F3 — capture the token ONCE (useRef initializes on the first render, while
+  // it's still in the URL), then scrub it from the address bar + history ON LOAD
+  // so it never lingers while the patient decides. The Confirm button reads the
+  // ref, so it still works after the scrub. Backend enforces single-use + TTL.
+  const token = useRef(useSearchParams().get('token') ?? '').current;
 
   const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.search) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, []);
 
   async function confirm() {
     if (!token) {

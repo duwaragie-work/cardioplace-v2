@@ -12,7 +12,7 @@
 //
 // The route is public (see proxy.ts) because the invitee has no session yet.
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, ShieldAlert } from 'lucide-react';
 import { useAuth, type OtpVerifyResponse } from '@/lib/auth-context';
@@ -42,7 +42,10 @@ const ROLE_LABEL: Record<string, string> = {
 // (users.service.ts). The token is single-use + short-TTL server-side (A5), so
 // its brief presence in the URL is acceptable.
 function ActivateInviteContent() {
-  const token = useSearchParams().get('token') ?? '';
+  // F3 — capture the token ONCE (useRef initializes on the first render, while
+  // it's still in the URL). It's used again on the Activate click, so it must
+  // survive the URL scrub in the effect below.
+  const token = useRef(useSearchParams().get('token') ?? '').current;
   const router = useRouter();
   const { login } = useAuth();
 
@@ -75,6 +78,12 @@ function ActivateInviteContent() {
             err instanceof Error ? err.message : 'Could not load invite.',
           );
       });
+    // F3 — the token is now captured (in the ref above); scrub it from the
+    // address bar + history so it can't be replayed from a shared browser's
+    // history (mirrors challenge-hash.ts). Backend enforces single-use + TTL.
+    if (typeof window !== 'undefined' && window.location.search) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
     return () => {
       cancelled = true;
     };
