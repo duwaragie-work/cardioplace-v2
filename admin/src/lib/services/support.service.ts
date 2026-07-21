@@ -5,7 +5,10 @@ import { fetchWithAuth } from './token'
 
 const API = process.env.NEXT_PUBLIC_API_URL
 
-export type SupportStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED'
+export type SupportStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED'
+/** Whose turn it is — derived server-side from the last reply's author, never
+ *  stored. Null when the ticket is new, resolved, or closed. */
+export type AwaitingParty = 'PATIENT' | 'OPS' | null
 export type SupportPriority = 'LOW' | 'NORMAL' | 'HIGH'
 export type SupportCategory = 'ACCOUNT' | 'MFA' | 'CLINICAL' | 'BUG' | 'OTHER'
 export type SupportAction = 'mfa-reset' | 'recovery-codes-regen' | 'webauthn-reset'
@@ -19,8 +22,11 @@ export interface SupportTicketRow {
   status: SupportStatus
   priority: SupportPriority
   identityVerified: boolean
+  assignedToOpsId: string | null
   createdAt: string
+  updatedAt: string
   resolvedAt: string | null
+  awaitingParty: AwaitingParty
   user: { name: string | null; displayId: string | null } | null
 }
 

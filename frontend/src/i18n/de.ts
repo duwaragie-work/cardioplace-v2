@@ -1009,6 +1009,7 @@ const de: Record<TranslationKey, string> = {
   'support.mytickets.statusOpen': 'Offen',
   'support.mytickets.statusInProgress': 'In Bearbeitung',
   'support.mytickets.statusResolved': 'Gelöst',
+  'support.mytickets.statusClosed': 'Geschlossen',
   'support.mytickets.replies': 'Antworten',
   'support.mytickets.support': 'Support',
   'support.mytickets.you': 'Sie',

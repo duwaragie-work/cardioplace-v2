@@ -60,18 +60,42 @@ const OPS_INBOX = 'ops@healplace.com'
  * See continue-support-system roadmap Phase 3 (clinical vs operational split).
  */
 export const CLINICAL_DEFLECTED_CODE = 'CLINICAL_DEFLECTED'
+
+/** Who the ticket is waiting on. Derived, never stored — see SupportStatus. */
+export type AwaitingParty = 'PATIENT' | 'OPS' | null
+
+/**
+ * Whose turn is it? Derived from the last reply's author instead of a stored
+ * AWAITING_REPLY state (Duwaragie, 2026-07-21): the stored copy was functionally
+ * identical to this and could drift from the thread it claimed to describe.
+ *
+ *   last reply by OPS  → waiting on the PATIENT ("your turn" badge)
+ *   last reply by USER → waiting on OPS (needs an agent)
+ *   no replies yet     → null (a brand-new ticket is nobody's "turn" yet)
+ *
+ * Only meaningful while the ticket is active; a RESOLVED/CLOSED ticket is not
+ * waiting on anyone, so callers pass null for those.
+ */
+export function deriveAwaitingParty(
+  lastReplyAuthorType: 'USER' | 'OPS' | null | undefined,
+): AwaitingParty {
+  if (lastReplyAuthorType === 'OPS') return 'PATIENT'
+  if (lastReplyAuthorType === 'USER') return 'OPS'
+  return null
+}
 const LOCKED_OUT_WINDOW_MS = 60 * 60 * 1000 // 1 hour
 const LOCKED_OUT_MAX = 5 // per IP per hour
 const CONTACT_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
 const CONTACT_MAX = 3 // authenticated tickets per user per 5-minute window
-// A patient can reopen a resolved/closed ticket within this window (anchored on
-// resolvedAt); past it, they raise a fresh request instead of resurrecting an
-// old thread. 14 days ≫ the 7-day auto-close, so a just-auto-closed ticket is
-// still reopenable for a week.
-const REOPEN_WINDOW_MS = 14 * 24 * 60 * 60 * 1000 // 14 days
+// A patient can reopen a RESOLVED ticket within this window (anchored on
+// resolvedAt); past it they raise a fresh request rather than resurrecting an
+// old thread. Deliberately SHORTER than the auto-close delay, so the reopen
+// window has already lapsed by the time a ticket reaches CLOSED — that keeps
+// CLOSED genuinely terminal instead of "closed but still reopenable".
+const REOPEN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 // The auto-close sweep moves a RESOLVED ticket to CLOSED after this much
-// inactivity (measured from resolvedAt). Well inside the reopen window.
-const AUTO_CLOSE_AFTER_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+// inactivity (measured from resolvedAt).
+const AUTO_CLOSE_AFTER_MS = 14 * 24 * 60 * 60 * 1000 // 14 days
 
 /**
  * Support System Phase 1. Two intake paths (signed-in contact + public
@@ -246,7 +270,18 @@ export class SupportService {
         },
       },
     })
-    return { data }
+    // Attach the derived "whose turn is it" hint so the UI can badge a thread
+    // without a stored AWAITING_REPLY state. Only meaningful while active —
+    // a resolved/closed ticket is waiting on nobody.
+    return {
+      data: data.map((t) => ({
+        ...t,
+        awaitingParty:
+          t.status === 'OPEN' || t.status === 'IN_PROGRESS'
+            ? deriveAwaitingParty(t.replies.at(-1)?.authorType)
+            : null,
+      })),
+    }
   }
 
   // ── Ops queue + detail ─────────────────────────────────────────────────
@@ -296,11 +331,27 @@ export class SupportService {
           updatedAt: true,
           resolvedAt: true,
           user: { select: { name: true, displayId: true } },
+          // Just the last reply's author — enough to derive whose turn it is
+          // without pulling whole threads into the queue list.
+          replies: {
+            take: 1,
+            orderBy: { sentAt: 'desc' },
+            select: { authorType: true },
+          },
         },
       }),
       this.prisma.supportTicket.count({ where }),
     ])
-    return { data: rows, total, page, limit }
+    // Swap the one-row `replies` probe for the derived hint so the ops queue can
+    // show "needs an agent" vs "waiting on patient" without a stored state.
+    const data = rows.map(({ replies, ...t }) => ({
+      ...t,
+      awaitingParty:
+        t.status === 'OPEN' || t.status === 'IN_PROGRESS'
+          ? deriveAwaitingParty(replies[0]?.authorType)
+          : null,
+    }))
+    return { data, total, page, limit }
   }
 
   async getTicket(id: string) {
@@ -371,17 +422,15 @@ export class SupportService {
         body: dto.body,
       },
     })
-    // An ops reply puts the ball in the patient's court → AWAITING_REPLY. Only
-    // advance from a still-open state; never downgrade a RESOLVED/CLOSED ticket
-    // (ops can reply on a resolved thread without silently un-resolving it).
-    if (
-      ticket.status === 'OPEN' ||
-      ticket.status === 'IN_PROGRESS' ||
-      ticket.status === 'REOPENED'
-    ) {
+    // An ops reply moves an untouched ticket into the active lane. It does NOT
+    // get its own "awaiting reply" state — whose turn it is is derived from the
+    // last reply's authorType (deriveAwaitingParty). Never downgrade a
+    // RESOLVED/CLOSED ticket: ops can reply on a resolved thread without
+    // silently un-resolving it.
+    if (ticket.status === 'OPEN') {
       await this.prisma.supportTicket.update({
         where: { id: ticket.id },
-        data: { status: 'AWAITING_REPLY' },
+        data: { status: 'IN_PROGRESS' },
       })
     }
     // Email the user + in-app bell (if they have an account). Fire-and-forget —
@@ -440,8 +489,8 @@ export class SupportService {
         body: dto.body,
       },
     })
-    // Ball back to ops. A patient reply always needs an ops response next,
-    // whether the ticket was OPEN, IN_PROGRESS, AWAITING_REPLY, or REOPENED.
+    // Keep the ticket in the active lane. The reply itself is what signals the
+    // ball is back with ops — deriveAwaitingParty reads the last authorType.
     await this.prisma.supportTicket.update({
       where: { id: ticket.id },
       data: { status: 'IN_PROGRESS' },
@@ -451,20 +500,25 @@ export class SupportService {
   }
 
   /**
-   * Patient reopens a resolved/closed ticket within the reopen window. Past the
-   * window they raise a fresh request instead. Clears resolvedAt/closedAt and
-   * flags reopenedAt so the auto-close sweep (which keys on status=RESOLVED)
-   * leaves it alone, and notifies ops.
+   * Patient reopens a RESOLVED ticket within the reopen window, returning it to
+   * IN_PROGRESS. There is no distinct REOPENED state — `reopenedAt` is what
+   * records that it happened, and it stays set for the ops timeline.
+   *
+   * CLOSED is deliberately NOT reopenable: the reopen window (7d) lapses before
+   * the auto-close delay (14d), so by the time a ticket is CLOSED the window is
+   * already gone. Past that point the patient raises a fresh request.
    */
   async reopen(actor: SupportActor, ticketId: string) {
     const ticket = await this.requireOwnedTicket(actor, ticketId)
-    if (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED') {
+    if (ticket.status !== 'RESOLVED') {
       throw new BadRequestException(
-        'Only a resolved or closed request can be reopened.',
+        'Only a resolved request can be reopened.',
       )
     }
-    const anchor = ticket.resolvedAt ?? ticket.closedAt
-    if (!anchor || anchor.getTime() < Date.now() - REOPEN_WINDOW_MS) {
+    if (
+      !ticket.resolvedAt ||
+      ticket.resolvedAt.getTime() < Date.now() - REOPEN_WINDOW_MS
+    ) {
       throw new BadRequestException(
         'This request can no longer be reopened. Please raise a new request.',
       )
@@ -472,10 +526,9 @@ export class SupportService {
     const updated = await this.prisma.supportTicket.update({
       where: { id: ticket.id },
       data: {
-        status: 'REOPENED',
+        status: 'IN_PROGRESS',
         reopenedAt: new Date(),
         resolvedAt: null,
-        closedAt: null,
       },
     })
     await this.notifyOpsTicketActivity(ticket, 'SUPPORT_REOPENED')
@@ -484,9 +537,10 @@ export class SupportService {
 
   /**
    * Auto-close sweep (daily cron). Moves RESOLVED tickets with no activity for
-   * AUTO_CLOSE_AFTER_MS to CLOSED. A REOPENED ticket is never RESOLVED, so it is
-   * excluded by construction. Silent housekeeping — the requester was already
-   * notified at resolve time and can still reopen for a further week.
+   * AUTO_CLOSE_AFTER_MS to CLOSED. A reopened ticket is back in IN_PROGRESS, so
+   * it is excluded by construction. Silent housekeeping — the requester was
+   * already notified at resolve time, and by 14 days the reopen window has
+   * lapsed, so CLOSED is terminal.
    */
   async autoCloseResolvedTickets(now: Date = new Date()): Promise<number> {
     const cutoff = new Date(now.getTime() - AUTO_CLOSE_AFTER_MS)

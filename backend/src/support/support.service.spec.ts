@@ -1,6 +1,10 @@
 import { jest } from '@jest/globals'
 import { BadRequestException, ForbiddenException, HttpException } from '@nestjs/common'
-import { SupportService, type SupportActor } from './support.service.js'
+import {
+  SupportService,
+  deriveAwaitingParty,
+  type SupportActor,
+} from './support.service.js'
 
 const OPS: SupportActor = { id: 'ops-1', email: 'ops@healplace.com', roles: ['HEALPLACE_OPS'] as any }
 const CTX = { ipAddress: '1.2.3.4', userAgent: 'jest' }
@@ -246,15 +250,24 @@ describe('SupportService', () => {
 
   // ── Phase 2 — lifecycle: ops reply / patient reply / reopen / auto-close ──
   describe('ops reply', () => {
-    it('an ops reply moves an OPEN ticket to AWAITING_REPLY and deep-links the bell', async () => {
+    it('an ops reply moves an OPEN ticket to IN_PROGRESS and deep-links the bell', async () => {
       const { svc, prisma } = make()
       prisma.supportTicket.findUnique.mockResolvedValue(ticketRow({ status: 'OPEN' }))
       await svc.reply(OPS, 'ticket-1', { body: 'we are looking into it' })
       const upd = prisma.supportTicket.update.mock.calls[0][0].data
-      expect(upd.status).toBe('AWAITING_REPLY')
+      expect(upd.status).toBe('IN_PROGRESS')
       const notif = prisma.notification.create.mock.calls[0][0].data
       expect(notif.dispatchTrigger).toBe('SUPPORT_REPLY')
       expect(notif.supportTicketId).toBe('ticket-1')
+    })
+
+    it('never un-resolves a RESOLVED ticket when ops replies on the thread', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(ticketRow({ status: 'RESOLVED' }))
+      await svc.reply(OPS, 'ticket-1', { body: 'one more thing' })
+      // The reply row is written, but no status update is issued.
+      expect(prisma.supportTicketReply.create).toHaveBeenCalled()
+      expect(prisma.supportTicket.update).not.toHaveBeenCalled()
     })
   })
 
@@ -264,7 +277,7 @@ describe('SupportService', () => {
     it('appends a USER reply, hands the ball back to ops, and pings the queue', async () => {
       const { svc, prisma } = make()
       prisma.supportTicket.findUnique.mockResolvedValue(
-        ticketRow({ status: 'AWAITING_REPLY', userId: 'user-1' }),
+        ticketRow({ status: 'IN_PROGRESS', userId: 'user-1' }),
       )
       await svc.replyAsUser(PATIENT, 'ticket-1', { body: 'here is the info' })
       const reply = prisma.supportTicketReply.create.mock.calls[0][0].data
@@ -301,26 +314,50 @@ describe('SupportService', () => {
   describe('reopen', () => {
     const PATIENT: SupportActor = { id: 'user-1', email: 'p@example.com', roles: ['PATIENT'] as any }
 
-    it('reopens a recently-resolved ticket, clearing resolved/closed timestamps', async () => {
+    it('reopens a recently-resolved ticket back to IN_PROGRESS (no REOPENED state)', async () => {
       const { svc, prisma } = make()
       prisma.supportTicket.findUnique.mockResolvedValue(
         ticketRow({ status: 'RESOLVED', userId: 'user-1', resolvedAt: new Date() }),
       )
       await svc.reopen(PATIENT, 'ticket-1')
       const upd = prisma.supportTicket.update.mock.calls[0][0].data
-      expect(upd.status).toBe('REOPENED')
+      expect(upd.status).toBe('IN_PROGRESS')
+      // reopenedAt is what records the event now that no status does.
       expect(upd.reopenedAt).toBeInstanceOf(Date)
       expect(upd.resolvedAt).toBeNull()
-      expect(upd.closedAt).toBeNull()
       const notif = prisma.notification.createMany.mock.calls[0][0].data
       expect(notif[0].dispatchTrigger).toBe('SUPPORT_REOPENED')
     })
 
-    it('refuses to reopen outside the reopen window', async () => {
+    it('reopens right up to the 7-day boundary', async () => {
       const { svc, prisma } = make()
-      const longAgo = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000)
+      const justInside = new Date(Date.now() - 6.9 * 24 * 60 * 60 * 1000)
       prisma.supportTicket.findUnique.mockResolvedValue(
-        ticketRow({ status: 'CLOSED', userId: 'user-1', resolvedAt: longAgo, closedAt: longAgo }),
+        ticketRow({ status: 'RESOLVED', userId: 'user-1', resolvedAt: justInside }),
+      )
+      await svc.reopen(PATIENT, 'ticket-1')
+      expect(prisma.supportTicket.update.mock.calls[0][0].data.status).toBe('IN_PROGRESS')
+    })
+
+    it('refuses to reopen once the 7-day window has lapsed', async () => {
+      const { svc, prisma } = make()
+      const tooOld = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
+      prisma.supportTicket.findUnique.mockResolvedValue(
+        ticketRow({ status: 'RESOLVED', userId: 'user-1', resolvedAt: tooOld }),
+      )
+      await expect(svc.reopen(PATIENT, 'ticket-1')).rejects.toBeInstanceOf(
+        BadRequestException,
+      )
+      expect(prisma.supportTicket.update).not.toHaveBeenCalled()
+    })
+
+    it('refuses to reopen a CLOSED ticket — CLOSED is terminal', async () => {
+      const { svc, prisma } = make()
+      // Auto-close (14d) always lands after the reopen window (7d) has lapsed,
+      // so a CLOSED ticket must never be resurrectable.
+      const closedAt = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+      prisma.supportTicket.findUnique.mockResolvedValue(
+        ticketRow({ status: 'CLOSED', userId: 'user-1', resolvedAt: closedAt, closedAt }),
       )
       await expect(svc.reopen(PATIENT, 'ticket-1')).rejects.toBeInstanceOf(
         BadRequestException,
@@ -386,6 +423,67 @@ describe('SupportService', () => {
       const action = prisma.supportTicketAction.create.mock.calls[0][0].data
       expect(action.actionType).toBe('PRIORITY_CHANGED')
       expect(action.metadata).toMatchObject({ from: 'HIGH', to: 'LOW' })
+    })
+  })
+
+  // ── Derived "whose turn is it" — the replacement for a stored AWAITING_REPLY ──
+  describe('deriveAwaitingParty', () => {
+    it('maps the last reply author to who is being waited on', () => {
+      // Ops spoke last → the patient owes a response.
+      expect(deriveAwaitingParty('OPS')).toBe('PATIENT')
+      // Patient spoke last → an agent needs to pick it up.
+      expect(deriveAwaitingParty('USER')).toBe('OPS')
+    })
+
+    it('is null when the thread has no replies yet', () => {
+      expect(deriveAwaitingParty(null)).toBeNull()
+      expect(deriveAwaitingParty(undefined)).toBeNull()
+    })
+  })
+
+  describe('awaitingParty on the list endpoints', () => {
+    it('listMyTickets derives it from the last reply in the thread', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findMany.mockResolvedValue([
+        {
+          id: 't1',
+          status: 'IN_PROGRESS',
+          replies: [
+            { authorType: 'USER', body: 'a', sentAt: new Date() },
+            { authorType: 'OPS', body: 'b', sentAt: new Date() },
+          ],
+        },
+      ])
+      const { data } = await svc.listMyTickets(OPS)
+      // OPS replied last → the patient's turn.
+      expect(data[0].awaitingParty).toBe('PATIENT')
+    })
+
+    it('listMyTickets reports null once the ticket is no longer active', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findMany.mockResolvedValue([
+        { id: 't1', status: 'RESOLVED', replies: [{ authorType: 'OPS', body: 'b', sentAt: new Date() }] },
+        { id: 't2', status: 'CLOSED', replies: [{ authorType: 'USER', body: 'c', sentAt: new Date() }] },
+      ])
+      const { data } = await svc.listMyTickets(OPS)
+      expect(data[0].awaitingParty).toBeNull()
+      expect(data[1].awaitingParty).toBeNull()
+    })
+
+    it('listTickets swaps the one-row replies probe for the derived hint', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findMany.mockResolvedValue([
+        { id: 't1', status: 'IN_PROGRESS', replies: [{ authorType: 'USER' }] },
+      ])
+      prisma.supportTicket.count.mockResolvedValue(1)
+      const { data } = await svc.listTickets({})
+      // Patient replied last → ops owes a response.
+      expect(data[0].awaitingParty).toBe('OPS')
+      // The probe itself must not leak into the queue payload.
+      expect('replies' in data[0]).toBe(false)
+      // ...and it only ever fetches the single most recent reply.
+      const sel = prisma.supportTicket.findMany.mock.calls[0][0].select
+      expect(sel.replies).toMatchObject({ take: 1, orderBy: { sentAt: 'desc' } })
     })
   })
 

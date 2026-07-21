@@ -25,7 +25,11 @@ export async function submitContact(input: {
   return (await res.json()) as { ticketNumber: string };
 }
 
-export type SupportTicketStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED';
+export type SupportTicketStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+
+/** Whose turn it is — derived server-side from the last reply's author, never
+ *  stored. Null when the ticket is new, resolved, or closed. */
+export type AwaitingParty = 'PATIENT' | 'OPS' | null;
 
 export interface MyTicketReply {
   authorType: 'USER' | 'OPS';
@@ -41,6 +45,9 @@ export interface MyTicket {
   status: SupportTicketStatus;
   createdAt: string;
   resolvedAt: string | null;
+  reopenedAt: string | null;
+  closedAt: string | null;
+  awaitingParty: AwaitingParty;
   replies: MyTicketReply[];
 }
 

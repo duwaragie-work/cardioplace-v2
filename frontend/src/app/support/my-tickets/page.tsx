@@ -14,6 +14,8 @@ const STATUS_CLS: Record<MyTicket['status'], string> = {
   OPEN: 'bg-amber-50 text-amber-700 border-amber-200',
   IN_PROGRESS: 'bg-blue-50 text-blue-700 border-blue-200',
   RESOLVED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  // Terminal — auto-closed 14 days after resolve. Muted so it reads as archive.
+  CLOSED: 'bg-slate-100 text-slate-500 border-slate-200',
 };
 
 export default function MyTicketsPage() {
@@ -43,7 +45,9 @@ export default function MyTicketsPage() {
       ? t('support.mytickets.statusOpen')
       : st === 'IN_PROGRESS'
         ? t('support.mytickets.statusInProgress')
-        : t('support.mytickets.statusResolved');
+        : st === 'CLOSED'
+          ? t('support.mytickets.statusClosed')
+          : t('support.mytickets.statusResolved');
 
   return (
     <main id="main" className="min-h-[100dvh] px-4 py-8" style={{ backgroundColor: '#FAFBFF' }}>

@@ -96,14 +96,16 @@ enum SupportCategory {
   OTHER
 }
 
+// Four-state lifecycle (Duwaragie, 2026-07-21). Deliberately does NOT store an
+// "awaiting reply" state: whose turn it is is DERIVED from the last reply's
+// authorType (see deriveAwaitingParty in support.service.ts) — a stored copy was
+// functionally identical and could drift from the thread it describes. A reopen
+// likewise returns the ticket to IN_PROGRESS rather than adding a state; the
+// `reopenedAt` timestamp is what records that it happened.
 enum SupportStatus {
   OPEN
   IN_PROGRESS
-  // Ball in the patient's court: ops replied and is waiting on the patient.
-  AWAITING_REPLY
   RESOLVED
-  // Patient reopened a RESOLVED/CLOSED ticket within the reopen window.
-  REOPENED
   // Terminal. Set by the auto-close cron N days after RESOLVED with no activity.
   CLOSED
 }

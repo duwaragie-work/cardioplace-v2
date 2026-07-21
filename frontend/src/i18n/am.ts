@@ -1032,6 +1032,9 @@ const am: Record<TranslationKey, string> = {
   'support.mytickets.statusOpen': 'Open',
   'support.mytickets.statusInProgress': 'In progress',
   'support.mytickets.statusResolved': 'Resolved',
+  // NOTE: this whole support.mytickets.* block is still untranslated English —
+  // scheduled for a native Amharic pass (see the support roadmap, i18n step).
+  'support.mytickets.statusClosed': 'ተዘግቷል',
   'support.mytickets.replies': 'replies',
   'support.mytickets.support': 'Support',
   'support.mytickets.you': 'You',

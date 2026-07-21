@@ -57,10 +57,14 @@ test.describe('5X — support full flow', () => {
     }
   })
 
-  // Support System roadmap Phase 2/5 — the full extended lifecycle: two-way
-  // in-thread messaging with the AWAITING_REPLY ↔ IN_PROGRESS handoff, ops
-  // assignment + priority re-triage, resolve, then patient reopen.
+  // The full extended lifecycle on the agreed FOUR-state model (Duwaragie,
+  // 2026-07-21): two-way in-thread messaging where whose-turn-it-is is DERIVED
+  // (`awaitingParty`) rather than stored, ops assignment + priority re-triage,
+  // resolve, then patient reopen back to IN_PROGRESS.
   test('two-way thread → assign → priority → resolve → patient reopen', async () => {
+    // Two sign-ins plus ~a dozen round-trips to a remote managed Postgres —
+    // comfortably more than the default 30s budget allows.
+    test.slow()
     const patient = await authedApi(API_BASE_URL, PATIENTS.aisha.email, 'patient')
     const ops = await authedApi(API_BASE_URL, ADMINS.ops.email, 'admin')
     try {
@@ -74,19 +78,21 @@ test.describe('5X — support full flow', () => {
       const id = await findTicketId(ops, ticketNumber)
       expect(id).toBeTruthy()
 
-      // 2. Ops reply puts the ball in the patient's court → AWAITING_REPLY.
+      // 2. Ops reply activates the ticket and puts the ball in the patient's
+      //    court — status IN_PROGRESS, and the DERIVED hint says PATIENT.
       const opsReply = await ops.post(`v2/admin/support/tickets/${id}/reply`, {
         data: { body: 'Happy to help — can you confirm your device?' },
       })
       expect(opsReply.ok(), await opsReply.text()).toBeTruthy()
-      expect(await mineStatus(patient, id!)).toBe('AWAITING_REPLY')
+      await expectMine(patient, id!, 'IN_PROGRESS', 'PATIENT', 'ops replied last')
 
-      // 3. Patient in-thread reply hands the ball back to ops → IN_PROGRESS.
+      // 3. Patient in-thread reply hands the ball back to ops. Status is
+      //    unchanged (still IN_PROGRESS) — only the derived hint flips.
       const patientReply = await patient.post(`v2/support/tickets/${id}/reply`, {
         data: { body: 'It is an Android phone.' },
       })
       expect(patientReply.ok(), await patientReply.text()).toBeTruthy()
-      expect(await mineStatus(patient, id!)).toBe('IN_PROGRESS')
+      await expectMine(patient, id!, 'IN_PROGRESS', 'OPS', 'patient replied last')
 
       // 4. Ops picks it up (assign-to-me) and re-triages the priority.
       const assign = await ops.post(`v2/admin/support/tickets/${id}/assign`, { data: {} })
@@ -108,7 +114,8 @@ test.describe('5X — support full flow', () => {
         data: { resolutionNotes: 'Guided through the steps.' },
       })
       expect(resolve.ok(), await resolve.text()).toBeTruthy()
-      expect(await mineStatus(patient, id!)).toBe('RESOLVED')
+      // A resolved ticket is waiting on nobody.
+      await expectMine(patient, id!, 'RESOLVED', null, 'resolved')
 
       // 6. A resolved ticket cannot take an in-thread reply — must reopen first.
       const lateReply = await patient.post(`v2/support/tickets/${id}/reply`, {
@@ -116,10 +123,11 @@ test.describe('5X — support full flow', () => {
       })
       expect(lateReply.status(), 'reply on resolved is refused').toBe(400)
 
-      // 7. Patient reopens within the window → REOPENED.
+      // 7. Patient reopens within the 7-day window → back to IN_PROGRESS.
+      //    There is no REOPENED state; reopenedAt records that it happened.
       const reopen = await patient.post(`v2/support/tickets/${id}/reopen`)
       expect(reopen.ok(), await reopen.text()).toBeTruthy()
-      expect(await mineStatus(patient, id!)).toBe('REOPENED')
+      expect(await mineStatus(patient, id!)).toBe('IN_PROGRESS')
     } finally {
       await patient.dispose()
       await ops.dispose()
@@ -127,11 +135,34 @@ test.describe('5X — support full flow', () => {
   })
 })
 
-async function mineStatus(patient: APIRequestContext, id: string): Promise<string> {
+async function mineRow(patient: APIRequestContext, id: string) {
   const res = await patient.get('v2/support/tickets/mine')
   expect(res.ok(), await res.text()).toBeTruthy()
-  const { data } = (await res.json()) as { data: Array<{ id: string; status: string }> }
-  return data.find((t) => t.id === id)?.status ?? 'NOT_FOUND'
+  const { data } = (await res.json()) as {
+    data: Array<{ id: string; status: string; awaitingParty: string | null }>
+  }
+  return data.find((t) => t.id === id)
+}
+
+async function mineStatus(patient: APIRequestContext, id: string): Promise<string> {
+  return (await mineRow(patient, id))?.status ?? 'NOT_FOUND'
+}
+
+/**
+ * Assert status + the derived "whose turn is it" hint in ONE round-trip.
+ * Each of these specs talks to a remote managed Postgres, so a checkpoint that
+ * fetched the list twice (once per field) was enough to blow the test timeout.
+ */
+async function expectMine(
+  patient: APIRequestContext,
+  id: string,
+  status: string,
+  awaitingParty: string | null,
+  label: string,
+): Promise<void> {
+  const row = await mineRow(patient, id)
+  expect(row?.status, `${label}: status`).toBe(status)
+  expect(row?.awaitingParty ?? null, `${label}: awaitingParty`).toBe(awaitingParty)
 }
 
 async function findTicketId(

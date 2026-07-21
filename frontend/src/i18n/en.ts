@@ -1047,6 +1047,7 @@ const en = {
   'support.mytickets.statusOpen': 'Open',
   'support.mytickets.statusInProgress': 'In progress',
   'support.mytickets.statusResolved': 'Resolved',
+  'support.mytickets.statusClosed': 'Closed',
   'support.mytickets.replies': 'replies',
   'support.mytickets.support': 'Support',
   'support.mytickets.you': 'You',
