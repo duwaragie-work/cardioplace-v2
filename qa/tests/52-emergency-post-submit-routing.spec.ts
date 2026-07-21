@@ -72,8 +72,13 @@ test.describe('Bug 16 — emergency post-submit routing', () => {
         await page.waitForTimeout(300)
       }
 
-      // The handler polls the async engine then deep-links to the emergency alert.
-      await expect(page).toHaveURL(/\/alerts\/[^/]+$/, { timeout: 25_000 })
+      // The handler polls the async engine, stashes the emergency alert id
+      // off-URL and pushes the BARE /alerts route (F1 — no ULID on the wire;
+      // CheckIn.tsx stashNavId('alertDetail') → router.push('/alerts')). The
+      // route used to be /alerts/<id>; the screen is what matters either way.
+      await expect(page).toHaveURL(/\/alerts$/, { timeout: 25_000 })
+      // The safety assertion: an emergency submit must land on the full-screen
+      // "CALL 911" alert, never the generic "Reading sent" confirmation.
       await expect(page.locator(byTestId(T.emergency.call911))).toBeVisible({
         timeout: 15_000,
       })

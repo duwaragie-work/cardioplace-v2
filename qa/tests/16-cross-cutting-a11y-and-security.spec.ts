@@ -5,7 +5,8 @@ import { PATIENTS, ADMINS } from '../helpers/accounts.js'
 import { newTestControl, type TestControl } from '../helpers/test-control.js'
 import { ADMIN_BASE_URL, API_BASE_URL } from '../playwright.config.js'
 import { byTestId, T } from '../helpers/selectors.js'
-import { assertRouteForbidden, gotoPatientAlertsTab } from '../helpers/api.js'
+import { assertRouteForbidden, gotoPatientAlertsTab, gotoPatientDetailById,
+} from '../helpers/api.js'
 
 /**
  * Cross-cutting: accessibility (axe-core), security smoke (no PHI in URLs,
@@ -274,7 +275,7 @@ test.describe('Admin app — PHI safety (§F)', () => {
     // Patient-detail Readings tab renders its chart/cards without crashing.
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const aisha = await tc.findUser(PATIENTS.aisha.email)
-    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, aisha.id)
     await page.locator(byTestId(T.admin.detailTab('readings'))).click()
     // Either the readings list or its empty state must render (proves the tab
     // + any chart components mounted without throwing).
@@ -511,7 +512,7 @@ test.describe('Phase 3 §M — RBAC matrix', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const james = await tc.findUser(PATIENTS.james.email) // assigned to primaryProvider
     await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${james.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, james.id)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
     await expect(page.locator(byTestId(T.admin.thresholdSave))).toBeVisible({ timeout: 25_000 })
     await expect(page.locator(byTestId(T.admin.thresholdReadonlyBanner))).toHaveCount(0)
@@ -527,7 +528,7 @@ test.describe('Phase 3 §M — RBAC matrix', () => {
     const aisha = await tc.findUser(PATIENTS.aisha.email)
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
     // Thresholds editor renders (canEditThresholds includes MED_DIR).
-    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, aisha.id)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
     await expect(page.locator(byTestId(T.admin.thresholdSave))).toBeVisible({ timeout: 25_000 })
     // Practice management is NO LONGER allowed for MED_DIR — list renders
@@ -547,7 +548,7 @@ test.describe('Phase 3 §M — RBAC matrix', () => {
     await page.goto(`${ADMIN_BASE_URL}/practices`)
     await expect(page.locator(byTestId(T.admin.practiceCreateButton)).first()).toBeVisible({ timeout: 25_000 })
     // CANNOT verify profiles (no verify-complete) nor edit thresholds.
-    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, aisha.id)
     await page.locator(byTestId(T.admin.detailTab('profile'))).click()
     await expect(page.locator(byTestId(T.admin.profileStatusBanner))).toBeVisible({ timeout: 25_000 })
     await expect(page.locator(byTestId(T.admin.profileVerifyComplete))).toHaveCount(0)
@@ -565,7 +566,7 @@ test.describe('Phase 3 §M — RBAC matrix', () => {
     await signInAdmin(page, ADMINS.support.email, ADMIN_BASE_URL) // SUPER_ADMIN
     await page.goto(`${ADMIN_BASE_URL}/practices`)
     await expect(page.locator(byTestId(T.admin.practiceCreateButton)).first()).toBeVisible({ timeout: 25_000 })
-    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, aisha.id)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
     await expect(page.locator(byTestId(T.admin.thresholdSave))).toBeVisible({ timeout: 20_000 })
     await page.locator(byTestId(T.admin.detailTab('profile'))).click()

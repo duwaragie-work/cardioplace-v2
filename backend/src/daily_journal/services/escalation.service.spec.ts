@@ -149,7 +149,10 @@ describe('escalationEmailBody — HIPAA notify-and-link (PHI)', () => {
   it.each(CLINICAL_ROLES)('%s email keeps the non-PHI handle, link + footer', (role) => {
     const { html } = render(role)
     expect(html).toContain('CP-PAT-K8M2R4N-7') // formatted displayId reference
-    expect(html).toContain('https://admin.test/patients/patient-1?alert=alert-1')
+    // No patient id in the link — the admin shell resolves the patient from the
+    // opaque alert id server-side (B3/F1, "no patient id in URLs").
+    expect(html).toContain('https://admin.test/patients/detail?alert=alert-1')
+    expect(html).not.toContain('patient-1?alert=')
     expect(html).toContain('protected health information') // HIPAA footer
   })
 
@@ -1586,7 +1589,7 @@ describe('EscalationService', () => {
       expect(html).toContain('Cedar Hill Internal Medicine')
       expect(html).toContain('within 4 hours')
       expect(html).toContain(
-        'https://admin.cardioplaceai.com/patients/patient-1?alert=alert-1',
+        'https://admin.cardioplaceai.com/patients/detail?alert=alert-1',
       )
       expect(html).toContain('primary provider') // role banner
       expect(html).toContain('Alert ID: alert-1')
@@ -1770,7 +1773,7 @@ describe('EscalationService', () => {
       expect(out.subject).not.toMatch(/urgent/i)
     })
 
-    it('escalationEmailBody routes PATIENT recipients to the patient app /alerts/{id} URL', () => {
+    it('escalationEmailBody routes PATIENT recipients to the patient app /alerts?id={alertId} URL', () => {
       const out = escalationEmailBody({
         alert: buildAlert({ tier: 'BP_LEVEL_2' }) as any,
         step: 'T0',
@@ -1782,14 +1785,14 @@ describe('EscalationService', () => {
         now: new Date('2026-04-22T15:00:00Z'),
       })
       // Patient gets the patient-app URL and the patient-flavored CTA label.
-      expect(out.html).toContain('https://app.cardioplaceai.com/alerts/alert-1')
+      expect(out.html).toContain('https://app.cardioplaceai.com/alerts?id=alert-1')
       expect(out.html).toContain('View your alert')
       // Crucially — does NOT include the admin-app URL anywhere.
       expect(out.html).not.toContain('https://admin.cardioplaceai.com')
       expect(out.html).not.toContain('/patients/patient-1')
     })
 
-    it('escalationEmailBody routes provider recipients to the admin app /patients/{id}?alert={id} URL', () => {
+    it('escalationEmailBody routes provider recipients to the admin app /patients/detail?alert={alertId} URL', () => {
       const out = escalationEmailBody({
         alert: buildAlert({ tier: 'BP_LEVEL_2' }) as any,
         step: 'T0',
@@ -1801,11 +1804,13 @@ describe('EscalationService', () => {
         now: new Date('2026-04-22T15:00:00Z'),
       })
       expect(out.html).toContain(
-        'https://admin.cardioplaceai.com/patients/patient-1?alert=alert-1',
+        'https://admin.cardioplaceai.com/patients/detail?alert=alert-1',
       )
       expect(out.html).toContain('View in dashboard')
       // Provider should NOT see the patient-app URL.
       expect(out.html).not.toContain('https://app.cardioplaceai.com')
+      // …and the patient id must not ride in the link (the whole point).
+      expect(out.html).not.toContain('/patients/patient-1')
     })
 
     it('escalationEmailBody handles missing DOB gracefully', () => {

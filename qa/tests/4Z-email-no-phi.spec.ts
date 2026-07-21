@@ -58,7 +58,12 @@ test.describe('4Z — provider escalation emails carry no patient PHI', () => {
         expect(email.subject).not.toContain(patient.name)
         // Keeps — the HIPAA confidentiality footer + a dashboard deep-link.
         expect(email.html).toContain('protected health information')
-        expect(email.html).toContain(`/patients/detail?id=${u.id}&alert=${alertId}`)
+        // The deep-link carries ONLY the opaque alert id; the admin shell
+        // resolves the patient from it server-side. This assertion used to
+        // require `?id=<patientUserId>&alert=…`, i.e. it demanded the very
+        // identifier this spec exists to keep out of the email.
+        expect(email.html).toContain(`/patients/detail?alert=${alertId}`)
+        expect(email.html).not.toContain(u.id)
       }
 
       await tc.resetUser(u.id)

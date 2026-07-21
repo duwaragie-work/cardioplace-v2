@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test'
+
+import { gotoPatientDetailById } from '../helpers/api.js'
 import { signInAdmin, authedApi } from '../helpers/auth.js'
 import { PATIENTS, ADMINS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
@@ -71,7 +73,7 @@ test.describe('Item B — Option D large-discrepancy badge', () => {
       await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
 
       // Large delta → badge visible.
-      await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${big.id}`)
+      await gotoPatientDetailById(page, ADMIN_BASE_URL, big.id)
       await page.locator(byTestId(T.admin.detailTab('readings'))).click()
       await expect(page.locator(byTestId(T.admin.readingsList))).toBeVisible({ timeout: 25_000 })
       await expect(
@@ -79,7 +81,7 @@ test.describe('Item B — Option D large-discrepancy badge', () => {
       ).toBeVisible()
 
       // Small delta → no badge.
-      await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${small.id}`)
+      await gotoPatientDetailById(page, ADMIN_BASE_URL, small.id)
       await page.locator(byTestId(T.admin.detailTab('readings'))).click()
       await expect(page.locator(byTestId(T.admin.readingsList))).toBeVisible({ timeout: 25_000 })
       await expect(
