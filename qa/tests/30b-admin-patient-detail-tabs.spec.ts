@@ -67,7 +67,7 @@ test.describe('Phase 3 §E — patient-detail tabs (Readings/CareTeam/Meds/Alert
     await api.dispose()
 
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('readings'))).click()
     await expect(page.locator(byTestId(T.admin.readingsList))).toBeVisible({ timeout: 25_000 })
 
@@ -92,7 +92,7 @@ test.describe('Phase 3 §E — patient-detail tabs (Readings/CareTeam/Meds/Alert
     const md = page.locator(byTestId(T.admin.careTeamMdSelect))
     let ready = false
     for (let attempt = 0; attempt < 6 && !ready; attempt++) {
-      await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+      await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
       await page.locator(byTestId(T.admin.detailTab('careteam'))).click()
       await page
         .locator(byTestId(T.admin.careTeamPracticeSelect))
@@ -149,7 +149,7 @@ test.describe('Phase 3 §E — patient-detail tabs (Readings/CareTeam/Meds/Alert
     const james = await tc.findUser(PATIENTS.james.email) // assigned to primaryProvider
 
     await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${james.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${james.id}`)
     await page.locator(byTestId(T.admin.detailTab('careteam'))).click()
 
     await expect(
@@ -171,7 +171,7 @@ test.describe('Phase 3 §E — patient-detail tabs (Readings/CareTeam/Meds/Alert
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
     await setMedActionViaUI(page, aisha.id, 'Lisinopril', 'VERIFY')
 
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('medications'))).click()
     const card = page
       .locator('[data-testid^="admin-med-card-"]')
@@ -232,7 +232,7 @@ test.describe('Phase 3 §E — patient-detail tabs (Readings/CareTeam/Meds/Alert
     // admin", body = the rationale). The Timeline renders it — the unique
     // rationale ties the entry to THIS action, independent of whether the
     // meds list still shows the (now-rejected) drug.
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('timeline'))).click()
     const timeline = page.locator(byTestId(T.admin.timelineList))
     await expect(timeline).toBeVisible({ timeout: 25_000 })
@@ -256,7 +256,7 @@ test.describe('Phase 3 §E — patient-detail tabs (Readings/CareTeam/Meds/Alert
     const resolvedId = resolved.alertIds[0]
 
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('alerts'))).click()
 
     // Default filter = OPEN.
@@ -280,7 +280,7 @@ test.describe('Phase 3 §E — patient-detail tabs (Readings/CareTeam/Meds/Alert
     await tc.seedAlerts(aisha.id, [{ tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' }])
 
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('timeline'))).click()
 
     await expect(page.locator(byTestId(T.admin.timelineList))).toBeVisible({ timeout: 25_000 })

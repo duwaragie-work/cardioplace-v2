@@ -4,8 +4,8 @@
 // timezone + after-hours protocol, plus the practice's deduplicated staff
 // list (sourced from existing PatientProviderAssignment rows).
 
-import { use, useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Building2,
   ChevronLeft,
@@ -54,8 +54,10 @@ function toForm(p: Practice): FormState {
   };
 }
 
-export default function PracticeDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+// B3 (static export) — was /practices/[id]; now a static /practices/detail shell
+// reading the opaque practice id from `?id=`. List stays at /practices.
+function PracticeDetailContent() {
+  const id = useSearchParams().get('id') ?? '';
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
 
@@ -636,5 +638,13 @@ function ReadonlyRow({
         {value && value.length > 0 ? value : '—'}
       </p>
     </div>
+  );
+}
+
+export default function PracticeDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <PracticeDetailContent />
+    </Suspense>
   );
 }

@@ -1811,9 +1811,11 @@ function escalationEmailBody(args: {
   // other recipients (provider/admin) deep-link into the admin dashboard.
   // Same admin URL for a patient-role recipient would land them on a 403/404
   // since /patients/{userId} is provider-only.
+  // B3 (static export) — /alerts and /patients/detail are now static routes
+  // reading their opaque id from the query string (was a dynamic path segment).
   const dashboardUrl = isPatient
-    ? `${patientBaseUrl}/alerts/${encodeURIComponent(alert.id)}`
-    : `${adminBaseUrl}/patients/${encodeURIComponent(alert.userId)}?alert=${encodeURIComponent(alert.id)}`
+    ? `${patientBaseUrl}/alerts?id=${encodeURIComponent(alert.id)}`
+    : `${adminBaseUrl}/patients/detail?id=${encodeURIComponent(alert.userId)}&alert=${encodeURIComponent(alert.id)}`
   const ctaLabel = isPatient ? 'View your alert →' : 'View in dashboard →'
 
   // Recipient role banner — clarifies why THIS person is getting THIS email.

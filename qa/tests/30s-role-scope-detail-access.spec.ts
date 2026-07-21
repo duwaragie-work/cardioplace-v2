@@ -42,7 +42,7 @@ test.describe('30s — patient-detail role-scope access guard', () => {
     await tc.dispose()
 
     await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${priya.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${priya.id}`)
 
     // Detail header renders; URL stays on the detail route (no bounce).
     await expect(page.locator(byTestId(T.admin.detailHeader))).toBeVisible({ timeout: 30_000 })
@@ -52,14 +52,14 @@ test.describe('30s — patient-detail role-scope access guard', () => {
   // ── PROVIDER + MED_DIR bounce out of an out-of-scope patient ──────────────
   test('PROVIDER opens out-of-scope patient → redirect to /patients?reason=out-of-scope', async ({ page }) => {
     await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${ABSENT_PATIENT_ID}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${ABSENT_PATIENT_ID}`)
     await page.waitForURL(OUT_OF_SCOPE_URL, { timeout: 30_000 })
     expect(page.url()).toMatch(OUT_OF_SCOPE_URL)
   })
 
   test('MED_DIR opens out-of-scope patient → redirect to /patients?reason=out-of-scope', async ({ page }) => {
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${ABSENT_PATIENT_ID}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${ABSENT_PATIENT_ID}`)
     await page.waitForURL(OUT_OF_SCOPE_URL, { timeout: 30_000 })
     expect(page.url()).toMatch(OUT_OF_SCOPE_URL)
   })
@@ -70,7 +70,7 @@ test.describe('30s — patient-detail role-scope access guard', () => {
     // instead. The meaningful distinction is that OPS is never bounced with
     // the out-of-scope reason — they have org-wide read access.
     await signInAdmin(page, ADMINS.ops.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${ABSENT_PATIENT_ID}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${ABSENT_PATIENT_ID}`)
     // Give the shell time to resolve the summary fetch + any redirect.
     await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {})
     expect(page.url()).not.toMatch(OUT_OF_SCOPE_URL)

@@ -71,7 +71,7 @@ test.describe('Phase 3 §K — admin notifications', () => {
     const row = page.locator(byTestId(T.admin.alertRow(id)))
     await expect(row).toBeVisible({ timeout: 25_000 })
     await row.click()
-    await expect(page).toHaveURL(new RegExp(`/patients/${aisha.id}`), { timeout: 20_000 })
+    await expect(page).toHaveURL(new RegExp(`/patients/detail\\?id=${aisha.id}`), { timeout: 20_000 })
     await tc.dispose()
   })
 })

@@ -318,7 +318,7 @@ export default function PatientAlertCard({
             )}
             <Link
               data-testid={`${testIdPrefix}-detail-${alert.id}`}
-              href={`/alerts/${alert.id}`}
+              href={`/alerts?id=${alert.id}`}
               aria-label={t('notifications.viewDetailsAria')}
               className="flex-1 h-10 rounded-xl text-[0.8125rem] font-bold flex items-center justify-center gap-2 transition cursor-pointer"
               style={{

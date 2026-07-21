@@ -71,7 +71,7 @@ test.describe('Bug 14 deprecation — two buffer commits stay two sessions', () 
 
       // Admin Readings tab — also two separate cards.
       await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-      await page.goto(`${ADMIN_BASE_URL}/patients/${u.id}`)
+      await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${u.id}`)
       await page.locator(byTestId(T.admin.detailTab('readings'))).click()
       await expect(page.locator(byTestId(T.admin.readingsList))).toBeVisible({ timeout: 25_000 })
       await expect(page.locator(byTestId(T.admin.readingsCard(r1.id)))).toBeVisible()

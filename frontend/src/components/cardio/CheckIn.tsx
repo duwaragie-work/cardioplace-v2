@@ -2772,7 +2772,7 @@ export default function CheckIn() {
             new Date(a.createdAt).getTime() >= sinceMs - 2000),
       );
       if (emergency) {
-        router.push(`/alerts/${emergency.id}`);
+        router.push(`/alerts?id=${emergency.id}`);
         return true;
       }
       await new Promise((r) => setTimeout(r, 400));

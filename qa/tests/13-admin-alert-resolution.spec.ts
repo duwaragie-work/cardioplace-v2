@@ -1421,7 +1421,7 @@ test.describe('Phase 3 §G — alert resolution modal', () => {
     // ("Finding 9"). So the cross-surface consistency signal is the Alerts
     // tab itself on a fresh load: the alert must persist as RESOLVED under
     // the RESOLVED status filter.
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('alerts'))).click()
     await page
       .locator(byTestId(T.admin.alertsStatusFilter('RESOLVED')))
@@ -1469,7 +1469,7 @@ test.describe('Phase 3 §H — alert acknowledgement', () => {
     expect(acked.find((a) => a.id === id)?.status).toBe('ACKNOWLEDGED')
 
     // Consistently reflected under the ACKNOWLEDGED status filter (fresh load).
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('alerts'))).click()
     await page
       .locator(byTestId(T.admin.alertsStatusFilter('ACKNOWLEDGED')))
@@ -1507,7 +1507,7 @@ test.describe('Phase 3 §H — alert acknowledgement', () => {
 
     // UI consistency: Alerts tab (RESOLVED filter) shows the final state.
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('alerts'))).click()
     await page
       .locator(byTestId(T.admin.alertsStatusFilter('RESOLVED')))

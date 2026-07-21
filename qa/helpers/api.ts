@@ -337,7 +337,7 @@ export async function acknowledgeAlertViaUI(
   page: Page,
   alertId: string,
 ): Promise<void> {
-  await page.goto(`/alerts/${alertId}`)
+  await page.goto(`/alerts?id=${alertId}`)
   const ack = page.locator(byTestId(T.alertDetail.acknowledgeBtn))
   await ack.waitFor({ state: 'visible', timeout: 15_000 })
   await ack.click()
@@ -689,7 +689,7 @@ export async function signOutViaUI(page: Page): Promise<void> {
 
 /** Open the patient-detail Alerts tab for `patientId`. */
 async function gotoPatientAlertsTab(adminPage: Page, patientId: string): Promise<void> {
-  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/detail?id=${patientId}`)
   await adminPage.locator(byTestId(T.admin.detailTab('alerts'))).click()
   await adminPage
     .locator(byTestId(T.admin.alertsStatusFilter('ALL')))
@@ -776,7 +776,7 @@ export async function verifyProfileViaUI(
   adminPage: Page,
   patientId: string,
 ): Promise<void> {
-  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/detail?id=${patientId}`)
   await adminPage.locator(byTestId(T.admin.detailTab('profile'))).click()
   const complete = adminPage.locator(byTestId(T.admin.profileVerifyComplete))
   await complete.waitFor({ state: 'visible', timeout: 15_000 })
@@ -801,7 +801,7 @@ export async function correctProfileFieldViaUI(
   rationale: string,
 ): Promise<void> {
   void rationale // UI does not collect per-field rationale (see header)
-  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/detail?id=${patientId}`)
   await adminPage.locator(byTestId(T.admin.detailTab('profile'))).click()
   // ProfileTab fetches async — wait for it to render before reaching for a
   // per-field control (the status banner is always present once loaded).
@@ -843,7 +843,7 @@ export async function setMedActionViaUI(
   action: 'VERIFY' | 'HOLD' | 'REJECT',
   rationale = 'QA automated rationale',
 ): Promise<void> {
-  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/detail?id=${patientId}`)
   await adminPage.locator(byTestId(T.admin.detailTab('medications'))).click()
   const card = adminPage
     .locator('[data-testid^="admin-med-card-"]')
@@ -892,7 +892,7 @@ export async function admitPatientViaUI(
   adminPage: Page,
   patientId: string,
 ): Promise<void> {
-  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/detail?id=${patientId}`)
   const btn = adminPage.locator(byTestId(T.admin.enrollmentEnrollBtn))
   await btn.waitFor({ state: 'visible', timeout: 15_000 })
   await btn.click()
@@ -915,7 +915,7 @@ export async function reassignCareTeamViaUI(
   role: 'PRIMARY' | 'BACKUP' | 'MD',
   newProviderEmail: string,
 ): Promise<void> {
-  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/detail?id=${patientId}`)
   await adminPage.locator(byTestId(T.admin.detailTab('careteam'))).click()
   const sel =
     role === 'PRIMARY'
@@ -959,7 +959,7 @@ export async function editThresholdViaUI(
     hrLowerTarget?: number
   },
 ): Promise<void> {
-  await adminPage.goto(`${ADMIN_BASE_URL}/patients/${patientId}`)
+  await adminPage.goto(`${ADMIN_BASE_URL}/patients/detail?id=${patientId}`)
   await adminPage.locator(byTestId(T.admin.detailTab('thresholds'))).click()
   const fill = async (testid: string, v: number | undefined) => {
     if (v == null) return
@@ -1058,7 +1058,7 @@ export async function activateInviteViaUI(
   token: string,
   landingPattern: RegExp = /\/(dashboard|onboarding)/,
 ): Promise<void> {
-  await page.goto(`${baseUrl}/activate/${token}`)
+  await page.goto(`${baseUrl}/activate?token=${token}`)
   const confirm = page.locator(byTestId(T.activate.confirm))
   await confirm.waitFor({ state: 'visible', timeout: 20_000 })
   await confirm.click()

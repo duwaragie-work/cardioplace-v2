@@ -548,7 +548,7 @@ test.describe('Option D — BP-only emergency retake-to-confirm (Manisha 2026-06
       // Regression guard — admin Readings tab also shows two separate cards
       // (its strict-by-sessionId grouping was already correct; confirm unbroken).
       await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-      await page.goto(`${ADMIN_BASE_URL}/patients/${u.id}`)
+      await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${u.id}`)
       await page.locator(byTestId(T.admin.detailTab('readings'))).click()
       await expect(page.locator(byTestId(T.admin.readingsList))).toBeVisible({
         timeout: 25_000,
