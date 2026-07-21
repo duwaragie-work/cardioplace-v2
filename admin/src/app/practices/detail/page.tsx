@@ -35,6 +35,7 @@ import {
 } from '@/lib/services/practice.service';
 import { useAuth } from '@/lib/auth-context';
 import { canEditThisPractice } from '@/lib/roleGates';
+import { readNavId } from '@/lib/nav-handoff';
 
 interface FormState {
   name: string;
@@ -54,11 +55,18 @@ function toForm(p: Practice): FormState {
   };
 }
 
-// B3 (static export) — was /practices/[id]; now a static /practices/detail shell
-// reading the opaque practice id from `?id=`. List stays at /practices.
+// B3/F1 (static export) — static /practices/detail shell. Id from the URL
+// (`?id=` deep-link) or sessionStorage (in-app click → bare route, id off the
+// CDN log). URL wins so a fresh deep-link isn't shadowed by a stale stash;
+// neither present → back to the list.
 function PracticeDetailContent() {
-  const id = useSearchParams().get('id') ?? '';
   const router = useRouter();
+  const id = useSearchParams().get('id') ?? readNavId('practiceDetail')?.id ?? '';
+
+  useEffect(() => {
+    if (!id) router.replace('/practices');
+  }, [id, router]);
+
   const { user, isLoading: authLoading } = useAuth();
 
   const [practice, setPractice] = useState<Practice | null>(null);

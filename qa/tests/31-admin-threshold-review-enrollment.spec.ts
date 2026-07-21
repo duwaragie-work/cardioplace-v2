@@ -453,8 +453,11 @@ test.describe('Care-team notifications + deep-link (UI E2E)', () => {
       const row = page.locator(byTestId(T.admin.notificationRow(provNotice.id)))
       await row.waitFor({ state: 'visible', timeout: 20_000 })
       await row.click()
-      await page.waitForURL(new RegExp(`/patients/detail\\?id=${olive.id}`), { timeout: 20_000 })
-      expect(page.url()).toContain(`/patients/detail?id=${olive.id}`)
+      // F1 — bare /patients/detail route; the id is handed off via
+      // sessionStorage, so it must NOT be in the URL.
+      await page.waitForURL(/\/patients\/detail$/, { timeout: 20_000 })
+      expect(page.url()).toContain('/patients/detail')
+      expect(page.url()).not.toContain('id=')
     }
     await tc.dispose()
   })

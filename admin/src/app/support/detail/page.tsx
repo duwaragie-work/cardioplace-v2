@@ -4,17 +4,25 @@
 // /support/detail shell reading the opaque ticket id from `?id=`. The list stays
 // at /support. `useSearchParams` requires the Suspense boundary below.
 
-import { Suspense } from 'react';
+import { Suspense, useEffect } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Shield } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { canManageSupport } from '@/lib/roleGates';
+import { readNavId } from '@/lib/nav-handoff';
 import SupportDetail from '@/components/support/SupportDetail';
 
 function SupportDetailContent() {
-  const id = useSearchParams().get('id') ?? '';
+  const router = useRouter();
+  // F1 — ticket id from `?id=` (deep-link) or sessionStorage (in-app click →
+  // bare route). URL wins; neither present → back to the queue.
+  const id = useSearchParams().get('id') ?? readNavId('supportDetail')?.id ?? '';
   const { user, isLoading } = useAuth();
+
+  useEffect(() => {
+    if (!isLoading && !id) router.replace('/support');
+  }, [isLoading, id, router]);
 
   if (isLoading) return null;
   if (!user) return null;

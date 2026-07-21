@@ -606,7 +606,9 @@ test.describe('Phase 3 §P — admin accessibility', () => {
     await expect(row).toBeVisible({ timeout: 25_000 })
     await row.focus()
     await page.keyboard.press('Enter')
-    await expect(page).toHaveURL(new RegExp(`/patients/detail\\?id=${aisha.id}`), { timeout: 20_000 })
+    // F1 — bare /patients/detail route; the id is handed off via sessionStorage,
+    // never the URL (this is the no-PHI-in-URL spec, so that's the point).
+    await expect(page).toHaveURL(/\/patients\/detail$/, { timeout: 20_000 })
     await tc.dispose()
   })
 

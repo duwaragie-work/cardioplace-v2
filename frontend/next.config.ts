@@ -95,35 +95,36 @@ const nextConfig: NextConfig = {
   // "activates" once a real HTTPS response carries it. This mirrors the
   // backend's always-on helmet HSTS. No `preload` (irreversible);
   // `includeSubDomains` is safe — every Cardioplace prod subdomain is HTTPS.
-  async headers() {
-    // B4 — under static export (STATIC_EXPORT=1) headers() can't run (no server
-    // runtime), so these are supplied by CloudFront instead via a
-    // response-headers policy — see docs/CLOUDFRONT_SECURITY_HEADERS.md for the
-    // exact set. Returning [] keeps that hand-off explicit and avoids the
-    // misleading export-time warning. In standalone / dev they still apply, so
-    // V-12 is never dropped before the AWS cutover.
-    if (process.env.STATIC_EXPORT) return [];
-    return [
-      {
-        source: '/:path*',
-        headers: [
+  // F2/B4 — the `headers` KEY is omitted entirely under static export
+  // (STATIC_EXPORT=1). Next warns whenever the key is PRESENT with
+  // output:'export' — even when it returns [] — so gating the whole key (not
+  // just the return value) is what actually silences it. Under export these are
+  // supplied by CloudFront instead (see docs/CLOUDFRONT_SECURITY_HEADERS.md); in
+  // standalone / dev the key is present and V-12 applies exactly as before.
+  ...(process.env.STATIC_EXPORT
+    ? {}
+    : {
+        headers: async () => [
           {
-            key: 'Strict-Transport-Security',
-            value: 'max-age=31536000; includeSubDomains',
+            source: '/:path*',
+            headers: [
+              {
+                key: 'Strict-Transport-Security',
+                value: 'max-age=31536000; includeSubDomains',
+              },
+              // V-12 — see the policy note above.
+              { key: 'Content-Security-Policy', value: csp },
+              // Legacy clickjacking header for browsers that predate
+              // frame-ancestors. Nothing embeds the patient app in an iframe.
+              { key: 'X-Frame-Options', value: 'DENY' },
+              { key: 'X-Content-Type-Options', value: 'nosniff' },
+              // Don't leak the full patient-app URL (which can carry ids) to
+              // third parties — e.g. the YouTube embed's referrer.
+              { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+            ],
           },
-          // V-12 — see the policy note above.
-          { key: 'Content-Security-Policy', value: csp },
-          // Legacy clickjacking header for browsers that predate
-          // frame-ancestors. Nothing embeds the patient app in an iframe.
-          { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'X-Content-Type-Options', value: 'nosniff' },
-          // Don't leak the full patient-app URL (which can carry ids) to
-          // third parties — e.g. the YouTube embed's referrer.
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         ],
-      },
-    ];
-  },
+      }),
 };
 
 export default nextConfig;

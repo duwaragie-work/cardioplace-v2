@@ -6,7 +6,7 @@
 //
 // The route is public (see proxy.ts) because the invitee has no session yet.
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, ShieldAlert } from 'lucide-react';
 import { useAuth, type AdminAuthResponse } from '@/lib/auth-context';
@@ -35,7 +35,9 @@ const ROLE_LABEL: Record<string, string> = {
 // B3 (static export) — was /activate/[token]; now a static /activate shell
 // reading the invite token from `?token=`. Email links updated backend-side.
 function ActivateInviteContent() {
-  const token = useSearchParams().get('token') ?? '';
+  // F3 — capture the token ONCE (used again on the Activate click, so it must
+  // survive the URL scrub in the effect below).
+  const token = useRef(useSearchParams().get('token') ?? '').current;
   const router = useRouter();
   const { login } = useAuth();
 
@@ -68,6 +70,11 @@ function ActivateInviteContent() {
             err instanceof Error ? err.message : 'Could not load invite.',
           );
       });
+    // F3 — token is captured (ref above); scrub it from the address bar +
+    // history so it can't be replayed. Backend enforces single-use + TTL.
+    if (typeof window !== 'undefined' && window.location.search) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
     return () => {
       cancelled = true;
     };

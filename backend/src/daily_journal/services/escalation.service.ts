@@ -1813,9 +1813,13 @@ function escalationEmailBody(args: {
   // since /patients/{userId} is provider-only.
   // B3 (static export) — /alerts and /patients/detail are now static routes
   // reading their opaque id from the query string (was a dynamic path segment).
+  // Addendum (2026-07-21, Ruhaim/Duwaragie) — the patient user id must NEVER
+  // appear in a URL. Deep-link with the alert id ONLY (opaque ULID); the admin
+  // detail page resolves the patient server-side from the alert. FLAG for
+  // Duwaragie/Niva: escalation email deep-link changed to alert-id-only.
   const dashboardUrl = isPatient
     ? `${patientBaseUrl}/alerts?id=${encodeURIComponent(alert.id)}`
-    : `${adminBaseUrl}/patients/detail?id=${encodeURIComponent(alert.userId)}&alert=${encodeURIComponent(alert.id)}`
+    : `${adminBaseUrl}/patients/detail?alert=${encodeURIComponent(alert.id)}`
   const ctaLabel = isPatient ? 'View your alert →' : 'View in dashboard →'
 
   // Recipient role banner — clarifies why THIS person is getting THIS email.
