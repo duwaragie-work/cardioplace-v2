@@ -594,7 +594,7 @@ export class SupportService {
           ticket.ticketNumber,
           ticket.priority,
           ticket.category,
-          `${this.adminBaseUrl}/support/${ticket.id}`,
+          `${this.adminBaseUrl}/support/detail?id=${ticket.id}`,
         ),
         {
           template: 'support_ops_notify',

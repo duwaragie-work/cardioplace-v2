@@ -1329,13 +1329,13 @@ export default function PatientsPage() {
                   <div
                     key={p.id}
                     data-testid={`admin-patient-list-row-${p.id}`}
-                    onClick={() => router.push(`/patients/${p.id}`)}
+                    onClick={() => router.push(`/patients/detail?id=${p.id}`)}
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        router.push(`/patients/${p.id}`);
+                        router.push(`/patients/detail?id=${p.id}`);
                       }
                     }}
                     title={p.needsThreshold ? 'Threshold needed — set or re-review targets' : undefined}

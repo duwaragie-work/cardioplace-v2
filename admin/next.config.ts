@@ -62,7 +62,13 @@ const csp = [
 ].join('; ');
 
 const nextConfig: NextConfig = {
-  output: 'standalone',
+  // B1 — build target is env-toggleable, NOT hard-flipped. Default stays
+  // 'standalone' so the current deploy (middleware + headers) keeps working.
+  // Only the AWS static build sets STATIC_EXPORT=1 for a pure static bundle.
+  output: process.env.STATIC_EXPORT ? 'export' : 'standalone',
+  // Static export can't run Next's image optimizer (no server), so disable it
+  // ONLY in export mode. Standalone/dev keep optimization unchanged.
+  ...(process.env.STATIC_EXPORT ? { images: { unoptimized: true } } : {}),
   outputFileTracingRoot: monorepoRoot,
   turbopack: {
     root: monorepoRoot,
@@ -80,6 +86,13 @@ const nextConfig: NextConfig = {
   // backend's always-on helmet HSTS. No `preload`; `includeSubDomains` is safe
   // (all prod subdomains are HTTPS).
   async headers() {
+    // B4 — under static export (STATIC_EXPORT=1) headers() can't run (no server
+    // runtime), so these are supplied by CloudFront instead via a
+    // response-headers policy — see docs/CLOUDFRONT_SECURITY_HEADERS.md for the
+    // exact set. Returning [] keeps that hand-off explicit and avoids the
+    // misleading export-time warning. In standalone / dev they still apply, so
+    // V-12 is never dropped before the AWS cutover.
+    if (process.env.STATIC_EXPORT) return [];
     return [
       {
         source: '/:path*',

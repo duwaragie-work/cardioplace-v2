@@ -209,7 +209,9 @@ export default function CSVUploadCard({
       });
       setParsedRows(next);
     } catch (e) {
-      console.error(e);
+      // 4.x — log only the message, never the raw error: a CSV parse failure
+      // can carry row content (bulk user names/emails = PII) in the object.
+      console.error(e instanceof Error ? e.message : 'CSV parse failed');
       setParseError(t('userManagement.error.csvParse'));
     }
   }

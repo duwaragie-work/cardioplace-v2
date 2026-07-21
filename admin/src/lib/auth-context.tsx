@@ -110,8 +110,12 @@ const AuthContext = createContext<AuthContextType>({
 // the patient app's pattern — the JWT itself never sees JS-readable storage.
 function writeAuthMarkers(roles: string[]) {
   if (typeof document === 'undefined') return;
-  document.cookie = `${AUTH_MARKER_COOKIE}=1; path=/; max-age=2592000; SameSite=Lax`;
-  document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax`;
+  // 3.2 — HTTPS-gated `Secure` (see the patient app for the rationale): adds
+  // Secure in prod without breaking http:// dev/staging, which would otherwise
+  // drop the cookie and loop proxy.ts back to /sign-in.
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${AUTH_MARKER_COOKIE}=1; path=/; max-age=2592000; SameSite=Lax${secure}`;
+  document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax${secure}`;
 }
 
 function clearAuthMarkers() {

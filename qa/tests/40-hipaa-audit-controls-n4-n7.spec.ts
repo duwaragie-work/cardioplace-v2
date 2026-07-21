@@ -113,7 +113,7 @@ test.describe('HIPAA audit controls — N4/N5/N6/N7 end-to-end', () => {
     await signInAdmin(page, admin.email, ADMIN_BASE_URL)
     // Go directly to the patient's detail page — deep-link is stable across
     // patient-list search UI changes.
-    await page.goto(`${ADMIN_BASE_URL}/patients/${patientUser!.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${patientUser!.id}`)
     // Confirm the detail header rendered — anchors the read.
     await expect(page.locator(byTestId(T.admin.detailHeader))).toBeVisible({
       timeout: 15_000,
@@ -142,7 +142,7 @@ test.describe('HIPAA audit controls — N4/N5/N6/N7 end-to-end', () => {
     expect(patientUser).not.toBeNull()
 
     await signInAdmin(page, admin.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${patientUser!.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${patientUser!.id}`)
     await expect(page.locator(byTestId(T.admin.detailHeader))).toBeVisible({
       timeout: 15_000,
     })
@@ -156,7 +156,7 @@ test.describe('HIPAA audit controls — N4/N5/N6/N7 end-to-end', () => {
       await thresholdsTab.click({ force: true })
     } else {
       // Fallback: navigate directly.
-      await page.goto(`${ADMIN_BASE_URL}/patients/${patientUser!.id}/thresholds`)
+      await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${patientUser!.id}`)
     }
 
     const sbpUpper = page.locator(byTestId(T.admin.thresholdSbpUpper))

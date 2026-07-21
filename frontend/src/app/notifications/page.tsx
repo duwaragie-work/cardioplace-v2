@@ -327,7 +327,7 @@ function NotifCard({
         // deep-link to the alert detail so the patient lands on context.
         // Generic notifications (gap reminders etc.) just mark-as-read.
         if (notif.alertId) {
-          router.push(`/alerts/${notif.alertId}`);
+          router.push(`/alerts?id=${notif.alertId}`);
         }
       }}
     >

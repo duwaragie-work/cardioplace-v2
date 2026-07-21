@@ -12,8 +12,8 @@
 // find by id. For a typical patient that's a small list. Replace with a
 // dedicated endpoint when one lands.
 
-import { useEffect, useState, use } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, AlertCircle, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -26,9 +26,6 @@ import { getProfile } from '@/lib/services/auth.service';
 import EmergencyAlertScreen from '@/components/alerts/EmergencyAlertScreen';
 import TierAlertView from '@/components/alerts/TierAlertView';
 
-interface PageProps {
-  params: Promise<{ id: string }>;
-}
 
 function AlertSkeleton() {
   return (
@@ -180,9 +177,12 @@ function NotFound({ reason }: { reason: string }) {
   );
 }
 
-export default function AlertDetailPage({ params }: PageProps) {
-  // Next 16: dynamic route params come back as a Promise — unwrap with `use`.
-  const { id } = use(params);
+// B3 (static export) — was a dynamic /alerts/[id] route; now a static /alerts
+// shell that reads the opaque alert id from `?id=` and fetches client-side. A
+// dynamic segment can't be statically exported without baking real ids into the
+// bundle. `useSearchParams` requires a Suspense boundary (the default export).
+function AlertDetailContent() {
+  const id = useSearchParams().get('id') ?? '';
   const router = useRouter();
   const { isLoading, isAuthenticated } = useAuth();
   const { t } = useLanguage();
@@ -306,7 +306,7 @@ export default function AlertDetailPage({ params }: PageProps) {
       // (provider resolved it between fetch and ack), fall through to the
       // banner view here.
       if (nextActiveAlertId) {
-        router.push(`/alerts/${nextActiveAlertId}`);
+        router.push(`/alerts?id=${nextActiveAlertId}`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : t('alerts.notFound.ackError'));
@@ -376,5 +376,13 @@ export default function AlertDetailPage({ params }: PageProps) {
       onAcknowledge={handleAcknowledge}
       isPreEnrollment={isPreEnrollment}
     />
+  );
+}
+
+export default function AlertDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <AlertDetailContent />
+    </Suspense>
   );
 }

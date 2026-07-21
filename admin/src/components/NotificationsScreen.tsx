@@ -539,7 +539,7 @@ export default function NotificationsScreen() {
                         // something.
                         onRowClick={() => {
                           if (a.patient?.id) {
-                            router.push(`/patients/${a.patient.id}?alert=${a.id}`);
+                            router.push(`/patients/detail?id=${a.patient.id}&alert=${a.id}`);
                           } else {
                             setExpandedId(expanded ? null : a.id);
                           }
@@ -641,12 +641,12 @@ export default function NotificationsScreen() {
                         // local Alerts tab when patientUserId is missing.
                         if (n.alertId && n.patientUserId) {
                           router.push(
-                            `/patients/${n.patientUserId}?alert=${n.alertId}`,
+                            `/patients/detail?id=${n.patientUserId}&alert=${n.alertId}`,
                           );
                         } else if (n.patientUserId) {
                           // Non-alert care-team notice (enrollment paused /
                           // condition review) → straight to the patient detail.
-                          router.push(`/patients/${n.patientUserId}`);
+                          router.push(`/patients/detail?id=${n.patientUserId}`);
                         } else if (n.alertId) {
                           setTopTab('alerts');
                         }

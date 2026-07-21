@@ -67,8 +67,8 @@ test.describe('F27 — pre-enrollment patient sees truthful messaging', () => {
       // test asserts the ALERT-DETAIL page content, so navigate straight there.)
       await signInPatient(page, PATIENTS.aisha.email)
       await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
-      await page.goto(`/alerts/${emergency.id}`)
-      await page.waitForURL(new RegExp(`/alerts/${emergency.id}`), { timeout: 30_000 }).catch(() => {})
+      await page.goto(`/alerts?id=${emergency.id}`)
+      await page.waitForURL(new RegExp(`/alerts\\?id=${emergency.id}`), { timeout: 30_000 }).catch(() => {})
       await page.waitForLoadState('networkidle').catch(() => {})
 
       const bodyText = await page.locator('body').innerText()

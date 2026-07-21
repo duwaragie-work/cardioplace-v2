@@ -113,7 +113,9 @@ export default function OnboardingPage() {
     });
 
     if (!showOnboarding) {
-      if (typeof window !== "undefined") {
+      // 4.1 — never ship a user identifier to the console in production (it
+      // lands in shared/kiosk browser dev-tools). Dev-only diagnostic.
+      if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
         // eslint-disable-next-line no-console
         console.debug("[onboarding] redirect away from onboarding page", {
           userId: user.id,

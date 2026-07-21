@@ -23,7 +23,7 @@ function formatDisplayId(value: string): string {
 export default function TicketCard({ ticket }: { ticket: SupportTicketRow }) {
   return (
     <Link
-      href={`/support/${ticket.id}`}
+      href={`/support/detail?id=${ticket.id}`}
       data-testid={`support-row-${ticket.ticketNumber}`}
       className="flex items-start gap-3 px-4 py-3 border-t first:border-t-0 border-slate-100 hover:bg-slate-50 transition"
     >

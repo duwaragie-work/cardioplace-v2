@@ -99,7 +99,7 @@ async function assertAlertMessageMatches(
   alertId: string,
   textRegex: RegExp,
 ): Promise<void> {
-  await page.goto(`/alerts/${alertId}`)
+  await page.goto(`/alerts?id=${alertId}`)
   // Post-FIX 1 (commit 388b816): angioedema routes to EmergencyAlertScreen.
   // The body is the signed-off registry patientMessage rendered locale-aware
   // via the alert.angioedema.* i18n key.

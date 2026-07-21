@@ -274,7 +274,7 @@ test.describe('Admin app — PHI safety (§F)', () => {
     // Patient-detail Readings tab renders its chart/cards without crashing.
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const aisha = await tc.findUser(PATIENTS.aisha.email)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('readings'))).click()
     // Either the readings list or its empty state must render (proves the tab
     // + any chart components mounted without throwing).
@@ -374,7 +374,7 @@ test.describe('Phase 4m — accessibility (20m)', () => {
       { tier: 'BP_LEVEL_2', status: 'OPEN' },
     ])
     await signInPatient(page, PATIENTS.aisha.email)
-    await page.goto(`/alerts/${alertIds[0]}`)
+    await page.goto(`/alerts?id=${alertIds[0]}`)
     const emergency = page.locator('[data-testid="emergency-screen"]')
     const shown = await emergency
       .waitFor({ state: 'visible', timeout: 12_000 })
@@ -511,7 +511,7 @@ test.describe('Phase 3 §M — RBAC matrix', () => {
     const tc = await newTestControl(API_BASE_URL, process.env.TEST_CONTROL_SECRET)
     const james = await tc.findUser(PATIENTS.james.email) // assigned to primaryProvider
     await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${james.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${james.id}`)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
     await expect(page.locator(byTestId(T.admin.thresholdSave))).toBeVisible({ timeout: 25_000 })
     await expect(page.locator(byTestId(T.admin.thresholdReadonlyBanner))).toHaveCount(0)
@@ -527,7 +527,7 @@ test.describe('Phase 3 §M — RBAC matrix', () => {
     const aisha = await tc.findUser(PATIENTS.aisha.email)
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
     // Thresholds editor renders (canEditThresholds includes MED_DIR).
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
     await expect(page.locator(byTestId(T.admin.thresholdSave))).toBeVisible({ timeout: 25_000 })
     // Practice management is NO LONGER allowed for MED_DIR — list renders
@@ -547,7 +547,7 @@ test.describe('Phase 3 §M — RBAC matrix', () => {
     await page.goto(`${ADMIN_BASE_URL}/practices`)
     await expect(page.locator(byTestId(T.admin.practiceCreateButton)).first()).toBeVisible({ timeout: 25_000 })
     // CANNOT verify profiles (no verify-complete) nor edit thresholds.
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('profile'))).click()
     await expect(page.locator(byTestId(T.admin.profileStatusBanner))).toBeVisible({ timeout: 25_000 })
     await expect(page.locator(byTestId(T.admin.profileVerifyComplete))).toHaveCount(0)
@@ -565,7 +565,7 @@ test.describe('Phase 3 §M — RBAC matrix', () => {
     await signInAdmin(page, ADMINS.support.email, ADMIN_BASE_URL) // SUPER_ADMIN
     await page.goto(`${ADMIN_BASE_URL}/practices`)
     await expect(page.locator(byTestId(T.admin.practiceCreateButton)).first()).toBeVisible({ timeout: 25_000 })
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
     await expect(page.locator(byTestId(T.admin.thresholdSave))).toBeVisible({ timeout: 20_000 })
     await page.locator(byTestId(T.admin.detailTab('profile'))).click()
@@ -606,7 +606,7 @@ test.describe('Phase 3 §P — admin accessibility', () => {
     await expect(row).toBeVisible({ timeout: 25_000 })
     await row.focus()
     await page.keyboard.press('Enter')
-    await expect(page).toHaveURL(new RegExp(`/patients/${aisha.id}`), { timeout: 20_000 })
+    await expect(page).toHaveURL(new RegExp(`/patients/detail\\?id=${aisha.id}`), { timeout: 20_000 })
     await tc.dispose()
   })
 

@@ -26,6 +26,7 @@ import {
 } from '@/lib/services/mfa.service';
 import LandingHeader from '@/components/LandingHeader';
 import LandingFooter from '@/components/LandingFooter';
+import { readChallengeHash } from '@/lib/challenge-hash';
 
 const CODE_LENGTH = 6;
 
@@ -38,14 +39,11 @@ function readChallengeToken(): string | null {
       if (parsed.challengeToken) return parsed.challengeToken;
     }
   } catch {
-    /* sessionStorage unavailable — fall through to URL param */
+    /* sessionStorage unavailable — fall through to the URL fragment */
   }
-  try {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('challengeToken');
-  } catch {
-    return null;
-  }
+  // Magic-link path: token arrives in the URL fragment (never logged), not the
+  // query string. See readChallengeHash (PHI audit 1.8).
+  return readChallengeHash()?.get('challengeToken') ?? null;
 }
 
 function clearStoredChallenge() {

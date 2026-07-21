@@ -29,6 +29,7 @@ import {
 } from '@/lib/services/webauthn.service';
 import LandingHeader from '@/components/cardio/LandingHeader';
 import LandingFooter from '@/components/cardio/LandingFooter';
+import { readChallengeHash } from '@/lib/challenge-hash';
 
 function readChallengeToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -39,10 +40,12 @@ function readChallengeToken(): string | null {
       if (parsed.challengeToken) return parsed.challengeToken;
     }
   } catch {
-    /* sessionStorage unavailable — fall through to URL param */
+    /* sessionStorage unavailable — fall through to the URL fragment */
   }
+  // Magic-link path: token arrives in the URL fragment (never logged), not the
+  // query string. See readChallengeHash (PHI audit 1.8).
   try {
-    return new URLSearchParams(window.location.search).get('challengeToken');
+    return readChallengeHash()?.get('challengeToken') ?? null;
   } catch {
     return null;
   }

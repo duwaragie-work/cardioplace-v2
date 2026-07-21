@@ -211,7 +211,7 @@ test.describe('Phase 4h — notifications (20h)', () => {
     const link = page.locator(`[data-testid="notification-row-detail-${alertIds[0]}"]`)
     await link.waitFor({ state: 'visible', timeout: 12_000 })
     await link.click()
-    await page.waitForURL(new RegExp(`/alerts/${alertIds[0]}`), {
+    await page.waitForURL(new RegExp(`/alerts\\?id=${alertIds[0]}`), {
       timeout: 12_000,
     })
     await expect(

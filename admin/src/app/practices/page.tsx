@@ -131,7 +131,7 @@ export default function PracticesPage() {
                 >
                   <button
                     type="button"
-                    onClick={() => router.push(`/practices/${p.id}`)}
+                    onClick={() => router.push(`/practices/detail?id=${p.id}`)}
                     className="w-full text-left px-5 py-4 flex items-center gap-4 transition-colors hover:bg-[#F8F4FF] cursor-pointer"
                   >
                     <div

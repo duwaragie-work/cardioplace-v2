@@ -379,7 +379,7 @@ describe('WebPushService', () => {
 
     it('alert-linked push deep-links to the alert detail', async () => {
       expect(await pathFor(alertNotification('BP_LEVEL_2', 'alert-99'))).toBe(
-        '/alerts/alert-99',
+        '/alerts?id=alert-99',
       )
     })
 

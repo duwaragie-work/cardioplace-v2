@@ -681,15 +681,20 @@ export class AuthController {
     try {
       const context = this.buildAuthContext(req)
       const result = await this.authService.verifyMagicLink(token, context)
+      // PHI audit 1.8 — the short-lived challenge token rides the URL FRAGMENT
+      // (`#…`), NOT the query string. A fragment is never sent to the server, so
+      // CloudFront/S3 never logs it and it never leaks via Referer; the challenge
+      // page reads it client-side (readChallengeHash) and scrubs it. A `?query=`
+      // here would land the challenge token in the static-host access log.
+      //
       // Phase/practice-identity — magic-link can also surface the selector
-      // requirement when the recipient is a multi-practice provider. Redirect
-      // to the FE selector page carrying the short-lived challenge token.
+      // requirement when the recipient is a multi-practice provider.
       if ('status' in result && result.status === 'PRACTICE_SELECT_REQUIRED') {
         const sp = new URLSearchParams({
           challengeToken: result.challengeToken,
           practices: JSON.stringify(result.practices),
         })
-        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/select-practice?${sp.toString()}`)
+        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/select-practice#${sp.toString()}`)
         return
       }
       // MFA gate — if an enrolled provider/admin ever arrives via magic link,
@@ -697,7 +702,7 @@ export class AuthController {
       // the selector redirect above). Patients have no TOTP so never hit this.
       if ('status' in result && result.status === 'MFA_REQUIRED') {
         const sp = new URLSearchParams({ challengeToken: result.challengeToken })
-        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/mfa-challenge?${sp.toString()}`)
+        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/mfa-challenge#${sp.toString()}`)
         return
       }
       // Patient biometric gate — a patient with a registered device bounces to
@@ -705,7 +710,7 @@ export class AuthController {
       // the patient app (biometric is patient-side; providers use TOTP above).
       if ('status' in result && result.status === 'WEBAUTHN_REQUIRED') {
         const sp = new URLSearchParams({ challengeToken: result.challengeToken })
-        res.redirect(`${patientAppUrl}/sign-in/biometric?${sp.toString()}`)
+        res.redirect(`${patientAppUrl}/sign-in/biometric#${sp.toString()}`)
         return
       }
       // Magic-link verify is a top-level GET (clicked from an email) so the
@@ -719,17 +724,14 @@ export class AuthController {
         ? (adminAppUrl ?? patientAppUrl)
         : patientAppUrl
 
-      const params = new URLSearchParams({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        userId: result.userId,
-        email: result.email ?? '',
-        name: result.name ?? '',
-        roles: result.roles.join(','),
-        login_method: result.login_method,
-        onboarding_required: String(result.onboarding_required),
-      })
-      res.redirect(`${targetUrl}/auth/magic-link?${params.toString()}`)
+      // V-11 / PHI audit 1.1 — redirect to a TOKENLESS URL. The access + refresh
+      // tokens (and email/name) used to ride the query string here, where
+      // CloudFront/S3 would log them verbatim — a refresh token in a log is a
+      // durable account-takeover primitive. They are now delivered ONLY via the
+      // HttpOnly cookies set just above (scoped to this API origin); the landing
+      // page calls POST /auth/refresh with credentials:'include' to mint a fresh
+      // access token and reads the profile for its roles/onboarding state.
+      res.redirect(`${targetUrl}/auth/magic-link`)
     } catch {
       res.redirect(`${patientAppUrl}/auth/magic-link?error=expired`)
     }

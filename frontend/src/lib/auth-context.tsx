@@ -134,8 +134,13 @@ const AuthContext = createContext<AuthContextType>({
 // rejects unauthenticated API calls regardless.
 function writeAuthMarkers(roles: string[]) {
   if (typeof document === 'undefined') return;
-  document.cookie = `${AUTH_MARKER_COOKIE}=1; path=/; max-age=2592000; SameSite=Lax`;
-  document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax`;
+  // 3.2 — add `Secure` so these client cookies never travel over plain HTTP,
+  // but ONLY on an HTTPS page: an unconditional `Secure` would be silently
+  // dropped by the browser on http:// (non-localhost) dev/staging, leaving
+  // proxy.ts with no marker → a redirect loop to /sign-in. HTTPS-gated is safe.
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${AUTH_MARKER_COOKIE}=1; path=/; max-age=2592000; SameSite=Lax${secure}`;
+  document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax${secure}`;
 }
 
 // The onboarding gate bit proxy.ts reads. Onboarded means either the server

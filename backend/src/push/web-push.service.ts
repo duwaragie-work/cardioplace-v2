@@ -275,7 +275,7 @@ export class WebPushService implements OnModuleInit {
 
       // An alert id is an opaque uuid — it names nothing clinical.
       const path = notification.alertId
-        ? `/alerts/${notification.alertId}`
+        ? `/alerts?id=${notification.alertId}`
         : BELL_PATH
 
       return { urgent, path }

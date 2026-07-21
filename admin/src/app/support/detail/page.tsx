@@ -1,19 +1,19 @@
 'use client';
 
-import { use } from 'react';
+// B3 (static export) — was the dynamic /support/[id] route; now a static
+// /support/detail shell reading the opaque ticket id from `?id=`. The list stays
+// at /support. `useSearchParams` requires the Suspense boundary below.
+
+import { Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Shield } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { canManageSupport } from '@/lib/roleGates';
 import SupportDetail from '@/components/support/SupportDetail';
 
-export default function SupportDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  // Next 16 — params is a Promise; unwrap with use().
-  const { id } = use(params);
+function SupportDetailContent() {
+  const id = useSearchParams().get('id') ?? '';
   const { user, isLoading } = useAuth();
 
   if (isLoading) return null;
@@ -51,5 +51,13 @@ export default function SupportDetailPage({
     <div className="h-full" style={{ backgroundColor: '#FAFBFF' }}>
       <SupportDetail ticketId={id} />
     </div>
+  );
+}
+
+export default function SupportDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <SupportDetailContent />
+    </Suspense>
   );
 }

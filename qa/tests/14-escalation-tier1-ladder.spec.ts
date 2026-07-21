@@ -154,7 +154,7 @@ test.describe('Escalation ladder copy after ack/resolve', () => {
     await adminAcknowledgeAlert(adminApi, tier1!.id)
 
     await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${u.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${u.id}`)
 
     // The patient-detail shell defaults to the Profile tab. Switch to
     // Alerts. (`?alert=` query is not currently honored — `useSearchParams`
