@@ -8,6 +8,8 @@ const STATUS_STYLE: Record<string, string> = {
   OPEN: 'bg-amber-50 text-amber-700 border-amber-200',
   IN_PROGRESS: 'bg-violet-50 text-violet-700 border-violet-200',
   RESOLVED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  // Terminal (auto-close cron). Muted so it reads as archive, not active work.
+  CLOSED: 'bg-slate-100 text-slate-500 border-slate-200',
 };
 const PRIORITY_STYLE: Record<string, string> = {
   HIGH: 'bg-red-50 text-red-700 border-red-200',
@@ -36,6 +38,22 @@ export default function TicketCard({ ticket }: { ticket: SupportTicketRow }) {
               className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-amber-700"
             >
               <AlertCircle className="w-3 h-3" /> New
+            </span>
+          )}
+          {/* Derived server-side from the last reply's author — this is what
+              replaced a stored AWAITING_REPLY status. "Needs reply" = the
+              patient spoke last and an agent owes them a response. */}
+          {ticket.awaitingParty === 'OPS' && (
+            <span
+              data-testid="support-needs-reply-badge"
+              className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700"
+            >
+              Needs reply
+            </span>
+          )}
+          {ticket.awaitingParty === 'PATIENT' && (
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Awaiting patient
             </span>
           )}
         </div>

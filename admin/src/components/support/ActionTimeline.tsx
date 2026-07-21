@@ -10,6 +10,8 @@ const LABELS: Record<string, string> = {
   ACCOUNT_UNLOCKED: 'Account unlocked',
   IDENTITY_VERIFIED: 'Identity verified',
   RESOLVED: 'Resolved',
+  ASSIGNED: 'Assigned',
+  PRIORITY_CHANGED: 'Priority changed',
 };
 
 export default function ActionTimeline({

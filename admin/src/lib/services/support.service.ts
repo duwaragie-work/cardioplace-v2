@@ -132,6 +132,34 @@ export async function resolveTicket(
   await jsonOrThrow(res, 'Could not resolve ticket')
 }
 
+/**
+ * S4 — pick up / hand off a ticket. Omitting `assigneeId` assigns to the acting
+ * ops user (assign-to-me); the server auto-advances an OPEN ticket to
+ * IN_PROGRESS on pickup and records an ASSIGNED action.
+ */
+export async function assignTicket(
+  id: string,
+  assigneeId?: string,
+): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/v2/admin/support/tickets/${id}/assign`,
+    { method: 'POST', body: JSON.stringify(assigneeId ? { assigneeId } : {}) },
+  )
+  await jsonOrThrow(res, 'Could not assign ticket')
+}
+
+/** S5 — re-triage priority; the server records from/to in the action timeline. */
+export async function changePriority(
+  id: string,
+  priority: SupportPriority,
+): Promise<void> {
+  const res = await fetchWithAuth(
+    `${API}/api/v2/admin/support/tickets/${id}/priority`,
+    { method: 'POST', body: JSON.stringify({ priority }) },
+  )
+  await jsonOrThrow(res, 'Could not change priority')
+}
+
 export async function runTicketAction(
   id: string,
   action: SupportAction,
