@@ -1016,7 +1016,6 @@ const am: Record<TranslationKey, string> = {
   'support.locked.statusBanner': 'ጥያቄ ልከዋል? የማረጋገጫ ኢሜይልዎ የቲኬት ቁጥርዎን ይዟል — ተጨማሪ ነገር ማከል ከፈለጉ ለዚያ ኢሜይል መልስ ይስጡ፣ በዚያው ቲኬት ላይ እንጨምረዋለን።',
   'support.locked.email': 'የመለያዎ ኢሜይል',
   'support.locked.description': 'ምን እየተከሰተ ነው? (ለምሳሌ የማረጋገጫ መተግበሪያዬንና የመልሶ ማግኛ ኮዶቼን አጣሁ)',
-  'support.locked.phone': 'የመልስ ስልክ (አማራጭ)',
   'support.locked.submit': 'እገዛ ይጠይቁ',
   'support.locked.submitting': 'በማስገባት ላይ…',
   'support.locked.successLead': 'እናመሰግናለን — ጥያቄዎ',
@@ -1075,6 +1074,14 @@ const am: Record<TranslationKey, string> = {
   'support.hub.accountSecurity': 'Account & security',
   'support.hub.accountSecurityBody': 'Sign-in, two-step verification, and recovery codes.',
   'support.hub.legal': 'Privacy & terms',
+  'support.hub.helpCenter': 'Help Center',
+  'support.hub.helpCenterBody': 'Answers to common questions about the app.',
+
+  'support.help.title': 'Help Center',
+  'support.help.subtitle': 'Answers to the questions we get most often.',
+  'support.help.loading': 'Loading…',
+  'support.help.empty': 'No articles yet — please check back soon.',
+  'support.help.stillNeedHelp': 'Still need help?',
 
   'support.clinical.title': 'This looks like a medical question',
   'support.clinical.body': 'Support can help with your account and the app, but not with your health. For anything about your symptoms, your readings, or your medicines, please reach your care team.',

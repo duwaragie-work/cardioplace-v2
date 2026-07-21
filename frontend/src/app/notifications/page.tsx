@@ -130,6 +130,13 @@ type Notif = {
    *  (escalation dispatch, admin resolution). Tapping deep-links to the
    *  alert detail page so the patient lands on context, not a generic feed. */
   alertId?: string | null;
+  /** Backend-set on SUPPORT_* rows. Same idea as `alertId`: without it a
+   *  "Support replied to your request" card dead-ended on "tap to mark as
+   *  read" and the patient had to go hunt for the thread themselves. */
+  supportTicketId?: string | null;
+  /** Why the notification was sent — used here only to recognise the SUPPORT_*
+   *  family for routing. */
+  dispatchTrigger?: string | null;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -328,6 +335,10 @@ function NotifCard({
         // Generic notifications (gap reminders etc.) just mark-as-read.
         if (notif.alertId) {
           router.push(`/alerts/${notif.alertId}`);
+        } else if (notif.supportTicketId) {
+          // Support notifications open the actual thread (my-tickets reads
+          // ?ticket= and expands it) rather than dead-ending on the feed.
+          router.push(`/support/my-tickets?ticket=${notif.supportTicketId}`);
         }
       }}
     >

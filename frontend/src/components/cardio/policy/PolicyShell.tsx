@@ -13,13 +13,34 @@ import { Shield } from 'lucide-react';
 import LandingHeader from '../LandingHeader';
 import LandingFooter from '../LandingFooter';
 
-const KIND_LABEL: Record<'terms' | 'privacy', string> = {
+/**
+ * The healthcare legal set. `terms` + `privacy` shipped first; the remaining
+ * five are the HIPAA/ACA/accessibility documents a clinical app in a
+ * federally-funded pilot needs. Engineering owns the routes and this chrome —
+ * the WORDING inside each page is legal/compliance's, and until they deliver it
+ * those pages carry a visible placeholder and are noindex + unlinked.
+ */
+export type PolicyKind =
+  | 'terms'
+  | 'privacy'
+  | 'hipaa'
+  | 'cookies'
+  | 'accessibility'
+  | 'nondiscrimination'
+  | 'telehealth';
+
+const KIND_LABEL: Record<PolicyKind, string> = {
   terms: 'Legal · Terms',
   privacy: 'Legal · Privacy',
+  hipaa: 'Legal · HIPAA Notice',
+  cookies: 'Legal · Cookies',
+  accessibility: 'Legal · Accessibility',
+  nondiscrimination: 'Legal · Nondiscrimination',
+  telehealth: 'Legal · Telehealth Consent',
 };
 
 interface PolicyShellProps {
-  kind: 'terms' | 'privacy';
+  kind: PolicyKind;
   title: string;
   /** Optional one-line summary line under the hero title. Non-binding —
    *  the actual legal content lives in the sections below. */

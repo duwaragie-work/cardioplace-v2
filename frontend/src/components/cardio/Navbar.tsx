@@ -50,13 +50,33 @@ export default function Navbar() {
       }
       const consolidatedAlertCount = byEntry.size;
 
-      // Only count PUSH notifications (EMAIL is for tracking)
-      const pushNotifCount = notifs.filter((n: { channel?: string }) =>
-        !n.channel || n.channel === 'PUSH',
+      // Count exactly what /notifications renders in its in-app inbox, so the
+      // badge and the page can never disagree.
+      //
+      // This used to be PUSH-only, which silently dropped every DASHBOARD-channel
+      // row — including the whole SUPPORT_* family (SUPPORT_REPLY, SUPPORT_RESOLVE,
+      // …). The effect was that support could reply to a patient and the bell
+      // would never light up, so the reply was only discoverable by opening
+      // /notifications on spec. Mirrors notifications/page.tsx: drop EMAIL
+      // (tracking-only), and drop a PUSH row that merely duplicates a DASHBOARD
+      // row with the same content so a dual-dispatch isn't counted twice.
+      const contentKey = (n: { title?: string; body?: string }) =>
+        `${n.title} ${n.body}`;
+      const dashboardKeys = new Set(
+        notifs
+          .filter((n: { channel?: string }) => n.channel === 'DASHBOARD')
+          .map(contentKey),
+      );
+      const inAppNotifCount = notifs.filter(
+        (n: { channel?: string; title?: string; body?: string }) => {
+          if (n.channel === 'EMAIL') return false;
+          if (n.channel === 'PUSH' && dashboardKeys.has(contentKey(n))) return false;
+          return true;
+        },
       ).length;
 
       setAlertCount((prev) => {
-        const next = consolidatedAlertCount + pushNotifCount;
+        const next = consolidatedAlertCount + inAppNotifCount;
         return prev === next ? prev : next;
       });
     };

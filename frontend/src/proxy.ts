@@ -6,7 +6,10 @@ import {
   ONBOARDED_MARKER_COOKIE,
 } from '@/lib/cookie-names'
 
-const PUBLIC_ROUTES = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/terms', '/privacy', '/auth/callback', '/auth/magic-link', '/activate', '/support', '/support/locked-out']
+const PUBLIC_ROUTES = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/terms', '/privacy', '/auth/callback', '/auth/magic-link', '/activate', '/support', '/support/locked-out',
+  // Healthcare legal set. Routes exist and resolve; copy is pending legal, so
+  // each is noindex (per-route metadata) and not linked from the footer/sitemap.
+  '/hipaa-notice', '/cookies', '/accessibility', '/nondiscrimination', '/telehealth-consent']
 
 /**
  * Routes that must stay GATED even though a broader PUBLIC_ROUTES prefix covers

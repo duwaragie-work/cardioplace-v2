@@ -993,7 +993,6 @@ const fr: Record<TranslationKey, string> = {
   'support.locked.statusBanner': 'Vous avez déjà envoyé une demande ? Votre e-mail de confirmation contient votre numéro de ticket : répondez à cet e-mail et nous ajouterons tout complément au même ticket.',
   'support.locked.email': 'Votre adresse e-mail de compte',
   'support.locked.description': 'Que se passe-t-il ? (ex. : j’ai perdu mon application d’authentification et mes codes de récupération)',
-  'support.locked.phone': 'Téléphone de rappel (facultatif)',
   'support.locked.submit': 'Demander de l’aide',
   'support.locked.submitting': 'Envoi…',
   'support.locked.successLead': 'Merci — votre demande',
@@ -1046,6 +1045,14 @@ const fr: Record<TranslationKey, string> = {
   'support.hub.accountSecurity': 'Compte et sécurité',
   'support.hub.accountSecurityBody': 'Connexion, vérification en deux étapes et codes de récupération.',
   'support.hub.legal': 'Confidentialité et conditions',
+  'support.hub.helpCenter': 'Centre d’aide',
+  'support.hub.helpCenterBody': 'Réponses aux questions fréquentes sur l’application.',
+
+  'support.help.title': 'Centre d’aide',
+  'support.help.subtitle': 'Réponses aux questions les plus fréquentes.',
+  'support.help.loading': 'Chargement…',
+  'support.help.empty': 'Aucun article pour le moment — revenez bientôt.',
+  'support.help.stillNeedHelp': 'Toujours besoin d’aide ?',
 
   'support.clinical.title': 'Cela ressemble à une question médicale',
   'support.clinical.body': 'L’assistance peut vous aider pour votre compte et l’application, mais pas pour votre santé. Pour toute question sur vos symptômes, vos mesures ou vos médicaments, contactez votre équipe soignante.',

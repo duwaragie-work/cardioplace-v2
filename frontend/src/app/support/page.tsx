@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ChevronRight,
+  HelpCircle,
   KeyRound,
   LifeBuoy,
   Loader2,
@@ -171,6 +172,13 @@ export default function SupportHubPage() {
 
               <Section title={t('support.hub.myRequests')}>
                 <LinkCard
+                  href="/support/help"
+                  icon={<HelpCircle className="h-5 w-5" />}
+                  title={t('support.hub.helpCenter')}
+                  body={t('support.hub.helpCenterBody')}
+                  testId="support-hub-help"
+                />
+                <LinkCard
                   href="/support/my-tickets"
                   icon={<MessageSquare className="h-5 w-5" />}
                   title={t('support.hub.myRequests')}
@@ -192,6 +200,17 @@ export default function SupportHubPage() {
           ) : (
             /* ── Signed out — the public subset only ─────────────────────── */
             <div data-testid="support-hub-public" className="space-y-8">
+              {/* Self-serve first — the Help Center is the main deflector. */}
+              <Section title={t('support.hub.helpCenter')}>
+                <LinkCard
+                  href="/support/help"
+                  icon={<HelpCircle className="h-5 w-5" />}
+                  title={t('support.hub.helpCenter')}
+                  body={t('support.hub.helpCenterBody')}
+                  testId="support-hub-help-public"
+                />
+              </Section>
+
               {/* Arriving from the sign-in page's "Need help?" — lead with this
                   and carry the typed email through so nothing is retyped. */}
               <Section title={t('support.hub.cantSignIn')}>

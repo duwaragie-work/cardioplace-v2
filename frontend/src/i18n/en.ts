@@ -1031,7 +1031,6 @@ const en = {
   'support.locked.statusBanner': 'Already sent a request? Your confirmation email has your ticket number — reply to that email and we\'ll add anything new to the same ticket.',
   'support.locked.email': 'Your account email',
   'support.locked.description': 'What’s happening? (e.g. I lost my authenticator app and recovery codes)',
-  'support.locked.phone': 'Callback phone (optional)',
   'support.locked.submit': 'Request help',
   'support.locked.submitting': 'Submitting…',
   'support.locked.successLead': 'Thanks — your request',
@@ -1088,6 +1087,15 @@ const en = {
   'support.hub.accountSecurity': 'Account & security',
   'support.hub.accountSecurityBody': 'Sign-in, two-step verification, and recovery codes.',
   'support.hub.legal': 'Privacy & terms',
+  'support.hub.helpCenter': 'Help Center',
+  'support.hub.helpCenterBody': 'Answers to common questions about the app.',
+
+  // Help Center / FAQ (public, reads contentType=FAQ).
+  'support.help.title': 'Help Center',
+  'support.help.subtitle': 'Answers to the questions we get most often.',
+  'support.help.loading': 'Loading…',
+  'support.help.empty': 'No articles yet — please check back soon.',
+  'support.help.stillNeedHelp': 'Still need help?',
 
   // Clinical-vs-operational split. ⚠ PLACEHOLDER WORDING — pending Dr. Singal
   // sign-off (patient-safety copy, same bar as the alert messages). Only the

@@ -993,7 +993,6 @@ const es: Record<TranslationKey, string> = {
   'support.locked.statusBanner': '¿Ya envió una solicitud? Su correo de confirmación incluye su número de ticket: responda a ese correo y añadiremos cualquier novedad al mismo ticket.',
   'support.locked.email': 'Su correo electrónico de la cuenta',
   'support.locked.description': '¿Qué ocurre? (p. ej. perdí mi aplicación de autenticación y los códigos de recuperación)',
-  'support.locked.phone': 'Teléfono de contacto (opcional)',
   'support.locked.submit': 'Solicitar ayuda',
   'support.locked.submitting': 'Enviando…',
   'support.locked.successLead': 'Gracias: su solicitud',
@@ -1046,6 +1045,14 @@ const es: Record<TranslationKey, string> = {
   'support.hub.accountSecurity': 'Cuenta y seguridad',
   'support.hub.accountSecurityBody': 'Inicio de sesión, verificación en dos pasos y códigos de recuperación.',
   'support.hub.legal': 'Privacidad y términos',
+  'support.hub.helpCenter': 'Centro de ayuda',
+  'support.hub.helpCenterBody': 'Respuestas a preguntas frecuentes sobre la aplicación.',
+
+  'support.help.title': 'Centro de ayuda',
+  'support.help.subtitle': 'Respuestas a las preguntas más frecuentes.',
+  'support.help.loading': 'Cargando…',
+  'support.help.empty': 'Todavía no hay artículos — vuelve pronto.',
+  'support.help.stillNeedHelp': '¿Aún necesitas ayuda?',
 
   'support.clinical.title': 'Esto parece una pregunta médica',
   'support.clinical.body': 'Soporte puede ayudarte con tu cuenta y la aplicación, pero no con tu salud. Para cualquier duda sobre tus síntomas, tus lecturas o tus medicamentos, contacta a tu equipo de atención.',

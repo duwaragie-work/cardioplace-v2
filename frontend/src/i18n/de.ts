@@ -993,7 +993,6 @@ const de: Record<TranslationKey, string> = {
   'support.locked.statusBanner': 'Schon eine Anfrage gesendet? Ihre Bestätigungs-E-Mail enthält Ihre Ticketnummer — antworten Sie einfach darauf, und wir ergänzen dasselbe Ticket.',
   'support.locked.email': 'Ihre Konto-E-Mail-Adresse',
   'support.locked.description': 'Was ist los? (z. B. ich habe meine Authentifizierungs-App und die Wiederherstellungscodes verloren)',
-  'support.locked.phone': 'Rückruftelefon (optional)',
   'support.locked.submit': 'Hilfe anfordern',
   'support.locked.submitting': 'Wird gesendet…',
   'support.locked.successLead': 'Danke — Ihre Anfrage',
@@ -1046,6 +1045,14 @@ const de: Record<TranslationKey, string> = {
   'support.hub.accountSecurity': 'Konto und Sicherheit',
   'support.hub.accountSecurityBody': 'Anmeldung, Zwei-Faktor-Bestätigung und Wiederherstellungscodes.',
   'support.hub.legal': 'Datenschutz und Bedingungen',
+  'support.hub.helpCenter': 'Hilfe-Center',
+  'support.hub.helpCenterBody': 'Antworten auf häufige Fragen zur App.',
+
+  'support.help.title': 'Hilfe-Center',
+  'support.help.subtitle': 'Antworten auf die häufigsten Fragen.',
+  'support.help.loading': 'Wird geladen…',
+  'support.help.empty': 'Noch keine Artikel — schauen Sie bald wieder vorbei.',
+  'support.help.stillNeedHelp': 'Brauchen Sie noch Hilfe?',
 
   'support.clinical.title': 'Das klingt nach einer medizinischen Frage',
   'support.clinical.body': 'Der Support hilft Ihnen bei Ihrem Konto und der App, aber nicht bei Ihrer Gesundheit. Wenden Sie sich bei Fragen zu Ihren Symptomen, Ihren Messwerten oder Ihren Medikamenten an Ihr Behandlungsteam.',
