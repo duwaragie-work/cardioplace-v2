@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { stashNavId } from '@/lib/nav-handoff';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
@@ -327,7 +328,8 @@ function NotifCard({
         // deep-link to the alert detail so the patient lands on context.
         // Generic notifications (gap reminders etc.) just mark-as-read.
         if (notif.alertId) {
-          router.push(`/alerts?id=${notif.alertId}`);
+          stashNavId('alertDetail', { id: notif.alertId });
+          router.push('/alerts');
         }
       }}
     >

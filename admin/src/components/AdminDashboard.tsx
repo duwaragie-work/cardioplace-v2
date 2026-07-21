@@ -49,6 +49,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/auth-context';
+import { stashNavId } from '@/lib/nav-handoff';
 import { hasAdminRole, isProviderOnly } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
 // Type-only — the v1 AlertPanel side panel was removed (it surfaced
@@ -823,7 +824,7 @@ export default function AdminDashboard() {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (a.patient?.id) router.push(`/patients/detail?id=${a.patient.id}`);
+                              if (a.patient?.id) { stashNavId('patientDetail', { id: a.patient.id }); router.push('/patients/detail'); }
                             }}
                             data-testid={`admin-dashboard-alert-open-${a.id}`}
                             className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-[10.5px] shrink-0 cursor-pointer transition-transform hover:scale-105"
@@ -846,7 +847,7 @@ export default function AdminDashboard() {
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (a.patient?.id) router.push(`/patients/detail?id=${a.patient.id}`);
+                                  if (a.patient?.id) { stashNavId('patientDetail', { id: a.patient.id }); router.push('/patients/detail'); }
                                 }}
                                 className="text-[13px] font-bold truncate cursor-pointer hover:underline text-left"
                                 style={{ color: 'var(--brand-text-primary)' }}

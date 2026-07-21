@@ -39,6 +39,7 @@ import {
   type AlertTier,
 } from '@/lib/services/provider.service';
 import type { PatientAlert } from '@/lib/services/patient-detail.service';
+import { stashNavId } from '@/lib/nav-handoff';
 import AlertCard from './AlertCard';
 import AlertResolutionModal, { type ResolvableAlert } from './AlertResolutionModal';
 
@@ -539,7 +540,8 @@ export default function NotificationsScreen() {
                         // something.
                         onRowClick={() => {
                           if (a.patient?.id) {
-                            router.push(`/patients/detail?id=${a.patient.id}&alert=${a.id}`);
+                            stashNavId('patientDetail', { id: a.patient.id, alert: a.id });
+                            router.push('/patients/detail');
                           } else {
                             setExpandedId(expanded ? null : a.id);
                           }
@@ -640,13 +642,13 @@ export default function NotificationsScreen() {
                         // target alert auto-expands. Falls back to the
                         // local Alerts tab when patientUserId is missing.
                         if (n.alertId && n.patientUserId) {
-                          router.push(
-                            `/patients/detail?id=${n.patientUserId}&alert=${n.alertId}`,
-                          );
+                          stashNavId('patientDetail', { id: n.patientUserId, alert: n.alertId });
+                          router.push('/patients/detail');
                         } else if (n.patientUserId) {
                           // Non-alert care-team notice (enrollment paused /
                           // condition review) → straight to the patient detail.
-                          router.push(`/patients/detail?id=${n.patientUserId}`);
+                          stashNavId('patientDetail', { id: n.patientUserId });
+                          router.push('/patients/detail');
                         } else if (n.alertId) {
                           setTopTab('alerts');
                         }

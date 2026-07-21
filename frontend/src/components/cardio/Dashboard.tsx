@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 import { Flame, Clock, ArrowRight, Heart, Bell, Target, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { stashNavId } from '@/lib/nav-handoff';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import { getJournalEntries, getNotifications, getAlerts, getJournalStats, type AlertTier } from '@/lib/services/journal.service';
@@ -581,7 +582,7 @@ export default function Dashboard() {
           <button
             type="button"
             data-testid="dashboard-alert-banner"
-            onClick={() => router.push(`/alerts?id=${topAlert.id}`)}
+            onClick={() => { stashNavId('alertDetail', { id: topAlert.id }); router.push('/alerts'); }}
             className="w-full text-left rounded-2xl p-4 cursor-pointer transition-all flex items-center gap-3 active:scale-[0.99]"
             style={{
               backgroundColor: topAlertVariant.accentLight,
@@ -1058,7 +1059,10 @@ export default function Dashboard() {
                       <button
                         type="button"
                         key={n.id}
-                        onClick={() => router.push(n.alertId ? `/alerts?id=${n.alertId}` : '/notifications?tab=notifications')}
+                        onClick={() => {
+                          if (n.alertId) { stashNavId('alertDetail', { id: n.alertId }); router.push('/alerts'); }
+                          else router.push('/notifications?tab=notifications');
+                        }}
                         className="w-full text-left p-3 rounded-xl cursor-pointer transition hover:scale-[1.01] active:scale-[0.99]"
                         style={{
                           backgroundColor: n.watched ? 'var(--brand-background)' : 'var(--brand-warning-amber-light)',

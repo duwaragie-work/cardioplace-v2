@@ -25,6 +25,7 @@ import {
 import { getProfile } from '@/lib/services/auth.service';
 import EmergencyAlertScreen from '@/components/alerts/EmergencyAlertScreen';
 import TierAlertView from '@/components/alerts/TierAlertView';
+import { readNavId, stashNavId } from '@/lib/nav-handoff';
 
 
 function AlertSkeleton() {
@@ -182,10 +183,24 @@ function NotFound({ reason }: { reason: string }) {
 // dynamic segment can't be statically exported without baking real ids into the
 // bundle. `useSearchParams` requires a Suspense boundary (the default export).
 function AlertDetailContent() {
-  const id = useSearchParams().get('id') ?? '';
+  const searchParams = useSearchParams();
   const router = useRouter();
+  // F1 — the alert id is STATE (not derived), seeded from the URL `?id=`
+  // (deep-link) or sessionStorage (in-app click → bare route, id off the CDN
+  // log; URL wins so a fresh deep-link isn't shadowed by a stale stash). Keeping
+  // it in state lets the same-route "next alert" nav below just setId() +
+  // re-fetch, instead of router.push('/alerts') which wouldn't remount.
+  const [id, setId] = useState<string>(
+    () => searchParams.get('id') ?? readNavId('alertDetail')?.id ?? '',
+  );
   const { isLoading, isAuthenticated } = useAuth();
   const { t } = useLanguage();
+
+  // Neither a deep-link id nor a stash (bare load, e.g. tab reopened) → back to
+  // the alerts list rather than a 404/empty detail.
+  useEffect(() => {
+    if (!id) router.replace('/notifications?tab=alerts');
+  }, [id, router]);
 
   const [alert, setAlert] = useState<DeviationAlertDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -306,7 +321,11 @@ function AlertDetailContent() {
       // (provider resolved it between fetch and ack), fall through to the
       // banner view here.
       if (nextActiveAlertId) {
-        router.push(`/alerts?id=${nextActiveAlertId}`);
+        // F1 — same-route hand-off: stash + setId (re-fetches via the [id]
+        // effect). router.push('/alerts') wouldn't remount (same URL), and
+        // '/alerts?id=' would leak the id into the CDN log.
+        stashNavId('alertDetail', { id: nextActiveAlertId });
+        setId(nextActiveAlertId);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : t('alerts.notFound.ackError'));
