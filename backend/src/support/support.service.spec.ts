@@ -140,6 +140,39 @@ describe('SupportService', () => {
       ).rejects.toBeInstanceOf(HttpException)
       expect(prisma.supportTicket.create).not.toHaveBeenCalled()
     })
+
+    // Public general contact — the signed-out hub's non-PHI "send us a message".
+    it('public contact creates a real trackable ticket, forced to OTHER', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.count.mockResolvedValue(0)
+      prisma.user.findUnique.mockResolvedValue(null)
+      prisma.supportTicket.create.mockImplementation((a: any) =>
+        Promise.resolve(ticketRow({ ...a.data })),
+      )
+      const res = await svc.createPublicContactTicket(
+        { email: 'someone@example.com', subject: 'Question', message: 'hello' },
+        CTX,
+      )
+      // A real ticket number — the whole point vs the old email-only endpoint.
+      expect(res.ticketNumber).toBe('CP-SUP-ABCDEFG')
+      const created = prisma.supportTicket.create.mock.calls[0][0].data
+      // Category is forced server-side so a public visitor can never file CLINICAL.
+      expect(created.category).toBe('OTHER')
+      expect(created.identityVerified).toBe(false)
+      expect(created.email).toBe('someone@example.com')
+    })
+
+    it('public contact is rate-limited per IP like locked-out', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.count.mockResolvedValue(5)
+      await expect(
+        svc.createPublicContactTicket(
+          { email: 'p@example.com', subject: 's', message: 'm' },
+          CTX,
+        ),
+      ).rejects.toBeInstanceOf(HttpException)
+      expect(prisma.supportTicket.create).not.toHaveBeenCalled()
+    })
   })
 
   describe('identity-verify gate', () => {

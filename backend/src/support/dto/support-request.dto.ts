@@ -53,6 +53,28 @@ export class LockedOutDto {
   // contactPhone is rejected rather than silently stored.
 }
 
+/**
+ * POST /v2/support/public-contact — public, non-PHI "send us a message" from
+ * the signed-out `/support` hub. Deliberately has NO category field: every
+ * public ticket is forced to OTHER server-side, so a signed-out visitor can
+ * never file a CLINICAL one (the clinical-vs-operational rule) and the public
+ * surface stays PHI-free.
+ */
+export class PublicContactDto {
+  @IsEmail()
+  email!: string
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  subject!: string
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(5000)
+  message!: string
+}
+
 /** POST /v2/admin/support/tickets/:id/reply — ops replying to the user. */
 export class ReplyDto {
   @IsString()

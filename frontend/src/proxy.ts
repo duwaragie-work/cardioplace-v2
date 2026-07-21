@@ -6,7 +6,18 @@ import {
   ONBOARDED_MARKER_COOKIE,
 } from '@/lib/cookie-names'
 
-const PUBLIC_ROUTES = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/terms', '/privacy', '/auth/callback', '/auth/magic-link', '/activate', '/support/locked-out']
+const PUBLIC_ROUTES = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/terms', '/privacy', '/auth/callback', '/auth/magic-link', '/activate', '/support', '/support/locked-out']
+
+/**
+ * Routes that must stay GATED even though a broader PUBLIC_ROUTES prefix covers
+ * them. PUBLIC_ROUTES is prefix-matched, so allow-listing the adaptive `/support`
+ * hub (which renders a signed-out subset) would otherwise drag every `/support/*`
+ * child public with it. `/support/my-tickets` renders a patient's own support
+ * threads, so without this it would (a) stop redirecting anonymous visitors to
+ * sign-in and (b) lose the `no-store` Cache-Control below — letting the browser
+ * restore the rendered threads from bfcache after logout.
+ */
+const PRIVATE_ROUTE_EXCEPTIONS = ['/support/my-tickets']
 
 const ADMIN_URL = process.env.NEXT_PUBLIC_ADMIN_URL || 'http://localhost:3001'
 
@@ -84,9 +95,12 @@ export function proxy(request: NextRequest) {
   const onboardedMarker = request.cookies.get(ONBOARDED_MARKER_COOKIE)?.value
   const path = request.nextUrl.pathname
 
-  const isPublic = PUBLIC_ROUTES.some(
-    (r) => path === r || path.startsWith(r + '/'),
-  )
+  // A private exception wins over a broader public prefix (see the const above).
+  const isPublic =
+    !PRIVATE_ROUTE_EXCEPTIONS.some(
+      (r) => path === r || path.startsWith(r + '/'),
+    ) &&
+    PUBLIC_ROUTES.some((r) => path === r || path.startsWith(r + '/'))
 
   // Admin-role users (provider, medical director, ops, super admin) belong
   // on the admin subdomain, not the patient app.

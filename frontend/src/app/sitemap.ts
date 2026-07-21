@@ -14,6 +14,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     { url: `${BASE_URL}/`, lastModified, changeFrequency: 'weekly', priority: 1 },
     { url: `${BASE_URL}/about`, lastModified, changeFrequency: 'monthly', priority: 0.7 },
+    // The public half of the adaptive support hub (Help Center, "I can't sign
+    // in", general contact) is genuinely public marketing-adjacent surface.
+    { url: `${BASE_URL}/support`, lastModified, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${BASE_URL}/privacy`, lastModified, changeFrequency: 'yearly', priority: 0.4 },
     { url: `${BASE_URL}/terms`, lastModified, changeFrequency: 'yearly', priority: 0.4 },
     { url: `${BASE_URL}/sign-in`, lastModified, changeFrequency: 'yearly', priority: 0.5 },

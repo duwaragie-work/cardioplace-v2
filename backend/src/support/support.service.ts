@@ -34,6 +34,7 @@ import type {
   ContactDto,
   LockedOutDto,
   PriorityDto,
+  PublicContactDto,
   ReplyDto,
   ResolveDto,
   VerifyIdentityDto,
@@ -238,6 +239,65 @@ export class SupportService {
     // on the success screen (frontend/src/i18n/en.ts:996), so a missing
     // requester email is user-visibly wrong. Ops still gets its routing
     // notification alongside.
+    await Promise.all([
+      this.notifyOpsNewTicket(ticket),
+      this.notifyRequesterTicketReceived(ticket),
+    ])
+    return { ticketNumber: ticket.ticketNumber }
+  }
+
+  /**
+   * Public, non-PHI general contact from the signed-out `/support` hub.
+   *
+   * Mirrors createLockedOutTicket (same IP rate-limit, same never-reveal-a-match
+   * posture) but is the *general* channel rather than the account-recovery one:
+   * NORMAL priority, and `category` is forced to OTHER server-side so a public
+   * visitor can never file a CLINICAL ticket.
+   *
+   * Replaces the legacy `POST /contact` (app.controller.ts), which only emailed
+   * the ops inbox — the submitter got no ticket number, no thread and no way to
+   * track it. This path produces a real, trackable ticket like every other
+   * intake, so the redesign genuinely has ONE support pipeline.
+   */
+  async createPublicContactTicket(
+    dto: PublicContactDto,
+    ctx: SupportContext,
+  ): Promise<{ ticketNumber: string }> {
+    // Same DB-backed per-IP guard as the locked-out form.
+    if (ctx.ipAddress) {
+      const recent = await this.prisma.supportTicket.count({
+        where: {
+          ipAddress: ctx.ipAddress,
+          createdAt: { gt: new Date(Date.now() - LOCKED_OUT_WINDOW_MS) },
+        },
+      })
+      if (recent >= LOCKED_OUT_MAX) {
+        throw new HttpException(
+          'Too many requests. Please try again later.',
+          HttpStatus.TOO_MANY_REQUESTS,
+        )
+      }
+    }
+    // Best-effort account match so ops has context — but, as with locked-out,
+    // the response NEVER reveals whether it matched.
+    const matched = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+      select: { id: true },
+    })
+    const ticketNumber = await this.ticketNumbers.next()
+    const ticket = await this.prisma.supportTicket.create({
+      data: {
+        ticketNumber,
+        userId: matched?.id ?? null,
+        email: dto.email,
+        category: SupportCategory.OTHER,
+        subject: dto.subject,
+        body: dto.message,
+        identityVerified: false, // unauthenticated — ops verifies before any action
+        ipAddress: ctx.ipAddress ?? null,
+        userAgent: ctx.userAgent ?? null,
+      },
+    })
     await Promise.all([
       this.notifyOpsNewTicket(ticket),
       this.notifyRequesterTicketReceived(ticket),

@@ -2,7 +2,12 @@ import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common'
 import type { Request } from 'express'
 import { Public } from '../auth/decorators/public.decorator.js'
 import { UserRole } from '../generated/prisma/enums.js'
-import { ContactDto, LockedOutDto, ReplyDto } from './dto/support-request.dto.js'
+import {
+  ContactDto,
+  LockedOutDto,
+  PublicContactDto,
+  ReplyDto,
+} from './dto/support-request.dto.js'
 import { extractIp } from './http.util.js'
 import {
   SupportService,
@@ -66,5 +71,14 @@ export class SupportController {
   @Post('locked-out')
   lockedOut(@Req() req: Request, @Body() dto: LockedOutDto) {
     return this.support.createLockedOutTicket(dto, this.ctxFrom(req))
+  }
+
+  /** Unauthenticated non-PHI "send us a message" from the public /support hub.
+   *  Same 5/IP/hour guard; category is forced to OTHER server-side. Replaces the
+   *  legacy POST /contact, which emailed ops without creating a trackable ticket. */
+  @Public()
+  @Post('public-contact')
+  publicContact(@Req() req: Request, @Body() dto: PublicContactDto) {
+    return this.support.createPublicContactTicket(dto, this.ctxFrom(req))
   }
 }

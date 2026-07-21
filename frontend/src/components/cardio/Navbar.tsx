@@ -119,6 +119,11 @@ export default function Navbar() {
     // have to register a new nav.readings key across all 5 locales.
     { labelKey: 'readings.title' as const, href: '/readings' },
     { labelKey: 'nav.chat' as const, href: '/chat' },
+    // Support is a primary destination, not a Settings sub-page (agreed scope:
+    // "its own nav item, not buried in settings"). Being in `links` is also what
+    // makes it reachable on MOBILE — the mobile overlay renders only this array,
+    // so while Support lived solely in the avatar dropdown it was desktop-only.
+    { labelKey: 'nav.support' as const, href: '/support' },
   ];
 
   return (
@@ -328,7 +333,7 @@ export default function Navbar() {
                   {t('settings.title')}
                 </Link>
                 <Link
-                  href="/support/my-tickets"
+                  href="/support"
                   role="menuitem"
                   data-testid="navbar-menu-support"
                   onClick={() => setMenuOpen(false)}

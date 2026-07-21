@@ -558,10 +558,15 @@ export default function RegisterPage() {
                   </a>
                   .
                 </p>
-                {/* Locked out — public support form (no auth required). */}
+                {/* Generic "Need help signing in?" now lands on the one /support
+                    hub (consolidation), whose public subset leads with the
+                    "I can't sign in" flow. The CONTEXTUAL deactivated-account CTA
+                    above still deep-links straight into /support/locked-out with
+                    the typed email pre-filled — that is the more direct route
+                    when we already know which account is stuck. */}
                 <p className="text-center mt-3">
                   <a
-                    href={`/support/locked-out${emailTrimmed ? `?email=${encodeURIComponent(emailTrimmed)}` : ''}`}
+                    href={`/support?flow=signin${emailTrimmed ? `&email=${encodeURIComponent(emailTrimmed)}` : ''}`}
                     data-testid="signin-need-help"
                     className="text-[0.6875rem] lg:text-xs font-medium text-[#7B00E0] hover:underline"
                   >

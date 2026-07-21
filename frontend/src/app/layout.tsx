@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { LanguageProvider } from "@/contexts/LanguageContext";
+import { ToastProvider } from "@/contexts/ToastContext";
 import NavbarWrapper from "@/components/NavbarWrapper";
 import ScrollToTop from "@/components/ScrollToTop";
 import HardReloadOnNavigate from "@/components/HardReloadOnNavigate";
@@ -52,13 +53,17 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <AuthProvider>
           <LanguageProvider>
-            <SkipLink />
-            <ScrollToTop />
-            <HardReloadOnNavigate />
-            <IdleWarningToast />
-            <PushRegistrar />
-            <NavbarWrapper>{children}</NavbarWrapper>
-            <PoweredByFooter />
+            {/* Inside LanguageProvider so toast callers can pass translated
+                copy; wraps the tree so any page can confirm an action. */}
+            <ToastProvider>
+              <SkipLink />
+              <ScrollToTop />
+              <HardReloadOnNavigate />
+              <IdleWarningToast />
+              <PushRegistrar />
+              <NavbarWrapper>{children}</NavbarWrapper>
+              <PoweredByFooter />
+            </ToastProvider>
           </LanguageProvider>
         </AuthProvider>
       </body>
