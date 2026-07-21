@@ -12,7 +12,7 @@
 // lockstep with proxy.ts if either changes.
 
 import { useEffect, useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { AUTH_MARKER_COOKIE, AUTH_ROLE_COOKIE } from '@/lib/cookie-names';
 
 const PATIENT_URL = process.env.NEXT_PUBLIC_PATIENT_URL || 'http://localhost:3000';
@@ -78,6 +78,7 @@ function isCoordinatorAllowed(pathname: string): boolean {
 
 export default function RouteGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const isPublic = isPublicPath(pathname);
   const [allowedPath, setAllowedPath] = useState<string | null>(null);
 
@@ -89,26 +90,36 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     const marker = readCookie(AUTH_MARKER_COOKIE);
     const roles = rolesFromCookie(readCookie(AUTH_ROLE_COOKIE));
 
-    // Not logged in → sign-in, preserving intended destination.
+    // Not logged in → sign-in, preserving intended destination. Client-side
+    // router.replace (NOT a full reload) so it doesn't re-run the auth-context
+    // refresh and race the single-use refresh token → 401 → session cleared.
     if (!marker) {
-      window.location.replace(`/sign-in?next=${encodeURIComponent(pathname)}`);
+      router.replace(`/sign-in?next=${encodeURIComponent(pathname)}`);
       return;
     }
     // Logged in but not an admin-tier role → their own app's dashboard
-    // (symmetric with the patient app's admin bridge).
+    // (cross-origin → full navigation; symmetric with the patient admin bridge).
     if (!hasAdminRole(roles)) {
       window.location.href = `${PATIENT_URL}/dashboard`;
       return;
     }
     // Coordinator-only callers are locked to their /users surface.
     if (isCoordinatorOnly(roles) && !isCoordinatorAllowed(pathname)) {
-      window.location.replace('/users');
+      router.replace('/users');
       return;
     }
     setAllowedPath(pathname);
-  }, [pathname, isPublic]);
+  }, [pathname, isPublic, router]);
 
   const cleared = isPublic || allowedPath === pathname;
-  if (!cleared) return null;
+  if (!cleared) {
+    // Block the whole page (chrome included) behind a spinner while a redirect
+    // is in flight, so a protected page never flashes before bouncing.
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="w-10 h-10 border-4 border-[#7B00E0] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
   return <>{children}</>;
 }

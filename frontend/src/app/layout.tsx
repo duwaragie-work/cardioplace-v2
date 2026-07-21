@@ -58,9 +58,9 @@ export default function RootLayout({
             <HardReloadOnNavigate />
             <IdleWarningToast />
             <PushRegistrar />
-            <NavbarWrapper>
-              <RouteGuard>{children}</RouteGuard>
-            </NavbarWrapper>
+            <RouteGuard>
+              <NavbarWrapper>{children}</NavbarWrapper>
+            </RouteGuard>
             <PoweredByFooter />
           </LanguageProvider>
         </AuthProvider>

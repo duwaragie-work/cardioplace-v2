@@ -17,12 +17,13 @@
 // cannot be reproduced from JS.
 
 import { useEffect, useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   AUTH_MARKER_COOKIE,
   AUTH_ROLE_COOKIE,
   ONBOARDED_MARKER_COOKIE,
 } from '@/lib/cookie-names';
+import SpinnerIndicator from '@/components/ui/SpinnerIndicator';
 
 const PUBLIC_ROUTES = [
   '/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/terms',
@@ -59,6 +60,7 @@ function hasAdminRole(rolesValue: string | undefined): boolean {
 
 export default function RouteGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const isPublic = isMatch(pathname, PUBLIC_ROUTES);
   // Which path the guard has cleared. Public routes are cleared synchronously
   // (nothing to leak); non-public routes render only after the effect clears
@@ -72,14 +74,18 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     const onboarded = readCookie(ONBOARDED_MARKER_COOKIE);
 
     // 1. Admin-role users belong on the admin app (checked on every path first,
-    //    mirroring proxy.ts). Cookie-only bridge — no tokens in the URL.
+    //    mirroring proxy.ts). Cross-origin → full navigation. Cookie-only
+    //    bridge; no tokens in the URL.
     if (marker && hasAdminRole(roles)) {
       window.location.href = `${ADMIN_URL}/dashboard`;
       return;
     }
-    // 2. Logged in on an auth page → dashboard.
+    // 2. Logged in on an auth page → dashboard. Client-side router.replace, NOT
+    //    a full reload: a reload re-runs the auth-context refresh and can race
+    //    the single-use refresh token → 401 → the session gets cleared and the
+    //    user is bounced back to sign-in.
     if (marker && (pathname === '/welcome' || pathname === '/sign-in')) {
-      window.location.replace('/dashboard');
+      router.replace('/dashboard');
       return;
     }
     // Public routes are otherwise fine.
@@ -89,19 +95,28 @@ export default function RouteGuard({ children }: { children: React.ReactNode }) 
     }
     // 3. Not logged in on a protected route → sign-in.
     if (!marker) {
-      window.location.replace('/sign-in');
+      router.replace('/sign-in');
       return;
     }
     // 4. Un-onboarded patient on a gated route → onboarding. Explicit '0' only:
     //    an ABSENT cookie means "unknown" and must fail open (see cookie-names).
     if (onboarded === '0' && isMatch(pathname, ONBOARDING_GATED_ROUTES)) {
-      window.location.replace('/onboarding');
+      router.replace('/onboarding');
       return;
     }
     setAllowedPath(pathname);
-  }, [pathname, isPublic]);
+  }, [pathname, isPublic, router]);
 
   const cleared = isPublic || allowedPath === pathname;
-  if (!cleared) return null;
+  if (!cleared) {
+    // Block the whole page (chrome included — the guard wraps it in layout.tsx)
+    // behind a spinner while a redirect is in flight, so a protected page never
+    // flashes its header before bouncing.
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <SpinnerIndicator size={40} className="text-[#7B00E0]" />
+      </div>
+    );
+  }
   return <>{children}</>;
 }

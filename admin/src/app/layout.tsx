@@ -31,9 +31,9 @@ export default function RootLayout({
             {/* AdminShell wraps authed pages with sidebar + top bar; landing
                 / auth routes pass through unchanged so they keep their own
                 marketing chrome. */}
-            <AdminShell>
-              <RouteGuard>{children}</RouteGuard>
-            </AdminShell>
+            <RouteGuard>
+              <AdminShell>{children}</AdminShell>
+            </RouteGuard>
             <Toaster
               position="top-right"
               richColors
