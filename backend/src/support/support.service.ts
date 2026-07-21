@@ -21,6 +21,7 @@ import { PrismaService } from '../prisma/prisma.service.js'
 import { EmailService } from '../email/email.service.js'
 import {
   EMAIL_TEMPLATE_VERSION,
+  supportAwaitingReplyEmailHtml,
   supportOpsNotifyHtml,
   supportReplyEmailHtml,
   supportResolvedEmailHtml,
@@ -97,6 +98,10 @@ const REOPEN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 // The auto-close sweep moves a RESOLVED ticket to CLOSED after this much
 // inactivity (measured from resolvedAt).
 const AUTO_CLOSE_AFTER_MS = 14 * 24 * 60 * 60 * 1000 // 14 days
+// "Waiting on the patient" nudge: ops replied last and the thread has been
+// silent this long. Long enough not to nag, short enough to unstick a
+// half-answered question well before the 14-day auto-close.
+const NUDGE_AFTER_MS = 3 * 24 * 60 * 60 * 1000 // 3 days
 
 /**
  * Support System Phase 1. Two intake paths (signed-in contact + public
@@ -201,6 +206,12 @@ export class SupportService {
       const recent = await this.prisma.supportTicket.count({
         where: {
           ipAddress: ctx.ipAddress,
+          // Count only tickets that came through an ANONYMOUS door. Authenticated
+          // intake lands identityVerified:true and has its own per-user cap, so
+          // counting it here would let signed-in patients behind a shared NAT — a
+          // clinic, a household, a shelter, all plausible in the Ward 7/8 cohort —
+          // exhaust this budget and lock out someone who genuinely cannot sign in.
+          identityVerified: false,
           createdAt: { gt: new Date(Date.now() - LOCKED_OUT_WINDOW_MS) },
         },
       })
@@ -268,6 +279,12 @@ export class SupportService {
       const recent = await this.prisma.supportTicket.count({
         where: {
           ipAddress: ctx.ipAddress,
+          // Count only tickets that came through an ANONYMOUS door. Authenticated
+          // intake lands identityVerified:true and has its own per-user cap, so
+          // counting it here would let signed-in patients behind a shared NAT — a
+          // clinic, a household, a shelter, all plausible in the Ward 7/8 cohort —
+          // exhaust this budget and lock out someone who genuinely cannot sign in.
+          identityVerified: false,
           createdAt: { gt: new Date(Date.now() - LOCKED_OUT_WINDOW_MS) },
         },
       })
@@ -596,12 +613,131 @@ export class SupportService {
   }
 
   /**
+   * Patient confirms a resolved request is genuinely done — the "or on user
+   * confirm" half of how a ticket reaches CLOSED (the other half being the
+   * 14-day auto-close sweep). Lets someone finish a thread immediately instead
+   * of leaving it sitting in RESOLVED for two weeks.
+   *
+   * RESOLVED-only by design: "confirm" is confirming a resolution. Closing an
+   * ACTIVE ticket would be a different action (abandoning an open request) and
+   * would silently strand ops mid-conversation, so it is refused. No ops
+   * notification — the patient agreeing with a resolution needs no follow-up.
+   */
+  async closeByUser(actor: SupportActor, ticketId: string) {
+    const ticket = await this.requireOwnedTicket(actor, ticketId)
+    if (ticket.status !== 'RESOLVED') {
+      throw new BadRequestException(
+        'Only a resolved request can be closed.',
+      )
+    }
+    return this.prisma.supportTicket.update({
+      where: { id: ticket.id },
+      data: { status: 'CLOSED', closedAt: new Date() },
+    })
+  }
+
+  /**
    * Auto-close sweep (daily cron). Moves RESOLVED tickets with no activity for
    * AUTO_CLOSE_AFTER_MS to CLOSED. A reopened ticket is back in IN_PROGRESS, so
    * it is excluded by construction. Silent housekeeping — the requester was
    * already notified at resolve time, and by 14 days the reopen window has
    * lapsed, so CLOSED is terminal.
    */
+  /**
+   * "Waiting on the patient" nudge sweep (daily cron).
+   *
+   * Fires when a ticket is still ACTIVE, **ops replied last**, and the thread
+   * has been silent for NUDGE_AFTER_MS. Without it, a half-answered question
+   * just goes quiet: ops is blocked waiting on the patient, the patient may have
+   * missed the reply, and nothing prompts either side until the ticket ages out.
+   *
+   * Idempotency is anchored on the LAST REPLY, not a fixed window: we skip if a
+   * nudge for this ticket was already sent *after* the most recent reply. That
+   * means one nudge per period of silence — never a daily nag — but a genuinely
+   * new silence after a later ops reply does earn a fresh nudge.
+   *
+   * Only tickets with a linked account are nudged: a locked-out ticket may have
+   * no `userId`, and we will not email an unverified address on a schedule.
+   */
+  async nudgeAwaitingPatientTickets(now: Date = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - NUDGE_AFTER_MS)
+    const candidates = await this.prisma.supportTicket.findMany({
+      where: {
+        status: { in: ['OPEN', 'IN_PROGRESS'] },
+        userId: { not: null },
+        replies: { some: {} },
+      },
+      select: {
+        id: true,
+        ticketNumber: true,
+        category: true,
+        email: true,
+        userId: true,
+        replies: {
+          orderBy: { sentAt: 'desc' },
+          take: 1,
+          select: { authorType: true, sentAt: true },
+        },
+      },
+    })
+
+    let sent = 0
+    for (const ticket of candidates) {
+      const lastReply = ticket.replies[0]
+      // Only nudge when OPS spoke last — if the patient replied last the ball
+      // is with us, and nudging them for our own backlog would be absurd.
+      if (!lastReply || lastReply.authorType !== 'OPS') continue
+      if (lastReply.sentAt > cutoff) continue // not silent long enough yet
+      // Narrows userId for TS; the query already filters `userId: { not: null }`.
+      const { userId } = ticket
+      if (!userId) continue
+
+      const alreadyNudged = await this.prisma.notification.findFirst({
+        where: {
+          supportTicketId: ticket.id,
+          dispatchTrigger: 'SUPPORT_AWAITING_REPLY',
+          sentAt: { gt: lastReply.sentAt },
+        },
+        select: { id: true },
+      })
+      if (alreadyNudged) continue
+
+      await this.prisma.notification.create({
+        data: {
+          userId,
+          channel: NotificationChannel.DASHBOARD,
+          title: 'We’re waiting to hear back from you',
+          body: `Ticket ${ticket.ticketNumber}`,
+          dispatchTrigger: 'SUPPORT_AWAITING_REPLY',
+          supportTicketId: ticket.id,
+        },
+      })
+
+      // Email too — a patient who has gone quiet is by definition not opening
+      // the app, so an in-app-only nudge would mostly talk to itself. Mirrors
+      // the monthly-reask cron's notification + email reach.
+      if (ticket.email) {
+        void this.email.sendEmail(
+          ticket.email,
+          `Re: your Cardioplace support request ${ticket.ticketNumber}`,
+          supportAwaitingReplyEmailHtml(ticket.ticketNumber),
+          {
+            template: 'support_awaiting_reply',
+            templateVersion: EMAIL_TEMPLATE_VERSION,
+            patientUserId: userId,
+            metadata: {
+              ticketId: ticket.id,
+              ticketNumber: ticket.ticketNumber,
+              category: ticket.category,
+            },
+          },
+        )
+      }
+      sent++
+    }
+    return sent
+  }
+
   async autoCloseResolvedTickets(now: Date = new Date()): Promise<number> {
     const cutoff = new Date(now.getTime() - AUTO_CLOSE_AFTER_MS)
     const result = await this.prisma.supportTicket.updateMany({

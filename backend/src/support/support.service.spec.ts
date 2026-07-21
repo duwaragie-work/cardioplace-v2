@@ -20,7 +20,12 @@ function make() {
       updateMany: jest.fn(async () => ({ count: 3 })) as any,
     },
     user: { findUnique: jest.fn() as any, findMany: jest.fn() as any },
-    notification: { create: jest.fn() as any, createMany: jest.fn() as any },
+    notification: {
+      create: jest.fn() as any,
+      createMany: jest.fn() as any,
+      // Nudge idempotency probe — default "no prior nudge".
+      findFirst: jest.fn(async () => null) as any,
+    },
     supportTicketReply: { create: jest.fn() as any },
     supportTicketAction: { create: jest.fn((a: any) => Promise.resolve(a.data)) as any },
     mfaRecoveryCode: { count: jest.fn(async () => 0) as any },
@@ -160,6 +165,23 @@ describe('SupportService', () => {
       expect(created.category).toBe('OTHER')
       expect(created.identityVerified).toBe(false)
       expect(created.email).toBe('someone@example.com')
+    })
+
+    it('the anonymous per-IP cap counts ONLY anonymous tickets', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.count.mockResolvedValue(0)
+      prisma.user.findUnique.mockResolvedValue(null)
+      prisma.supportTicket.create.mockImplementation((a: any) =>
+        Promise.resolve(ticketRow({ ...a.data })),
+      )
+      await svc.createLockedOutTicket({ email: 'p@example.com', description: 'x' }, CTX)
+      // Authenticated intake has its own per-user cap. If it also counted here,
+      // signed-in patients behind a shared NAT (clinic / household / shelter —
+      // realistic for the Ward 7/8 cohort) could exhaust the anonymous budget
+      // and lock out someone who genuinely cannot sign in.
+      const where = prisma.supportTicket.count.mock.calls[0][0].where
+      expect(where.identityVerified).toBe(false)
+      expect(where.ipAddress).toBe('1.2.3.4')
     })
 
     it('public contact is rate-limited per IP like locked-out', async () => {
@@ -406,6 +428,113 @@ describe('SupportService', () => {
       await expect(svc.reopen(PATIENT, 'ticket-1')).rejects.toBeInstanceOf(
         BadRequestException,
       )
+    })
+  })
+
+  // "Closed ... or on user confirm" — the patient-driven half of reaching CLOSED.
+  describe('user-confirmed close', () => {
+    const PATIENT: SupportActor = { id: 'user-1', email: 'p@example.com', roles: ['PATIENT'] as any }
+
+    it('closes a resolved ticket on the owner’s confirmation', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(
+        ticketRow({ status: 'RESOLVED', userId: 'user-1', resolvedAt: new Date() }),
+      )
+      await svc.closeByUser(PATIENT, 'ticket-1')
+      const upd = prisma.supportTicket.update.mock.calls[0][0].data
+      expect(upd.status).toBe('CLOSED')
+      expect(upd.closedAt).toBeInstanceOf(Date)
+    })
+
+    it('refuses to close a still-active ticket', async () => {
+      const { svc, prisma } = make()
+      // Closing an ACTIVE ticket would strand ops mid-conversation — that is a
+      // different action from confirming a resolution, so it is refused.
+      prisma.supportTicket.findUnique.mockResolvedValue(
+        ticketRow({ status: 'IN_PROGRESS', userId: 'user-1' }),
+      )
+      await expect(svc.closeByUser(PATIENT, 'ticket-1')).rejects.toBeInstanceOf(
+        BadRequestException,
+      )
+      expect(prisma.supportTicket.update).not.toHaveBeenCalled()
+    })
+
+    it("cannot close someone else's ticket (NotFound, non-enumeration)", async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findUnique.mockResolvedValue(
+        ticketRow({ status: 'RESOLVED', userId: 'someone-else' }),
+      )
+      await expect(svc.closeByUser(PATIENT, 'ticket-1')).rejects.toMatchObject({
+        status: 404,
+      })
+      expect(prisma.supportTicket.update).not.toHaveBeenCalled()
+    })
+  })
+
+  // "Waiting on the patient" nudge — ops replied, the thread went quiet.
+  describe('awaiting-patient nudge sweep', () => {
+    const daysAgo = (d: number) => new Date(Date.now() - d * 24 * 60 * 60 * 1000)
+    const candidate = (over: Record<string, any> = {}) => ({
+      id: 'ticket-1',
+      ticketNumber: 'CP-SUP-ABCDEFG',
+      category: 'ACCOUNT',
+      email: 'p@example.com',
+      userId: 'user-1',
+      replies: [{ authorType: 'OPS', sentAt: daysAgo(5) }],
+      ...over,
+    })
+
+    it('nudges when ops replied last and the thread has gone quiet', async () => {
+      const { svc, prisma, email } = make()
+      prisma.supportTicket.findMany.mockResolvedValue([candidate()])
+      prisma.notification.findFirst.mockResolvedValue(null)
+      const count = await svc.nudgeAwaitingPatientTickets()
+      expect(count).toBe(1)
+      const notif = prisma.notification.create.mock.calls[0][0].data
+      expect(notif.dispatchTrigger).toBe('SUPPORT_AWAITING_REPLY')
+      expect(notif.supportTicketId).toBe('ticket-1')
+      // Email too — a silent patient isn't opening the app.
+      const templates = email.sendEmail.mock.calls.map((c: any[]) => c[3]?.template)
+      expect(templates).toContain('support_awaiting_reply')
+    })
+
+    it('never nudges when the PATIENT replied last (the ball is with ops)', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findMany.mockResolvedValue([
+        candidate({ replies: [{ authorType: 'USER', sentAt: daysAgo(9) }] }),
+      ])
+      const count = await svc.nudgeAwaitingPatientTickets()
+      expect(count).toBe(0)
+      expect(prisma.notification.create).not.toHaveBeenCalled()
+    })
+
+    it('waits out the silence window before nudging', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findMany.mockResolvedValue([
+        candidate({ replies: [{ authorType: 'OPS', sentAt: daysAgo(1) }] }),
+      ])
+      const count = await svc.nudgeAwaitingPatientTickets()
+      expect(count).toBe(0)
+    })
+
+    it('does not re-nudge the same silence (idempotent per last reply)', async () => {
+      const { svc, prisma } = make()
+      // Capture the timestamp ONCE — asserting against a second daysAgo(5) call
+      // compares two Dates milliseconds apart and fails spuriously.
+      const lastReplyAt = daysAgo(5)
+      prisma.supportTicket.findMany.mockResolvedValue([
+        candidate({ replies: [{ authorType: 'OPS', sentAt: lastReplyAt }] }),
+      ])
+      // A nudge already exists that was sent AFTER the last reply.
+      prisma.notification.findFirst.mockResolvedValue({ id: 'notif-1' })
+      const count = await svc.nudgeAwaitingPatientTickets()
+      expect(count).toBe(0)
+      expect(prisma.notification.create).not.toHaveBeenCalled()
+      // The dedupe must be anchored on the last reply, not a fixed window —
+      // otherwise a later ops reply could never earn a fresh nudge.
+      const where = prisma.notification.findFirst.mock.calls[0][0].where
+      expect(where.supportTicketId).toBe('ticket-1')
+      expect(where.sentAt.gt).toBe(lastReplyAt)
     })
   })
 

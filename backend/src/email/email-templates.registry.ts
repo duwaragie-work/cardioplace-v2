@@ -55,6 +55,10 @@ export type EmailTemplateName =
   // on ticket create. The intake screen already promises "check the link in
   // your confirmation email" — this template makes that promise truthful.
   | 'support_ticket_received'
+  // Nudge fired by the support housekeeping cron when ops replied and the
+  // thread went quiet — prompts the patient before the ticket drifts to
+  // auto-close with their question unanswered.
+  | 'support_awaiting_reply'
   | 'contact_form'
   // Treatment adherence + monitoring
   | 'gap_alert'
@@ -234,6 +238,14 @@ export const EMAIL_TEMPLATE_REGISTRY: Record<EmailTemplateName, TemplateSpec> = 
     briefDescriptionFn: (m) =>
       clip(
         `Support ticket resolved — ticketNumber ${m.ticketNumber ?? '?'} — category ${m.category ?? 'unspecified'}`,
+      ),
+  },
+  support_awaiting_reply: {
+    purpose: 'CARE_COORDINATION',
+    recipientCategory: 'PATIENT',
+    briefDescriptionFn: (m) =>
+      clip(
+        `Support ticket awaiting patient reply — ticketNumber ${m.ticketNumber ?? '?'} — category ${m.category ?? 'unspecified'}`,
       ),
   },
   support_ops_notify: {

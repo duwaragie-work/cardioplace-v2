@@ -65,6 +65,13 @@ export class SupportController {
     return this.support.reopen(this.actorFrom(req), id)
   }
 
+  /** Patient confirms a resolved request is done → CLOSED, without waiting out
+   *  the 14-day auto-close sweep. RESOLVED-only; owner-only. */
+  @Post('tickets/:id/close')
+  close(@Req() req: AuthedReq, @Param('id') id: string) {
+    return this.support.closeByUser(this.actorFrom(req), id)
+  }
+
   /** Unauthenticated "I can't sign in" form — rate-limited 5/IP/hour in the
    *  service; lands identity-UNverified pending ops phone verification. */
   @Public()

@@ -14,6 +14,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/contexts/ToastContext';
 import {
   canReopen,
+  closeTicket,
   listMyTickets,
   replyToTicket,
   reopenTicket,
@@ -109,6 +110,22 @@ export default function MyTicketsPage() {
     } catch (e) {
       setRowError(
         e instanceof Error ? e.message : t('support.mytickets.reopenError'),
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function doClose(ticket: MyTicket) {
+    setBusyId(ticket.id);
+    setRowError(null);
+    try {
+      await closeTicket(ticket.id);
+      await load();
+      showToast(t('support.mytickets.closed'));
+    } catch (e) {
+      setRowError(
+        e instanceof Error ? e.message : t('support.mytickets.closeError'),
       );
     } finally {
       setBusyId(null);
@@ -253,13 +270,30 @@ export default function MyTicketsPage() {
                           <CheckCircle2 className="w-3.5 h-3.5" />{' '}
                           {t('support.mytickets.resolvedNote')}
                         </p>
-                        {/* Reopen is offered only inside the 7-day window; the
-                            server re-checks, so a stale tab can't bypass it. */}
-                        {canReopen(ticket) && (
-                          <>
-                            <p className="text-[12px] text-slate-500">
-                              {t('support.mytickets.reopenNote')}
-                            </p>
+                        {/* Two ways out of RESOLVED, matching the agreed
+                            lifecycle: confirm it's done (→ CLOSED now), or
+                            reopen. Reopen is offered only inside the 7-day
+                            window; the server re-checks both, so a stale tab
+                            can't bypass either. */}
+                        <p className="text-[12px] text-slate-500">
+                          {canReopen(ticket)
+                            ? t('support.mytickets.reopenNote')
+                            : t('support.mytickets.closeNote')}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => doClose(ticket)}
+                            disabled={busy}
+                            data-testid="my-ticket-close"
+                            className="inline-flex h-10 items-center gap-2 rounded-full bg-[#7B00E0] px-5 text-[13px] font-semibold text-white transition-colors hover:bg-[#6600BC] disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            {busy
+                              ? t('support.mytickets.closing')
+                              : t('support.mytickets.close')}
+                          </button>
+                          {canReopen(ticket) && (
                             <button
                               type="button"
                               onClick={() => doReopen(ticket)}
@@ -272,8 +306,8 @@ export default function MyTicketsPage() {
                                 ? t('support.mytickets.reopening')
                                 : t('support.mytickets.reopen')}
                             </button>
-                          </>
-                        )}
+                          )}
+                        </div>
                       </div>
                     )}
 

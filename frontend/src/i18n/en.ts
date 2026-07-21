@@ -1067,6 +1067,11 @@ const en = {
   'support.mytickets.reopenError': 'Could not reopen this request.',
   'support.mytickets.reopenNote': 'Still need help? You can reopen this for 7 days.',
   'support.mytickets.reopened': 'Request reopened.',
+  'support.mytickets.close': 'Yes, this is resolved',
+  'support.mytickets.closing': 'Closing…',
+  'support.mytickets.closed': 'Request closed.',
+  'support.mytickets.closeError': 'Could not close this request.',
+  'support.mytickets.closeNote': 'The reopen window has passed. You can confirm this is done.',
 
   // ── /support hub — one adaptive surface for signed-out and signed-in ────
   'support.hub.title': 'Support',

@@ -31,6 +31,7 @@ const ALL_TEMPLATES: EmailTemplateName[] = [
   'support_resolved',
   'support_ops_notify',
   'support_ticket_received',
+  'support_awaiting_reply',
   'contact_form',
   'gap_alert',
   'medication_reask',

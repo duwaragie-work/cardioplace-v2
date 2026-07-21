@@ -3,6 +3,7 @@ import { TestControlController } from './test-control.controller.js'
 import { TestControlService } from './test-control.service.js'
 import { CronsModule } from '../crons/crons.module.js'
 import { DailyJournalModule } from '../daily_journal/daily_journal.module.js'
+import { SupportModule } from '../support/support.module.js'
 
 /**
  * Dev-only test-control module. Wires up endpoints used by the Playwright
@@ -13,7 +14,7 @@ import { DailyJournalModule } from '../daily_journal/daily_journal.module.js'
  * mutate state by design.
  */
 @Module({
-  imports: [CronsModule, DailyJournalModule],
+  imports: [CronsModule, DailyJournalModule, SupportModule],
   controllers: [TestControlController],
   providers: [TestControlService],
 })

@@ -17,5 +17,8 @@ import { TicketNumberService } from './ticket-number.service.js'
   imports: [PrismaModule, EmailModule, AuthModule],
   controllers: [SupportController, AdminSupportController],
   providers: [SupportService, TicketNumberService, SupportAutoCloseService],
+  // Exported so TestControlModule can drive the support sweeps deterministically
+  // (auto-close / nudge) instead of the Playwright suite waiting on a 03:00 cron.
+  exports: [SupportService],
 })
 export class SupportModule {}

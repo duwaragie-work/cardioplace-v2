@@ -1027,6 +1027,11 @@ const de: Record<TranslationKey, string> = {
   'support.mytickets.reopenError': 'Diese Anfrage konnte nicht wieder geöffnet werden.',
   'support.mytickets.reopenNote': 'Brauchen Sie noch Hilfe? Sie können sie 7 Tage lang wieder öffnen.',
   'support.mytickets.reopened': 'Anfrage wieder geöffnet.',
+  'support.mytickets.close': 'Ja, das ist erledigt',
+  'support.mytickets.closing': 'Wird geschlossen…',
+  'support.mytickets.closed': 'Anfrage geschlossen.',
+  'support.mytickets.closeError': 'Diese Anfrage konnte nicht geschlossen werden.',
+  'support.mytickets.closeNote': 'Die Frist zum Wiederöffnen ist abgelaufen. Sie können bestätigen, dass es erledigt ist.',
 
   'support.hub.title': 'Support',
   'support.hub.subtitle': 'Hilfe zu Ihrem Konto, zur Anmeldung oder zur App.',

@@ -1,6 +1,11 @@
-import { test, expect, request as pwRequest } from '@playwright/test'
+import {
+  test,
+  expect,
+  request as pwRequest,
+  type APIRequestContext,
+} from '@playwright/test'
 import { authedApi } from '../helpers/auth.js'
-import { PATIENTS } from '../helpers/accounts.js'
+import { PATIENTS, ADMINS } from '../helpers/accounts.js'
 import { API_BASE_URL, PATIENT_BASE_URL } from '../playwright.config.js'
 
 /**
@@ -112,4 +117,108 @@ test.describe('5W — support hub + public contact', () => {
       await patient.dispose()
     }
   })
+
+  // The terminal state and the sweep that produces it were Jest-only until now —
+  // never proven against a real DB. `autoCloseResolvedTickets` takes an
+  // injectable `now`, so we drive the sweep with a future timestamp instead of
+  // backdating rows or waiting 14 days.
+  test('resolve → auto-close sweep at +15d → CLOSED', async () => {
+    test.slow()
+    const patient = await authedApi(API_BASE_URL, PATIENTS.mike.email, 'patient')
+    const ops = await authedApi(API_BASE_URL, ADMINS.ops.email, 'admin')
+    const ctl = await testControl()
+    try {
+      const subject = `Auto-close probe ${Date.now()}`
+      const created = await patient.post('v2/support/contact', {
+        data: { subject, body: 'probe', category: 'ACCOUNT' },
+      })
+      expect(created.ok(), await created.text()).toBeTruthy()
+      const { ticketNumber } = (await created.json()) as { ticketNumber: string }
+      const id = await findMyTicketId(patient, ticketNumber)
+
+      const resolved = await ops.post(`v2/admin/support/tickets/${id}/resolve`, {
+        data: { resolutionNotes: 'done' },
+      })
+      expect(resolved.ok(), await resolved.text()).toBeTruthy()
+      expect(await myStatus(patient, id)).toBe('RESOLVED')
+
+      // 15 days > the 14-day auto-close delay.
+      const future = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString()
+      const swept = await ctl.post('test-control/cron/support-auto-close/run', {
+        data: { now: future },
+      })
+      expect(swept.ok(), await swept.text()).toBeTruthy()
+      expect(await myStatus(patient, id)).toBe('CLOSED')
+    } finally {
+      await patient.dispose()
+      await ops.dispose()
+      await ctl.dispose()
+    }
+  })
+
+  // "Closed ... or on user confirm" — the patient-driven route to CLOSED.
+  test('resolve → patient confirms → CLOSED immediately', async () => {
+    test.slow()
+    const patient = await authedApi(API_BASE_URL, PATIENTS.olive.email, 'patient')
+    const ops = await authedApi(API_BASE_URL, ADMINS.ops.email, 'admin')
+    try {
+      const subject = `User-close probe ${Date.now()}`
+      const created = await patient.post('v2/support/contact', {
+        data: { subject, body: 'probe', category: 'ACCOUNT' },
+      })
+      expect(created.ok(), await created.text()).toBeTruthy()
+      const { ticketNumber } = (await created.json()) as { ticketNumber: string }
+      const id = await findMyTicketId(patient, ticketNumber)
+
+      // Closing an ACTIVE ticket is refused — confirm means confirm a resolution.
+      const tooEarly = await patient.post(`v2/support/tickets/${id}/close`)
+      expect(tooEarly.status(), 'close before resolve is refused').toBe(400)
+
+      const resolved = await ops.post(`v2/admin/support/tickets/${id}/resolve`, {
+        data: { resolutionNotes: 'done' },
+      })
+      expect(resolved.ok(), await resolved.text()).toBeTruthy()
+
+      const closed = await patient.post(`v2/support/tickets/${id}/close`)
+      expect(closed.ok(), await closed.text()).toBeTruthy()
+      expect(await myStatus(patient, id)).toBe('CLOSED')
+    } finally {
+      await patient.dispose()
+      await ops.dispose()
+    }
+  })
 })
+
+/** Authorised test-control context (gated by ENABLE_TEST_CONTROL + secret). */
+async function testControl(): Promise<APIRequestContext> {
+  const secret = process.env.TEST_CONTROL_SECRET
+  return pwRequest.newContext({
+    baseURL: `${API_ROOT}/api/`,
+    extraHTTPHeaders: secret ? { 'X-Test-Control-Secret': secret } : {},
+  })
+}
+
+async function findMyTicketId(
+  patient: APIRequestContext,
+  ticketNumber: string,
+): Promise<string> {
+  const res = await patient.get('v2/support/tickets/mine')
+  expect(res.ok(), await res.text()).toBeTruthy()
+  const { data } = (await res.json()) as {
+    data: Array<{ id: string; ticketNumber: string }>
+  }
+  const row = data.find((t) => t.ticketNumber === ticketNumber)
+  expect(row, `ticket ${ticketNumber} in /tickets/mine`).toBeTruthy()
+  return row!.id
+}
+
+async function myStatus(
+  patient: APIRequestContext,
+  id: string,
+): Promise<string> {
+  const res = await patient.get('v2/support/tickets/mine')
+  const { data } = (await res.json()) as {
+    data: Array<{ id: string; status: string }>
+  }
+  return data.find((t) => t.id === id)?.status ?? 'NOT_FOUND'
+}

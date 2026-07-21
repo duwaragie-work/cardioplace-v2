@@ -74,6 +74,7 @@ enum NotificationTrigger {
   SUPPORT_RESOLVE // support ticket resolved
   SUPPORT_USER_REPLIED // patient replied in-thread (→ ops); ball back to ops
   SUPPORT_REOPENED // patient reopened a resolved/closed ticket (→ ops)
+  SUPPORT_AWAITING_REPLY // nudge (→ patient): ops replied and the thread went quiet
   MFA_RESET // MFA reset notice
 
   // ── System-class — VISIBLE in the bell. ──

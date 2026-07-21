@@ -32,4 +32,24 @@ export class SupportAutoCloseService {
       }
     })
   }
+
+  /**
+   * "Waiting on the patient" nudge — ops replied, the thread went quiet.
+   *
+   * Its OWN CLS principal (`cron-support-nudge`), not the auto-close one: this
+   * sweep DISCLOSES to the patient (notification + email), so the audit trail
+   * must not attribute those disclosures to the silent housekeeping job.
+   *
+   * Runs an hour after auto-close so the two sweeps never interleave on the
+   * same rows — a ticket closed at 03:00 is simply no longer a candidate.
+   */
+  @Cron('0 4 * * *') // daily 04:00 UTC
+  async scheduledNudgeRun() {
+    return runAsCronActor(this.cls, 'cron-support-nudge', async () => {
+      const count = await this.support.nudgeAwaitingPatientTickets()
+      if (count > 0) {
+        this.logger.log(`Nudged ${count} support ticket(s) awaiting a patient reply`)
+      }
+    })
+  }
 }

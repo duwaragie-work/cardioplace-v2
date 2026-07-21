@@ -1027,6 +1027,11 @@ const es: Record<TranslationKey, string> = {
   'support.mytickets.reopenError': 'No se pudo reabrir esta solicitud.',
   'support.mytickets.reopenNote': '¿Aún necesitas ayuda? Puedes reabrirla durante 7 días.',
   'support.mytickets.reopened': 'Solicitud reabierta.',
+  'support.mytickets.close': 'Sí, está resuelta',
+  'support.mytickets.closing': 'Cerrando…',
+  'support.mytickets.closed': 'Solicitud cerrada.',
+  'support.mytickets.closeError': 'No se pudo cerrar esta solicitud.',
+  'support.mytickets.closeNote': 'El plazo para reabrir ha pasado. Puedes confirmar que está resuelta.',
 
   'support.hub.title': 'Soporte',
   'support.hub.subtitle': 'Obtén ayuda con tu cuenta, el inicio de sesión o la aplicación.',

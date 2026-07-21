@@ -149,6 +149,22 @@ export async function reopenTicket(ticketId: string): Promise<MyTicket> {
 }
 
 /**
+ * Patient confirms a resolved request is done → CLOSED, instead of waiting out
+ * the 14-day auto-close sweep. RESOLVED-only; the server refuses anything else.
+ */
+export async function closeTicket(ticketId: string): Promise<MyTicket> {
+  const res = await fetchWithAuth(
+    `${API}/api/v2/support/tickets/${ticketId}/close`,
+    { method: 'POST' },
+  );
+  if (!res.ok) {
+    const e = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(e?.message || 'Could not close this request.');
+  }
+  return (await res.json()) as MyTicket;
+}
+
+/**
  * Mirrors REOPEN_WINDOW_MS in backend/src/support/support.service.ts. Used only
  * to decide whether to OFFER the reopen button — the server is the authority
  * and re-checks it, so a stale client can never actually reopen out of window.

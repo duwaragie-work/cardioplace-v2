@@ -3,6 +3,7 @@ import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EncryptionService } from '../common/encryption.service.js'
+import { SupportService } from '../support/support.service.js'
 import { AuditExceptionReportService } from '../crons/audit-exception-report.service.js'
 import { DailyReminderService, type DailyReminderScanSummary } from '../crons/daily-reminder.service.js'
 import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
@@ -52,6 +53,9 @@ export class TestControlService {
     // cron. Same pattern as the other cron drivers above.
     private readonly auditExceptionReport: AuditExceptionReportService,
     private readonly encryption: EncryptionService,
+    // Support housekeeping sweeps (auto-close / awaiting-reply nudge) so the
+    // Playwright suite can drive them instead of waiting on the nightly crons.
+    private readonly support: SupportService,
   ) {}
 
   // ─── Cron drivers ───────────────────────────────────────────────────────
@@ -532,6 +536,52 @@ export class TestControlService {
       rowsDeleted += r.rowsDeleted
     }
     return { usersTouched: users.length, rowsDeleted }
+  }
+
+  /**
+   * Wipe test-scoped SupportTicket rows (cascading to replies + actions).
+   *
+   * `resetTestPatients` deliberately never touched the support tables, so
+   * tickets accumulated forever — and because BOTH support rate limits count
+   * SupportTicket rows in a time window (3/user/5min for authenticated intake,
+   * 5/IP/hour for the anonymous locked-out + public-contact doors), a local
+   * re-run of the support specs 429'd itself. Clearing these rows is what makes
+   * that suite deterministic outside a fresh CI database.
+   *
+   * Scoped two ways, both safe: seed/test emails on the `@cardioplace.test`
+   * domain, and loopback `ipAddress` (a real patient is never on 127.0.0.1/::1,
+   * and the anonymous specs submit arbitrary throwaway emails, so the IP is the
+   * only thing that identifies them).
+   */
+  async resetSupportTickets(): Promise<{ rowsDeleted: number }> {
+    const result = await this.prisma.supportTicket.deleteMany({
+      where: {
+        OR: [
+          { email: { endsWith: '@cardioplace.test' } },
+          { ipAddress: { in: ['127.0.0.1', '::1', '::ffff:127.0.0.1'] } },
+        ],
+      },
+    })
+    return { rowsDeleted: result.count }
+  }
+
+  /**
+   * Drive the support housekeeping sweeps on demand instead of waiting for the
+   * 03:00/04:00 crons. Both take an injectable `now`, so a spec proves
+   * RESOLVED → CLOSED by passing a future timestamp — no backdating, no waiting.
+   * Wrapped in the same CLS actor scopes the @Cron handlers use, so the writes
+   * attribute to the right system principal rather than a null actor.
+   */
+  async runSupportAutoClose(now: Date): Promise<{ closed: number }> {
+    return runAsCronActor(this.cls, 'cron-support-auto-close', async () => ({
+      closed: await this.support.autoCloseResolvedTickets(now),
+    }))
+  }
+
+  async runSupportNudge(now: Date): Promise<{ nudged: number }> {
+    return runAsCronActor(this.cls, 'cron-support-nudge', async () => ({
+      nudged: await this.support.nudgeAwaitingPatientTickets(now),
+    }))
   }
 
   /**

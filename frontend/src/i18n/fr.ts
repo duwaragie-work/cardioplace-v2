@@ -1027,6 +1027,11 @@ const fr: Record<TranslationKey, string> = {
   'support.mytickets.reopenError': 'Impossible de rouvrir cette demande.',
   'support.mytickets.reopenNote': 'Toujours besoin d’aide ? Vous pouvez la rouvrir pendant 7 jours.',
   'support.mytickets.reopened': 'Demande rouverte.',
+  'support.mytickets.close': 'Oui, c’est résolu',
+  'support.mytickets.closing': 'Clôture…',
+  'support.mytickets.closed': 'Demande clôturée.',
+  'support.mytickets.closeError': 'Impossible de clôturer cette demande.',
+  'support.mytickets.closeNote': 'Le délai de réouverture est écoulé. Vous pouvez confirmer que c’est résolu.',
 
   'support.hub.title': 'Assistance',
   'support.hub.subtitle': 'Obtenez de l’aide pour votre compte, la connexion ou l’application.',
