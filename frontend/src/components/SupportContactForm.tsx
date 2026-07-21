@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useToast } from '@/contexts/ToastContext';
 import type { TranslationKey } from '@/i18n';
 import ClinicalRedirectPanel from '@/components/support/ClinicalRedirectPanel';
 import {
@@ -31,6 +32,7 @@ export default function SupportContactForm({
   defaultOpenAccountFlow?: boolean;
 } = {}) {
   const { t } = useLanguage();
+  const { showToast } = useToast();
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [category, setCategory] = useState<SupportCategory>('ACCOUNT');
@@ -70,6 +72,10 @@ export default function SupportContactForm({
         contactPreference: pref,
       });
       setDone(r.ticketNumber);
+      // Toast AND the inline card: the card carries the ticket number the
+      // patient may need to quote, the toast is the immediate "it went through"
+      // acknowledgement the agreed lifecycle calls for on Open.
+      showToast(t('support.form.sentToast'));
       setSubject('');
       setBody('');
     } catch (e2) {

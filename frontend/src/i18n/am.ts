@@ -649,6 +649,7 @@ const am: Record<TranslationKey, string> = {
   'support.form.comingSoon': '(coming soon)',
   'support.form.sending': 'Sending…',
   'support.form.send': 'Send message',
+  'support.form.sentToast': 'Request sent.',
   'support.form.error': 'Could not send your message.',
   'support.form.successPrefix': 'Thanks — your request',
   'support.form.successSuffix': "was received. We'll get back to you by email.",

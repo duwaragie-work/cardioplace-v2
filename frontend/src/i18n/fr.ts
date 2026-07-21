@@ -638,6 +638,7 @@ const fr: Record<TranslationKey, string> = {
   'support.form.comingSoon': '(bientôt disponible)',
   'support.form.sending': 'Envoi…',
   'support.form.send': 'Envoyer le message',
+  'support.form.sentToast': 'Demande envoyée.',
   'support.form.error': "Impossible d'envoyer votre message.",
   'support.form.successPrefix': 'Merci — votre demande',
   'support.form.successSuffix': 'a été reçue. Nous vous répondrons par e-mail.',

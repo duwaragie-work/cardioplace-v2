@@ -650,6 +650,8 @@ const en = {
   'support.form.comingSoon': '(coming soon)',
   'support.form.sending': 'Sending…',
   'support.form.send': 'Send message',
+  /** Transient confirmation shown alongside the inline success card. */
+  'support.form.sentToast': 'Request sent.',
   'support.form.error': 'Could not send your message.',
   'support.form.successPrefix': 'Thanks — your request',
   'support.form.successSuffix': "was received. We'll get back to you by email.",

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { CheckCircle2, Info } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useToast } from '@/contexts/ToastContext';
 import { submitPublicContact } from '@/lib/services/support.service';
 
 /**
@@ -20,6 +21,7 @@ import { submitPublicContact } from '@/lib/services/support.service';
  */
 export default function PublicContactForm() {
   const { t } = useLanguage();
+  const { showToast } = useToast();
   const [email, setEmail] = useState('');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
@@ -39,6 +41,7 @@ export default function PublicContactForm() {
         message: message.trim(),
       });
       setDone(r.ticketNumber);
+      showToast(t('support.form.sentToast'));
       setSubject('');
       setMessage('');
     } catch (e2) {
