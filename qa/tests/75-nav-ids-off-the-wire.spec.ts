@@ -6,15 +6,25 @@ import { newTestControl, type TestControl } from '../helpers/test-control.js'
 import { ADMIN_BASE_URL, API_BASE_URL } from '../playwright.config.js'
 
 /**
- * F1 (static export) — patient/alert ids must NOT reach the host on in-app
- * navigation. In-app clicks stash the id in sessionStorage and navigate to the
- * BARE route; the id only rides the URL for external email/push deep-links
- * (kept as a fallback). This proves:
- *   1. after an in-app click the URL carries no id/alert query, and
- *   2. NO network request during the nav carries the ULID (the real check —
- *      that's what would otherwise land in the CDN access log), and
- *   3. the detail still renders (the sessionStorage hand-off worked), and
- *   4. an external deep-link `?id=<ULID>` still resolves (fallback intact).
+ * F1 + Group A addendum (2026-07-21) — the patient USER ID must NEVER reach the
+ * host in a URL. Two nav mechanisms, one guarantee:
+ *   • patients-list / care-team click → id stashed in sessionStorage, navigate
+ *     to the BARE route (no id, no alert on the URL).
+ *   • alert click / email deep-link → ONLY the alert id rides the URL
+ *     (`?alert=<alertId>`); the admin detail page resolves the patient
+ *     server-side. An alert id is an opaque ULID and reveals nothing without an
+ *     authenticated, practice-scoped API call — so it is allowed in the URL; a
+ *     patient id is not.
+ *
+ * There is deliberately NO admin `?id=<patientUserId>` path any more. This proves:
+ *   1. after a patients-list click the URL carries no id/alert query, and
+ *   2. after an alert click the URL carries `?alert=` but NEVER the patient id, and
+ *   3. NO network request during either nav carries the patient ULID (the real
+ *      check — that's what would otherwise land in the CDN access log), and
+ *   4. the detail still renders in both cases (stash hand-off / alert-resolve worked).
+ *
+ * The patient app's `/alerts?id=<alertId>` deep-link is unchanged — an alert id
+ * in the URL is fine; that path is covered below as before.
  */
 
 test.describe('F1 — ids off the wire on in-app navigation', () => {
@@ -56,13 +66,70 @@ test.describe('F1 — ids off the wire on in-app navigation', () => {
     })
   })
 
-  test('admin: external deep-link ?id= still resolves (fallback)', async ({ page }) => {
-    const aisha = await tc.findUser(PATIENTS.aisha.email)
+  test('admin: bare /patients/detail with no stash redirects to the list', async ({
+    page,
+  }) => {
+    // The old `?id=<patientUserId>` deep-link is gone. Hitting the detail route
+    // cold (no `?alert=`, no sessionStorage) must NOT render an empty detail —
+    // it bounces back to the patients list.
     await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail`)
+    await page.waitForURL(/\/patients(?!\/detail)/, { timeout: 20_000 })
+  })
 
-    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
-    await expect(page.getByTestId('admin-patient-detail-header')).toBeVisible({
-      timeout: 20_000,
+  test.describe('admin alert nav (write-gated)', () => {
+    test.skip(!process.env.RUN_WRITE_TESTS, 'Write tests gated by RUN_WRITE_TESTS=1')
+
+    test('alert click → ?alert= only, patient id never on the wire', async ({ page }) => {
+      const aisha = await tc.findUser(PATIENTS.aisha.email)
+      await tc.resetUser(aisha.id)
+      const { alertIds } = await tc.seedAlerts(aisha.id, [
+        { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
+      ])
+      const alertId = alertIds[0]
+
+      await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+      await page.goto(`${ADMIN_BASE_URL}/notifications`)
+
+      const requestUrls: string[] = []
+      page.on('request', (r) => requestUrls.push(r.url()))
+
+      await page.getByTestId(`admin-alert-row-${alertId}`).first().click()
+
+      // 1. URL deep-links the alert but NEVER the patient id.
+      await page.waitForURL(/\/patients\/detail\?alert=/, { timeout: 20_000 })
+      expect(page.url()).toContain(`alert=${alertId}`)
+      expect(page.url()).not.toContain(aisha.id)
+
+      // 2. The real check: the patient ULID is in NO request URL (the alert id
+      //    is allowed; the patient id is not).
+      for (const u of requestUrls) {
+        expect(u, `patient ULID leaked in a request: ${u}`).not.toContain(aisha.id)
+      }
+
+      // 3. The detail resolved server-side from the alert and rendered.
+      await expect(page.getByTestId('admin-patient-detail-header')).toBeVisible({
+        timeout: 20_000,
+      })
+      await tc.resetUser(aisha.id)
+    })
+
+    test('email-style deep-link /patients/detail?alert= resolves the patient', async ({
+      page,
+    }) => {
+      const aisha = await tc.findUser(PATIENTS.aisha.email)
+      await tc.resetUser(aisha.id)
+      const { alertIds } = await tc.seedAlerts(aisha.id, [
+        { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
+      ])
+      await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
+
+      await page.goto(`${ADMIN_BASE_URL}/patients/detail?alert=${alertIds[0]}`)
+      await expect(page.getByTestId('admin-patient-detail-header')).toBeVisible({
+        timeout: 20_000,
+      })
+      expect(page.url()).not.toContain(aisha.id)
+      await tc.resetUser(aisha.id)
     })
   })
 

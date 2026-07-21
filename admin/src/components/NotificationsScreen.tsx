@@ -540,8 +540,8 @@ export default function NotificationsScreen() {
                         // something.
                         onRowClick={() => {
                           if (a.patient?.id) {
-                            stashNavId('patientDetail', { id: a.patient.id, alert: a.id });
-                            router.push('/patients/detail');
+                            // Addendum — alert id only; patient resolved server-side.
+                            router.push(`/patients/detail?alert=${a.id}`);
                           } else {
                             setExpandedId(expanded ? null : a.id);
                           }
@@ -642,11 +642,12 @@ export default function NotificationsScreen() {
                         // target alert auto-expands. Falls back to the
                         // local Alerts tab when patientUserId is missing.
                         if (n.alertId && n.patientUserId) {
-                          stashNavId('patientDetail', { id: n.patientUserId, alert: n.alertId });
-                          router.push('/patients/detail');
+                          // Addendum — alert id only; patient resolved server-side.
+                          router.push(`/patients/detail?alert=${n.alertId}`);
                         } else if (n.patientUserId) {
                           // Non-alert care-team notice (enrollment paused /
-                          // condition review) → straight to the patient detail.
+                          // condition review) → no alert to resolve from, so
+                          // hand the patient id off via sessionStorage (not URL).
                           stashNavId('patientDetail', { id: n.patientUserId });
                           router.push('/patients/detail');
                         } else if (n.alertId) {
