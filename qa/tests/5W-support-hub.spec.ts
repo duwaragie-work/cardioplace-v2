@@ -156,6 +156,81 @@ test.describe('5W — support hub + public contact', () => {
     }
   })
 
+  // The nudge is the one change here that EMAILS PATIENTS, so it gets end-to-end
+  // proof rather than unit coverage alone: it must fire when ops replied and the
+  // thread went quiet, and must NOT fire again for that same silence.
+  test('ops reply → 4d silence → nudge fires once, not twice', async () => {
+    test.slow()
+    const patient = await authedApi(API_BASE_URL, PATIENTS.james.email, 'patient')
+    const ops = await authedApi(API_BASE_URL, ADMINS.ops.email, 'admin')
+    const ctl = await testControl()
+    try {
+      const subject = `Nudge probe ${Date.now()}`
+      const created = await patient.post('v2/support/contact', {
+        data: { subject, body: 'probe', category: 'ACCOUNT' },
+      })
+      expect(created.ok(), await created.text()).toBeTruthy()
+      const { ticketNumber } = (await created.json()) as { ticketNumber: string }
+      const id = await findMyTicketId(patient, ticketNumber)
+
+      // Ops replies → the ball is with the patient.
+      const replied = await ops.post(`v2/admin/support/tickets/${id}/reply`, {
+        data: { body: 'Could you confirm your device?' },
+      })
+      expect(replied.ok(), await replied.text()).toBeTruthy()
+
+      // Nothing yet — the silence window has not elapsed.
+      const early = await ctl.post('test-control/cron/support-nudge/run', {
+        data: { now: new Date().toISOString() },
+      })
+      expect(early.ok(), await early.text()).toBeTruthy()
+      expect((await early.json()).nudged, 'no nudge before the window').toBe(0)
+
+      // 4 days later (> the 3-day window) it fires.
+      const future = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString()
+      const first = await ctl.post('test-control/cron/support-nudge/run', {
+        data: { now: future },
+      })
+      expect(first.ok(), await first.text()).toBeTruthy()
+      expect((await first.json()).nudged, 'nudged after the window').toBeGreaterThanOrEqual(1)
+
+      // Running again must NOT re-nudge the same silence — the dedupe is
+      // anchored on the last reply, so a daily cron can't turn into a daily nag.
+      const second = await ctl.post('test-control/cron/support-nudge/run', {
+        data: { now: future },
+      })
+      expect(second.ok(), await second.text()).toBeTruthy()
+      expect((await second.json()).nudged, 'no repeat nudge for the same silence').toBe(0)
+    } finally {
+      await patient.dispose()
+      await ops.dispose()
+      await ctl.dispose()
+    }
+  })
+
+  // The legal shells must resolve but stay out of the index while the copy is
+  // still placeholder — a discoverable, unfinished HIPAA notice is worse than none.
+  test('legal route shells resolve and are noindex', async () => {
+    const ctx = await pwRequest.newContext({ baseURL: PATIENT_BASE_URL })
+    try {
+      for (const route of [
+        '/hipaa-notice',
+        '/cookies',
+        '/accessibility',
+        '/nondiscrimination',
+        '/telehealth-consent',
+      ]) {
+        const res = await ctx.get(route)
+        expect(res.status(), `${route} resolves`).toBe(200)
+        // PolicyShell is a client component and Next cannot export metadata from
+        // one — each route needs a server wrapper, so assert the tag really emits.
+        expect(await res.text(), `${route} is noindex`).toContain('noindex');
+      }
+    } finally {
+      await ctx.dispose()
+    }
+  })
+
   // "Closed ... or on user confirm" — the patient-driven route to CLOSED.
   test('resolve → patient confirms → CLOSED immediately', async () => {
     test.slow()

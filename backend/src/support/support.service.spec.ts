@@ -508,6 +508,51 @@ describe('SupportService', () => {
       expect(prisma.notification.create).not.toHaveBeenCalled()
     })
 
+    it('only considers active, account-linked tickets that have a reply', async () => {
+      const { svc, prisma } = make()
+      prisma.supportTicket.findMany.mockResolvedValue([])
+      await svc.nudgeAwaitingPatientTickets()
+      const where = prisma.supportTicket.findMany.mock.calls[0][0].where
+      // Resolved/closed threads are nobody's turn.
+      expect(where.status).toEqual({ in: ['OPEN', 'IN_PROGRESS'] })
+      // A locked-out ticket can have no linked account — we will not email an
+      // unverified address on a schedule.
+      expect(where.userId).toEqual({ not: null })
+      // Nothing to be "waiting" on if ops never replied.
+      expect(where.replies).toEqual({ some: {} })
+    })
+
+    it('skips a ticket whose thread has no replies at all', async () => {
+      const { svc, prisma } = make()
+      // Defensive: even if the query filter regressed, an empty thread must
+      // never produce a nudge (there is no ops reply to be waiting on).
+      prisma.supportTicket.findMany.mockResolvedValue([candidate({ replies: [] })])
+      const count = await svc.nudgeAwaitingPatientTickets()
+      expect(count).toBe(0)
+      expect(prisma.notification.create).not.toHaveBeenCalled()
+    })
+
+    it('nudges in-app even when the ticket has no email on file', async () => {
+      const { svc, prisma, email } = make()
+      prisma.supportTicket.findMany.mockResolvedValue([candidate({ email: '' })])
+      prisma.notification.findFirst.mockResolvedValue(null)
+      const count = await svc.nudgeAwaitingPatientTickets()
+      // The in-app notification still lands; only the email is skipped.
+      expect(count).toBe(1)
+      expect(prisma.notification.create).toHaveBeenCalled()
+      expect(email.sendEmail).not.toHaveBeenCalled()
+    })
+
+    it('respects the injectable `now` so the sweep is drivable in tests', async () => {
+      const { svc, prisma } = make()
+      // Reply 5 days ago, but evaluate as if it were only 1 day later — the
+      // silence window has not elapsed from that vantage point.
+      prisma.supportTicket.findMany.mockResolvedValue([candidate()])
+      const asOf = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000)
+      const count = await svc.nudgeAwaitingPatientTickets(asOf)
+      expect(count).toBe(0)
+    })
+
     it('waits out the silence window before nudging', async () => {
       const { svc, prisma } = make()
       prisma.supportTicket.findMany.mockResolvedValue([
