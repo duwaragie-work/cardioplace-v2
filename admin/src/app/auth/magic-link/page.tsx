@@ -1,86 +1,49 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth, type AdminAuthResponse } from "@/lib/auth-context";
+import { useAuth } from "@/lib/auth-context";
 
-// Bridges a cross-origin admin sign-in into admin auth state. Two callers:
+// Bridges a cross-origin admin sign-in into admin auth state. Two callers, both
+// now TOKENLESS (PHI audit 1.1 / 1.2 / V-11):
 //   1. Backend magic-link verify (auth.controller.ts) — a SUPER_ADMIN who
-//      clicked a link from email; still arrives with tokens in the URL (that's
-//      audit finding 1.1, a backend-owned fix). Handled by the TOKEN path.
-//   2. Patient sign-in (frontend/src/app/sign-in/page.tsx) — an admin who
-//      authenticated on the patient app. As of 1.2 this arrives with NO tokens
-//      in the URL; the OTP verify already set the admin-scoped HttpOnly
-//      cookies, so we authenticate via the COOKIE path (AuthProvider's mount
-//      rehydrate calls /auth/refresh with that cookie).
+//      clicked a link from email. The redirect now sets HttpOnly cookies and
+//      lands here with NO tokens in the URL.
+//   2. Patient sign-in bridge (frontend/src/app/sign-in/page.tsx) — an admin who
+//      authenticated on the patient app; the OTP verify already set the
+//      admin-scoped HttpOnly cookies.
+// Either way we authenticate via the COOKIE: AuthProvider's mount rehydrate
+// calls POST /auth/refresh with credentials:'include'. No token is read from the
+// URL (so nothing lands in the CloudFront/S3 access log); this page only reads
+// `?error=` and routes once the session resolves.
 function MagicLinkHandler() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { login, user, isLoading } = useAuth();
+  const { user, isLoading } = useAuth();
   const [error, setError] = useState("");
-  const [processing, setProcessing] = useState(true);
-  // 'token'  → tokens present in the URL (legacy email flow)
-  // 'cookie' → no tokens; wait for the mount rehydrate to authenticate
-  const [flow, setFlow] = useState<"token" | "cookie">("token");
-  const calledRef = useRef(false);
+
+  const errorParam = searchParams.get("error");
 
   useEffect(() => {
-    if (calledRef.current) return;
-    calledRef.current = true;
-
-    const errorParam = searchParams.get("error");
     if (errorParam) {
       setError(
         errorParam === "expired"
           ? "This sign-in link has expired or already been used."
-          : "Something went wrong. Please try again."
+          : "Something went wrong. Please try again.",
       );
-      setProcessing(false);
       return;
     }
-
-    const accessToken = searchParams.get("accessToken");
-    const refreshToken = searchParams.get("refreshToken");
-    const userId = searchParams.get("userId");
-
-    // No tokens in the URL → cookie bridge (1.2). Do NOT error here; the
-    // AuthProvider's mount rehydrate is already refreshing from the HttpOnly
-    // cookie. The effect below routes once that resolves.
-    if (!accessToken || !userId) {
-      setFlow("cookie");
-      return;
-    }
-
-    const authResponse: AdminAuthResponse = {
-      accessToken,
-      refreshToken: refreshToken ?? undefined,
-      userId,
-      email: searchParams.get("email") || undefined,
-      name: searchParams.get("name") || undefined,
-      roles: searchParams.get("roles")?.split(",").filter(Boolean) || [],
-    };
-
-    login(authResponse);
-
-    // Full page navigation so the proxy reads the freshly-set cookie.
-    window.location.href = "/dashboard";
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Cookie bridge (1.2): once the mount rehydrate settles, route on the result.
-  // A live session → dashboard; nothing → the same "invalid/expired" UI the
-  // token path shows (so a stale bridge doesn't spin forever).
-  useEffect(() => {
-    if (flow !== "cookie" || isLoading) return;
-    if (user) {
-      window.location.href = "/dashboard";
-    } else {
+    // Wait for the cookie-based mount rehydrate to settle.
+    if (isLoading) return;
+    if (!user) {
       setError("This sign-in link is invalid or has expired.");
-      setProcessing(false);
+      return;
     }
-  }, [flow, isLoading, user]);
+    // Full page navigation so the proxy reads the freshly-established cookie.
+    window.location.href = "/dashboard";
+  }, [errorParam, user, isLoading]);
 
-  if (processing) {
+  if (!error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="text-center">
