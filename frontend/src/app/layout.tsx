@@ -10,6 +10,7 @@ import PoweredByFooter from "@/components/PoweredByFooter";
 import SkipLink from "@/components/SkipLink";
 import IdleWarningToast from "@/components/auth/IdleWarningToast";
 import PushRegistrar from "@/components/auth/PushRegistrar";
+import RouteGuard from "@/components/auth/RouteGuard";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -57,7 +58,9 @@ export default function RootLayout({
             <HardReloadOnNavigate />
             <IdleWarningToast />
             <PushRegistrar />
-            <NavbarWrapper>{children}</NavbarWrapper>
+            <NavbarWrapper>
+              <RouteGuard>{children}</RouteGuard>
+            </NavbarWrapper>
             <PoweredByFooter />
           </LanguageProvider>
         </AuthProvider>

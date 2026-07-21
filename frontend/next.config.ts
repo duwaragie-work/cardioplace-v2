@@ -74,6 +74,9 @@ const nextConfig: NextConfig = {
   // keeps working unchanged. Only the AWS static build sets STATIC_EXPORT=1,
   // which emits a pure static bundle for S3+CloudFront. Same code, two targets.
   output: process.env.STATIC_EXPORT ? 'export' : 'standalone',
+  // Static export can't run Next's image optimizer (no server), so disable it
+  // ONLY in export mode. Standalone/dev keep optimization unchanged.
+  ...(process.env.STATIC_EXPORT ? { images: { unoptimized: true } } : {}),
   outputFileTracingRoot: monorepoRoot,
   turbopack: {
     root: monorepoRoot,

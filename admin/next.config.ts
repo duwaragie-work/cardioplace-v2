@@ -66,6 +66,9 @@ const nextConfig: NextConfig = {
   // 'standalone' so the current deploy (middleware + headers) keeps working.
   // Only the AWS static build sets STATIC_EXPORT=1 for a pure static bundle.
   output: process.env.STATIC_EXPORT ? 'export' : 'standalone',
+  // Static export can't run Next's image optimizer (no server), so disable it
+  // ONLY in export mode. Standalone/dev keep optimization unchanged.
+  ...(process.env.STATIC_EXPORT ? { images: { unoptimized: true } } : {}),
   outputFileTracingRoot: monorepoRoot,
   turbopack: {
     root: monorepoRoot,
