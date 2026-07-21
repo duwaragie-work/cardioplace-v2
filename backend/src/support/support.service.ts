@@ -597,11 +597,22 @@ export class SupportService {
       })
     }
 
+    // Assignee display name. `assignedToOpsId` is a bare column (no relation on
+    // SupportTicket), so resolve it here — otherwise the ops triage bar renders
+    // a raw ULID. Ops user, not a patient: id + name only, no email.
+    const assignedToOps = ticket.assignedToOpsId
+      ? await this.prisma.user.findUnique({
+          where: { id: ticket.assignedToOpsId },
+          select: { id: true, name: true },
+        })
+      : null
+
     const { user, totpCredential, ...rest } = ticket as typeof ticket & {
       totpCredential?: unknown
     }
     return {
       ...rest,
+      assignedToOps,
       user: ticket.user
         ? {
             id: ticket.user.id,
@@ -922,7 +933,10 @@ export class SupportService {
         data: {
           userId: ticket.userId,
           channel: NotificationChannel.DASHBOARD,
-          title: 'Support request closed',
+          // "resolved", not "closed" — RESOLVED and CLOSED are distinct states
+          // here and the patient can still reopen a RESOLVED ticket. "Closed"
+          // is reserved for the terminal CLOSED transition.
+          title: 'Support request resolved',
           body: `Ticket ${ticket.ticketNumber} has been marked resolved.`,
           dispatchTrigger: 'SUPPORT_RESOLVE',
           supportTicketId: ticket.id,

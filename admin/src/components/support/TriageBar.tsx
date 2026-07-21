@@ -19,11 +19,15 @@ const PRIORITIES: SupportPriority[] = ['HIGH', 'NORMAL', 'LOW'];
  */
 export default function TriageBar({
   assignedToOpsId,
+  assignedToOpsName,
   priority,
   onAssignToMe,
   onChangePriority,
 }: {
   assignedToOpsId: string | null;
+  /** Resolved ops-user name. Falls back to the id only if the name is missing,
+   *  so the agent sees "Dr. Elena Reyes", never a raw ULID. */
+  assignedToOpsName?: string | null;
   priority: SupportPriority;
   onAssignToMe: () => Promise<void> | void;
   onChangePriority: (p: SupportPriority) => Promise<void> | void;
@@ -52,9 +56,9 @@ export default function TriageBar({
         {assignedToOpsId ? (
           <span
             data-testid="support-assignee"
-            className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 font-mono text-[11px] text-violet-700"
+            className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700"
           >
-            {assignedToOpsId}
+            {assignedToOpsName ?? assignedToOpsId}
           </span>
         ) : (
           <span className="text-[12px] text-slate-400">Unassigned</span>

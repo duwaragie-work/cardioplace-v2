@@ -36,6 +36,13 @@ export interface SupportTicketRow {
   createdAt: string
   updatedAt: string
   resolvedAt: string | null
+  /** Patient-initiated reopen / close (and the cron auto-close) are deliberately
+   *  NOT SupportTicketAction rows — that table is ops-only (every row carries an
+   *  opsUserId). The events are recorded as these timestamps instead, so the ops
+   *  timeline merges them in rather than the lifecycle looking like it stopped
+   *  at "Resolved". See the SupportActionType comment in support.prisma. */
+  reopenedAt: string | null
+  closedAt: string | null
   awaitingParty: AwaitingParty
   sla: SupportSla
   user: { name: string | null; displayId: string | null } | null
@@ -58,6 +65,9 @@ export interface SupportTicketActionRow {
 export interface SupportTicketDetail extends Omit<SupportTicketRow, 'user'> {
   body: string
   userId: string | null
+  /** Resolved from `assignedToOpsId` server-side so the UI shows a name, not a
+   *  raw ULID. Null when unassigned (or if the ops user row is gone). */
+  assignedToOps: { id: string; name: string | null } | null
   user: {
     id: string
     name: string | null

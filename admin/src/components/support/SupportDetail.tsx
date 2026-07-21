@@ -154,6 +154,7 @@ export default function SupportDetail({ ticketId }: { ticketId: string }) {
           on it. Both write to the action timeline below. */}
       <TriageBar
         assignedToOpsId={ticket.assignedToOpsId}
+        assignedToOpsName={ticket.assignedToOps?.name ?? null}
         priority={ticket.priority}
         onAssignToMe={() =>
           withReload(() => assignTicket(ticket.id), 'Assigned to you.')
@@ -184,7 +185,11 @@ export default function SupportDetail({ ticketId }: { ticketId: string }) {
       <ReplyBox
         onSend={(b) => withReload(() => replyTicket(ticket.id, b), 'Reply sent.')}
       />
-      <ActionTimeline actions={ticket.actions} />
+      <ActionTimeline
+        actions={ticket.actions}
+        reopenedAt={ticket.reopenedAt}
+        closedAt={ticket.closedAt}
+      />
     </div>
   );
 }
