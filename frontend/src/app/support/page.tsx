@@ -96,24 +96,23 @@ export default function SupportHubPage() {
   // Mirrors LandingFooter's mounted + isLoading + isAuthenticated gate.
   const [mounted, setMounted] = useState(false);
   // Deep-link target from the entry points: the sign-in page sends
-  // `?flow=signin[&email=]`, in-app help sends `?flow=account`. Read from
+  // `?flow=signin`, in-app help sends `?flow=account`. These are opaque
+  // flow hints, never patient identifiers — the email is handed to the
+  // locked-out form via sessionStorage (stashSupportEmail). Read from
   // window.location rather than useSearchParams so this page needs no Suspense
   // boundary — same approach as support/locked-out/page.tsx.
   const [flow, setFlow] = useState<string | null>(null);
-  const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
     const params = new URLSearchParams(window.location.search);
     setFlow(params.get('flow'));
-    setEmail(params.get('email'));
   }, []);
 
-  // Carry the typed email through to the locked-out form so a user arriving
-  // from the sign-in page doesn't retype it.
-  const lockedOutHref = email
-    ? `/support/locked-out?email=${encodeURIComponent(email)}`
-    : '/support/locked-out';
+  // The locked-out form pre-fills itself from sessionStorage
+  // (takeSupportEmail) — it never read `?email=`, and putting a patient
+  // email in the URL would land it in access logs / referrers (1.5, A1/A4).
+  const lockedOutHref = '/support/locked-out';
 
   const resolving = !mounted || isLoading;
   const authed = mounted && !isLoading && isAuthenticated;
@@ -217,8 +216,8 @@ export default function SupportHubPage() {
                 />
               </Section>
 
-              {/* Arriving from the sign-in page's "Need help?" — lead with this
-                  and carry the typed email through so nothing is retyped. */}
+              {/* Arriving from the sign-in page's "Need help?" — lead with this.
+                  The typed email rides along in sessionStorage, not the URL. */}
               <Section title={t('support.hub.cantSignIn')}>
                 <div
                   className={

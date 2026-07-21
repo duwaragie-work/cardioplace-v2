@@ -557,7 +557,7 @@ test.describe('Phase 3 §E — patient-detail Profile + Thresholds (UI)', () => 
     const sbpTarget = 150 + (Date.now() % 20) // 150–169 mmHg
     await editThresholdViaUI(page, aisha.id, { sbpUpperTarget: sbpTarget })
 
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
     await expect(
       page.locator(byTestId(T.admin.thresholdSbpUpper)),
@@ -573,7 +573,7 @@ test.describe('Phase 3 §E — patient-detail Profile + Thresholds (UI)', () => 
     const james = await tc.findUser(PATIENTS.james.email) // baseline-assigned to primaryProvider
 
     await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${james.id}`)
+    await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${james.id}`)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
 
     await expect(page.locator(byTestId(T.admin.thresholdSbpUpper))).toBeVisible({ timeout: 20_000 })

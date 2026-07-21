@@ -59,7 +59,7 @@ function isPublicPath(pathname: string): boolean {
   return (
     pathname.startsWith('/sign-in') ||
     pathname.startsWith('/auth/') ||
-    pathname.startsWith('/activate/')
+    pathname.startsWith('/activate')
   );
 }
 

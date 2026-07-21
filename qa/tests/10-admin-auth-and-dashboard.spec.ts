@@ -213,7 +213,9 @@ test.describe('Phase 3 §C — admin dashboard triage', () => {
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
     await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
     await page.locator(byTestId(T.admin.dashboardAlertOpen(alertId))).click()
-    await expect(page).toHaveURL(new RegExp(`/patients/${aisha.id}`), { timeout: 20_000 })
+    // F1 — in-app click lands on the BARE /patients/detail route (the id is
+    // handed off via sessionStorage, so it never appears in the URL / CDN log).
+    await expect(page).toHaveURL(/\/patients\/detail$/, { timeout: 20_000 })
   })
 
   test('30a.4 — tier filter + search narrow the queue', async ({ page }) => {

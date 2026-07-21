@@ -26,6 +26,7 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { CheckCircle2, Zap, Clock } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { stashNavId } from '@/lib/nav-handoff';
 import type { TranslationKey } from '@/i18n';
 import { getAlertPresentation } from './alert-presentation';
 
@@ -318,7 +319,12 @@ export default function PatientAlertCard({
             )}
             <Link
               data-testid={`${testIdPrefix}-detail-${alert.id}`}
-              href={`/alerts/${alert.id}`}
+              // F1 — bare href + stash the id (keeps the ULID out of the RSC
+              // .txt request / CDN log). prefetch={false} so hover doesn't fetch
+              // the bare payload before the stash is set.
+              href="/alerts"
+              prefetch={false}
+              onClick={() => stashNavId('alertDetail', { id: alert.id })}
               aria-label={t('notifications.viewDetailsAria')}
               className="flex-1 h-10 rounded-xl text-[0.8125rem] font-bold flex items-center justify-center gap-2 transition cursor-pointer"
               style={{

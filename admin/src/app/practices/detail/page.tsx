@@ -4,8 +4,8 @@
 // timezone + after-hours protocol, plus the practice's deduplicated staff
 // list (sourced from existing PatientProviderAssignment rows).
 
-import { use, useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Building2,
   ChevronLeft,
@@ -35,6 +35,7 @@ import {
 } from '@/lib/services/practice.service';
 import { useAuth } from '@/lib/auth-context';
 import { canEditThisPractice } from '@/lib/roleGates';
+import { readNavId } from '@/lib/nav-handoff';
 
 interface FormState {
   name: string;
@@ -54,9 +55,18 @@ function toForm(p: Practice): FormState {
   };
 }
 
-export default function PracticeDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+// B3/F1 (static export) — static /practices/detail shell. Id from the URL
+// (`?id=` deep-link) or sessionStorage (in-app click → bare route, id off the
+// CDN log). URL wins so a fresh deep-link isn't shadowed by a stale stash;
+// neither present → back to the list.
+function PracticeDetailContent() {
   const router = useRouter();
+  const id = useSearchParams().get('id') ?? readNavId('practiceDetail')?.id ?? '';
+
+  useEffect(() => {
+    if (!id) router.replace('/practices');
+  }, [id, router]);
+
   const { user, isLoading: authLoading } = useAuth();
 
   const [practice, setPractice] = useState<Practice | null>(null);
@@ -636,5 +646,13 @@ function ReadonlyRow({
         {value && value.length > 0 ? value : '—'}
       </p>
     </div>
+  );
+}
+
+export default function PracticeDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <PracticeDetailContent />
+    </Suspense>
   );
 }

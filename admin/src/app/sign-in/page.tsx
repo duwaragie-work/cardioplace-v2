@@ -6,6 +6,7 @@ import { useAuth, type AdminAuthResponse } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { hasAdminRole } from "@/lib/roleGates";
 import { getOrCreateDeviceId } from "@/lib/device";
+import { takeSignInEmail } from "@/lib/signin-prefill";
 import { MFA_CHALLENGE_STORAGE_KEY } from "@/lib/services/mfa.service";
 
 // Where a rehydrated NON-admin user (the shared API refresh-token cookie can
@@ -78,15 +79,15 @@ export default function RegisterPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
 
-  // Read the post-activation handoff params (?activated=1&email=…) from the
-  // URL on mount. Done via window.location to avoid a useSearchParams Suspense
-  // boundary; client-only so it never runs during SSR.
+  // Read the post-activation handoff on mount. 1.6 — the benign `activated=1`
+  // flag stays in the URL, but the email prefill now comes from sessionStorage
+  // (one-shot) so the invitee's email (PII) never lands in the URL / access log.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('activated') !== '1') return;
-    const email = params.get('email');
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setJustActivated(true);
+    const email = takeSignInEmail();
     if (email) setEmail(email);
   }, []);
 

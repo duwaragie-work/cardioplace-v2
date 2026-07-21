@@ -39,6 +39,7 @@ import {
   type AlertTier,
 } from '@/lib/services/provider.service';
 import type { PatientAlert } from '@/lib/services/patient-detail.service';
+import { stashNavId } from '@/lib/nav-handoff';
 import AlertCard from './AlertCard';
 import AlertResolutionModal, { type ResolvableAlert } from './AlertResolutionModal';
 
@@ -539,7 +540,8 @@ export default function NotificationsScreen() {
                         // something.
                         onRowClick={() => {
                           if (a.patient?.id) {
-                            router.push(`/patients/${a.patient.id}?alert=${a.id}`);
+                            // Addendum — alert id only; patient resolved server-side.
+                            router.push(`/patients/detail?alert=${a.id}`);
                           } else {
                             setExpandedId(expanded ? null : a.id);
                           }
@@ -640,13 +642,14 @@ export default function NotificationsScreen() {
                         // target alert auto-expands. Falls back to the
                         // local Alerts tab when patientUserId is missing.
                         if (n.alertId && n.patientUserId) {
-                          router.push(
-                            `/patients/${n.patientUserId}?alert=${n.alertId}`,
-                          );
+                          // Addendum — alert id only; patient resolved server-side.
+                          router.push(`/patients/detail?alert=${n.alertId}`);
                         } else if (n.patientUserId) {
                           // Non-alert care-team notice (enrollment paused /
-                          // condition review) → straight to the patient detail.
-                          router.push(`/patients/${n.patientUserId}`);
+                          // condition review) → no alert to resolve from, so
+                          // hand the patient id off via sessionStorage (not URL).
+                          stashNavId('patientDetail', { id: n.patientUserId });
+                          router.push('/patients/detail');
                         } else if (n.alertId) {
                           setTopTab('alerts');
                         }

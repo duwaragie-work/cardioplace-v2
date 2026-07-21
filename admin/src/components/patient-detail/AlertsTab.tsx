@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import AlertResolutionModal, { type ResolvableAlert } from '@/components/AlertResolutionModal';
 import AlertCard from '@/components/AlertCard';
+import { readNavId } from '@/lib/nav-handoff';
 import {
   acknowledgeProviderAlert,
   type AlertTier,
@@ -149,8 +150,11 @@ export default function AlertsTab({ alerts, loading, onResolved, heightCm, patie
   // list we auto-expand + scroll to it so the user lands on the row
   // that triggered the bell click. Falls through silently if the id
   // doesn't match (alert already resolved + filtered out, etc.).
+  // F1 — the target alert id arrives via `?alert=` (deep-link) OR the shared
+  // 'patientDetail' sessionStorage hand-off (in-app bell click → bare route).
   const searchParams = useSearchParams();
-  const targetAlertId = searchParams?.get('alert') ?? null;
+  const targetAlertId =
+    searchParams?.get('alert') ?? readNavId('patientDetail')?.alert ?? null;
   useEffect(() => {
     if (!targetAlertId) return;
     if (loading) return;

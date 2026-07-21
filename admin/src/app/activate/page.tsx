@@ -6,10 +6,11 @@
 //
 // The route is public (see proxy.ts) because the invitee has no session yet.
 
-import { use, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, ShieldAlert } from 'lucide-react';
 import { useAuth, type AdminAuthResponse } from '@/lib/auth-context';
+import { stashSignInEmail } from '@/lib/signin-prefill';
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -22,10 +23,6 @@ interface InvitePreview {
   expiresAt: string;
 }
 
-interface PageProps {
-  params: Promise<{ token: string }>;
-}
-
 const ROLE_LABEL: Record<string, string> = {
   PATIENT: 'Patient',
   COORDINATOR: 'Care Coordinator',
@@ -35,8 +32,12 @@ const ROLE_LABEL: Record<string, string> = {
   SUPER_ADMIN: 'Super Admin',
 };
 
-export default function ActivateInvitePage({ params }: PageProps) {
-  const { token } = use(params);
+// B3 (static export) — was /activate/[token]; now a static /activate shell
+// reading the invite token from `?token=`. Email links updated backend-side.
+function ActivateInviteContent() {
+  // F3 — capture the token ONCE (used again on the Activate click, so it must
+  // survive the URL scrub in the effect below).
+  const token = useRef(useSearchParams().get('token') ?? '').current;
   const router = useRouter();
   const { login } = useAuth();
 
@@ -69,6 +70,11 @@ export default function ActivateInvitePage({ params }: PageProps) {
             err instanceof Error ? err.message : 'Could not load invite.',
           );
       });
+    // F3 — token is captured (ref above); scrub it from the address bar +
+    // history so it can't be replayed. Backend enforces single-use + TTL.
+    if (typeof window !== 'undefined' && window.location.search) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
     return () => {
       cancelled = true;
     };
@@ -104,10 +110,10 @@ export default function ActivateInvitePage({ params }: PageProps) {
       // in via OTP (then MFA), so don't persist any session locally. Send
       // them to the sign-in page with their email prefilled.
       if ('status' in data && data.status === 'SIGN_IN_REQUIRED') {
-        const email = preview?.email ?? '';
-        window.location.href = `/sign-in?activated=1${
-          email ? `&email=${encodeURIComponent(email)}` : ''
-        }`;
+        // 1.6 — email prefill via sessionStorage, not the URL. `activated=1`
+        // is a benign non-PII flag and stays in the query string.
+        stashSignInEmail(preview?.email ?? '');
+        window.location.href = '/sign-in?activated=1';
         return;
       }
       login(data as AdminAuthResponse);
@@ -265,5 +271,13 @@ function Row({
         {value}
       </dd>
     </div>
+  );
+}
+
+export default function ActivateInvitePage() {
+  return (
+    <Suspense fallback={null}>
+      <ActivateInviteContent />
+    </Suspense>
   );
 }

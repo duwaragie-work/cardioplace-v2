@@ -25,6 +25,7 @@ import {
   type UpsertPracticePayload,
 } from '@/lib/services/practice.service';
 import { useAuth } from '@/lib/auth-context';
+import { stashNavId } from '@/lib/nav-handoff';
 import { canCreateOrDeletePractices } from '@/lib/roleGates';
 
 export default function PracticesPage() {
@@ -131,7 +132,7 @@ export default function PracticesPage() {
                 >
                   <button
                     type="button"
-                    onClick={() => router.push(`/practices/${p.id}`)}
+                    onClick={() => { stashNavId('practiceDetail', { id: p.id }); router.push('/practices/detail'); }}
                     className="w-full text-left px-5 py-4 flex items-center gap-4 transition-colors hover:bg-[#F8F4FF] cursor-pointer"
                   >
                     <div

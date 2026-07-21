@@ -55,6 +55,7 @@ import {
 } from 'lucide-react';
 
 import { useAuth } from '@/lib/auth-context';
+import { stashNavId } from '@/lib/nav-handoff';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, declineEmergencyConfirmation, getActiveSession, getAwaitingEmergency, getAlerts, type ActiveSessionDto, type AlertTier, type JournalEntryPayload } from '@/lib/services/journal.service';
@@ -2772,7 +2773,8 @@ export default function CheckIn() {
             new Date(a.createdAt).getTime() >= sinceMs - 2000),
       );
       if (emergency) {
-        router.push(`/alerts/${emergency.id}`);
+        stashNavId('alertDetail', { id: emergency.id });
+        router.push('/alerts');
         return true;
       }
       await new Promise((r) => setTimeout(r, 400));

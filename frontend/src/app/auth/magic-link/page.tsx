@@ -1,68 +1,51 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useAuth, type OtpVerifyResponse } from "@/lib/auth-context";
-import { Suspense } from "react";
+import { useAuth } from "@/lib/auth-context";
+import { shouldShowOnboardingForUser } from "@/lib/onboarding";
 
+// PHI audit 1.1 / V-11 — the backend used to hand the session over as
+// `?accessToken=…&refreshToken=…&email=…&name=…` in this URL, which CloudFront/S3
+// would log verbatim. Those params are gone. The backend now sets the session as
+// HttpOnly cookies and redirects here TOKENLESS; the auth-context's mount-time
+// rehydrate (which no longer skips this route, since there is no accessToken
+// param) calls POST /auth/refresh with credentials:'include' to establish the
+// session from those cookies. This page only reads `?error=` and routes once the
+// session resolves — no credential is ever read from, or left in, the URL.
 function MagicLinkHandler() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { login } = useAuth();
+  const { user, isLoading } = useAuth();
   const [error, setError] = useState("");
-  const [processing, setProcessing] = useState(true);
-  const calledRef = useRef(false);
+
+  const errorParam = searchParams.get("error");
 
   useEffect(() => {
-    if (calledRef.current) return;
-    calledRef.current = true;
-
-    // Check for error from backend redirect
-    const errorParam = searchParams.get("error");
     if (errorParam) {
       setError(
         errorParam === "expired"
           ? "This magic link has expired or already been used."
-          : "Something went wrong. Please try again."
+          : "Something went wrong. Please try again.",
       );
-      setProcessing(false);
       return;
     }
-
-    // Read tokens from URL params (set by backend redirect)
-    const accessToken = searchParams.get("accessToken");
-    const refreshToken = searchParams.get("refreshToken");
-    const userId = searchParams.get("userId");
-
-    if (!accessToken || !userId) {
-      setError("Invalid magic link.");
-      setProcessing(false);
+    // Wait for the cookie-based rehydrate to settle before deciding.
+    if (isLoading) return;
+    if (!user) {
+      setError("This magic link is invalid or has expired.");
       return;
     }
+    const needsOnboarding = shouldShowOnboardingForUser({
+      userId: user.id,
+      onboardingStatus: user.onboardingStatus,
+      onboardingRequiredHint: user.onboardingRequired,
+    });
+    // Full navigation so proxy.ts / the destination reads the freshly-set cookie.
+    window.location.href = needsOnboarding ? "/onboarding" : "/dashboard";
+  }, [errorParam, user, isLoading, router]);
 
-    // Build the auth response from URL params
-    const authResponse: OtpVerifyResponse = {
-      accessToken,
-      refreshToken: refreshToken ?? undefined,
-      userId,
-      email: searchParams.get("email") || undefined,
-      name: searchParams.get("name") || undefined,
-      roles: searchParams.get("roles")?.split(",").filter(Boolean) || [],
-      login_method: searchParams.get("login_method") || "magic_link",
-      onboarding_required: searchParams.get("onboarding_required") === "true",
-    };
-
-    login(authResponse);
-
-    // Full page navigation to ensure auth state is read from localStorage
-    const dest = authResponse.onboarding_required
-      ? "/onboarding"
-      : "/dashboard";
-    window.location.href = dest;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  if (processing) {
+  if (!error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="text-center">

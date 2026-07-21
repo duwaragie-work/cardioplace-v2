@@ -69,7 +69,14 @@ const csp = [
 ].join('; ');
 
 const nextConfig: NextConfig = {
-  output: 'standalone',
+  // B1 — build target is env-toggleable, NOT hard-flipped. Default stays
+  // 'standalone' so the current Railway/Vercel deploy (middleware + headers)
+  // keeps working unchanged. Only the AWS static build sets STATIC_EXPORT=1,
+  // which emits a pure static bundle for S3+CloudFront. Same code, two targets.
+  output: process.env.STATIC_EXPORT ? 'export' : 'standalone',
+  // Static export can't run Next's image optimizer (no server), so disable it
+  // ONLY in export mode. Standalone/dev keep optimization unchanged.
+  ...(process.env.STATIC_EXPORT ? { images: { unoptimized: true } } : {}),
   outputFileTracingRoot: monorepoRoot,
   turbopack: {
     root: monorepoRoot,
@@ -88,28 +95,36 @@ const nextConfig: NextConfig = {
   // "activates" once a real HTTPS response carries it. This mirrors the
   // backend's always-on helmet HSTS. No `preload` (irreversible);
   // `includeSubDomains` is safe — every Cardioplace prod subdomain is HTTPS.
-  async headers() {
-    return [
-      {
-        source: '/:path*',
-        headers: [
+  // F2/B4 — the `headers` KEY is omitted entirely under static export
+  // (STATIC_EXPORT=1). Next warns whenever the key is PRESENT with
+  // output:'export' — even when it returns [] — so gating the whole key (not
+  // just the return value) is what actually silences it. Under export these are
+  // supplied by CloudFront instead (see docs/CLOUDFRONT_SECURITY_HEADERS.md); in
+  // standalone / dev the key is present and V-12 applies exactly as before.
+  ...(process.env.STATIC_EXPORT
+    ? {}
+    : {
+        headers: async () => [
           {
-            key: 'Strict-Transport-Security',
-            value: 'max-age=31536000; includeSubDomains',
+            source: '/:path*',
+            headers: [
+              {
+                key: 'Strict-Transport-Security',
+                value: 'max-age=31536000; includeSubDomains',
+              },
+              // V-12 — see the policy note above.
+              { key: 'Content-Security-Policy', value: csp },
+              // Legacy clickjacking header for browsers that predate
+              // frame-ancestors. Nothing embeds the patient app in an iframe.
+              { key: 'X-Frame-Options', value: 'DENY' },
+              { key: 'X-Content-Type-Options', value: 'nosniff' },
+              // Don't leak the full patient-app URL (which can carry ids) to
+              // third parties — e.g. the YouTube embed's referrer.
+              { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+            ],
           },
-          // V-12 — see the policy note above.
-          { key: 'Content-Security-Policy', value: csp },
-          // Legacy clickjacking header for browsers that predate
-          // frame-ancestors. Nothing embeds the patient app in an iframe.
-          { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'X-Content-Type-Options', value: 'nosniff' },
-          // Don't leak the full patient-app URL (which can carry ids) to
-          // third parties — e.g. the YouTube embed's referrer.
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         ],
-      },
-    ];
-  },
+      }),
 };
 
 export default nextConfig;

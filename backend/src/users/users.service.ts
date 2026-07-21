@@ -1479,7 +1479,9 @@ export class UsersService {
           ? 'http://localhost:3000'
           : 'http://localhost:3001',
       )
-      const inviteUrl = `${baseUrl}/activate/${params.rawToken}`
+      // B3 (static export) — /activate is now a static route reading the token
+      // from `?token=` (was the /activate/<token> path segment).
+      const inviteUrl = `${baseUrl}/activate?token=${encodeURIComponent(params.rawToken)}`
 
       const subject = `You've been invited to Cardioplace — activate your account`
       const html = activationEmailHtml({

@@ -65,7 +65,7 @@ test.describe('Threshold-needed: navigation + resolvability + close-off (admin U
 
       // ── Admin opens the patient; banner is present ──
       await signInAdmin(page, ADMINS.support.email, ADMIN_BASE_URL)
-      await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+      await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
       await page.locator(byTestId(T.admin.detailHeader)).waitFor({ state: 'visible', timeout: 30_000 })
       await expect(page.locator(byTestId(T.admin.thresholdNeededBanner))).toBeVisible({ timeout: 20_000 })
 
@@ -91,7 +91,7 @@ test.describe('Threshold-needed: navigation + resolvability + close-off (admin U
       await expect
         .poll(async () => (await tc.findUser(PATIENTS.aisha.email)).enrollmentStatus, { timeout: 20_000 })
         .toBe('ENROLLED')
-      await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+      await page.goto(`${ADMIN_BASE_URL}/patients/detail?id=${aisha.id}`)
       await page.locator(byTestId(T.admin.detailTab('alerts'))).click()
       await expect(page.locator(byTestId(T.admin.thresholdNeededBanner))).toBeHidden({ timeout: 15_000 })
 

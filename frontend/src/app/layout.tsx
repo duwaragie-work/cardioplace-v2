@@ -11,6 +11,7 @@ import PoweredByFooter from "@/components/PoweredByFooter";
 import SkipLink from "@/components/SkipLink";
 import IdleWarningToast from "@/components/auth/IdleWarningToast";
 import PushRegistrar from "@/components/auth/PushRegistrar";
+import RouteGuard from "@/components/auth/RouteGuard";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -61,7 +62,15 @@ export default function RootLayout({
               <HardReloadOnNavigate />
               <IdleWarningToast />
               <PushRegistrar />
-              <NavbarWrapper>{children}</NavbarWrapper>
+              {/* RouteGuard is the client-side auth/onboarding guard that
+                  mirrors proxy.ts for the static export (no server middleware
+                  there). It must stay wrapped around the routed content —
+                  keeping the file without rendering it silently disables the
+                  guard. ToastProvider sits outside it so a redirect can still
+                  surface a toast. */}
+              <RouteGuard>
+                <NavbarWrapper>{children}</NavbarWrapper>
+              </RouteGuard>
               <PoweredByFooter />
             </ToastProvider>
           </LanguageProvider>

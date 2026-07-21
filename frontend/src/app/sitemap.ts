@@ -1,5 +1,10 @@
 import type { MetadataRoute } from 'next'
 
+// B3 (static export) — prerender to a static /sitemap.xml file. Without this,
+// `output: 'export'` errors ("dynamic/revalidate not configured"). It derives
+// only from NEXT_PUBLIC_PATIENT_BASE_URL, so it's safe to fully static.
+export const dynamic = 'force-static'
+
 /**
  * /sitemap.xml — Next 16 file convention. Closes B9 from
  * qa/reports/RESULTS.md (was returning text/html via the catch-all). Lists

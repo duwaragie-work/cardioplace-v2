@@ -56,6 +56,7 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { stashNavId } from '@/lib/nav-handoff';
 import { canCompleteEnrollment, canVerifyProfile, hasAdminRole, isCoordinatorOnly, isProviderOnly } from '@/lib/roleGates';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getPatients, getPatientSummary } from '@/lib/services/provider.service';
@@ -1329,13 +1330,14 @@ export default function PatientsPage() {
                   <div
                     key={p.id}
                     data-testid={`admin-patient-list-row-${p.id}`}
-                    onClick={() => router.push(`/patients/${p.id}`)}
+                    onClick={() => { stashNavId('patientDetail', { id: p.id }); router.push('/patients/detail'); }}
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        router.push(`/patients/${p.id}`);
+                        stashNavId('patientDetail', { id: p.id });
+                        router.push('/patients/detail');
                       }
                     }}
                     title={p.needsThreshold ? 'Threshold needed — set or re-review targets' : undefined}

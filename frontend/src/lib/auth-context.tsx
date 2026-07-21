@@ -134,8 +134,13 @@ const AuthContext = createContext<AuthContextType>({
 // rejects unauthenticated API calls regardless.
 function writeAuthMarkers(roles: string[]) {
   if (typeof document === 'undefined') return;
-  document.cookie = `${AUTH_MARKER_COOKIE}=1; path=/; max-age=2592000; SameSite=Lax`;
-  document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax`;
+  // 3.2 — add `Secure` so these client cookies never travel over plain HTTP,
+  // but ONLY on an HTTPS page: an unconditional `Secure` would be silently
+  // dropped by the browser on http:// (non-localhost) dev/staging, leaving
+  // proxy.ts with no marker → a redirect loop to /sign-in. HTTPS-gated is safe.
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${AUTH_MARKER_COOKIE}=1; path=/; max-age=2592000; SameSite=Lax${secure}`;
+  document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax${secure}`;
 }
 
 // The onboarding gate bit proxy.ts reads. Onboarded means either the server
@@ -230,21 +235,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // happen whether or not this visitor turns out to be signed in.
     sweepStaleClinicalDrafts();
 
-    // Skip rehydrate when we're handling a fresh magic-link sign-in.
-    // MagicLinkHandler is about to call login() with the tokens from the
-    // URL params; running /refresh here would consume the just-issued
-    // refresh token and race with the destination page's own mount-time
-    // rehydrate. Refresh-token rotation is single-use, so whichever fetch
-    // reaches the backend second gets a 401 — and the loser's rehydrate
-    // clears user state, which bounces the destination page to /sign-in.
-    if (
-      typeof window !== 'undefined' &&
-      window.location.pathname === '/auth/magic-link' &&
-      new URLSearchParams(window.location.search).has('accessToken')
-    ) {
-      setIsLoading(false);
-      return;
-    }
+    // F4 — the old "skip rehydrate on /auth/magic-link?accessToken=" guard was
+    // removed: the backend no longer emits tokens in the magic-link redirect
+    // (A1/V-11), so that param never exists. The magic-link page now waits for
+    // this cookie rehydrate instead of racing it, so there's nothing to skip.
 
     let cancelled = false;
     async function rehydrate() {

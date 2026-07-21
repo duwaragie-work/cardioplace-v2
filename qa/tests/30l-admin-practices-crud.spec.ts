@@ -68,7 +68,7 @@ test.describe('Phase 3 §L — practices CRUD', () => {
     await api.dispose()
 
     await signInAdmin(page, ADMINS.support.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/practices/${pid}`)
+    await page.goto(`${ADMIN_BASE_URL}/practices/detail?id=${pid}`)
     const start = page.locator(byTestId(T.admin.practiceHoursStart))
     await expect(start).toBeVisible({ timeout: 25_000 })
     await start.fill('07:00')
@@ -76,7 +76,7 @@ test.describe('Phase 3 §L — practices CRUD', () => {
     await page.locator(byTestId(T.admin.practiceSave)).click()
 
     // Reload proves persistence.
-    await page.goto(`${ADMIN_BASE_URL}/practices/${pid}`)
+    await page.goto(`${ADMIN_BASE_URL}/practices/detail?id=${pid}`)
     await expect(page.locator(byTestId(T.admin.practiceHoursStart))).toHaveValue('07:00', { timeout: 25_000 })
     await expect(page.locator(byTestId(T.admin.practiceHoursEnd))).toHaveValue('19:00')
   })
@@ -97,7 +97,7 @@ test.describe('Phase 3 §L — practices CRUD', () => {
 
     // Detail of their OWN practice is read-only — banner present, no editable
     // inputs / Save.
-    await page.goto(`${ADMIN_BASE_URL}/practices/${pid}`)
+    await page.goto(`${ADMIN_BASE_URL}/practices/detail?id=${pid}`)
     await expect(page.locator(byTestId(T.admin.practiceReadonly))).toBeVisible({ timeout: 25_000 })
     await expect(page.locator(byTestId(T.admin.practiceSave))).toHaveCount(0)
     await expect(page.locator(byTestId(T.admin.practiceNameInput))).toHaveCount(0)

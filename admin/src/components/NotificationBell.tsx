@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bell, Check, CheckCheck, Loader2 } from 'lucide-react';
+import { stashNavId } from '@/lib/nav-handoff';
 import {
   getAdminNotifications,
   markAdminNotificationsReadBulk,
@@ -190,11 +191,16 @@ export default function NotificationBell() {
     // expands + scrolls to that row. Falls back to the notifications page
     // when the alert is orphaned (no patientUserId on the row).
     if (n.alertId && n.patientUserId) {
-      router.push(`/patients/${n.patientUserId}?alert=${n.alertId}`);
+      // Addendum — alert in hand: pass ONLY the alert id (opaque ULID); the
+      // detail page resolves the patient server-side. The patient user id never
+      // touches the URL.
+      router.push(`/patients/detail?alert=${n.alertId}`);
     } else if (n.patientUserId) {
-      // Non-alert care-team notice (enrollment paused / condition review) —
-      // deep-link straight to the patient detail.
-      router.push(`/patients/${n.patientUserId}`);
+      // Non-alert care-team notice (enrollment paused / condition review) — no
+      // alert to resolve from, so hand the patient id off via sessionStorage
+      // (never the URL).
+      stashNavId('patientDetail', { id: n.patientUserId });
+      router.push('/patients/detail');
     } else if (n.alertId) {
       router.push(`/notifications?tab=notifications`);
     }

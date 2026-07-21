@@ -23,7 +23,7 @@ const HIDE_NAV_PATHS = ['/', '/home', '/about', '/contact', '/welcome', '/sign-i
 // confuse them (Dashboard / Check-In tabs that all redirect to /sign-in).
 // `/sign-in/*` sub-steps (e.g. /sign-in/biometric) are pre-auth flows that
 // render their own LandingHeader — the signed-in navbar must not paint there.
-const HIDE_NAV_PREFIXES = ['/activate/', '/sign-in/'];
+const HIDE_NAV_PREFIXES = ['/activate', '/sign-in/'];
 
 export default function NavbarWrapper({ children }: { children: ReactNode }) {
   const pathname = usePathname();

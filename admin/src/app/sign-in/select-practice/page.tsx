@@ -22,6 +22,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { MFA_CHALLENGE_STORAGE_KEY } from '@/lib/services/mfa.service';
 import LandingHeader from '@/components/LandingHeader';
 import LandingFooter from '@/components/LandingFooter';
+import { readChallengeHash } from '@/lib/challenge-hash';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -39,11 +40,12 @@ function readChallenge(): Challenge | null {
   } catch {
     /* sessionStorage unavailable — fall through */
   }
-  // Fallback to URL params (magic-link redirect path).
+  // Magic-link path: token + practices arrive in the URL FRAGMENT (never logged
+  // by the static host), not the query string. See readChallengeHash (1.8).
   try {
-    const params = new URLSearchParams(window.location.search);
-    const challengeToken = params.get('challengeToken');
-    const practicesRaw = params.get('practices');
+    const params = readChallengeHash();
+    const challengeToken = params?.get('challengeToken');
+    const practicesRaw = params?.get('practices');
     if (challengeToken && practicesRaw) {
       return {
         challengeToken,

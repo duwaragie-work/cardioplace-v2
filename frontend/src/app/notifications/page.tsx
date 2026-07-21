@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { stashNavId } from '@/lib/nav-handoff';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
@@ -334,10 +335,15 @@ function NotifCard({
         // deep-link to the alert detail so the patient lands on context.
         // Generic notifications (gap reminders etc.) just mark-as-read.
         if (notif.alertId) {
-          router.push(`/alerts/${notif.alertId}`);
+          // #151 (F1): the alert id travels via sessionStorage, never in the
+          // URL — spec 75-nav-ids-off-the-wire asserts no ULID on the wire.
+          stashNavId('alertDetail', { id: notif.alertId });
+          router.push('/alerts');
         } else if (notif.supportTicketId) {
           // Support notifications open the actual thread (my-tickets reads
           // ?ticket= and expands it) rather than dead-ending on the feed.
+          // An opaque ticket ULID resolved through an authz-scoped API is
+          // fine here — the no-PII-in-URL rule covers email / name / user id.
           router.push(`/support/my-tickets?ticket=${notif.supportTicketId}`);
         }
       }}

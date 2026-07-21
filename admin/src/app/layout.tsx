@@ -6,6 +6,7 @@ import { LanguageProvider } from "@/contexts/LanguageContext";
 import AdminShell from "@/components/AdminShell";
 import SkipLink from "@/components/SkipLink";
 import IdleWarningToast from "@/components/auth/IdleWarningToast";
+import RouteGuard from "@/components/auth/RouteGuard";
 
 export const metadata: Metadata = {
   title: "Cardioplace Admin",
@@ -30,7 +31,9 @@ export default function RootLayout({
             {/* AdminShell wraps authed pages with sidebar + top bar; landing
                 / auth routes pass through unchanged so they keep their own
                 marketing chrome. */}
-            <AdminShell>{children}</AdminShell>
+            <RouteGuard>
+              <AdminShell>{children}</AdminShell>
+            </RouteGuard>
             <Toaster
               position="top-right"
               richColors

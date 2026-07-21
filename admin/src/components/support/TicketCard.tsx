@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { AlertCircle } from 'lucide-react';
 import type { SupportTicketRow } from '@/lib/services/support.service';
+import { stashNavId } from '@/lib/nav-handoff';
 
 const STATUS_STYLE: Record<string, string> = {
   OPEN: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -25,7 +26,12 @@ function formatDisplayId(value: string): string {
 export default function TicketCard({ ticket }: { ticket: SupportTicketRow }) {
   return (
     <Link
-      href={`/support/${ticket.id}`}
+      // F1 — bare href + stash the id (keeps the ULID out of the RSC .txt
+      // request / CDN log). prefetch={false} so hovering doesn't fetch the
+      // bare-route payload before the stash is set.
+      href="/support/detail"
+      prefetch={false}
+      onClick={() => stashNavId('supportDetail', { id: ticket.id })}
       data-testid={`support-row-${ticket.ticketNumber}`}
       className="flex items-start gap-3 px-4 py-3 border-t first:border-t-0 border-slate-100 hover:bg-slate-50 transition"
     >
