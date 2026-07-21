@@ -44,10 +44,25 @@ const deleteReading = providerService.deleteReading as jest.MockedFunction<
   typeof providerService.deleteReading
 >
 
+/**
+ * Fixture timestamps, anchored to "3 days ago" and expressed as minute offsets.
+ *
+ * These were previously hardcoded to 2026-05-2x. ReadingsTab defaults its date
+ * filter to '30D' (see the `useState<DateFilter>('30D')` in the component), so
+ * once wall-clock time drifted more than 30 days past those literals every
+ * fixture row was filtered out, no `data-testid` rendered, and 9 tests went red
+ * without a single line of source changing. Anchoring to `Date.now()` keeps the
+ * relative gaps the session-grouping assertions rely on while making the suite
+ * immune to that rot.
+ */
+const ANCHOR_MS = Date.now() - 3 * 24 * 60 * 60 * 1000
+const mins = (offset: number): string =>
+  new Date(ANCHOR_MS + offset * 60_000).toISOString()
+
 function entry(over: Partial<PatientJournalEntry> = {}): PatientJournalEntry {
   return {
     id: 'je-x',
-    measuredAt: '2026-05-22T03:00:00Z',
+    measuredAt: mins(0),
     sessionId: null,
     systolicBP: 130,
     diastolicBP: 80,
@@ -95,9 +110,9 @@ describe('groupReadingsBySession (F25)', () => {
 
   it('Bug 5 — groups consecutive NULL-session readings within the 5-min window (legacy / chat rows)', () => {
     const groups = groupReadingsBySession([
-      entry({ id: 'a', sessionId: null, measuredAt: '2026-05-22T03:00:00Z' }),
-      entry({ id: 'b', sessionId: null, measuredAt: '2026-05-22T03:02:00Z' }),
-      entry({ id: 'c', sessionId: null, measuredAt: '2026-05-22T03:04:00Z' }),
+      entry({ id: 'a', sessionId: null, measuredAt: mins(0) }),
+      entry({ id: 'b', sessionId: null, measuredAt: mins(2) }),
+      entry({ id: 'c', sessionId: null, measuredAt: mins(4) }),
     ])
     expect(groups).toHaveLength(1)
     const session = groups[0] as Extract<ReadingGroup, { kind: 'session' }>
@@ -107,8 +122,8 @@ describe('groupReadingsBySession (F25)', () => {
 
   it('Bug 5 — does NOT group NULL-session readings more than 5 min apart', () => {
     const groups = groupReadingsBySession([
-      entry({ id: 'a', sessionId: null, measuredAt: '2026-05-22T03:00:00Z' }),
-      entry({ id: 'b', sessionId: null, measuredAt: '2026-05-22T03:08:00Z' }),
+      entry({ id: 'a', sessionId: null, measuredAt: mins(0) }),
+      entry({ id: 'b', sessionId: null, measuredAt: mins(8) }),
     ])
     expect(groups).toHaveLength(2)
     expect(groups.every((g) => g.kind === 'single')).toBe(true)
@@ -116,9 +131,9 @@ describe('groupReadingsBySession (F25)', () => {
 
   it('Bug 5 — a NULL-session reading never merges into an adjacent sessioned group', () => {
     const groups = groupReadingsBySession([
-      entry({ id: 'a', sessionId: 's1', measuredAt: '2026-05-22T03:00:00Z' }),
-      entry({ id: 'b', sessionId: 's1', measuredAt: '2026-05-22T03:01:00Z' }),
-      entry({ id: 'c', sessionId: null, measuredAt: '2026-05-22T03:02:00Z' }),
+      entry({ id: 'a', sessionId: 's1', measuredAt: mins(0) }),
+      entry({ id: 'b', sessionId: 's1', measuredAt: mins(1) }),
+      entry({ id: 'c', sessionId: null, measuredAt: mins(2) }),
     ])
     expect(groups).toHaveLength(2)
     expect((groups[0] as Extract<ReadingGroup, { kind: 'session' }>).entries).toHaveLength(2)
@@ -162,10 +177,10 @@ describe('ReadingsTab — session grouping render (F25)', () => {
 
   it('renders a session card around 3 same-session readings + a standalone row', async () => {
     getEntries.mockResolvedValue([
-      entry({ id: 'a', sessionId: 's1', measuredAt: '2026-05-22T03:03:00Z' }),
-      entry({ id: 'b', sessionId: 's1', measuredAt: '2026-05-22T03:01:00Z' }),
-      entry({ id: 'c', sessionId: 's1', measuredAt: '2026-05-22T02:59:00Z' }),
-      entry({ id: 'd', sessionId: null, measuredAt: '2026-05-21T09:00:00Z' }),
+      entry({ id: 'a', sessionId: 's1', measuredAt: mins(3) }),
+      entry({ id: 'b', sessionId: 's1', measuredAt: mins(1) }),
+      entry({ id: 'c', sessionId: 's1', measuredAt: mins(-1) }),
+      entry({ id: 'd', sessionId: null, measuredAt: mins(-18 * 60) }),
     ])
     render(<ReadingsTab patientId="p1" />)
 

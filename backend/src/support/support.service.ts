@@ -10,12 +10,14 @@ import { ConfigService } from '@nestjs/config'
 import { ClsService } from 'nestjs-cls'
 import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import type { Prisma } from '../generated/prisma/client.js'
+import { SUPPORT_SLA_MINUTES } from '@cardioplace/shared'
 import {
   NotificationChannel,
   SupportActionType,
   SupportCategory,
   SupportContactPref,
   UserRole,
+  type SupportPriority,
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { EmailService } from '../email/email.service.js'
@@ -84,6 +86,57 @@ export function deriveAwaitingParty(
   if (lastReplyAuthorType === 'OPS') return 'PATIENT'
   if (lastReplyAuthorType === 'USER') return 'OPS'
   return null
+}
+
+/** First-response SLA state for a ticket. Derived, never stored. */
+export interface SupportSla {
+  /** Minutes from createdAt to the first OPS reply; null if none yet. */
+  firstResponseMinutes: number | null
+  /** The per-priority target this ticket is measured against. */
+  targetMinutes: number
+  /** True if the first reply came late, or none has come and the target has already passed. */
+  breached: boolean
+}
+
+/**
+ * First-response SLA, derived from the reply history rather than stored.
+ *
+ * Same reasoning as `deriveAwaitingParty`: a stored `slaDueAt`/`firstResponseAt`
+ * pair is a cache of something the thread already knows, and caches drift. The
+ * inputs here are `createdAt`, the ticket's priority, and the earliest OPS
+ * reply — all of which we already have.
+ *
+ * Two distinct breach cases, and missing the second is the classic bug:
+ *   • answered late  — the first OPS reply took longer than the target;
+ *   • not answered at all — no OPS reply yet AND the target has already elapsed.
+ * Only checking the first would let a completely ignored ticket look compliant
+ * forever, which is exactly the ticket you most want surfaced.
+ */
+export function deriveSupportSla(params: {
+  createdAt: Date
+  priority: SupportPriority
+  firstOpsReplyAt: Date | null
+  now?: Date
+}): SupportSla {
+  const { createdAt, priority, firstOpsReplyAt } = params
+  const now = params.now ?? new Date()
+  const targetMinutes = SUPPORT_SLA_MINUTES[priority]
+  const toMinutes = (from: Date, to: Date) =>
+    Math.max(0, Math.round((to.getTime() - from.getTime()) / 60_000))
+
+  if (firstOpsReplyAt) {
+    const firstResponseMinutes = toMinutes(createdAt, firstOpsReplyAt)
+    return {
+      firstResponseMinutes,
+      targetMinutes,
+      breached: firstResponseMinutes > targetMinutes,
+    }
+  }
+  return {
+    firstResponseMinutes: null,
+    targetMinutes,
+    breached: toMinutes(createdAt, now) > targetMinutes,
+  }
 }
 const LOCKED_OUT_WINDOW_MS = 60 * 60 * 1000 // 1 hour
 const LOCKED_OUT_MAX = 5 // per IP per hour
@@ -408,27 +461,104 @@ export class SupportService {
           updatedAt: true,
           resolvedAt: true,
           user: { select: { name: true, displayId: true } },
-          // Just the last reply's author — enough to derive whose turn it is
-          // without pulling whole threads into the queue list.
+          // Two derived signals need the reply history: `awaitingParty` (the
+          // LAST author) and the SLA first-response (the EARLIEST ops author).
+          // Prisma can't select the same relation twice with different args, so
+          // take the whole thread ascending — but only two scalar columns, which
+          // on realistically-short support threads is cheaper than a second
+          // round-trip per row.
           replies: {
-            take: 1,
-            orderBy: { sentAt: 'desc' },
-            select: { authorType: true },
+            orderBy: { sentAt: 'asc' },
+            select: { authorType: true, sentAt: true },
           },
         },
       }),
       this.prisma.supportTicket.count({ where }),
     ])
-    // Swap the one-row `replies` probe for the derived hint so the ops queue can
-    // show "needs an agent" vs "waiting on patient" without a stored state.
+    // Swap the raw reply history for the two derived hints, so the ops queue can
+    // show "needs an agent" vs "waiting on patient" and flag an overdue
+    // first response — none of it stored, none of it able to drift.
+    const now = new Date()
     const data = rows.map(({ replies, ...t }) => ({
       ...t,
       awaitingParty:
         t.status === 'OPEN' || t.status === 'IN_PROGRESS'
-          ? deriveAwaitingParty(replies[0]?.authorType)
+          ? deriveAwaitingParty(replies.at(-1)?.authorType)
           : null,
+      sla: deriveSupportSla({
+        createdAt: t.createdAt,
+        priority: t.priority,
+        firstOpsReplyAt:
+          replies.find((r) => r.authorType === 'OPS')?.sentAt ?? null,
+        now,
+      }),
     }))
     return { data, total, page, limit }
+  }
+
+  /**
+   * First-response SLA attainment for the ops queue, grouped by priority.
+   *
+   * Mirrors the shape `reports/sla.service.ts` produces for clinical alerts —
+   * per-bucket total / met / breached / attainment % — so the two scorecards
+   * read the same way. Computed from reply history at call time; nothing about
+   * SLA is persisted.
+   */
+  async getSlaReport(now: Date = new Date()) {
+    const tickets = await this.prisma.supportTicket.findMany({
+      select: {
+        priority: true,
+        createdAt: true,
+        replies: {
+          where: { authorType: 'OPS' },
+          orderBy: { sentAt: 'asc' },
+          take: 1,
+          select: { sentAt: true },
+        },
+      },
+    })
+
+    const buckets = new Map<
+      SupportPriority,
+      { total: number; met: number; breached: number; targetMinutes: number }
+    >()
+    for (const t of tickets) {
+      const sla = deriveSupportSla({
+        createdAt: t.createdAt,
+        priority: t.priority,
+        firstOpsReplyAt: t.replies[0]?.sentAt ?? null,
+        now,
+      })
+      const b = buckets.get(t.priority) ?? {
+        total: 0,
+        met: 0,
+        breached: 0,
+        targetMinutes: sla.targetMinutes,
+      }
+      b.total += 1
+      if (sla.breached) b.breached += 1
+      else b.met += 1
+      buckets.set(t.priority, b)
+    }
+
+    const byPriority = [...buckets.entries()].map(([priority, b]) => ({
+      priority,
+      ...b,
+      // Null rather than 0 for an empty bucket — "no tickets" is not "0% met",
+      // and charting them the same way would libel a queue nobody used.
+      attainmentPct: b.total > 0 ? Math.round((b.met / b.total) * 100) : null,
+    }))
+    const total = byPriority.reduce((s, b) => s + b.total, 0)
+    const met = byPriority.reduce((s, b) => s + b.met, 0)
+    return {
+      byPriority,
+      overall: {
+        total,
+        met,
+        breached: total - met,
+        attainmentPct: total > 0 ? Math.round((met / total) * 100) : null,
+      },
+    }
   }
 
   async getTicket(id: string) {

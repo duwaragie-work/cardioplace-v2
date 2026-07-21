@@ -34,6 +34,31 @@ export const TIER_SLA_MINUTES: Record<AlertTierValue, number> = {
 };
 
 /**
+ * Support System — per-priority "first response within" target, in minutes
+ * from `SupportTicket.createdAt`. PARALLEL to TIER_SLA_MINUTES but a different
+ * axis entirely: that one is clinical alert acknowledgement, this is the
+ * administrative support queue, keyed on `SupportPriority` not alert tier.
+ *
+ * "First response" = the earliest OPS reply on the thread. Deliberately NOT
+ * stored on the ticket — it is derived from the reply history at read time, the
+ * same call made for `awaitingParty`, so a cached copy can never drift from the
+ * thread it claims to describe.
+ *
+ * These are OPERATIONAL targets, not clinical ones — a support agent is not on
+ * a clinical clock — so unlike TIER_SLA_MINUTES they do not need Dr. Singal's
+ * sign-off. They are still provisional and should be revisited once the pilot
+ * has real queue volume to measure against.
+ */
+export const SUPPORT_SLA_MINUTES = {
+  /** Locked-out / can't-sign-in lands HIGH — the patient is blocked out of the app. */
+  HIGH: 4 * 60,
+  NORMAL: 24 * 60,
+  LOW: 3 * 24 * 60,
+} as const;
+
+export type SupportPriorityValue = keyof typeof SUPPORT_SLA_MINUTES;
+
+/**
  * Task 3 — per-tier "resolve within" target (minutes from
  * `DeviationAlert.createdAt`). PARALLEL to TIER_SLA_MINUTES, which is an
  * *acknowledge*-within target — resolution is a separate, later milestone, so

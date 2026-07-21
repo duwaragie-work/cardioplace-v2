@@ -9,6 +9,16 @@ export type SupportStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED'
 /** Whose turn it is — derived server-side from the last reply's author, never
  *  stored. Null when the ticket is new, resolved, or closed. */
 export type AwaitingParty = 'PATIENT' | 'OPS' | null
+
+/** First-response SLA, derived server-side from the reply history. Never stored,
+ *  so it cannot drift from the thread it describes. */
+export interface SupportSla {
+  /** Minutes from createdAt to the first OPS reply; null if still unanswered. */
+  firstResponseMinutes: number | null
+  targetMinutes: number
+  /** Answered late, OR unanswered with the target already elapsed. */
+  breached: boolean
+}
 export type SupportPriority = 'LOW' | 'NORMAL' | 'HIGH'
 export type SupportCategory = 'ACCOUNT' | 'MFA' | 'CLINICAL' | 'BUG' | 'OTHER'
 export type SupportAction = 'mfa-reset' | 'recovery-codes-regen' | 'webauthn-reset'
@@ -27,6 +37,7 @@ export interface SupportTicketRow {
   updatedAt: string
   resolvedAt: string | null
   awaitingParty: AwaitingParty
+  sla: SupportSla
   user: { name: string | null; displayId: string | null } | null
 }
 

@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 import { Bell, Menu, X, Globe, User as UserIcon, Settings, LifeBuoy, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { getAlerts, getNotifications } from '@/lib/services/journal.service';
+import { countInAppNotifications } from '@/lib/notification-badge';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { ALL_LOCALES, isLocaleSupported } from '@/i18n';
 
@@ -51,29 +52,10 @@ export default function Navbar() {
       const consolidatedAlertCount = byEntry.size;
 
       // Count exactly what /notifications renders in its in-app inbox, so the
-      // badge and the page can never disagree.
-      //
-      // This used to be PUSH-only, which silently dropped every DASHBOARD-channel
-      // row — including the whole SUPPORT_* family (SUPPORT_REPLY, SUPPORT_RESOLVE,
-      // …). The effect was that support could reply to a patient and the bell
-      // would never light up, so the reply was only discoverable by opening
-      // /notifications on spec. Mirrors notifications/page.tsx: drop EMAIL
-      // (tracking-only), and drop a PUSH row that merely duplicates a DASHBOARD
-      // row with the same content so a dual-dispatch isn't counted twice.
-      const contentKey = (n: { title?: string; body?: string }) =>
-        `${n.title} ${n.body}`;
-      const dashboardKeys = new Set(
-        notifs
-          .filter((n: { channel?: string }) => n.channel === 'DASHBOARD')
-          .map(contentKey),
-      );
-      const inAppNotifCount = notifs.filter(
-        (n: { channel?: string; title?: string; body?: string }) => {
-          if (n.channel === 'EMAIL') return false;
-          if (n.channel === 'PUSH' && dashboardKeys.has(contentKey(n))) return false;
-          return true;
-        },
-      ).length;
+      // badge and the page can never disagree. Extracted to lib/notification-badge
+      // so the rule is unit-testable — see its docstring for the DASHBOARD /
+      // SUPPORT_* regression this guards against.
+      const inAppNotifCount = countInAppNotifications(notifs);
 
       setAlertCount((prev) => {
         const next = consolidatedAlertCount + inAppNotifCount;

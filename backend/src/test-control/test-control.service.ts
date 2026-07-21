@@ -664,7 +664,18 @@ export class TestControlService {
               this.prisma.deviationAlert.deleteMany({ where: { userId } }),
               this.prisma.journalEntry.deleteMany({ where: { userId } }),
             ],
-            { isolationLevel: 'Serializable' },
+            {
+              isolationLevel: 'Serializable',
+              // Prisma's default interactive-transaction timeout is 5s. Four
+              // serialized deleteManys across a patient's whole alert/journal
+              // history routinely exceed that on the shared managed Postgres
+              // once test data has accumulated, and the resulting P2028 is NOT
+              // a deadlock — so the retry predicate below rethrew it and the
+              // endpoint 500'd, silently leaving every spec's patient state
+              // un-reset. Same fix as the V-06 backfill needed.
+              timeout: 30_000,
+              maxWait: 10_000,
+            },
           )
         return {
           rowsDeleted:
@@ -686,9 +697,14 @@ export class TestControlService {
           // Prisma Cloud dev DB during Cluster 7 verification; the underlying
           // 40P01 doesn't surface to the typed code field through the adapter.
           (typeof e?.message === 'string' && e.message.includes('TransactionWriteConflict'))
-        if (!isDeadlock || attempt === MAX_ATTEMPTS) throw err
+        // P2028 = transaction timed out. Distinct from a deadlock but equally
+        // transient here: the delete volume varies with how much test data has
+        // piled up, so a retry (now with the 30s budget above) genuinely helps.
+        // Previously this fell straight through and 500'd the whole reset.
+        const isTxTimeout = e?.code === 'P2028'
+        if ((!isDeadlock && !isTxTimeout) || attempt === MAX_ATTEMPTS) throw err
         this.logger.warn(
-          `resetUser deadlock (attempt ${attempt}/${MAX_ATTEMPTS}) for ${userId} — retrying in 100ms`,
+          `resetUser ${isTxTimeout ? 'tx timeout' : 'deadlock'} (attempt ${attempt}/${MAX_ATTEMPTS}) for ${userId} — retrying in 100ms`,
         )
         await new Promise((r) => setTimeout(r, 100))
       }

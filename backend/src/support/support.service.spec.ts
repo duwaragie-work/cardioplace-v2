@@ -3,6 +3,7 @@ import { BadRequestException, ForbiddenException, HttpException } from '@nestjs/
 import {
   SupportService,
   deriveAwaitingParty,
+  deriveSupportSla,
   type SupportActor,
 } from './support.service.js'
 
@@ -633,6 +634,64 @@ describe('SupportService', () => {
     })
   })
 
+  // ── First-response SLA — derived from reply history, never stored ────────
+  describe('deriveSupportSla', () => {
+    const createdAt = new Date('2026-07-01T00:00:00Z')
+    const after = (mins: number) => new Date(createdAt.getTime() + mins * 60_000)
+
+    it('measures first response from createdAt to the first OPS reply', () => {
+      const sla = deriveSupportSla({
+        createdAt,
+        priority: 'NORMAL' as any,
+        firstOpsReplyAt: after(90),
+      })
+      expect(sla.firstResponseMinutes).toBe(90)
+      expect(sla.targetMinutes).toBe(24 * 60)
+      expect(sla.breached).toBe(false)
+    })
+
+    it('flags a first response that came in later than the target', () => {
+      // HIGH = 4h target; answered at 5h.
+      const sla = deriveSupportSla({
+        createdAt,
+        priority: 'HIGH' as any,
+        firstOpsReplyAt: after(5 * 60),
+      })
+      expect(sla.breached).toBe(true)
+      expect(sla.firstResponseMinutes).toBe(5 * 60)
+    })
+
+    it('flags an UNANSWERED ticket once its target has elapsed', () => {
+      // The case that is easy to miss: checking only "was the reply late" lets a
+      // completely ignored ticket look compliant forever — and that is exactly
+      // the ticket most worth surfacing.
+      const sla = deriveSupportSla({
+        createdAt,
+        priority: 'HIGH' as any,
+        firstOpsReplyAt: null,
+        now: after(5 * 60),
+      })
+      expect(sla.firstResponseMinutes).toBeNull()
+      expect(sla.breached).toBe(true)
+    })
+
+    it('does not flag an unanswered ticket that is still inside its window', () => {
+      const sla = deriveSupportSla({
+        createdAt,
+        priority: 'HIGH' as any,
+        firstOpsReplyAt: null,
+        now: after(60),
+      })
+      expect(sla.breached).toBe(false)
+    })
+
+    it('uses a longer target for LOW than for HIGH', () => {
+      const high = deriveSupportSla({ createdAt, priority: 'HIGH' as any, firstOpsReplyAt: null, now: createdAt })
+      const low = deriveSupportSla({ createdAt, priority: 'LOW' as any, firstOpsReplyAt: null, now: createdAt })
+      expect(low.targetMinutes).toBeGreaterThan(high.targetMinutes)
+    })
+  })
+
   // ── Derived "whose turn is it" — the replacement for a stored AWAITING_REPLY ──
   describe('deriveAwaitingParty', () => {
     it('maps the last reply author to who is being waited on', () => {
@@ -677,20 +736,35 @@ describe('SupportService', () => {
       expect(data[1].awaitingParty).toBeNull()
     })
 
-    it('listTickets swaps the one-row replies probe for the derived hint', async () => {
+    it('listTickets derives BOTH awaitingParty and SLA from one reply fetch', async () => {
       const { svc, prisma } = make()
+      const createdAt = new Date('2026-07-01T00:00:00Z')
       prisma.supportTicket.findMany.mockResolvedValue([
-        { id: 't1', status: 'IN_PROGRESS', replies: [{ authorType: 'USER' }] },
+        {
+          id: 't1',
+          status: 'IN_PROGRESS',
+          priority: 'NORMAL',
+          createdAt,
+          replies: [
+            // Earliest OPS reply drives the SLA...
+            { authorType: 'OPS', sentAt: new Date(createdAt.getTime() + 30 * 60_000) },
+            // ...while the LAST reply drives awaitingParty.
+            { authorType: 'USER', sentAt: new Date(createdAt.getTime() + 60 * 60_000) },
+          ],
+        },
       ])
       prisma.supportTicket.count.mockResolvedValue(1)
       const { data } = await svc.listTickets({})
-      // Patient replied last → ops owes a response.
       expect(data[0].awaitingParty).toBe('OPS')
-      // The probe itself must not leak into the queue payload.
+      expect(data[0].sla.firstResponseMinutes).toBe(30)
+      expect(data[0].sla.breached).toBe(false)
+      // The raw thread must not leak into the queue payload.
       expect('replies' in data[0]).toBe(false)
-      // ...and it only ever fetches the single most recent reply.
+      // Prisma can't select one relation twice with different args, so this is
+      // deliberately the whole thread ascending — but only two scalar columns.
       const sel = prisma.supportTicket.findMany.mock.calls[0][0].select
-      expect(sel.replies).toMatchObject({ take: 1, orderBy: { sentAt: 'desc' } })
+      expect(sel.replies).toMatchObject({ orderBy: { sentAt: 'asc' } })
+      expect(Object.keys(sel.replies.select).sort()).toEqual(['authorType', 'sentAt'])
     })
   })
 

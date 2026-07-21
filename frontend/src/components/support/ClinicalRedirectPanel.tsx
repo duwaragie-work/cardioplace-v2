@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { HeartPulse, PhoneCall } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import AudioButton from '@/components/intake/AudioButton';
 
 /**
  * The clinical-vs-operational split, rendered.
@@ -37,9 +38,18 @@ export default function ClinicalRedirectPanel({
       <div className="flex items-start gap-3">
         <HeartPulse className="w-5 h-5 mt-0.5 shrink-0 text-[#7B00E0]" />
         <div className="min-w-0">
-          <h3 className="text-[15px] font-semibold text-slate-800">
-            {t('support.clinical.title')}
-          </h3>
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-[15px] font-semibold text-slate-800">
+              {t('support.clinical.title')}
+            </h3>
+            {/* This is the highest-stakes copy on the support surface — it tells
+                someone with a medical question where to go, and carries the 911
+                carve-out. It must not be reading-dependent. */}
+            <AudioButton
+              text={`${t('support.clinical.title')}. ${t('support.clinical.body')} ${t('support.clinical.emergency')}`}
+              size="sm"
+            />
+          </div>
           <p className="mt-1 text-[13px] leading-relaxed text-slate-600">
             {t('support.clinical.body')}
           </p>

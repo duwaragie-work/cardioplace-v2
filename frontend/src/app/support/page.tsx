@@ -36,6 +36,7 @@ import Navbar from '@/components/cardio/Navbar';
 import LandingHeader from '@/components/cardio/LandingHeader';
 import LandingFooter from '@/components/cardio/LandingFooter';
 import SupportContactForm from '@/components/SupportContactForm';
+import AudioButton from '@/components/intake/AudioButton';
 import PublicContactForm from '@/components/PublicContactForm';
 import ClinicalRedirectPanel from '@/components/support/ClinicalRedirectPanel';
 
@@ -146,11 +147,16 @@ export default function SupportHubPage() {
             className="mb-6 flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3"
           >
             <PhoneCall className="mt-0.5 h-4 w-4 shrink-0 text-red-700" />
-            <p className="text-[13px] text-red-800">
+            <p className="flex-1 text-[13px] text-red-800">
               <span className="font-semibold">{t('support.hub.emergencyTitle')}</span>
               {' — '}
               {t('support.hub.emergencyBody')}
             </p>
+            {/* Emergency guidance must never be reading-dependent. */}
+            <AudioButton
+              text={`${t('support.hub.emergencyTitle')}. ${t('support.hub.emergencyBody')}`}
+              size="sm"
+            />
           </div>
 
           {resolving ? (

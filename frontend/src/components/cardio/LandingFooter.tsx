@@ -68,9 +68,20 @@ export default function LandingFooter() {
             {/* <a href="/about" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.careTeams')}</a> */}
           </div>
           <div className="flex flex-col gap-3">
+            {/* The healthcare legal block the proposal asks for. The five newer
+                notices are LINKED here but still carry `robots: noindex` on
+                their routes and are absent from sitemap.ts — reachable for a
+                patient who goes looking, not indexed while the copy is an
+                explicit "being finalised" placeholder. Drop the noindex (and add
+                them to the sitemap) once legal delivers the real text. */}
             <span className="font-bold text-white text-sm">{t('landing.legal')}</span>
             <Link href="/privacy" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.privacy')}</Link>
             <Link href="/terms" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.terms')}</Link>
+            <Link href="/hipaa-notice" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.hipaaNotice')}</Link>
+            <Link href="/cookies" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.cookiePolicy')}</Link>
+            <Link href="/accessibility" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.accessibility')}</Link>
+            <Link href="/nondiscrimination" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.nondiscrimination')}</Link>
+            <Link href="/telehealth-consent" className="text-white font-medium text-sm hover:text-white transition-colors">{t('landing.telehealthConsent')}</Link>
           </div>
         </div>
 

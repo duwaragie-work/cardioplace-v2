@@ -54,6 +54,14 @@ export class AdminSupportController {
     return this.support.listTickets(query)
   }
 
+  /** First-response SLA attainment by priority. Derived at call time from the
+   *  reply history — nothing about SLA is stored on the ticket.
+   *  Declared before `tickets/:id` so 'sla' can't be captured as an id. */
+  @Get('sla')
+  slaReport() {
+    return this.support.getSlaReport()
+  }
+
   @Get('tickets/:id')
   get(@Param('id') id: string) {
     return this.support.getTicket(id)

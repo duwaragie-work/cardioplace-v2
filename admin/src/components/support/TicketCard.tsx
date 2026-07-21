@@ -56,6 +56,22 @@ export default function TicketCard({ ticket }: { ticket: SupportTicketRow }) {
               Awaiting patient
             </span>
           )}
+          {/* First-response SLA breach — derived, not stored. Covers both
+              "answered late" and "never answered and the target has passed",
+              the latter being the ticket most worth surfacing. */}
+          {ticket.sla?.breached && (
+            <span
+              data-testid="support-sla-overdue"
+              title={
+                ticket.sla.firstResponseMinutes === null
+                  ? `No reply yet — target ${ticket.sla.targetMinutes} min`
+                  : `First reply took ${ticket.sla.firstResponseMinutes} min — target ${ticket.sla.targetMinutes} min`
+              }
+              className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700"
+            >
+              Overdue
+            </span>
+          )}
         </div>
         <p className="text-[13px] font-semibold text-slate-800 truncate">{ticket.subject}</p>
         <p className="text-[11px] text-slate-500 truncate">

@@ -7,14 +7,15 @@
 // the /support hub can read it. Renders its own chrome for the same reason the
 // hub does — the correct header depends on auth state.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ChevronDown, HelpCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, ChevronDown, HelpCircle, Loader2, Search } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import Navbar from '@/components/cardio/Navbar';
 import LandingHeader from '@/components/cardio/LandingHeader';
 import LandingFooter from '@/components/cardio/LandingFooter';
+import AudioButton from '@/components/intake/AudioButton';
 import { listFaqArticles, type FaqArticle } from '@/lib/services/content.service';
 
 export default function HelpCenterPage() {
@@ -23,11 +24,24 @@ export default function HelpCenterPage() {
   const [mounted, setMounted] = useState(false);
   const [articles, setArticles] = useState<FaqArticle[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     setMounted(true);
     listFaqArticles().then(setArticles);
   }, []);
+
+  // Client-side filter: the whole (small) FAQ set is already fetched, so
+  // searching in the browser is instant and needs no endpoint. Matches title,
+  // summary AND body — someone searching "recovery codes" is far more likely to
+  // be quoting words from inside an answer than from its title.
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q || !articles) return articles ?? [];
+    return articles.filter((a) =>
+      `${a.title} ${a.summary} ${a.body}`.toLowerCase().includes(q),
+    );
+  }, [articles, query]);
 
   const resolving = !mounted || isLoading;
   const authed = mounted && !isLoading && isAuthenticated;
@@ -59,6 +73,23 @@ export default function HelpCenterPage() {
             </div>
           </div>
 
+          {/* Search — the proposal asks for a *searchable* FAQ, and it is the
+              main ticket-deflector, so it has to stay usable as content grows. */}
+          {articles && articles.length > 0 && (
+            <div className="relative mb-4">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t('support.help.searchPlaceholder')}
+                aria-label={t('support.help.searchPlaceholder')}
+                data-testid="help-search"
+                className="w-full rounded-xl border border-slate-200 py-3 pl-9 pr-3 text-[14px] outline-none"
+              />
+            </div>
+          )}
+
           {!articles && (
             <div className="flex items-center gap-2 text-[13px] text-slate-400">
               <Loader2 className="h-4 w-4 animate-spin" /> {t('support.help.loading')}
@@ -74,8 +105,17 @@ export default function HelpCenterPage() {
             </div>
           )}
 
+          {articles && articles.length > 0 && visible.length === 0 && (
+            <div
+              data-testid="help-no-results"
+              className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-[13px] text-slate-500"
+            >
+              {t('support.help.noResults')}
+            </div>
+          )}
+
           <div className="space-y-3">
-            {articles?.map((a) => {
+            {visible.map((a) => {
               const open = openId === a.id;
               return (
                 <div
@@ -105,6 +145,14 @@ export default function HelpCenterPage() {
                   </button>
                   {open && (
                     <div className="border-t border-slate-100 bg-slate-50/50 p-4">
+                      {/* Silent-literacy architecture (V2-E): the FAQ is the
+                          self-serve surface for the Ward 7/8 cohort, so each
+                          answer carries a listen affordance like the rest of the
+                          patient-facing app. Reads the answer, not the heading —
+                          the heading is already on screen. */}
+                      <div className="mb-2 flex justify-end">
+                        <AudioButton text={a.body} size="sm" />
+                      </div>
                       <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-slate-700">
                         {a.body}
                       </p>
