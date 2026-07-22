@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals'
-import { ForbiddenException } from '@nestjs/common'
+import { ForbiddenException, Logger } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 import { UserRole } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
@@ -841,6 +841,83 @@ describe('PatientAccessService', () => {
       )
       expect(msg).not.toContain(PRACTICE_B)
       expect(msg).toBe('Requested record is outside your management scope')
+    })
+
+    // ── The other half of S1: the id must STILL reach server-side logs ──────
+    //
+    // S1 is a two-sided requirement — strip the id from the RESPONSE, keep it
+    // in the LOG. Only the first half was pinned, which left the second free to
+    // rot: someone tightening log redaction could drop the identifier and the
+    // deny path would go un-debuggable with every existing test still green.
+    // V-05 (common/logging/log-redact.ts) explicitly permits IDs in stdout and
+    // bars only clinical content, so this is the sanctioned side of that line.
+    describe('the identifier still reaches the server-side log', () => {
+      let warn: jest.SpiedFunction<typeof Logger.prototype.warn>
+
+      beforeEach(() => {
+        warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+      })
+      afterEach(() => {
+        warn.mockRestore()
+      })
+
+      /** Flatten every warn() call to one searchable string. */
+      const logged = (): string => warn.mock.calls.map((c) => String(c[0])).join('\n')
+
+      it('logs the refused patient id AND the actor id', async () => {
+        prisma.patientProviderAssignment.findUnique.mockResolvedValue(null)
+        await expect(
+          service.assertCanAccessPatient(scopedProvider, PATIENT_A),
+        ).rejects.toThrow(ForbiddenException)
+
+        expect(warn).toHaveBeenCalled()
+        // Both halves matter: the target answers "which record", the actor
+        // answers "who tried" — an access-denial log with only one is half a
+        // trail.
+        expect(logged()).toContain(PATIENT_A)
+        expect(logged()).toContain(PROV_ID)
+      })
+
+      it('logs the refused practice id on both practice guards', async () => {
+        prisma.practiceMedicalDirector.findUnique.mockResolvedValue(null)
+        await expect(
+          service.assertCanModifyPracticeAssignment(scopedMed, PRACTICE_B),
+        ).rejects.toThrow(ForbiddenException)
+        expect(logged()).toContain(PRACTICE_B)
+
+        warn.mockClear()
+        prisma.practiceMedicalDirector.findUnique.mockResolvedValue(null)
+        await expect(
+          service.assertCanManagePractice(scopedMed, PRACTICE_B),
+        ).rejects.toThrow(ForbiddenException)
+        expect(logged()).toContain(PRACTICE_B)
+      })
+
+      it('does NOT log a denial when access is granted', async () => {
+        // Otherwise every ordinary patient view would emit an "access denied"
+        // line and the signal would be worthless for spotting real probing.
+        prisma.patientProviderAssignment.findUnique.mockResolvedValue({
+          practiceId: PRACTICE_A,
+          primaryProviderId: PROV_ID,
+          backupProviderId: null,
+        })
+        prisma.practiceProvider.findUnique.mockResolvedValue({ id: 'pp-1' })
+
+        await expect(
+          service.assertCanAccessPatient(scopedProvider, PATIENT_A),
+        ).resolves.toBeUndefined()
+        expect(warn).not.toHaveBeenCalled()
+      })
+
+      it('never logs a denial for unscoped roles (they short-circuit)', async () => {
+        await expect(
+          service.assertCanAccessPatient(
+            { id: OPS_ID, roles: [UserRole.HEALPLACE_OPS] },
+            PATIENT_A,
+          ),
+        ).resolves.toBeUndefined()
+        expect(warn).not.toHaveBeenCalled()
+      })
     })
 
     // The wrong-role branch of assertCanModifyPracticeAssignment predates S1

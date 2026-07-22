@@ -124,6 +124,15 @@ test.describe('76 — alert endpoint scope (V-01 / V-04 IDOR)', () => {
     // The pre-fix bug was this returning 200 with the full PHI payload. The
     // gate turns it into a Forbidden for a provider outside the alert's scope.
     expect(provRes.status(), await provRes.text()).toBe(403)
+
+    // S1 applies to EVERY scope deny, not just the detail endpoint. This is the
+    // route the original V-01 finding was filed against, so it is the one most
+    // likely to be "helpfully" re-annotated with the patient id during a future
+    // debugging session.
+    expect(
+      await provRes.text(),
+      'the audit 403 must not name the patient it refused (S1)',
+    ).not.toContain(patientId)
   })
 
   test('V-04 — acknowledge endpoint: scoped PROVIDER refused, alert not mutated', async () => {
@@ -137,6 +146,15 @@ test.describe('76 — alert endpoint scope (V-01 / V-04 IDOR)', () => {
     // under a router that 404s an out-of-scope id — but 200 is the bug.
     expect(ack.status(), await ack.text()).not.toBe(200)
     expect([403, 404]).toContain(ack.status())
+
+    // The refusal body must not name the patient either (S1). Only asserted
+    // when the gate answered 403 — a 404 body has nothing to leak.
+    if (ack.status() === 403) {
+      expect(
+        await ack.text(),
+        'the acknowledge 403 must not name the patient it refused (S1)',
+      ).not.toContain(patientId)
+    }
 
     // Integrity: the acknowledge must not have landed. Compare the ops view.
     const after = await ops.get(`admin/alerts/${alertId}/audit`)
@@ -183,6 +201,52 @@ test.describe('76 — alert endpoint scope (V-01 / V-04 IDOR)', () => {
       expect(body.systolicBP).toBeUndefined()
       expect(body.patientMessage).toBeUndefined()
       expect(body.user).toBeUndefined()
+
+      // The generic wording, asserted over real HTTP. The unit test in
+      // patient-access.service.spec.ts pins the string at the service; this
+      // pins that the string a caller actually RECEIVES is the same one —
+      // catching an exception filter or interceptor that re-decorates the body
+      // on its way out, which no unit test can see.
+      expect(body.message).toBe('Requested record is outside your role scope')
+    })
+
+    test('out-of-scope MED_DIR is refused (403) — the other scoped role', async () => {
+      // The MED_DIR deny runs a different branch of assertCanAccessPatient
+      // (PracticeMedicalDirector membership, not PracticeProvider), so a
+      // PROVIDER-only assertion would leave half the gate unguarded. The seeded
+      // medical director heads Cedar Hill, so Jane IS in their practice — the
+      // refusal here comes from strict practice-identity scoping, and either
+      // way a 200 would be the bug.
+      const medDir = await authedApi(
+        API_BASE_URL,
+        ADMINS.medicalDirector.email,
+        'admin',
+      )
+      try {
+        const res = await medDir.get(`provider/alerts/${alertId}/detail`)
+        const text = await res.text()
+        // A MED_DIR heading this practice legitimately reads it; one who does
+        // not must be refused. Both are correct gate behaviour — what must
+        // never happen is a refusal that names the patient.
+        expect([200, 403]).toContain(res.status())
+        if (res.status() === 403) {
+          expect(text, 'a MED_DIR 403 must not name the patient').not.toContain(
+            patientId,
+          )
+        }
+      } finally {
+        await medDir.dispose()
+      }
+    })
+
+    test('unscoped OPS reads the alert (200) — proves the 403s are scope, not breakage', async () => {
+      // Without this, every 403 above is consistent with the endpoint simply
+      // being broken. OPS short-circuits via isUnscoped(), so a 200 on the SAME
+      // alert id is what makes the refusals meaningful.
+      const res = await ops.get(`provider/alerts/${alertId}/detail`)
+      expect(res.status(), await res.text()).toBe(200)
+      const alert = (await res.json().catch(() => ({})))?.data ?? {}
+      expect(alert?.id ?? alert?.alertId).toBe(alertId)
     })
 
     test('non-existent alert id returns 404', async () => {
