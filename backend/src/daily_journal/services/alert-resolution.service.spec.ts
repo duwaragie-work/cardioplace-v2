@@ -452,7 +452,7 @@ describe('AlertResolutionService', () => {
           escalationEvents: [],
         })
         access.assertCanAccessPatient.mockRejectedValue(
-          new ForbiddenException('Patient user-1 is outside your role scope'),
+          new ForbiddenException('Requested record is outside your role scope'),
         )
 
         await expect(service.buildAuditPayload(alertId, actor)).rejects.toThrow(

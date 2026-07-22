@@ -76,7 +76,7 @@ describe('AdminCaregiverController — per-patient access scope', () => {
 
   it('cross-practice denial propagates and the service is NOT called', async () => {
     access.assertCanAccessPatient.mockRejectedValueOnce(
-      new ForbiddenException(`Patient ${PATIENT} is outside your role scope`),
+      new ForbiddenException('Requested record is outside your role scope'),
     )
     await expect(controller.list(makeReq(provActor), PATIENT)).rejects.toThrow(
       ForbiddenException,

@@ -783,4 +783,74 @@ describe('PatientAccessService', () => {
       expect(ids).toEqual([])
     })
   })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // S1 (alert-resolve IDOR review, 2026-07-21) — the deny BODY must not name
+  // the record that was refused.
+  //
+  // The escalation deep-link deliberately keeps the patient user id out of
+  // URLs; an interpolated id in the 403 handed it straight back to any
+  // authenticated staff account in exchange for an alert id, rebuilding the
+  // alertId → patientId mapping the design removed. These tests are the thing
+  // that stops a reviewer "restoring" the helpful id: they fail on the
+  // identifier, not on an exact sentence, so the wording stays free to change.
+  // ────────────────────────────────────────────────────────────────────────
+  describe('deny messages carry no identifier (S1)', () => {
+    /** Run `fn`, require it to throw Forbidden, hand back the message. */
+    async function denyMessage(fn: () => Promise<unknown>): Promise<string> {
+      try {
+        await fn()
+      } catch (e) {
+        expect(e).toBeInstanceOf(ForbiddenException)
+        return (e as ForbiddenException).message
+      }
+      throw new Error('expected a ForbiddenException, but the call resolved')
+    }
+
+    const scopedProvider: ActorUser = {
+      id: PROV_ID,
+      roles: [UserRole.PROVIDER],
+    }
+    const scopedMed: ActorUser = { id: MED_ID, roles: [UserRole.MEDICAL_DIRECTOR] }
+
+    it('assertCanAccessPatient does not leak the patient user id', async () => {
+      prisma.patientProviderAssignment.findUnique.mockResolvedValue(null)
+
+      const msg = await denyMessage(() =>
+        service.assertCanAccessPatient(scopedProvider, PATIENT_A),
+      )
+      expect(msg).not.toContain(PATIENT_A)
+      expect(msg).toBe('Requested record is outside your role scope')
+    })
+
+    it('assertCanModifyPracticeAssignment does not leak the practice id', async () => {
+      prisma.practiceMedicalDirector.findUnique.mockResolvedValue(null)
+
+      const msg = await denyMessage(() =>
+        service.assertCanModifyPracticeAssignment(scopedMed, PRACTICE_B),
+      )
+      expect(msg).not.toContain(PRACTICE_B)
+      expect(msg).toBe('Requested record is outside your MED_DIR scope')
+    })
+
+    it('assertCanManagePractice does not leak the practice id', async () => {
+      prisma.practiceMedicalDirector.findUnique.mockResolvedValue(null)
+
+      const msg = await denyMessage(() =>
+        service.assertCanManagePractice(scopedMed, PRACTICE_B),
+      )
+      expect(msg).not.toContain(PRACTICE_B)
+      expect(msg).toBe('Requested record is outside your management scope')
+    })
+
+    // The wrong-role branch of assertCanModifyPracticeAssignment predates S1
+    // and never interpolated anything — pinned so a future edit to the block
+    // above doesn't accidentally start naming the practice here.
+    it('the non-MED_DIR refusal names no practice either', async () => {
+      const msg = await denyMessage(() =>
+        service.assertCanModifyPracticeAssignment(scopedProvider, PRACTICE_B),
+      )
+      expect(msg).not.toContain(PRACTICE_B)
+    })
+  })
 })
