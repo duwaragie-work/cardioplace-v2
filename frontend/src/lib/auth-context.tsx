@@ -21,6 +21,15 @@ import {
 } from '@/lib/cookie-names';
 import { useIdleTimeout } from '@/lib/hooks/useIdleTimeout';
 import { unsubscribePush } from '@/lib/services/push.service';
+import {
+  purgeClinicalDrafts,
+  sweepStaleClinicalDrafts,
+} from '@/lib/clinical-drafts';
+import {
+  clearOnboardedMarker,
+  isOnboardingSkippedOnDevice,
+  writeOnboardedMarker,
+} from '@/lib/onboarding';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -125,14 +134,33 @@ const AuthContext = createContext<AuthContextType>({
 // rejects unauthenticated API calls regardless.
 function writeAuthMarkers(roles: string[]) {
   if (typeof document === 'undefined') return;
-  document.cookie = `${AUTH_MARKER_COOKIE}=1; path=/; max-age=2592000; SameSite=Lax`;
-  document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax`;
+  // 3.2 — add `Secure` so these client cookies never travel over plain HTTP,
+  // but ONLY on an HTTPS page: an unconditional `Secure` would be silently
+  // dropped by the browser on http:// (non-localhost) dev/staging, leaving
+  // proxy.ts with no marker → a redirect loop to /sign-in. HTTPS-gated is safe.
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${AUTH_MARKER_COOKIE}=1; path=/; max-age=2592000; SameSite=Lax${secure}`;
+  document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax${secure}`;
+}
+
+// The onboarding gate bit proxy.ts reads. Onboarded means either the server
+// says identity is captured, or this device chose to skip it — the guard must
+// honour both or a patient who skipped would be stuck in a redirect loop.
+function writeOnboardedMarkerFor(user: {
+  id: string;
+  onboardingStatus?: string;
+} | null) {
+  if (!user) return;
+  writeOnboardedMarker(
+    user.onboardingStatus === 'COMPLETED' || isOnboardingSkippedOnDevice(user.id),
+  );
 }
 
 function clearAuthMarkers() {
   if (typeof document === 'undefined') return;
   document.cookie = `${AUTH_MARKER_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
   document.cookie = `${AUTH_ROLE_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+  clearOnboardedMarker();
   // Clear pre-fix unscoped names too so a local session created before the
   // app-scoped rename doesn't leave a stale "logged in" marker behind.
   for (const name of LEGACY_MARKER_COOKIES) {
@@ -201,21 +229,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // cookie. If it succeeds we hydrate state with a fresh access token +
   // user profile; if it fails we treat the user as logged-out.
   useEffect(() => {
-    // Skip rehydrate when we're handling a fresh magic-link sign-in.
-    // MagicLinkHandler is about to call login() with the tokens from the
-    // URL params; running /refresh here would consume the just-issued
-    // refresh token and race with the destination page's own mount-time
-    // rehydrate. Refresh-token rotation is single-use, so whichever fetch
-    // reaches the backend second gets a 401 — and the loser's rehydrate
-    // clears user state, which bounces the destination page to /sign-in.
-    if (
-      typeof window !== 'undefined' &&
-      window.location.pathname === '/auth/magic-link' &&
-      new URLSearchParams(window.location.search).has('accessToken')
-    ) {
-      setIsLoading(false);
-      return;
-    }
+    // V-10 — age out clinical drafts left behind when sign-out never ran (tab
+    // closed, crash, battery died), so abandoned ePHI can't linger on a shared
+    // device indefinitely. Runs before the auth branch below because it must
+    // happen whether or not this visitor turns out to be signed in.
+    sweepStaleClinicalDrafts();
+
+    // F4 — the old "skip rehydrate on /auth/magic-link?accessToken=" guard was
+    // removed: the backend no longer emits tokens in the magic-link redirect
+    // (A1/V-11), so that param never exists. The magic-link page now waits for
+    // this cookie rehydrate instead of racing it, so there's nothing to skip.
 
     let cancelled = false;
     async function rehydrate() {
@@ -246,6 +269,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           preferredLanguage: profile.preferredLanguage ?? null,
         });
         writeAuthMarkers(profile.roles ?? []);
+        writeOnboardedMarkerFor({
+          id: profile.id,
+          onboardingStatus: profile.onboardingStatus,
+        });
         // Mirror of admin's rehydrate wiring — no consumer on the patient
         // app today, but the shape stays aligned so future patient-facing
         // practice copy can rely on it.
@@ -366,6 +393,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (newUser?.roles) {
       writeAuthMarkers(newUser.roles);
     }
+    writeOnboardedMarkerFor(newUser);
     // Refresh token deliberately NOT persisted client-side — the backend
     // already set the HttpOnly `refresh_token` cookie on the verify-OTP
     // response (auth.controller.setRefreshCookie). Keeping it out of JS
@@ -397,6 +425,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAvailablePractices([]);
       clearTokenState();
       clearAuthMarkers();
+      // V-10 — an idle timeout is the walked-away-from-a-shared-device case,
+      // so the clinical drafts must go here too, not just on explicit sign-out.
+      purgeClinicalDrafts();
       window.location.href = '/sign-in?session_expired=1';
     },
   });
@@ -428,6 +459,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAvailablePractices([]);
     clearTokenState();
     clearAuthMarkers();
+    // V-10 — wipe in-progress clinical drafts (BP, symptoms, medications) from
+    // this device. Runs even if the backend logout call above failed: the local
+    // ePHI must not survive a sign-out just because the network did not.
+    purgeClinicalDrafts();
     // Hard navigation guarantees the cookie clear has settled before the
     // next request — router.push raced with cookie clearing in production
     // and proxy.ts kept routing the user back to /dashboard.
@@ -435,6 +470,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const markOnboardingComplete = () => {
+    // Open the route guard in the same tick the patient finishes onboarding —
+    // the redirect to /dashboard hits proxy.ts before any rehydrate could
+    // refresh the cookie.
+    writeOnboardedMarker(true);
     setUser((prev) =>
       prev
         ? { ...prev, onboardingStatus: 'COMPLETED', onboardingRequired: false }

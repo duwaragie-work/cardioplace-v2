@@ -254,6 +254,8 @@ const am: Record<TranslationKey, string> = {
   'checkin.optionD.screenC.body': 'ንባብዎን አስቀምጠናል እና የእንክብካቤ ቡድንዎ እንዲያገኝዎት አሳውቀናል።',
   'checkin.optionD.screenC.safetyFooter': 'አሁን ጤናዎ ካልተሰማዎት፣ እባክዎ ሐኪምዎን ወይም 911 ይደውሉ።',
   'checkin.optionD.screenC.done': 'ወደ ዳሽቦርድ ተመለስ',
+  // TODO(l10n-am): native-speaker verification required before ship.
+  'checkin.optionD.screenC.doneFinishOther': 'ሌላውን ንባብዎን ይጨርሱ',
   'checkin.optionD.confirmedNormal.title': 'ሁለተኛው ንባብዎ የተሻለ ይመስላል',
   'checkin.optionD.confirmedNormal.body': 'የክትትል ንባብዎ ይበልጥ ደህንነቱ በተጠበቀ ክልል ውስጥ ነው። ሁለቱንም ንባቦች አስቀምጠን ለእንክብካቤ ቡድንዎ አሳውቀናል — አሁንም ሊያገኙዎት ይችላሉ።',
   // Resume intro — Screen A ራስ-ሰር መቀጠያ (2026-06-16)። ጊዜያዊ (ማኒሻ በመጠባበቅ ላይ)።
@@ -308,6 +310,7 @@ const am: Record<TranslationKey, string> = {
   // B5 — confirmation
   'checkin.confirm.title': 'ንባብ ተልኳል',
   'checkin.confirm.titleMulti': 'ንባብ {n} ተልኳል',
+  'checkin.confirm.lookingGood': 'በጣም ጥሩ ነው — እንዲሁ ይቀጥሉ!',
   'checkin.confirm.subtitle': 'የተንከባካቢ ቡድንዎ ወዲያውኑ ይቀበላል።',
   // #88 — English placeholder; flagged for Niva translation pass.
   'checkin.confirm.subtitleUnenrolled': 'የእንክብካቤ ቡድንዎን እያዘጋጀን ነው። ምዝገባዎ ከተጠናቀቀ በኋላ ንባቦችዎን መገምገም ይጀምራሉ።',
@@ -557,7 +560,10 @@ const am: Record<TranslationKey, string> = {
   'settings.badge.alwaysOn': 'Always on',
   'settings.badge.on': 'On',
   'settings.badge.recommended': 'Recommended',
-  'settings.notif.title': 'ማሳወቂያዎች',
+  // TODO(i18n): "Pop-up notifications" — native-speaker Amharic pending. The
+  // prior value meant "phone notifications", now inaccurate (this also covers
+  // laptops). English placeholder until reviewed; never machine-translate.
+  'settings.notif.title': 'Pop-up notifications',
   'settings.notif.desc': 'መተግበሪያው ተዘግቶም ቢሆን ስለ ንባቦችዎ ማንቂያዎችንና አስታዋሾችን በዚህ መሣሪያ ላይ ይቀበሉ።',
   'settings.notif.badgeBlocked': 'ታግዷል',
   'settings.notif.badgeOff': 'ጠፍቷል',
@@ -613,6 +619,41 @@ const am: Record<TranslationKey, string> = {
   'settings.danger.close.requested': 'Check your email. We sent a link to confirm closing your account. It expires in 1 hour.',
   'settings.danger.processing': 'Processing…',
   'settings.danger.error': 'Something went wrong. Please try again.',
+
+  // ─── Settings — errors + Contact support (i18n sweep) ───────────────────────
+  // TODO(i18n): Amharic pending native-speaker review — English placeholders so
+  // the type stays satisfied and am users see English (the getTranslation
+  // fallback) rather than machine-translated Amharic. Never machine-translate.
+  'settings.error.load': 'Could not load settings.',
+  'settings.bio.errorSetup': 'Could not set up biometric.',
+  'settings.bio.errorRename': 'Could not rename device.',
+  'settings.bio.errorRemove': 'Could not remove device.',
+  'settings.recovery.errorRegenerate': 'Could not regenerate codes.',
+  'settings.support.title': 'Contact support',
+  'settings.support.intro':
+    "Need help with your account, sign-in, or something in the app? Send our team a message and we'll follow up by email.",
+  'settings.support.myRequests': 'View my requests →',
+  'settings.support.goToSupport': 'Go to Support →',
+  'support.form.categoryAccount': 'Account',
+  'support.form.categoryMfa': 'MFA',
+  'support.form.categoryClinical': 'Clinical question',
+  'support.form.categoryBug': 'Bug',
+  'support.form.categoryOther': 'Other',
+  'support.form.subject': 'Subject',
+  'support.form.category': 'Category',
+  'support.form.message': 'Message',
+  'support.form.messagePlaceholder': 'How can we help?',
+  'support.form.reachBy': 'Prefer to be reached by:',
+  'support.form.email': 'Email',
+  'support.form.phone': 'Phone',
+  'support.form.comingSoon': '(coming soon)',
+  'support.form.sending': 'Sending…',
+  'support.form.send': 'Send message',
+  'support.form.sentToast': 'Request sent.',
+  'support.form.error': 'Could not send your message.',
+  'support.form.successPrefix': 'Thanks — your request',
+  'support.form.successSuffix': "was received. We'll get back to you by email.",
+
   'settings.close.pageTitle': 'Confirm account closure',
   'settings.close.pageDesc': 'Click below to permanently close your Cardioplace account. This cannot be undone.',
   'settings.close.confirmButton': 'Permanently close my account',
@@ -676,19 +717,38 @@ const am: Record<TranslationKey, string> = {
   // TODO(l10n-am): draft Amharic strings need native-speaker review before
   // the PR merges (Duwaragie hand-off). English fallbacks are placeholders
   // so the key-drift check passes; the runtime UI will still render them.
-  'profile.reminders.heading': 'Reminders',
-  'profile.reminders.editHeading': 'Edit reminders',
-  'profile.reminders.dailyTime': 'Daily reminder time',
-  'profile.reminders.quietHoursStart': 'Quiet hours start',
-  'profile.reminders.quietHoursEnd': 'Quiet hours end',
-  // TODO(l10n-am): Amharic native-speaker verification required per spec §N10.
-  'profile.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
-  'profile.reminders.startLabel': 'Start',
-  'profile.reminders.endLabel': 'End',
-  'profile.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
-  'profile.reminders.saveButton': 'Save',
-  'profile.reminders.savingButton': 'Saving…',
-  'profile.reminders.cancelButton': 'Cancel',
+  // L-5 — filled from English; TODO(l10n-am): native-speaker verification
+  // required before ship per spec §N10 (do not machine-translate as final).
+  'profile.reminders.heading': 'አስታዋሾች',
+  'profile.reminders.editHeading': 'አስታዋሾችን ያርትዑ',
+  'profile.reminders.dailyTime': 'የዕለታዊ አስታዋሽ ሰዓት',
+  'profile.reminders.quietHoursStart': 'የጸጥታ ሰዓታት መጀመሪያ',
+  'profile.reminders.quietHoursEnd': 'የጸጥታ ሰዓታት መጨረሻ',
+  'profile.reminders.quietHoursHeading': 'የጸጥታ ሰዓታት (በዚህ ጊዜ ውስጥ ምንም አስታዋሽ አይላክም)',
+  'profile.reminders.startLabel': 'መጀመሪያ',
+  'profile.reminders.endLabel': 'መጨረሻ',
+  'profile.reminders.emergencyDisclaimer': 'የአስቸኳይ ጤና ማንቂያዎች በጸጥታ ሰዓታት ውስጥም እንኳ ሁልጊዜ ይደርሳሉ።',
+  'profile.reminders.saveButton': 'አስቀምጥ',
+  'profile.reminders.savingButton': 'በማስቀመጥ ላይ…',
+  'profile.reminders.cancelButton': 'ይቅር',
+  // L3 — TODO(l10n-am): native-speaker verification required before ship.
+  // NOTE: the consent line is the TCPA wording under counsel review — the
+  // Amharic rendering must be checked by a native speaker AND counsel.
+  'profile.sms.heading': 'የጽሑፍ መልእክት አስታዋሾች',
+  'profile.sms.editHeading': 'የጽሑፍ መልእክት አስታዋሾችን ያርትዑ',
+  'profile.sms.phoneLabel': 'የሞባይል ቁጥር',
+  'profile.sms.phoneHelp': 'አማራጭ። የአገር ኮድን ያካትቱ፣ ለምሳሌ +1 555 010 0000።',
+  'profile.sms.phoneInvalid': 'ቁጥርዎን ከአገር ኮድ ጋር ያስገቡ፣ ለምሳሌ +15550100።',
+  'profile.sms.consentLabel': 'የጽሑፍ አስታዋሾችን ይላኩልኝ',
+  'profile.sms.consentFinePrint':
+    'መልእክቶቹ ከCardioplace ይመጣሉ። ምንም የጤና መረጃ አይካተትም። የመልእክት ክፍያዎች ሊተገበሩ ይችላሉ። በማንኛውም ጊዜ STOP ብለው ይመልሱ።',
+  'profile.sms.optedOutNotice':
+    'STOP ብለው ስለመለሱ የጽሑፍ መልእክቶች ጠፍተዋል። እንደገና ለማብራት ከላይ ያለውን ሳጥን ምልክት ያድርጉ።',
+  'profile.sms.statusLabel': 'የጽሑፍ አስታዋሾች',
+  'profile.sms.statusOn': 'በርቷል',
+  'profile.sms.statusOff': 'ጠፍቷል',
+  'profile.sms.statusStopped': 'ቆሟል (STOP ብለው መልሰዋል)',
+  'profile.sms.notSet': 'አልተቀናበረም',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'ንባቦቼ',
@@ -919,6 +979,7 @@ const am: Record<TranslationKey, string> = {
   'register.accountSuspended': 'መለያዎ ታግዷል። እባክዎ ድጋፍ ያግኙ።',
   'register.accountBlocked': 'መለያዎ ተዘግቷል። እባክዎ ድጋፍ ያግኙ።',
   'register.accountDeactivated': 'ይህ መለያ ተሰናክሏል። እንደገና ለማንቃት የእንክብካቤ ቡድንዎን ያግኙ።',
+  'register.contactSupportReactivate': 'እንደገና ለማንቃት ድጋፍን ያግኙ →',
   'register.accountClosed': 'ይህ መለያ በቋሚነት ተዘግቷል እና እንደገና ሊከፈት አይችልም።',
   'register.failedResend': 'OTP እንደገና መላክ አልተቻለም።',
   'register.verificationFailed': 'ማረጋገጥ አልተሳካም።',
@@ -945,19 +1006,23 @@ const am: Record<TranslationKey, string> = {
   'register.otpTitle': 'OTP ኮድ',
   'register.otpInfo': '6-አሃዝ ኮድ በኢሜል እንልካለን። ለመግባት እዚህ ይጻፉት።',
   // Support — locked-out page (Fix 12). TODO: Amharic translations pending;
-  // English placeholders (runtime falls back am → en until translated).
-  'support.locked.title': 'Need help signing in?',
-  'support.locked.subtitle': 'Tell us what’s happening and our team will contact you to verify your identity before making any account changes.',
-  'support.locked.statusBanner': 'You can also check the status of an existing request by clicking the link in your confirmation email.',
-  'support.locked.email': 'Your account email',
-  'support.locked.description': 'What’s happening? (e.g. I lost my authenticator app and recovery codes)',
-  'support.locked.phone': 'Callback phone (optional)',
-  'support.locked.submit': 'Request help',
-  'support.locked.submitting': 'Submitting…',
-  'support.locked.successLead': 'Thanks — your request',
-  'support.locked.successTail': 'is in. Our team will reach out to verify your identity before any changes are made.',
-  'support.locked.error': 'Could not submit your request.',
-  'support.locked.backToSignIn': 'Back to sign in',
+  // L-5 — filled from English; TODO(l10n-am): native-speaker verification
+  // required before ship per spec §N10 (do not machine-translate as final).
+  'support.locked.title': 'ለመግባት እገዛ ይፈልጋሉ?',
+  'support.locked.subtitle': 'ምን እየተከሰተ እንዳለ ይንገሩን፤ ማንኛውንም የመለያ ለውጥ ከማድረጋችን በፊት ቡድናችን ማንነትዎን ለማረጋገጥ ያገኝዎታል።',
+  // N-1 (2026-07-14 triage) — see en.ts: the confirmation email carries a
+  // ticket number and a reply address, not a link.
+  // ⚠️ Amharic wording needs a native-speaker review before pilot (Ward 7/8
+  // cohort) — the meaning is right, the phrasing is unverified.
+  'support.locked.statusBanner': 'ጥያቄ ልከዋል? የማረጋገጫ ኢሜይልዎ የቲኬት ቁጥርዎን ይዟል — ተጨማሪ ነገር ማከል ከፈለጉ ለዚያ ኢሜይል መልስ ይስጡ፣ በዚያው ቲኬት ላይ እንጨምረዋለን።',
+  'support.locked.email': 'የመለያዎ ኢሜይል',
+  'support.locked.description': 'ምን እየተከሰተ ነው? (ለምሳሌ የማረጋገጫ መተግበሪያዬንና የመልሶ ማግኛ ኮዶቼን አጣሁ)',
+  'support.locked.submit': 'እገዛ ይጠይቁ',
+  'support.locked.submitting': 'በማስገባት ላይ…',
+  'support.locked.successLead': 'እናመሰግናለን — ጥያቄዎ',
+  'support.locked.successTail': 'ገብቷል። ማንኛውም ለውጥ ከመደረጉ በፊት ቡድናችን ማንነትዎን ለማረጋገጥ ያገኝዎታል።',
+  'support.locked.error': 'ጥያቄዎን ማስገባት አልተቻለም።',
+  'support.locked.backToSignIn': 'ወደ መግቢያ ተመለስ',
   // Support — "My support requests" page (Fix 9). English fallback pending am.
   'support.mytickets.back': 'Back to settings',
   'support.mytickets.title': 'My support requests',
@@ -968,10 +1033,79 @@ const am: Record<TranslationKey, string> = {
   'support.mytickets.statusOpen': 'Open',
   'support.mytickets.statusInProgress': 'In progress',
   'support.mytickets.statusResolved': 'Resolved',
+  // NOTE: this whole support.mytickets.* block is still untranslated English —
+  // scheduled for a native Amharic pass (see the support roadmap, i18n step).
+  'support.mytickets.statusClosed': 'ተዘግቷል',
   'support.mytickets.replies': 'replies',
   'support.mytickets.support': 'Support',
   'support.mytickets.you': 'You',
   'support.mytickets.resolvedNote': 'This request was resolved.',
+  // ⚠ UNTRANSLATED — everything from here to the end of the support block is
+  // English placeholder awaiting a native Amharic pass (tracked in the support
+  // roadmap's i18n step). Falling back to readable English is the correct
+  // interim behaviour; machine-guessed clinical-adjacent copy is not.
+  'support.mytickets.closedNote': 'This request is closed.',
+  'support.mytickets.yourTurn': 'Your reply needed',
+  'support.mytickets.replyPlaceholder': 'Write a reply…',
+  'support.mytickets.replySend': 'Send reply',
+  'support.mytickets.replySending': 'Sending…',
+  'support.mytickets.replyError': 'Could not send your reply.',
+  'support.mytickets.replySent': 'Reply sent.',
+  'support.mytickets.reopen': 'Reopen this request',
+  'support.mytickets.reopening': 'Reopening…',
+  'support.mytickets.reopenError': 'Could not reopen this request.',
+  'support.mytickets.reopenNote': 'Still need help? You can reopen this for 7 days.',
+  'support.mytickets.reopened': 'Request reopened.',
+  'support.mytickets.close': 'Yes, this is resolved',
+  'support.mytickets.closing': 'Closing…',
+  'support.mytickets.closed': 'Request closed.',
+  'support.mytickets.closeError': 'Could not close this request.',
+  'support.mytickets.closeNote': 'The reopen window has passed. You can confirm this is done.',
+
+  'support.hub.title': 'Support',
+  'support.hub.subtitle': 'Get help with your account, sign-in, or the app.',
+  'support.hub.loading': 'Loading…',
+  'support.hub.emergencyTitle': 'If this is an emergency',
+  'support.hub.emergencyBody': 'In an emergency, call 911.',
+  'support.hub.cantSignIn': 'I can’t sign in',
+  'support.hub.cantSignInBody': 'Locked out, lost your authenticator, or not getting your code.',
+  'support.hub.generalContact': 'Send us a message',
+  'support.hub.generalContactBody': 'A general question about Cardioplace.',
+  'support.hub.signInPrompt': 'Already have an account?',
+  'support.hub.signInCta': 'Sign in to track your requests',
+  'support.hub.raiseTitle': 'Raise a request',
+  'support.hub.raiseBody': 'Account, sign-in, or something not working in the app.',
+  'support.hub.myRequests': 'My requests',
+  'support.hub.myRequestsBody': 'Track status and reply to our team.',
+  'support.hub.accountSecurity': 'Account & security',
+  'support.hub.accountSecurityBody': 'Sign-in, two-step verification, and recovery codes.',
+  'support.hub.legal': 'Privacy & terms',
+  'support.hub.helpCenter': 'Help Center',
+  'support.hub.helpCenterBody': 'Answers to common questions about the app.',
+
+  'support.help.title': 'Help Center',
+  'support.help.subtitle': 'Answers to the questions we get most often.',
+  'support.help.loading': 'Loading…',
+  'support.help.searchPlaceholder': 'Search help articles',
+  'support.help.noResults': 'No articles match your search.',
+  'support.help.empty': 'No articles yet — please check back soon.',
+  'support.help.stillNeedHelp': 'Still need help?',
+
+  'support.clinical.title': 'This looks like a medical question',
+  'support.clinical.body': 'Support can help with your account and the app, but not with your health. For anything about your symptoms, your readings, or your medicines, please reach your care team.',
+  'support.clinical.ctaChat': 'Message my care team',
+  'support.clinical.ctaSignedOut': 'Sign in to reach your care team',
+  'support.clinical.emergency': 'In an emergency, call 911.',
+
+  'support.publiccontact.email': 'Your email',
+  'support.publiccontact.subject': 'Subject',
+  'support.publiccontact.message': 'How can we help?',
+  'support.publiccontact.noPhi': 'Please don’t include health information in this form.',
+  'support.publiccontact.send': 'Send message',
+  'support.publiccontact.sending': 'Sending…',
+  'support.publiccontact.successLead': 'Thanks — your request',
+  'support.publiccontact.successTail': 'is in. We’ll reply by email.',
+  'support.publiccontact.error': 'Could not send your message.',
   // Translated 2026-06-04 (user opted in vs Niva pass). 911 stays per US pilot.
   // Amharic translation flagged for native-speaker review by Niva.
   'register.medicalDisclaimer': 'Cardioplace ጤናዎን ለመከታተል እና ከእንክብካቤ ቡድንዎ ጋር ለመገናኘት ይረዳዎታል። ይህ የሕክምና ምክርን፣ ምርመራን ወይም ሕክምናን አይተካም። በአስቸኳይ ጊዜ 911 ይደውሉ።',
@@ -996,6 +1130,15 @@ const am: Record<TranslationKey, string> = {
   // TODO(l10n-am): Amharic native-speaker verification required.
   'onboarding.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
   'onboarding.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
+  // L3 — TODO(l10n-am): native-speaker verification required before ship.
+  'onboarding.sms.phoneLabel': 'የሞባይል ቁጥር (አማራጭ)',
+  'onboarding.sms.phoneAudio': 'የሞባይል ቁጥርዎ ስንት ነው? ይህ አማራጭ ነው — ባዶ መተው ይችላሉ።',
+  'onboarding.sms.phoneHelp': 'የጽሑፍ አስታዋሾችን ከፈለጉ ብቻ ያክሉ። የአገር ኮድን ያካትቱ፣ ለምሳሌ +1 555 010 0000።',
+  'onboarding.sms.phoneInvalid': 'ቁጥርዎን ከአገር ኮድ ጋር ያስገቡ፣ ለምሳሌ +15550100 — ወይም ባዶ ይተዉት።',
+  'onboarding.reminders.title': 'ማስታወሻዎችዎን ያዘጋጁ',
+  'onboarding.reminders.subtitle': 'መቼ እንደምናገኝዎት ይምረጡ። ይህን በማንኛውም ጊዜ በቅንብሮች ውስጥ መቀየር ይችላሉ።',
+  'onboarding.stepIndicator': 'ደረጃ {n} ከ{t}',
+  'onboarding.back': 'ተመለስ',
   'onboarding.invalidDob': 'እባክዎ ትክክለኛ የልደት ቀን ያስገቡ።',
   'onboarding.continue': 'ቀጥል',
   'onboarding.skip': 'ለአሁን ዝለል',
@@ -1029,9 +1172,17 @@ const am: Record<TranslationKey, string> = {
   'landing.legal': 'ህጋዊ',
   'landing.privacy': 'የግላዊነት ፖሊሲ',
   'landing.terms': 'የአገልግሎት ውሎች',
+  'landing.hipaaNotice': 'HIPAA Notice',
+  'landing.cookiePolicy': 'Cookie Policy',
+  'landing.accessibility': 'Accessibility',
+  'landing.nondiscrimination': 'Nondiscrimination',
+  'landing.telehealthConsent': 'Telehealth Consent',
   'landing.contact': 'ያግኙን',
   'landing.dashboard': 'ዳሽቦርድ',
   'landing.getInTouch': 'ያግኙን',
+  // ⚠ UNTRANSLATED — English placeholder pending the native Amharic pass.
+  'landing.supportBlurb': 'Questions about your account or the app? Our support team is here to help.',
+  'landing.goToSupport': 'Go to Support',
   'landing.messageSent': 'መልዕክት ተልኳል!',
   'landing.messageReply': 'በቅርቡ እናገኝዎታለን።',
   'landing.yourEmail': 'ኢሜልዎ',
@@ -1065,8 +1216,8 @@ const am: Record<TranslationKey, string> = {
   'home.aiQuote': '"የዛሬ የደም ግፊትዎ ከ7 ቀን አማካይዎ ትንሽ ከፍ ያለ ነው። ዛሬ ጠዋት ሊሲኖፕሪልዎን ወስደዋል? ቢረዳዎ ቀትር ላይ እንደገና ላስታውስዎ እችላለሁ።"',
   'home.escalation': 'አስፈላጊ ሲሆን ማሳደግ',
   'home.escalationDesc': 'ንባቦች ከታካሚው ግለሰባዊ መነሻ መስመር ሲያፈነግጡ፣ መድረኩ ለእንክብካቤ ቡድኑ የተዋቀረ ማንቂያ ያመነጫል። ደረጃ 1፡ በ24 ሰዓት ውስጥ ይገመገማል። ደረጃ 2፡ ታካሚ ወዲያውኑ 911 እንዲደውል ይነገረዋል። የእንክብካቤ ቡድኑ በተመሳሳይ ጊዜ ይነገረዋል።',
-  'home.learning': 'ያለማቋረጥ ይማራል',
-  'home.learningDesc': 'ለሁሉም-የሚያገለግል ገደቦች የሉም። በ CDC NHANES የልብና የደም ቧንቧ መረጃ ላይ ሠልጥኗል እና ከእያንዳንዱ ታካሚ መስተጋብር ይማራል ለሚያገለግላቸው ማህበረሰቦች ከጊዜ ወደ ጊዜ የበለጠ ትክክለኛ ይሆናል።',
+  'home.learning': 'ለእያንዳንዱ ታካሚ የተበጀ',
+  'home.learningDesc': 'ለሁሉም-የሚያገለግል ገደቦች የሉም። የማንቂያ ደንቦች በሐኪሞች ይወሰናሉ እና ለእያንዳንዱ ታካሚ ሁኔታዎችና መድኃኒቶች የተበጁ ናቸው፣ ለሚያገለግላቸው ማህበረሰቦች የተቋቋሙ ክሊኒካዊ መመሪያዎችን በመከተል።',
   'home.silentLiteracy': 'ጸጥታ ያለ ማንበብ ንድፍ',
   'home.soundTitle': 'ማንበብ አያስፈልግም። ፈጽሞ።',
   'home.soundDesc': 'አብዛኛው የጤና ቴክኖሎጂ ታካሚዎችን ምን እንደሚፈልጉ እንዲገልጹ ይጠይቃል። Cardioplace ይገምታል። መድረኩ የምላሽ ቅጦችን ያነባል፣ ታካሚ ምን ያህል በፍጥነት ይመልሳል፣ የትኛውን ሁነታ ይመርጣል፣ መልሶቻቸው ግንዛቤን ያመለክታሉ እንደሆነ፣ እና ራሱ ያስተካክላል።\n\nምንም ታካሚ ፈጽሞ አይፈረጅም። ምንም ታካሚ ማንበብ ይችላሉ እንደሆነ ፈጽሞ አይጠየቅም። እንክብካቤ ባሉበት ቦታ ላይ በትክክል ይደርሳቸዋል።',
@@ -1075,7 +1226,7 @@ const am: Record<TranslationKey, string> = {
   'home.forPatients': 'ለታካሚዎች',
   'home.forPatientsSubtitle': 'በ Ward 7 እና Ward 8 ውስጥ ከደም ግፊት ወይም ከልብ በሽታ ጋር የሚኖሩ',
   'home.patient1': 'በጽሁፍ ወይም በድምጽ ቼክ-ኢኖች፣ የእርስዎ ምርጫ፣ በየቀኑ።',
-  'home.patient2': 'ስማርትፎን አያስፈልግም። ማንበብ አያስፈልግም።',
+  'home.patient2': 'መተየብ አያስፈልግም። ማንበብ አያስፈልግም። ብቻ ንኩ እና ይናገሩ።',
   'home.patient3': 'የደም ግፊት መለኪያዎች ያለ ክፍያ ይቀርባሉ።',
   'home.patient4': 'እርስዎ መደወል ከማስፈለግዎ በፊት የእንክብካቤ ቡድንዎ ምን እየሆነ እንደሆነ ያያል።',
   'home.forCareTeams': 'ለእንክብካቤ ቡድኖች',
@@ -1142,8 +1293,8 @@ const am: Record<TranslationKey, string> = {
   'about.principle3Desc': 'ቼክ-ኢኖች በእንግሊዝኛ፣ በስፓኒሽ፣ በፈረንሳይኛ፣ በጀርመንኛ እና በአማርኛ ይገኛሉ፣ ተጨማሪ ቋንቋዎች በማልማት ላይ ናቸው። የድምጽ መስተጋብር ማለት የቋንቋ እና የማንበብና መጻፍ እንቅፋቶች ሙሉ በሙሉ ይጠፋሉ ማለት ነው።',
   'about.principle4Title': 'ዘላቂነት በድጋፍ ገንዘብ ላይ ሊደገፍ አይችልም።',
   'about.principle4Desc': 'CMS Remote Patient Monitoring ክፍያ ማለት መድረኩ ከመመዝገቢያ የመጀመሪያ ወር ጀምሮ ለተሳታፊ ሆስፒታሎች ተደጋጋሚ ገቢ ያመነጫል ማለት ነው። ይህ ፕሮግራም ከገንዘብ ድጋፉ በላይ ለመቆየት የተዘጋጀ ነው።',
-  'about.principle5Title': 'መድረኩ በተጠቀመ ቁጥር ይበልጥ ብልህ ይሆናል።',
-  'about.principle5Desc': "Cardioplace የ CDC NHANES ጨምሮ በተረጋገጡ የልብና የደም ቧንቧ መረጃ ስብስቦች ላይ ሠልጥኗል፣ በአሜሪካ ውስጥ ለደም ግፊት፣ ለመድሃኒት እና ለዲሞግራፊ መረጃ የወርቅ ደረጃ። በ Ward 7 እና Ward 8 ውስጥ ታካሚዎች መድረኩን ሲጠቀሙ፣ ለዚያ ማህበረሰብ በተለይ መደበኛ ምን እንደሚመስል እንማራለን። ማንቂያዎች ከጊዜ ወደ ጊዜ ይበልጥ ትክክለኛ ይሆናሉ፣ እና ለሚከላከሏቸው ሰዎች ይበልጥ ተገቢ ይሆናሉ።",
+  'about.principle5Title': 'እያንዳንዱ ማንቂያ በሐኪሞች የተቀመጡ ክሊኒካዊ ደንቦችን ይከተላል።',
+  'about.principle5Desc': "Cardioplace አይገምትም። እያንዳንዱ ማንቂያ በሐኪሞች የተጻፉና የጸደቁ ግልጽ ደንቦችን ይከተላል፣ እንደ AHA እና ACC ያሉ የተቋቋሙ የልብና የደም ቧንቧ መመሪያዎችን መሠረት በማድረግ። ገደቦች ለእያንዳንዱ ታካሚ ሁኔታዎች፣ መድኃኒቶች እና ዕድሜ የተበጁ ናቸው፣ ስለዚህ አንድ ዓይነት ንባብ ለተለያዩ ሰዎች የተለያየ ትርጉም ሊኖረው ይችላል፣ ልክ አንድ ሐኪም እንደሚፈርድበት።",
   'about.silentLiteracyTitle': 'ጸጥታ ያለ የማንበብ ችሎታ አርክቴክቸር',
   'about.silentLiteracyDesc1': 'ሌሎች የጤና ማንበብ ችሎታ መድረኮች ሁሉ ታካሚዎችን ምን እንደሚፈልጉ እንዲገልጹ ይጠይቃሉ። Cardioplace ከዚያ ይልቅ ይመለከታል።\n\nየምላሽ ዘግይት። የሁነታ ምርጫ። የማስተማር-መልስ ትክክለኛነት። መድረኩ እነዚህን ምልክቶች በዝምታ ያነባል እና ግንኙነትን ራሱ ያስተካክላል፣ እያንዳንዱ ታካሚ በትክክል በሚያደርገው ላይ ተመስርቶ ድምጽ፣ ጽሁፍ ወይም ጥምር ያቀርባል፣ እንደሚመርጡ በሚሉት ሳይሆን።',
   'about.silentLiteracyDesc2': 'ምንም ታካሚ ፈጽሞ አይገመገምም። ምንም ታካሚ ፈጽሞ አይፈረጅም። ክብር ማስተካከያ አይደለም። ነባሪው ነው።',

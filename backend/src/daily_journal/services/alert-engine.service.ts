@@ -222,12 +222,13 @@ function axisFor(r: RuleResult): Axis {
   // axis so it co-fires with the SBP cadHighRule 'bp-high' row.
   if (r.ruleId === 'RULE_CAD_DBP_HIGH') return 'dbp-high'
   // HR rules emit BP_LEVEL_1_HIGH / LOW tiers but represent a different axis.
+  // N-7 (2026-07-14 triage) — RULE_BRADY_HR_ASYMPTOMATIC removed from this
+  // branch; superseded by RULE_BRADY_ABSOLUTE (Manisha 2026-05-10 Cluster 6).
   if (
     r.ruleId === 'RULE_AFIB_HR_HIGH' ||
     r.ruleId === 'RULE_AFIB_HR_LOW' ||
     r.ruleId === 'RULE_TACHY_HR' ||
-    r.ruleId === 'RULE_BRADY_HR_SYMPTOMATIC' ||
-    r.ruleId === 'RULE_BRADY_HR_ASYMPTOMATIC'
+    r.ruleId === 'RULE_BRADY_HR_SYMPTOMATIC'
   ) {
     return 'hr'
   }
@@ -305,10 +306,11 @@ export class AlertEngineService {
         this.logEvaluationError(payload.entryId, err)
       }
 
-      // Gap 1 fix (2026-07-13) — count DeviationAlert rows this entry produced
-      // and emit ENTRY_EVALUATED so the N7 logged-confirmation listener can
-      // decide whether to append "Looking good — keep it up!" based on the
-      // engine's actual verdict (not just the BP-band predicate). By this
+      // Count DeviationAlert rows this entry produced and emit ENTRY_EVALUATED
+      // with the verdict. (L-6, 2026-07-14 — the logged-confirmation listener
+      // that consumed this was removed; the "Looking good" confirmation is now
+      // an in-app success screen. The event is retained for any future
+      // post-evaluation consumer and is harmless with zero listeners.) By this
       // point evaluate() has awaited every persistAlert transaction (see
       // withDeadlockRetry + prisma.$transaction inside persistAlert), so all
       // committed rows are visible to the count. Wrapped in try/catch so a
@@ -759,10 +761,13 @@ export class AlertEngineService {
           claimedRule === 'RULE_SYMPTOM_OVERRIDE_PREGNANCY' &&
           session.symptoms.ruqPain
         ) {
+          // V-05 sweep — the message names pregnancy + ruqPain, so pairing it
+          // with user=<id> discloses "patient X is pregnant with RUQ pain".
+          // Keep the opaque entry handle only (access-controlled to resolve).
           this.logger.log(
             `Symptom-override suppressed: pregnancy override ` +
               `fired on ruqPain — RULE_SYMPTOM_OVERRIDE_GENERAL skipped. ` +
-              `user=${session.userId} entry=${session.entryId}`,
+              `entry=${session.entryId}`,
           )
         }
         continue
@@ -1248,8 +1253,13 @@ export class AlertEngineService {
       this.logger,
     )
 
+    // V-05 sweep — `result.reason` embeds raw clinical values (e.g. "confirmatory
+    // reading 180/120 …" for a confirmed emergency). ruleId + tier + userId
+    // already say WHAT fired for WHOM; the narrative + all vitals live on the
+    // DeviationAlert row (`upserted.id`), access-controlled and audited. Log the
+    // row id as the correlation handle instead of the PHI-bearing reason.
     this.logger.log(
-      `Alert fired: ${result.ruleId} (${result.tier}) for user ${session.userId} — ${result.reason}`,
+      `Alert fired: ${result.ruleId} (${result.tier}) for user ${session.userId} — alert=${upserted.id}`,
     )
 
     // Phase/7 — renamed from ANOMALY_TRACKED and enriched with tier + ruleId so
@@ -1268,8 +1278,12 @@ export class AlertEngineService {
     // threshold first changed 160→140. Fire-and-forget; never blocks the
     // alert. Idempotent: only on the patient's FIRST RULE_CAD_HIGH alert.
     void this.maybeNotifyCadThresholdRamp(session, ctx, result).catch((err) =>
+      // V-05 sweep — only CAD patients reach this path, so `user=<id>` here is
+      // a condition disclosure (patient X has CAD). Log the opaque entry handle
+      // instead — resolves to the patient only via the access-controlled DB,
+      // matching the AFib-gate log's standard below.
       this.logger.warn(
-        `CAD threshold-ramp notice failed for user ${session.userId}: ${
+        `CAD threshold-ramp notice failed for entry ${session.entryId}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       ),
@@ -1314,7 +1328,10 @@ export class AlertEngineService {
     })
   }
 
-  private legacyTypeFor(result: RuleResult, session: SessionAverage): 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'WEIGHT' | 'MEDICATION_ADHERENCE' {
+  // N-7 (Duwaragie 2026-07-14 triage) — 'WEIGHT' removed from the return
+  // union. No branch has returned it since the Cluster 6 rewrite; enum
+  // value dropped from DeviationType in the same PR (schema + migration).
+  private legacyTypeFor(result: RuleResult, session: SessionAverage): 'SYSTOLIC_BP' | 'DIASTOLIC_BP' | 'MEDICATION_ADHERENCE' {
     // Map new tier/ruleId back to legacy DeviationType for the @@unique
     // constraint until it can be dropped (phase/7+).
     if (

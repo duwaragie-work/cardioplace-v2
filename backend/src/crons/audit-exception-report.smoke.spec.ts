@@ -11,14 +11,19 @@
 // DB. This is DI-only wiring verification.
 import { jest } from '@jest/globals'
 import { Module } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { EventEmitter2, EventEmitterModule } from '@nestjs/event-emitter'
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule'
 import { Test, TestingModule } from '@nestjs/testing'
 import { ClsModule } from 'nestjs-cls'
 import { AuditFailureTallyService } from '../common/audit/audit-failure-tally.service.js'
 import { CRON_LABEL_TO_PRINCIPAL } from '../common/cls/system-principals.js'
+import { EmailService } from '../email/email.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { AUTH_EVENTS } from '../auth/auth.events.js'
 import { AuditExceptionReportService } from './audit-exception-report.service.js'
 import { AuditExceptionWriter } from './audit-exception-report/audit-exception-writer.js'
+import { RealtimeFailedAuthService } from './audit-exception-report/realtime-failed-auth.service.js'
 
 function fakePrisma() {
   return {
@@ -44,12 +49,18 @@ function fakePrisma() {
   imports: [
     ClsModule.forRoot({ global: true, middleware: { mount: false } }),
     ScheduleModule.forRoot(),
+    // EventEmitter must be present so Nest's @OnEvent discovery subscribes the
+    // real-time evaluator — this is what the real-time-path smoke test exercises.
+    EventEmitterModule.forRoot({ wildcard: false }),
   ],
   providers: [
     { provide: PrismaService, useValue: fakePrisma() },
+    { provide: EmailService, useValue: { sendEmail: jest.fn() } },
+    { provide: ConfigService, useValue: { get: () => undefined } },
     AuditFailureTallyService,
     AuditExceptionWriter,
     AuditExceptionReportService,
+    RealtimeFailedAuthService,
   ],
 })
 class N7SmokeModule {}
@@ -74,6 +85,18 @@ describe('N7 smoke — Nest DI wiring', () => {
   it('resolves AuditExceptionWriter', () => {
     const writer = mod.get(AuditExceptionWriter)
     expect(writer).toBeInstanceOf(AuditExceptionWriter)
+  })
+
+  it('resolves RealtimeFailedAuthService', () => {
+    expect(mod.get(RealtimeFailedAuthService)).toBeInstanceOf(RealtimeFailedAuthService)
+  })
+
+  it('subscribes the real-time evaluator to AUTH_EVENTS.FAILURE (@OnEvent wired)', () => {
+    // Nest's @OnEvent discovery runs during init(); it registers the handler on
+    // the singleton EventEmitter2. A registered listener here proves the
+    // decorator was picked up. (Behaviour is covered by the unit spec.)
+    const emitter = mod.get(EventEmitter2)
+    expect(emitter.hasListeners(AUTH_EVENTS.FAILURE)).toBe(true)
   })
 
   it('resolves AuditFailureTallyService', () => {

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -56,6 +57,68 @@ export class TestControlController {
     }
   }
 
+  /**
+   * Seed N failed-auth rows for one identifier (2026-07-17).
+   *
+   * Exists because V-03's rate limiter now — correctly — makes the old driver
+   * impossible: qa/tests/74 drove the CRITICAL tier by POSTing 50 wrong OTPs,
+   * and 5/60s per ip:email stops that at 5. See TestControlService.seedFailedAuth
+   * for why this is the faithful path rather than a shortcut (the rows go through
+   * the same authLog.create extension that emits AUTH_EVENTS.FAILURE in prod).
+   *
+   * Same gate as every route here: prod hard-block + ENABLE_TEST_CONTROL +
+   * secret. `count` is capped so this can never be used as an amplifier.
+   */
+  @Post('auth/seed-failed')
+  @HttpCode(200)
+  async seedFailedAuth(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { identifier: string; count: number; ipAddress?: string },
+  ) {
+    this.assertAuthorized(secret)
+    if (!body?.identifier) {
+      throw new BadRequestException('identifier is required')
+    }
+    const count = Number(body?.count ?? 0)
+    if (!Number.isInteger(count) || count < 1 || count > 200) {
+      throw new BadRequestException('count must be an integer 1..200')
+    }
+    return this.svc.seedFailedAuth(body.identifier, count, body.ipAddress)
+  }
+
+  /**
+   * Flip the auth rate limiter on/off at runtime (2026-07-17).
+   *
+   * The qa suite runs with AUTH_THROTTLE_DISABLED=1 because ~100 specs sign in
+   * as a handful of shared seed accounts and would otherwise trip V-03's 5/60s
+   * limit on their own auth. But the spec that PROVES the limiter
+   * (tests/75-auth-rate-limiting) needs it ON. AuthThrottlerGuard.shouldSkip
+   * reads process.env live on every request, so that spec toggles it around its
+   * own block instead of forcing a whole separate backend process.
+   *
+   * Same prod hard-block as every route here; NODE_ENV=production also makes the
+   * guard ignore the flag regardless, so this cannot weaken a real deployment.
+   */
+  @Post('auth/throttle')
+  @HttpCode(200)
+  async setThrottle(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { enabled: boolean },
+  ) {
+    this.assertAuthorized(secret)
+    if (typeof body?.enabled !== 'boolean') {
+      throw new BadRequestException('enabled (boolean) is required')
+    }
+    // enabled=true  → limiter active  → flag cleared
+    // enabled=false → limiter skipped → flag set
+    if (body.enabled) {
+      delete process.env.AUTH_THROTTLE_DISABLED
+    } else {
+      process.env.AUTH_THROTTLE_DISABLED = '1'
+    }
+    return { throttleEnabled: body.enabled }
+  }
+
   // ─── Cron drivers ───────────────────────────────────────────────────────
   @Post('cron/escalation/run')
   @HttpCode(200)
@@ -103,6 +166,39 @@ export class TestControlController {
   // F33 — drive the medication-hold escalation ladder on demand instead of
   // waiting for the daily 15:00 UTC cron. Lets the audit + Playwright suites
   // backdate a hold then fire the scan synchronously.
+  // Support housekeeping — drive both sweeps on demand. `autoCloseResolvedTickets`
+  // and `nudgeAwaitingPatientTickets` take an injectable `now`, so a spec proves
+  // RESOLVED → CLOSED (or a 3-day-silent nudge) by passing a future timestamp
+  // instead of backdating rows or waiting for the 03:00/04:00 crons.
+  @Post('cron/support-auto-close/run')
+  @HttpCode(200)
+  async runSupportAutoClose(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { now?: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.runSupportAutoClose(body?.now ? new Date(body.now) : new Date())
+  }
+
+  @Post('cron/support-nudge/run')
+  @HttpCode(200)
+  async runSupportNudge(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { now?: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.runSupportNudge(body?.now ? new Date(body.now) : new Date())
+  }
+
+  /** Clear test-scoped support tickets so the rate-limit counters reset —
+   *  without this the support specs 429 each other on a local re-run. */
+  @Post('support/reset')
+  @HttpCode(200)
+  async resetSupport(@Headers('x-test-control-secret') secret: string) {
+    this.assertAuthorized(secret)
+    return this.svc.resetSupportTickets()
+  }
+
   @Post('cron/medication-hold-escalation/run')
   @HttpCode(200)
   async runMedicationHoldEscalation(
@@ -527,6 +623,43 @@ export class TestControlController {
   ) {
     this.assertAuthorized(secret)
     await this.svc.setOnboardingStatus(body.userId, body.status)
+    return { ok: true }
+  }
+
+  // Onboarding suite (spec 03, A1–A5) — roll a patient back to cold un-onboarded
+  // state (clears identity/reminder/consent + policy_acknowledged AuthLog rows).
+  // Keyed by email; returns the id for follow-up calls. Replaces the proof
+  // specs' `docker exec psql` reset so the suite runs in CI over HTTP.
+  @Post('reset/onboarding')
+  @HttpCode(200)
+  async resetOnboarding(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { email: string },
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.resetOnboarding(body.email)
+  }
+
+  // A5 duplicate-consent assertion — count a user's policy_acknowledged rows.
+  @Get('audit/policy-ack-count')
+  async countPolicyAck(
+    @Headers('x-test-control-secret') secret: string,
+    @Query('userId') userId: string,
+  ) {
+    this.assertAuthorized(secret)
+    return this.svc.countPolicyAck(userId)
+  }
+
+  // A5 version-awareness — force a stale acknowledged version so onboarding
+  // re-shows the privacy step (simulates a POLICY_VERSION bump).
+  @Post('user/set-policy-ack-version')
+  @HttpCode(200)
+  async setPolicyAckVersion(
+    @Headers('x-test-control-secret') secret: string,
+    @Body() body: { email: string; version: string },
+  ) {
+    this.assertAuthorized(secret)
+    await this.svc.setPolicyAckVersion(body.email, body.version)
     return { ok: true }
   }
 

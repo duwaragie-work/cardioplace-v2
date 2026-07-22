@@ -28,10 +28,20 @@ export const T = {
   // ─── Patient: onboarding ────────────────────────────────────────────────
   onboarding: {
     nameInput: 'onboarding-name-input',
-    dobInput: 'onboarding-dob-input',
-    timezoneSelect: 'onboarding-timezone-select',
+    // NOTE: no dob/timezone selectors — DOB moved to clinical-intake A1 and
+    // timezone is derived from the browser, never asked here.
+    // Step 1 of 2 — identity (name + comm preference).
     submitBtn: 'onboarding-submit-btn',
     skipBtn: 'onboarding-skip-btn',
+    stepIndicator: 'onboarding-step-indicator',
+    // Step 2 of 2 — reminders (daily time + quiet hours). No Skip: daily
+    // reminders are always-on (Patient Reminder spec §1D), so Continue is the
+    // only exit.
+    remindersSubmitBtn: 'onboarding-reminders-submit-btn',
+    remindersBackBtn: 'onboarding-reminders-back-btn',
+    reminderTime: 'onboarding-reminder-time',
+    quietStart: 'onboarding-quiet-start',
+    quietEnd: 'onboarding-quiet-end',
     // Privacy/trust step (V2-E Gap 7) — shown FIRST, before the profile form.
     agreeTerms: 'onboarding-agree-terms',
     privacyContinueBtn: 'onboarding-privacy-continue-btn',

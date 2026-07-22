@@ -67,3 +67,21 @@ export function kgToLbs(kg: number): number {
   if (!Number.isFinite(kg) || kg <= 0) return 0
   return Math.round((kg / KG_PER_LB) * 10) / 10
 }
+
+/**
+ * Convert a kilogram DELTA to pounds.
+ *
+ * Deliberately separate from `kgToLbs`, which returns 0 for any non-positive
+ * input. A weight *delta* is legitimately negative (the patient lost weight)
+ * and legitimately zero, so running a delta through `kgToLbs` would silently
+ * report a 3 kg LOSS as 0 — the sign would vanish. Use this for differences,
+ * `kgToLbs` for absolute weights.
+ *
+ * Introduced with the HF-decompensation unit fix: the rule compared a kg delta
+ * against a threshold constant named `_LBS`, so it fired at 2 kg (4.41 lbs)
+ * while its clinical spec (HF-ARC 2024, Manisha) says 2 lbs.
+ */
+export function kgDeltaToLbs(deltaKg: number): number {
+  if (!Number.isFinite(deltaKg)) return 0
+  return Math.round((deltaKg / KG_PER_LB) * 10) / 10
+}

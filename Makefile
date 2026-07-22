@@ -13,6 +13,9 @@
 #
 # Other:
 #   make install        # npm install at root (installs all workspaces)
+#                       # then run `npm run build:shared` once before `make dev`
+#                       # — the backend resolves @cardioplace/shared via its
+#                       # built dist/, which a fresh clone does not have.
 #   make stop           # kill anything bound to :3000/:3001/:4000
 #   make restart        # stop + clean .next caches + dev
 #   make docker-up      # docker compose up --build

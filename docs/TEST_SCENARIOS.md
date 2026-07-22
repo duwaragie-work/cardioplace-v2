@@ -312,7 +312,7 @@ Per-rule fixture defaults: BP `125/75`, pulse `72`, no symptoms, no suboptimal.
 | Pulse | Symptoms | Meds | Expected |
 |---|---|---|---|
 | 48 | `chestPainOrDyspnea` | — | `RULE_BRADY_HR_SYMPTOMATIC` |
-| 38 | none | — | `RULE_BRADY_HR_ASYMPTOMATIC` (<40 regardless) |
+| 38 | none | — | `RULE_BRADY_ABSOLUTE` (<40 regardless) |
 | 55 | none | — | `null` |
 | 55 | `chestPainOrDyspnea` | `Metoprolol, BETA_BLOCKER` | `null` (BB suppression 50–60) |
 | 48 | `chestPainOrDyspnea` | `BETA_BLOCKER` | `RULE_BRADY_HR_SYMPTOMATIC` (below 50 fires) |

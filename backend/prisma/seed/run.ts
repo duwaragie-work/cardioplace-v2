@@ -7,8 +7,10 @@ import { seedPractices } from './practices.js'
 import { seedAdmins } from './admins.js'
 import { seedPatients } from './patients.js'
 import { seedState } from './state.js'
+import { seedE2EOnboardingPatient } from './e2e-onboarding.js'
 import { seedDisplayIds } from './display-ids.js'
 import { seedSystemPrincipals } from './system-principals.js'
+import { seedFaqContent } from './content-faq.js'
 import { prisma } from './helpers.js'
 
 export async function runSeed() {
@@ -18,9 +20,14 @@ export async function runSeed() {
   await seedPatients(practices, admins)
 
   // Pre-seeded alerts/notifications/audit are dev/test fixtures only —
-  // a production seed must never insert them.
+  // a production seed must never insert them. The un-onboarded E2E patient is
+  // likewise test-only (perma-OTP, synthetic email).
   if (process.env.NODE_ENV !== 'production') {
     await seedState(practices, admins)
+    await seedE2EOnboardingPatient(admins)
+    // Starter Help Center / FAQ fixtures — dev/test only. Production FAQ content
+    // comes through the content-authoring + admin review workflow, not a seed.
+    await seedFaqContent()
   }
 
   // System-principal registry (audit) — runs in EVERY environment, not just

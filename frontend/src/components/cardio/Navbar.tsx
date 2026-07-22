@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 import { Bell, Menu, X, Globe, User as UserIcon, Settings, LifeBuoy, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { getAlerts, getNotifications } from '@/lib/services/journal.service';
+import { countInAppNotifications } from '@/lib/notification-badge';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { ALL_LOCALES, isLocaleSupported } from '@/i18n';
 
@@ -50,13 +51,14 @@ export default function Navbar() {
       }
       const consolidatedAlertCount = byEntry.size;
 
-      // Only count PUSH notifications (EMAIL is for tracking)
-      const pushNotifCount = notifs.filter((n: { channel?: string }) =>
-        !n.channel || n.channel === 'PUSH',
-      ).length;
+      // Count exactly what /notifications renders in its in-app inbox, so the
+      // badge and the page can never disagree. Extracted to lib/notification-badge
+      // so the rule is unit-testable — see its docstring for the DASHBOARD /
+      // SUPPORT_* regression this guards against.
+      const inAppNotifCount = countInAppNotifications(notifs);
 
       setAlertCount((prev) => {
-        const next = consolidatedAlertCount + pushNotifCount;
+        const next = consolidatedAlertCount + inAppNotifCount;
         return prev === next ? prev : next;
       });
     };
@@ -119,6 +121,11 @@ export default function Navbar() {
     // have to register a new nav.readings key across all 5 locales.
     { labelKey: 'readings.title' as const, href: '/readings' },
     { labelKey: 'nav.chat' as const, href: '/chat' },
+    // Support is a primary destination, not a Settings sub-page (agreed scope:
+    // "its own nav item, not buried in settings"). Being in `links` is also what
+    // makes it reachable on MOBILE — the mobile overlay renders only this array,
+    // so while Support lived solely in the avatar dropdown it was desktop-only.
+    { labelKey: 'nav.support' as const, href: '/support' },
   ];
 
   return (
@@ -328,7 +335,7 @@ export default function Navbar() {
                   {t('settings.title')}
                 </Link>
                 <Link
-                  href="/support/my-tickets"
+                  href="/support"
                   role="menuitem"
                   data-testid="navbar-menu-support"
                   onClick={() => setMenuOpen(false)}

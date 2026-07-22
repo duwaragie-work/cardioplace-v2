@@ -156,6 +156,59 @@ export async function seedAdmins() {
   console.log(`  ops: ${opsUser.email}`)
   console.log(`  coordinator: ${coordinator.email} (practice seed-cedar-hill)`)
 
+  // ─── Out-of-scope PROVIDER (V-01/V-04 IDOR spec harness) ─────────────────
+  // PROVIDER role linked ONLY to the IDOR harness practice (seed-idor-harness,
+  // created in practices.ts). That practice holds ZERO patients, so every
+  // seed alert lives in a different practice than this actor's active
+  // context. PatientAccessService.assertCanAccessPatient's inActiveScope()
+  // check trips the 403 branch on every alert, which is exactly what spec 76
+  // (V-01/V-04 IDOR) needs to prove the HTTP-layer scope gate.
+  //
+  // Why one membership and not zero: auth.service.ts:224-232's
+  // resolvePracticeContext blocks sign-in for PROVIDERs/MDs with zero
+  // PracticeProvider (or PracticeMedicalDirector) rows — "No practice
+  // membership — contact your admin". A single membership on a harness
+  // practice satisfies that guard AND keeps the actor out-of-scope for every
+  // real patient. Two memberships would trigger the practice-selector flow,
+  // which the spec's headless apiSignIn doesn't drive.
+  //
+  // Using the primary/backup/multi-practice providers for this spec would
+  // legitimately return 200 (they're all Cedar Hill members) — see
+  // qa/tests/76-alert-scope-idor.spec.ts for the actor rationale.
+  //
+  // NOT gated behind SEED_TEST_FIXTURES: spec 76 is a security-critical
+  // finding that must run in every CI shard, and the row cost is trivial
+  // (one User, one Practice, one PracticeProvider join).
+  const outOfScopeProvider = await prisma.user.upsert({
+    where: { email: 'outofscope-provider@cardioplace.test' },
+    update: {},
+    create: {
+      email: 'outofscope-provider@cardioplace.test',
+      pwdhash,
+      name: 'Dr. Ines Vega',
+      roles: ['PROVIDER'],
+      isVerified: true,
+      onboardingStatus: 'COMPLETED',
+      timezone: 'America/New_York',
+      displayId: await staffDisplayId('outofscope-provider@cardioplace.test'),
+    },
+  })
+  await seedPermaOtp('outofscope-provider@cardioplace.test', otpHash)
+  await prisma.practiceProvider.upsert({
+    where: {
+      practiceId_userId: {
+        practiceId: 'seed-idor-harness',
+        userId: outOfScopeProvider.id,
+      },
+    },
+    update: {},
+    create: {
+      practiceId: 'seed-idor-harness',
+      userId: outOfScopeProvider.id,
+    },
+  })
+  console.log(`  out-of-scope provider: ${outOfScopeProvider.email} (single membership: seed-idor-harness — V-01/V-04 harness)`)
+
   // ─── Multi-practice provider fixture (phase/practice-identity) ───────────
   // Behind SEED_TEST_FIXTURES so production seeds stay single-practice. Drives
   // Playwright specs 34/35/36: this provider is a member of BOTH Cedar Hill
@@ -223,6 +276,7 @@ export async function seedAdmins() {
     medicalDirector,
     opsUser,
     coordinator,
+    outOfScopeProvider,
     multiPracticeProvider,
   }
 }

@@ -1,5 +1,9 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { ClsService } from 'nestjs-cls'
+import { runAsCronActor } from '../common/cls/cron-actor.util.js'
 import { PrismaService } from '../prisma/prisma.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
+import { SupportService } from '../support/support.service.js'
 import { AuditExceptionReportService } from '../crons/audit-exception-report.service.js'
 import { DailyReminderService, type DailyReminderScanSummary } from '../crons/daily-reminder.service.js'
 import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
@@ -15,6 +19,19 @@ import { createHash, randomBytes } from 'node:crypto'
 /**
  * Helpers backing the /test-control HTTP endpoints. Pure delegation —
  * the controller layer handles auth/secret + DTO shape.
+ *
+ * N-2 residual (2026-07-17) — the cron drivers below call each service's inner
+ * `runScan` / `run` / `dispatchT0ForAlert` DIRECTLY, which skips the `@Cron`
+ * (or `@OnEvent`) method that establishes the system-principal CLS scope. Every
+ * PHI write and email those scans emit was therefore attributed to whoever hit
+ * the test-control endpoint — or to nobody (`system-principal-unknown`) —
+ * instead of the cron's principal. That is the same defect N-2 fixed on the
+ * production paths, arriving through the back door: these routes are @Public()
+ * and HTTP-reachable wherever ENABLE_TEST_CONTROL is on (see V-08).
+ *
+ * Each driver now re-establishes the SAME label its real scheduler uses, so a
+ * test-driven run is audited identically to a scheduled one — which is the
+ * point of driving the real cron rather than a copy of it.
  */
 @Injectable()
 export class TestControlService {
@@ -22,6 +39,9 @@ export class TestControlService {
 
   constructor(
     private readonly prisma: PrismaService,
+    // N-2 residual — needed to re-establish the cron actor scope the @Cron
+    // wrappers would otherwise provide.
+    private readonly cls: ClsService,
     // N3 (2026-07-13) — gap-alert is replaced by daily-reminder. Test-control
     // now drives the new cron; the qa helper's old runGapAlert() call is
     // rewired to hit runDailyReminderScan() below.
@@ -32,12 +52,18 @@ export class TestControlService {
     // N7 (2026-07-11) — Playwright coverage for the audit-exception-report
     // cron. Same pattern as the other cron drivers above.
     private readonly auditExceptionReport: AuditExceptionReportService,
+    private readonly encryption: EncryptionService,
+    // Support housekeeping sweeps (auto-close / awaiting-reply nudge) so the
+    // Playwright suite can drive them instead of waiting on the nightly crons.
+    private readonly support: SupportService,
   ) {}
 
   // ─── Cron drivers ───────────────────────────────────────────────────────
   async runEscalationScan(now: Date): Promise<{ scanned: number; dispatched: number }> {
     const before = await this.prisma.escalationEvent.count()
-    await this.escalation.runScan(now)
+    await runAsCronActor(this.cls, 'cron-escalation-ladder', () =>
+      this.escalation.runScan(now),
+    )
     const after = await this.prisma.escalationEvent.count()
     return { scanned: 1, dispatched: Math.max(0, after - before) }
   }
@@ -49,7 +75,11 @@ export class TestControlService {
    * Idempotent + error-propagating (see EscalationService.dispatchT0ForAlert).
    */
   async fireEscalationT0(alertId: string): Promise<{ ok: true }> {
-    await this.escalation.dispatchT0ForAlert(alertId)
+    // 'engine-alert-generator' — the label handleAlertCreated uses for the same
+    // T+0 dispatch, so a driven T+0 audits identically to an event-driven one.
+    await runAsCronActor(this.cls, 'engine-alert-generator', () =>
+      this.escalation.dispatchT0ForAlert(alertId),
+    )
     return { ok: true }
   }
 
@@ -59,18 +89,26 @@ export class TestControlService {
    * assert on tier-selection + care-team fan-out counts, not just totals.
    */
   async runDailyReminderScan(now: Date): Promise<DailyReminderScanSummary> {
-    return this.dailyReminder.runScan(now)
+    return runAsCronActor(this.cls, 'cron-daily-reminder', () =>
+      this.dailyReminder.runScan(now),
+    )
   }
 
   async runMonthlyReaskScan(now: Date): Promise<{ scanned: number; reasked: number }> {
-    const sent = await this.monthlyReask.runScan(now)
+    const sent = await runAsCronActor(this.cls, 'cron-monthly-reask', () =>
+      this.monthlyReask.runScan(now),
+    )
     return { scanned: 1, reasked: sent }
   }
 
   async runMedicationHoldEscalationScan(
     now: Date,
   ): Promise<{ scanned: number; rungsFired: number }> {
-    const fired = await this.medicationHoldEscalation.runScan(now)
+    const fired = await runAsCronActor(
+      this.cls,
+      'cron-medication-hold-escalation',
+      () => this.medicationHoldEscalation.runScan(now),
+    )
     return { scanned: 1, rungsFired: fired }
   }
 
@@ -87,8 +125,60 @@ export class TestControlService {
     stickySkipped: number
     failedDetectors: number
   }> {
-    const summary = await this.auditExceptionReport.run(now)
+    const summary = await runAsCronActor(
+      this.cls,
+      'cron-audit-exception-report',
+      () => this.auditExceptionReport.run(now),
+    )
     return { scanned: 1, ...summary }
+  }
+
+  /**
+   * Seed N failed-auth rows for one identifier, so a spec can drive the
+   * repeated-failed-auth evaluator past a threshold.
+   *
+   * WHY THIS EXISTS (2026-07-17). qa/tests/74 used to drive the CRITICAL tier by
+   * POSTing 50 wrong OTPs to /otp/verify. V-03's rate limiter now (correctly)
+   * rejects that at 5/60s per ip:email — the limiter exists precisely to make
+   * "50 rapid failed logins for one account from one client" impossible, so the
+   * old driver can never reach 50 again. The scenario the CRITICAL tier is
+   * really for is a DISTRIBUTED attacker (50 IPs × 1 attempt each, which the
+   * per-ip:email limiter does not stop) — and a single test host cannot
+   * synthesise that over HTTP, because req.ip is the socket peer unless
+   * TRUST_PROXY_HOPS is set, and making it spoofable would be the bug main.ts
+   * deliberately avoids.
+   *
+   * So drive the evaluator at its real trigger instead of through the transport:
+   * `authFailureExtension` wraps `authLog.create` and emits AUTH_EVENTS.FAILURE
+   * for every `success: false` row. `this.prisma` IS the extended client, so
+   * these writes fire the evaluator on exactly the production path — only the
+   * HTTP hop (the part V-03 now blocks) is skipped.
+   *
+   * Rows mirror what verifyOtp's miss path writes (`otp_expired`, success:false,
+   * identifier = the email), so the detector groups them identically.
+   */
+  async seedFailedAuth(
+    identifier: string,
+    count: number,
+    ipAddress?: string,
+  ): Promise<{ seeded: number }> {
+    for (let i = 0; i < count; i += 1) {
+      await this.prisma.authLog.create({
+        data: {
+          event: 'otp_expired',
+          identifier,
+          method: 'otp',
+          // Vary the IP by default so the row set looks like the distributed
+          // burst the CRITICAL tier is meant to catch, and so the detector's
+          // distinctIpCount evidence is meaningful rather than always 1.
+          ipAddress: ipAddress ?? `203.0.113.${i % 254}`,
+          userAgent: 'test-control/seedFailedAuth',
+          success: false,
+          errorCode: 'otp_not_found_or_expired',
+        },
+      })
+    }
+    return { seeded: count }
   }
 
   // ─── N4/N5/N6/N7 audit-read helpers ────────────────────────────────────
@@ -449,6 +539,52 @@ export class TestControlService {
   }
 
   /**
+   * Wipe test-scoped SupportTicket rows (cascading to replies + actions).
+   *
+   * `resetTestPatients` deliberately never touched the support tables, so
+   * tickets accumulated forever — and because BOTH support rate limits count
+   * SupportTicket rows in a time window (3/user/5min for authenticated intake,
+   * 5/IP/hour for the anonymous locked-out + public-contact doors), a local
+   * re-run of the support specs 429'd itself. Clearing these rows is what makes
+   * that suite deterministic outside a fresh CI database.
+   *
+   * Scoped two ways, both safe: seed/test emails on the `@cardioplace.test`
+   * domain, and loopback `ipAddress` (a real patient is never on 127.0.0.1/::1,
+   * and the anonymous specs submit arbitrary throwaway emails, so the IP is the
+   * only thing that identifies them).
+   */
+  async resetSupportTickets(): Promise<{ rowsDeleted: number }> {
+    const result = await this.prisma.supportTicket.deleteMany({
+      where: {
+        OR: [
+          { email: { endsWith: '@cardioplace.test' } },
+          { ipAddress: { in: ['127.0.0.1', '::1', '::ffff:127.0.0.1'] } },
+        ],
+      },
+    })
+    return { rowsDeleted: result.count }
+  }
+
+  /**
+   * Drive the support housekeeping sweeps on demand instead of waiting for the
+   * 03:00/04:00 crons. Both take an injectable `now`, so a spec proves
+   * RESOLVED → CLOSED by passing a future timestamp — no backdating, no waiting.
+   * Wrapped in the same CLS actor scopes the @Cron handlers use, so the writes
+   * attribute to the right system principal rather than a null actor.
+   */
+  async runSupportAutoClose(now: Date): Promise<{ closed: number }> {
+    return runAsCronActor(this.cls, 'cron-support-auto-close', async () => ({
+      closed: await this.support.autoCloseResolvedTickets(now),
+    }))
+  }
+
+  async runSupportNudge(now: Date): Promise<{ nudged: number }> {
+    return runAsCronActor(this.cls, 'cron-support-nudge', async () => ({
+      nudged: await this.support.nudgeAwaitingPatientTickets(now),
+    }))
+  }
+
+  /**
    * Cluster 8 §D — wipe ALL PatientMedication rows for a user. Niva's
    * setUserMedication dedupes by drugName, so swapping a test's med roster
    * (e.g., ACE → ARB-only for the angioedema ARB-variant test) requires
@@ -528,7 +664,18 @@ export class TestControlService {
               this.prisma.deviationAlert.deleteMany({ where: { userId } }),
               this.prisma.journalEntry.deleteMany({ where: { userId } }),
             ],
-            { isolationLevel: 'Serializable' },
+            {
+              isolationLevel: 'Serializable',
+              // Prisma's default interactive-transaction timeout is 5s. Four
+              // serialized deleteManys across a patient's whole alert/journal
+              // history routinely exceed that on the shared managed Postgres
+              // once test data has accumulated, and the resulting P2028 is NOT
+              // a deadlock — so the retry predicate below rethrew it and the
+              // endpoint 500'd, silently leaving every spec's patient state
+              // un-reset. Same fix as the V-06 backfill needed.
+              timeout: 30_000,
+              maxWait: 10_000,
+            },
           )
         return {
           rowsDeleted:
@@ -550,9 +697,14 @@ export class TestControlService {
           // Prisma Cloud dev DB during Cluster 7 verification; the underlying
           // 40P01 doesn't surface to the typed code field through the adapter.
           (typeof e?.message === 'string' && e.message.includes('TransactionWriteConflict'))
-        if (!isDeadlock || attempt === MAX_ATTEMPTS) throw err
+        // P2028 = transaction timed out. Distinct from a deadlock but equally
+        // transient here: the delete volume varies with how much test data has
+        // piled up, so a retry (now with the 30s budget above) genuinely helps.
+        // Previously this fell straight through and 500'd the whole reset.
+        const isTxTimeout = e?.code === 'P2028'
+        if ((!isDeadlock && !isTxTimeout) || attempt === MAX_ATTEMPTS) throw err
         this.logger.warn(
-          `resetUser deadlock (attempt ${attempt}/${MAX_ATTEMPTS}) for ${userId} — retrying in 100ms`,
+          `resetUser ${isTxTimeout ? 'tx timeout' : 'deadlock'} (attempt ${attempt}/${MAX_ATTEMPTS}) for ${userId} — retrying in 100ms`,
         )
         await new Promise((r) => setTimeout(r, 100))
       }
@@ -618,6 +770,9 @@ export class TestControlService {
           changedBy: 'SYSTEM',
           changedByRole: VerifierRole.ADMIN,
           reason: 'Angioedema ACE/ARB contraindication flag set (#84 retro-upgrade)',
+          reasonEncrypted: this.encryption.encryptNullable(
+            'Angioedema ACE/ARB contraindication flag set (#84 retro-upgrade)',
+          ),
           now,
         })
       }
@@ -650,6 +805,64 @@ export class TestControlService {
     await this.prisma.user.update({
       where: { id: userId },
       data: { onboardingStatus: status },
+    })
+  }
+
+  /**
+   * Full onboarding-state reset for the E2E onboarding suite (spec 03, A1–A5).
+   * Rolls a patient back to cold: NOT_COMPLETED, no identity, no reminder
+   * preference, no consent — AND deletes their `policy_acknowledged` AuthLog
+   * rows so the A5 "no duplicate consent write" assertion starts from zero
+   * every run. Keyed by email so specs don't need a userId round-trip first;
+   * returns the id they'll use for subsequent test-control calls.
+   *
+   * Replaces the `docker exec psql` reset the proof specs used, so the suite
+   * is CI-runnable over HTTP. Test-infra only — gated by the controller.
+   */
+  async resetOnboarding(email: string): Promise<{ userId: string }> {
+    const user = await this.prisma.user.update({
+      where: { email },
+      data: {
+        onboardingStatus: 'NOT_COMPLETED',
+        name: null,
+        communicationPreference: null,
+        reminderPreferenceSet: false,
+        policyAcknowledgedAt: null,
+        acknowledgedPolicyVersion: null,
+      },
+      select: { id: true },
+    })
+    await this.prisma.authLog.deleteMany({
+      where: { userId: user.id, event: 'policy_acknowledged' },
+    })
+    return { userId: user.id }
+  }
+
+  /**
+   * Count a user's `policy_acknowledged` AuthLog rows. Drives the A5
+   * duplicate-consent assertion: after a re-ask on a second device the count
+   * must stay 1 (consent is recorded once, not per device).
+   */
+  async countPolicyAck(userId: string): Promise<{ count: number }> {
+    const count = await this.prisma.authLog.count({
+      where: { userId, event: 'policy_acknowledged' },
+    })
+    return { count }
+  }
+
+  /**
+   * Force a stored `acknowledgedPolicyVersion` (+ a consent timestamp) without
+   * driving the consent flow. Lets the A5 version-aware test simulate a patient
+   * who consented to an OLD policy version: onboarding must re-show the privacy
+   * step because the stored version no longer matches the current POLICY_VERSION.
+   */
+  async setPolicyAckVersion(email: string, version: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { email },
+      data: {
+        acknowledgedPolicyVersion: version,
+        policyAcknowledgedAt: new Date(),
+      },
     })
   }
 
@@ -1086,6 +1299,7 @@ export class TestControlService {
           newValue: (e.newValue ?? undefined) as never,
           discrepancyFlag: e.discrepancyFlag ?? false,
           rationale: e.rationale ?? null,
+          rationaleEncrypted: this.encryption.encryptNullable(e.rationale ?? null),
           ...(e.createdAtIso ? { createdAt: new Date(e.createdAtIso) } : {}),
         },
       })
@@ -1203,6 +1417,7 @@ export class TestControlService {
           afterHours: false,
           triggeredByResolution: false,
           reason: 'test-control.advanceLadderSteps',
+          reasonEncrypted: this.encryption.encryptNullable('test-control.advanceLadderSteps'),
         },
       })
       advanced.push(step.step)

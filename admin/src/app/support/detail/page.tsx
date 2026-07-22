@@ -1,0 +1,71 @@
+'use client';
+
+// B3 (static export) — was the dynamic /support/[id] route; now a static
+// /support/detail shell reading the opaque ticket id from `?id=`. The list stays
+// at /support. `useSearchParams` requires the Suspense boundary below.
+
+import { Suspense, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Shield } from 'lucide-react';
+import { useAuth } from '@/lib/auth-context';
+import { canManageSupport } from '@/lib/roleGates';
+import { readNavId } from '@/lib/nav-handoff';
+import SupportDetail from '@/components/support/SupportDetail';
+
+function SupportDetailContent() {
+  const router = useRouter();
+  // F1 — ticket id from `?id=` (deep-link) or sessionStorage (in-app click →
+  // bare route). URL wins; neither present → back to the queue.
+  const id = useSearchParams().get('id') ?? readNavId('supportDetail')?.id ?? '';
+  const { user, isLoading } = useAuth();
+
+  useEffect(() => {
+    if (!isLoading && !id) router.replace('/support');
+  }, [isLoading, id, router]);
+
+  if (isLoading) return null;
+  if (!user) return null;
+
+  if (!canManageSupport(user)) {
+    return (
+      <div
+        className="h-full flex items-center justify-center"
+        style={{ backgroundColor: 'var(--brand-background)' }}
+      >
+        <div className="text-center p-8 rounded-2xl bg-white max-w-sm" style={{ boxShadow: 'var(--brand-shadow-card)' }}>
+          <div
+            className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+            style={{ backgroundColor: 'var(--brand-alert-red-light)' }}
+          >
+            <Shield className="w-7 h-7" style={{ color: 'var(--brand-alert-red)' }} />
+          </div>
+          <h1 className="text-xl font-bold mb-2" style={{ color: 'var(--brand-text-primary)' }}>
+            403 Access Denied
+          </h1>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center px-4 py-2 rounded-full text-sm font-semibold text-white transition hover:opacity-90"
+            style={{ backgroundColor: 'var(--brand-primary-purple)' }}
+          >
+            Go to Dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full" style={{ backgroundColor: '#FAFBFF' }}>
+      <SupportDetail ticketId={id} />
+    </div>
+  );
+}
+
+export default function SupportDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <SupportDetailContent />
+    </Suspense>
+  );
+}

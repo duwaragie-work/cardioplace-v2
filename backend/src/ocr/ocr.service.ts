@@ -136,8 +136,10 @@ export class OcrService {
       result.sbp < SBP_MIN || result.sbp > SBP_MAX ||
       result.dbp < DBP_MIN || result.dbp > DBP_MAX
     ) {
+      // V-05: the rejected values are still the patient's reading. "which
+      // bound was breached" is the diagnostic; the numbers themselves are PHI.
       this.logger.warn(
-        `BP OCR — out-of-range values rejected for user ${userId}: ${result.sbp}/${result.dbp}`,
+        `BP OCR — out-of-range values rejected for user ${userId}`,
       )
       throw new BpOcrFailure('OUT_OF_RANGE', 'Numbers outside expected range')
     }
@@ -148,9 +150,12 @@ export class OcrService {
       result.pulse >= PULSE_MIN &&
       result.pulse <= PULSE_MAX
 
+    // V-05: confidence + whether a pulse was read are the OCR-quality signals
+    // worth logging; the extracted reading itself is PHI and is persisted (and
+    // audited) on JournalEntry.
     this.logger.log(
-      `BP OCR success for user ${userId}: ${result.sbp}/${result.dbp}` +
-        (pulseValid ? ` p${result.pulse}` : '') +
+      `BP OCR success for user ${userId}` +
+        (pulseValid ? ' pulse=read' : ' pulse=none') +
         ` confidence=${result.confidence.toFixed(2)}`,
     )
 

@@ -1,8 +1,26 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { AUTH_MARKER_COOKIE, AUTH_ROLE_COOKIE } from '@/lib/cookie-names'
+import {
+  AUTH_MARKER_COOKIE,
+  AUTH_ROLE_COOKIE,
+  ONBOARDED_MARKER_COOKIE,
+} from '@/lib/cookie-names'
 
-const PUBLIC_ROUTES = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/terms', '/privacy', '/auth/callback', '/auth/magic-link', '/activate', '/support/locked-out']
+const PUBLIC_ROUTES = ['/', '/home', '/about', '/contact', '/welcome', '/sign-in', '/terms', '/privacy', '/auth/callback', '/auth/magic-link', '/activate', '/support', '/support/locked-out',
+  // Healthcare legal set. Routes exist and resolve; copy is pending legal, so
+  // each is noindex (per-route metadata) and not linked from the footer/sitemap.
+  '/hipaa-notice', '/cookies', '/accessibility', '/nondiscrimination', '/telehealth-consent']
+
+/**
+ * Routes that must stay GATED even though a broader PUBLIC_ROUTES prefix covers
+ * them. PUBLIC_ROUTES is prefix-matched, so allow-listing the adaptive `/support`
+ * hub (which renders a signed-out subset) would otherwise drag every `/support/*`
+ * child public with it. `/support/my-tickets` renders a patient's own support
+ * threads, so without this it would (a) stop redirecting anonymous visitors to
+ * sign-in and (b) lose the `no-store` Cache-Control below — letting the browser
+ * restore the rendered threads from bfcache after logout.
+ */
+const PRIVATE_ROUTE_EXCEPTIONS = ['/support/my-tickets']
 
 const ADMIN_URL = process.env.NEXT_PUBLIC_ADMIN_URL || 'http://localhost:3001'
 
@@ -40,6 +58,24 @@ const ADMIN_ROLES = new Set([
   'COORDINATOR',
 ])
 
+// Patient-facing surfaces that require onboarding first. Deliberately a
+// list, not "everything non-public": /onboarding and /clinical-intake must
+// stay reachable, and gating them would loop.
+const ONBOARDING_GATED_ROUTES = [
+  '/dashboard',
+  '/readings',
+  '/check-in',
+  '/chat',
+  '/profile',
+  '/notifications',
+]
+
+function isOnboardingGated(path: string): boolean {
+  return ONBOARDING_GATED_ROUTES.some(
+    (r) => path === r || path.startsWith(r + '/'),
+  )
+}
+
 function hasAdminRole(rolesCookieValue: string | undefined): boolean {
   if (!rolesCookieValue) return false
   return rolesCookieValue
@@ -59,11 +95,15 @@ function buildAdminBridgeUrl(): URL {
 export function proxy(request: NextRequest) {
   const marker = request.cookies.get(AUTH_MARKER_COOKIE)?.value
   const rolesValue = request.cookies.get(AUTH_ROLE_COOKIE)?.value
+  const onboardedMarker = request.cookies.get(ONBOARDED_MARKER_COOKIE)?.value
   const path = request.nextUrl.pathname
 
-  const isPublic = PUBLIC_ROUTES.some(
-    (r) => path === r || path.startsWith(r + '/'),
-  )
+  // A private exception wins over a broader public prefix (see the const above).
+  const isPublic =
+    !PRIVATE_ROUTE_EXCEPTIONS.some(
+      (r) => path === r || path.startsWith(r + '/'),
+    ) &&
+    PUBLIC_ROUTES.some((r) => path === r || path.startsWith(r + '/'))
 
   // Admin-role users (provider, medical director, ops, super admin) belong
   // on the admin subdomain, not the patient app.
@@ -79,6 +119,19 @@ export function proxy(request: NextRequest) {
   // Already logged in, trying to access auth pages → redirect to dashboard
   if (marker && (path === '/welcome' || path === '/sign-in')) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
+  }
+
+  // Un-onboarded patients belong on /onboarding. Without this, typing a URL
+  // walked straight past onboarding into the app — including the 5-step
+  // clinical check-in. The onboarding page's own client-side redirect never
+  // saw those navigations.
+  //
+  // Explicit '0' only: an absent cookie means "unknown" (a session predating
+  // this cookie), and bouncing those to /onboarding would be worse than
+  // letting them through — AuthProvider writes the real bit on mount.
+  // /onboarding itself is never gated, or this would loop.
+  if (marker && onboardedMarker === '0' && isOnboardingGated(path)) {
+    return NextResponse.redirect(new URL('/onboarding', request.url))
   }
 
   const response = NextResponse.next()

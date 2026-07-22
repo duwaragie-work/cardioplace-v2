@@ -128,11 +128,14 @@ model JournalEntry {
   // tab as a "possible measurement artifact" note.
   narrowPpArtifact Boolean @default(false)
 
-  otherSymptoms String[]
+  otherSymptoms          String[]
+  otherSymptomsEncrypted String?
 
-  teachBackAnswer  String?
-  teachBackCorrect Boolean?
-  notes            String?
+  teachBackAnswer          String?
+  teachBackAnswerEncrypted String?
+  teachBackCorrect         Boolean?
+  notes                    String?
+  notesEncrypted           String?
   source           EntrySource @default(MANUAL)
   sourceMetadata   Json?
 
@@ -196,7 +199,11 @@ enum DelayBand {
 enum DeviationType {
   SYSTOLIC_BP
   DIASTOLIC_BP
-  WEIGHT
+  // N-7 (Duwaragie 2026-07-14 triage) — WEIGHT removed. Unreachable —
+  // `legacyTypeFor` (alert-engine.service.ts) never returned it since the
+  // Cluster 6 rewrite, and no rule emits a weight-axis DeviationAlert.
+  // Enum recreation migration at
+  // prisma/migrations/20260716140000_drop_deviation_type_weight/migration.sql.
   MEDICATION_ADHERENCE
 }
 
@@ -217,6 +224,12 @@ enum NotificationChannel {
   EMAIL
   PHONE
   DASHBOARD
+  // L4 (2026-07-14) — SMS reminders. Additive 4th channel on the N2 reminder
+  // dispatcher; an SMS Notification row is the §164.528 send record (the body
+  // stored is the PHI-free directional nudge, never the reminder's own copy).
+  // NOTE: `PHONE` above is the escalation ladder's voice-call channel — it is
+  // NOT SMS. Keep them distinct.
+  SMS
 }
 
 enum EscalationLevel {

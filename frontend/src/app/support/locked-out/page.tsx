@@ -7,21 +7,22 @@ import Link from 'next/link';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { submitLockedOut } from '@/lib/services/support.service';
+import { takeSupportEmail } from '@/lib/support-prefill';
 
 export default function LockedOutPage() {
   const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [description, setDescription] = useState('');
-  const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // Pre-fill the email from the sign-in "reactivate" CTA (?email=...). Read the
-  // URL directly so this page needs no Suspense boundary for useSearchParams.
+  // Pre-fill the email from the sign-in "reactivate" CTA. 1.5 — carried via
+  // sessionStorage, NOT a `?email=` query param, so patient PII never lands in
+  // the URL / access log. One-shot read (cleared on take).
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
-    const e = new URLSearchParams(window.location.search).get('email');
+    const e = takeSupportEmail();
     if (e) setEmail(e);
   }, []);
 
@@ -34,7 +35,6 @@ export default function LockedOutPage() {
       const r = await submitLockedOut({
         email: email.trim(),
         description: description.trim(),
-        contactPhone: phone.trim() || undefined,
       });
       setDone(r.ticketNumber);
     } catch (e2) {
@@ -95,13 +95,9 @@ export default function LockedOutPage() {
               data-testid="locked-out-description"
               className="w-full text-[14px] rounded-xl border border-slate-200 p-3 outline-none resize-y"
             />
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder={t('support.locked.phone')}
-              aria-label={t('support.locked.phone')}
-              className="w-full text-[14px] rounded-xl border border-slate-200 p-3 outline-none"
-            />
+            {/* L-3 — the "Callback phone" field was removed: the phone-callback
+                implication was dropped elsewhere (Fix 6/7), so this form must not
+                collect a number. The backend rejects contactPhone too. */}
             {err && <p className="text-[13px] text-red-600">{err}</p>}
             <button
               type="submit"

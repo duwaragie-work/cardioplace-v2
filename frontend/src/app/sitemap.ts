@@ -1,5 +1,10 @@
 import type { MetadataRoute } from 'next'
 
+// B3 (static export) — prerender to a static /sitemap.xml file. Without this,
+// `output: 'export'` errors ("dynamic/revalidate not configured"). It derives
+// only from NEXT_PUBLIC_PATIENT_BASE_URL, so it's safe to fully static.
+export const dynamic = 'force-static'
+
 /**
  * /sitemap.xml — Next 16 file convention. Closes B9 from
  * qa/reports/RESULTS.md (was returning text/html via the catch-all). Lists
@@ -14,6 +19,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     { url: `${BASE_URL}/`, lastModified, changeFrequency: 'weekly', priority: 1 },
     { url: `${BASE_URL}/about`, lastModified, changeFrequency: 'monthly', priority: 0.7 },
+    // The public half of the adaptive support hub (Help Center, "I can't sign
+    // in", general contact) is genuinely public marketing-adjacent surface.
+    { url: `${BASE_URL}/support`, lastModified, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${BASE_URL}/privacy`, lastModified, changeFrequency: 'yearly', priority: 0.4 },
     { url: `${BASE_URL}/terms`, lastModified, changeFrequency: 'yearly', priority: 0.4 },
     { url: `${BASE_URL}/sign-in`, lastModified, changeFrequency: 'yearly', priority: 0.5 },

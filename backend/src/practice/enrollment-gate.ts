@@ -17,7 +17,8 @@ export type EnrollmentGateResult =
 
 /**
  * Checks whether a patient user meets every prerequisite to flip
- * `onboardingStatus` → `COMPLETED`.
+ * `enrollmentStatus` → `ENROLLED`. (Nothing here reads `onboardingStatus`:
+ * onboarding is identity-only and orthogonal to clinical enrollment.)
  *
  * Rationale per CLINICAL_SPEC V2-D "Practice-level configuration — required
  * before enrollment" + §4.2 (HFrEF) / §4.7 (HCM) / §4.8 (DCM) "MANDATORY: do

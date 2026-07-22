@@ -8,6 +8,8 @@ import {
 import { UserRole } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { AssignmentService } from './assignment.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
+import { encryptionMock } from '../common/test/encryption.mock.js'
 
 // May 2026 follow-up coverage for the two assignment-service fixes:
 //   • Primary != backup must reject — backend safeguard so a hand-crafted
@@ -66,6 +68,7 @@ describe('AssignmentService — May 2026 hardening', () => {
         AssignmentService,
         { provide: PrismaService, useValue: prisma },
         { provide: PatientAccessService, useValue: access },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
     service = module.get(AssignmentService)
@@ -201,7 +204,7 @@ describe('AssignmentService — May 2026 hardening', () => {
   describe('MED_DIR practice scope', () => {
     it('create denies MED_DIR who does not head the target practice', async () => {
       access.assertCanModifyPracticeAssignment.mockRejectedValueOnce(
-        new ForbiddenException('Practice practice-A is outside your MED_DIR scope'),
+        new ForbiddenException('Requested record is outside your MED_DIR scope'),
       )
       const medActor: ActorUser = { id: 'md-other', roles: [UserRole.MEDICAL_DIRECTOR] }
       await expect(

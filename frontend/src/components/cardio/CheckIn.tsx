@@ -55,6 +55,7 @@ import {
 } from 'lucide-react';
 
 import { useAuth } from '@/lib/auth-context';
+import { stashNavId } from '@/lib/nav-handoff';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { TranslationKey } from '@/i18n';
 import { ClinicalIntakeRequiredError, ImplausibleReadingError, createJournalEntry, finalizeSingleReadingSession, declineEmergencyConfirmation, getActiveSession, getAwaitingEmergency, getAlerts, type ActiveSessionDto, type AlertTier, type JournalEntryPayload } from '@/lib/services/journal.service';
@@ -87,7 +88,7 @@ import {
   listMyMedications,
   type PatientMedication,
 } from '@/lib/services/patient-medications.service';
-import { getBMI, JOURNAL_NOTE_MAX_LENGTH, SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared';
+import { getBMI, isBpNormalRange, JOURNAL_NOTE_MAX_LENGTH, SESSION_WINDOW_MS, SINGLE_READING_FINALIZE_MS } from '@cardioplace/shared';
 import AudioButton from '@/components/intake/AudioButton';
 import MicButton from '@/components/intake/MicButton';
 import BpPhotoButton from '@/components/intake/BpPhotoButton';
@@ -1866,6 +1867,22 @@ function ConfirmationScreen({
         {t(isEnrolled ? 'checkin.confirm.subtitle' : 'checkin.confirm.subtitleUnenrolled')}
       </p>
 
+      {/* L-6 — the "Logged ✓ / Looking good" confirmation now lives in-app on
+          this success screen (the push + persisted bell Notification were
+          removed — they piled up and desensitized patients). Positive tail is
+          gated on a normal BP band and a non-emergency reading, so it never
+          reassures over a concerning value. */}
+      {!isEmergency &&
+        isBpNormalRange(lastReading.systolicBP ?? null, lastReading.diastolicBP ?? null) && (
+          <p
+            className="text-[0.875rem] font-semibold -mt-2 mb-4"
+            style={{ color: 'var(--brand-success-green)' }}
+            data-testid="checkin-looking-good"
+          >
+            {t('checkin.confirm.lookingGood')}
+          </p>
+        )}
+
       {/* Reading summary card */}
       <div
         className="w-full rounded-2xl p-3 mb-3"
@@ -2183,6 +2200,12 @@ export default function CheckIn() {
   // Bug 8 — true when the just-submitted reading triggered an emergency-class
   // rule; suppresses the Q3 / AFib reading-prompt on the confirmation screen.
   const [confirmationIsEmergency, setConfirmationIsEmergency] = useState(false);
+  // L-9 (M-3, Manisha confirmed 2026-07-14) — true when the sitting was closed
+  // via an EXPLICIT "I'm good, send to my care team" (not the countdown timer).
+  // Drives startAnotherReading to mint a FRESH session instead of reopening the
+  // one the patient said they were done with. Timer/implicit close leaves this
+  // false, so its "Add another reading" still rejoins within the 5-min window.
+  const [committedExplicitly, setCommittedExplicitly] = useState(false);
   // Bug 20a (live-test 2026-06-17) — the confirmation screen's "We're setting up
   // your care team" copy is for NOT_ENROLLED patients ONLY. Read the enrollment
   // field DIRECTLY and show it only when explicitly NOT_ENROLLED. Defaulting to
@@ -2334,6 +2357,12 @@ export default function CheckIn() {
     if (existing) {
       setBufferDraft(existing);
       setBufferReviewing(true);
+      // L-11 — re-adopt the buffered draft's sessionId into component state.
+      // Without this, after navigating away and back the rehydrated draft keeps
+      // its sessionId (journalDraft.ts) but the component's `sessionId` is a
+      // fresh uuid, so an "add another reading in the same session" would start
+      // a NEW session instead of joining the one still under review (§5.2).
+      setSessionId(existing.sessionId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, isLoading, user?.id]);
@@ -2581,10 +2610,27 @@ export default function CheckIn() {
     setSubmitting(true);
     try {
       if (optionDEligible && sys != null && dia != null) {
+        // L-10 — an Option-D emergency reading is its OWN episode and must NEVER
+        // be averaged into the ongoing (buffer/live) session. If the held
+        // reading inherited the current sessionId, the engine would group it
+        // with the ordinary session and a 180/120 emergency would surface as an
+        // innocuous averaged card. Mint a DEDICATED sessionId for the emergency
+        // episode, isolated from the ordinary session. We also adopt it into
+        // `sessionId` state so the paired confirmatory reading
+        // (submitOptionDSecond, which reads `sessionId`) lands in this SAME
+        // dedicated session — the two Option-D readings stay grouped with each
+        // other, never with the ordinary one. (The resume path mirrors this: it
+        // re-adopts the held reading's own sessionId.)
+        const emergencySessionId = uuid();
+        setSessionId(emergencySessionId);
         // Persist the first reading HELD (AWAITING) so the server-side safety
         // net (cron) can flag it UNCONFIRMED if the patient abandons the flow;
         // no alert pages anyone until the patient confirms or declines.
-        const held = await createJournalEntry({ ...basePayload, beginEmergencyConfirmation: true });
+        const held = await createJournalEntry({
+          ...basePayload,
+          sessionId: emergencySessionId,
+          beginEmergencyConfirmation: true,
+        });
         if (user?.id) clearCheckInDraft(user.id);
         setImplausibleCount(0);
         setOptionDFirstId(held.entry.id);
@@ -2727,7 +2773,8 @@ export default function CheckIn() {
             new Date(a.createdAt).getTime() >= sinceMs - 2000),
       );
       if (emergency) {
-        router.push(`/alerts/${emergency.id}`);
+        stashNavId('alertDetail', { id: emergency.id });
+        router.push('/alerts');
         return true;
       }
       await new Promise((r) => setTimeout(r, 400));
@@ -2839,37 +2886,64 @@ export default function CheckIn() {
   }
 
   function startAnotherReading() {
-    // Keep sessionId; reset reading-specific fields; skip B1 next round.
+    // L-9 (M-3, Manisha confirmed) — if the patient EXPLICITLY finalized the
+    // last sitting ("I'm good, send to my care team"), "Add another reading"
+    // opens a BRAND-NEW session rather than reopening the one they said they
+    // were done with. That means a full reset, not just a new id:
+    //   • new sessionId                → the reading can't group/average with it
+    //   • readingNumber → 0            → runs STEP_FLOW (the B1 checklist is
+    //                                    per-sitting) and drops the "Reading N in
+    //                                    this session · AFib needs 3" banner
+    //   • sessionReadings → []         → the old sitting's readings don't count
+    //                                    toward the new one's AFib 3-in-a-row
+    // A timer/implicit close leaves committedExplicitly false, so that path
+    // still rejoins the sitting within its 5-min edit window (unchanged).
+    const freshSession = committedExplicitly;
+    if (freshSession) {
+      setSessionId(uuid());
+      setCommittedExplicitly(false);
+      setReadingNumber(0);
+      setSessionReadings([]);
+    }
     setForm((prev) => ({
       ...emptyForm(),
       measuredDate: nowDate(),
       measuredTime: nowTime(),
-      // Carry forward the user's checklist answers — they're still valid for
-      // the same session so we don't make them re-tap 8 things.
-      noCaffeine: prev.noCaffeine,
-      noSmoking: prev.noSmoking,
-      noExercise: prev.noExercise,
-      bladderEmpty: prev.bladderEmpty,
-      seatedQuietly: prev.seatedQuietly,
-      posturalSupport: prev.posturalSupport,
-      notTalking: prev.notTalking,
-      cuffOnBareArm: prev.cuffOnBareArm,
+      // SAME session → carry the checklist forward; it's still valid for this
+      // sitting and we don't make them re-tap 8 things. NEW session → a new
+      // sitting, so nothing is pre-filled and B1 re-asks (a checklist attests
+      // to the conditions of THAT measurement, so it must not be inherited).
+      ...(freshSession
+        ? {}
+        : {
+            noCaffeine: prev.noCaffeine,
+            noSmoking: prev.noSmoking,
+            noExercise: prev.noExercise,
+            bladderEmpty: prev.bladderEmpty,
+            seatedQuietly: prev.seatedQuietly,
+            posturalSupport: prev.posturalSupport,
+            notTalking: prev.notTalking,
+            cuffOnBareArm: prev.cuffOnBareArm,
+          }),
+      // Unit is a display preference, not a clinical attestation — always keep.
       weightUnit: prev.weightUnit,
     }));
     setShowConfirmation(false);
-    // Cluster 6 Q2 — second reading is being logged in the same session.
-    // Clear the finalize timer so it doesn't fire when the new reading
-    // averages with the first.
+    // Cluster 6 Q2 — clear the finalize timer so it doesn't fire when the new
+    // reading averages with the first (same-session case).
     setPendingFinalizeEntryId(null);
-    setStep('B2');
+    // New session starts at the checklist (STEP_FLOW[0]); same session skips B1.
+    setStep(freshSession ? 'B1' : 'B2');
     setDirection(1);
   }
 
   // ── Part 1 — FE buffer handlers ──────────────────────────────────────────
   // Commit the whole buffered sitting in one shot. Every reading carries the
   // draft's shared sessionId so the engine groups + averages them as one
-  // session. Triggered by "I'm good" or the countdown expiring.
-  async function commitBuffer() {
+  // session. Triggered by "I'm good" (explicit=true) or the countdown expiring
+  // (explicit=false). The flag decides whether a later "Add another reading"
+  // starts a fresh session (L-9 / M-3).
+  async function commitBuffer(explicit: boolean) {
     if (!bufferDraft || committingBuffer) return;
     const draft = bufferDraft;
     setCommittingBuffer(true);
@@ -2914,6 +2988,9 @@ export default function CheckIn() {
       // the review screen), so don't arm the post-submit single-reading prompt.
       setPendingFinalizeEntryId(null);
       setConfirmationIsEmergency(false);
+      // L-9 — record whether the patient explicitly finalized ("I'm good") so
+      // the confirmation screen's "Add another reading" can start a new session.
+      setCommittedExplicitly(explicit);
       setShowConfirmation(true);
     } catch (e) {
       // Keep the buffer intact so the patient can retry.
@@ -3121,8 +3198,8 @@ export default function CheckIn() {
         hasAFib={hasAFib}
         committing={committingBuffer}
         onTakeAnother={takeAnotherFromBuffer}
-        onCommit={commitBuffer}
-        onExpire={commitBuffer}
+        onCommit={() => void commitBuffer(true)}
+        onExpire={() => void commitBuffer(false)}
         onEditReading={editBufferReading}
         onDeleteReading={deleteBufferReading}
       />
@@ -3213,10 +3290,25 @@ export default function CheckIn() {
         resumed={optionDResumed}
         onSubmitSecond={submitOptionDSecond}
         onDecline={handleOptionDDecline}
+        hasPendingBufferedReading={!!bufferDraft}
         onDone={() => {
           // Bug 16 — if the confirmatory was emergency-range we already routed to
           // the 911 alert; don't bounce over it to the dashboard.
           if (optionDRoutedToEmergencyRef.current) return;
+          // A buffered sitting is still UNCOMMITTED on-device — the patient
+          // logged a normal reading (held for the 5-min window), then a high one
+          // that routed here. Leaving for the dashboard strands that first
+          // reading (the backend has never seen it), so hand them back to the
+          // buffer review to finish it. Its own draft.sessionId is used on
+          // commit, so it stays a separate session from this emergency episode.
+          if (bufferDraft) {
+            setOptionDActive(false);
+            setOptionDFirstId(null);
+            setOptionDFirstBp(null);
+            setOptionDResumed(false);
+            setBufferReviewing(true);
+            return;
+          }
           router.push('/dashboard');
         }}
       />

@@ -38,7 +38,7 @@ test.describe('Phase 4f — patient alert lifecycle (20f)', () => {
       { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
     ])
     await signInPatient(page, PATIENTS.aisha.email)
-    await page.goto(`/alerts/${alertIds[0]}`)
+    await page.goto(`/alerts?id=${alertIds[0]}`)
     await expect(
       page.locator('[data-testid="alert-message-patient"]'),
     ).toBeVisible({ timeout: 12_000 })
@@ -55,7 +55,7 @@ test.describe('Phase 4f — patient alert lifecycle (20f)', () => {
       { tier: 'BP_LEVEL_1_HIGH', status: 'OPEN' },
     ])
     await signInPatient(page, PATIENTS.aisha.email)
-    await page.goto(`/alerts/${alertIds[0]}`)
+    await page.goto(`/alerts?id=${alertIds[0]}`)
     const ack = page.locator('[data-testid="alert-acknowledge-button"]')
     await ack.waitFor({ state: 'visible', timeout: 12_000 })
     await ack.click()
@@ -102,7 +102,7 @@ test.describe('Phase 4f — patient alert lifecycle (20f)', () => {
       )
       .toBe('RESOLVED')
     await signInPatient(page, PATIENTS.aisha.email)
-    await page.goto(`/alerts/${alertId}`)
+    await page.goto(`/alerts?id=${alertId}`)
     // TierAlertView renders the resolution panel (alert-resolved-by) for a
     // resolved alert; fall back to status badge / patient message.
     await expect(
@@ -124,11 +124,11 @@ test.describe('Phase 4f — patient alert lifecycle (20f)', () => {
     ])
     await signInPatient(page, PATIENTS.aisha.email)
     // Simulate clicking the deep-link embedded in an escalation email.
-    await page.goto(`/alerts/${alertIds[0]}`)
+    await page.goto(`/alerts?id=${alertIds[0]}`)
     await expect(
       page.locator('[data-testid="alert-message-patient"]'),
     ).toBeVisible({ timeout: 12_000 })
-    await expect(page).toHaveURL(new RegExp(`/alerts/${alertIds[0]}`))
+    await expect(page).toHaveURL(new RegExp(`/alerts\\?id=${alertIds[0]}`))
     await tc.resetUser(u.id)
   })
 })

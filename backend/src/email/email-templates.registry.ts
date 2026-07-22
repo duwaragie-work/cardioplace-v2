@@ -51,6 +51,14 @@ export type EmailTemplateName =
   | 'support_reply'
   | 'support_resolved'
   | 'support_ops_notify'
+  // N-1 (Duwaragie 2026-07-14 triage) — submitter's confirmation email fired
+  // on ticket create. The intake screen already promises "check the link in
+  // your confirmation email" — this template makes that promise truthful.
+  | 'support_ticket_received'
+  // Nudge fired by the support housekeeping cron when ops replied and the
+  // thread went quiet — prompts the patient before the ticket drifts to
+  // auto-close with their question unanswered.
+  | 'support_awaiting_reply'
   | 'contact_form'
   // Treatment adherence + monitoring
   | 'gap_alert'
@@ -60,6 +68,8 @@ export type EmailTemplateName =
   | 'care_team_gap_alert'
   // Healthcare operations reporting
   | 'monthly_report'
+  // Security operations (HIPAA §164.308(a)(6))
+  | 'security_alert'
 
 /**
  * §164.528 permitted-use purpose taxonomy. Mirrors the Prisma
@@ -230,12 +240,32 @@ export const EMAIL_TEMPLATE_REGISTRY: Record<EmailTemplateName, TemplateSpec> = 
         `Support ticket resolved — ticketNumber ${m.ticketNumber ?? '?'} — category ${m.category ?? 'unspecified'}`,
       ),
   },
+  support_awaiting_reply: {
+    purpose: 'CARE_COORDINATION',
+    recipientCategory: 'PATIENT',
+    briefDescriptionFn: (m) =>
+      clip(
+        `Support ticket awaiting patient reply — ticketNumber ${m.ticketNumber ?? '?'} — category ${m.category ?? 'unspecified'}`,
+      ),
+  },
   support_ops_notify: {
     purpose: 'CARE_COORDINATION',
     recipientCategory: 'HEALPLACE_OPS',
     briefDescriptionFn: (m) =>
       clip(
         `Ops routing notification — ticketNumber ${m.ticketNumber ?? '?'} — category ${m.category ?? 'unspecified'} — priority ${m.priority ?? 'unspecified'}`,
+      ),
+  },
+  // N-1 (Duwaragie 2026-07-14 triage) — submitter confirmation. Recipient is
+  // the ticket submitter (patient or lockout requester); DIRECT_TO_PATIENT
+  // purpose because the recipient IS the data subject and the body carries
+  // only the ticket handle they already know.
+  support_ticket_received: {
+    purpose: 'DIRECT_TO_PATIENT',
+    recipientCategory: 'PATIENT',
+    briefDescriptionFn: (m) =>
+      clip(
+        `Support ticket received — ticketNumber ${m.ticketNumber ?? '?'} — category ${m.category ?? 'unspecified'}`,
       ),
   },
   contact_form: {
@@ -285,6 +315,21 @@ export const EMAIL_TEMPLATE_REGISTRY: Record<EmailTemplateName, TemplateSpec> = 
     briefDescriptionFn: (m) =>
       clip(
         `Monthly practice-wide alert summary — practice ${m.practiceId ?? '?'} — ${m.monthLabel ?? m.monthYear ?? '?'} — totalAlerts ${m.totalAlerts ?? '?'} — escalatedPct ${m.escalatedPct ?? '?'}`,
+      ),
+  },
+
+  // ── Security operations ───────────────────────────────────────────────
+  // Real-time repeated-failed-auth page to the security owner. Carries the
+  // auth IDENTIFIER + failure count only — never patient clinical data — so
+  // patientUserId is null on the disclosure (the subject is a login, not a
+  // patient). HEALTHCARE_OPERATIONS is the correct §164.506 purpose (security
+  // oversight of the system), matching monthly_report.
+  security_alert: {
+    purpose: 'HEALTHCARE_OPERATIONS',
+    recipientCategory: 'HEALPLACE_OPS',
+    briefDescriptionFn: (m) =>
+      clip(
+        `Security alert — ${m.failedCount ?? '?'} failed auth attempt(s) for identifier ${m.identifier ?? '?'} across ${m.distinctIpCount ?? '?'} IP(s)`,
       ),
   },
 }

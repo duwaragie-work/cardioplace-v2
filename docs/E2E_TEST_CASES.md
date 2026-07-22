@@ -560,7 +560,7 @@ All cases in §10 are **[E2E]**. Unit-level equivalents already green in [TEST_S
 | **TC-RUL.L1L.07** | 31 | HTN + threshold lower 110 + 12 readings | 108/70 | `RULE_PERSONALIZED_LOW` |
 | **TC-RUL.L1L.08** | 32 | Age 40-64 | 88/58 | `RULE_STANDARD_L1_LOW` |
 | **TC-RUL.L1L.09** | 33 | AFib 3 readings | pulse 48 | `RULE_AFIB_HR_LOW` |
-| **TC-RUL.L1L.10** | 36 | Bradycardia asymptomatic | pulse 38 | `RULE_BRADY_HR_ASYMPTOMATIC` |
+| **TC-RUL.L1L.10** | 36 | Bradycardia asymptomatic (now **Tier 1**, not L1 Low) | pulse 38 | `RULE_BRADY_ABSOLUTE` |
 
 ### 10.6 Tier 3 (physician-only)
 

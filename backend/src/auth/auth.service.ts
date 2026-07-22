@@ -25,6 +25,7 @@ import {
 } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { writeAuditWithRetry } from '../common/audit/write-with-retry.js'
+import { EncryptionService } from '../common/encryption.service.js'
 import { DisplayIdService } from '../users/display-id.service.js'
 import { BcryptService } from './bcrypt.service.js'
 import { GeolocationService } from './geolocation.service.js'
@@ -176,6 +177,9 @@ export interface ProfileResult {
   preferredLanguage?: string | null
   timezone: string | null
   onboardingStatus: OnboardingStatus
+  // Present on submit/patch responses so the client can route the onboarding
+  // steps without a follow-up GET.
+  reminderPreferenceSet?: boolean
 }
 
 function sha256(input: string): string {
@@ -260,6 +264,31 @@ const MFA_SOFT_LOCK_WINDOW_MS = 15 * 60_000
 const MFA_HARD_LOCK_THRESHOLD = 10
 const MFA_HARD_LOCK_WINDOW_MS = 60 * 60_000
 
+/**
+ * V-03 (Humaira assessment 2026-07-14) — account-scoped OTP failure lock.
+ *
+ * THE HOLE. The existing 5-attempt lock lives on the OtpCode ROW
+ * (`otpRecord.attempts`), and on trip it DELETES that row. `otp/send` then
+ * mints a brand-new row with attempts: 0. So the ceiling was 5 guesses per
+ * 60s send-cooldown, forever, with no account ever locking — the assessment's
+ * "persistent per-account lockout" was unmet. Counting AuthLog `otp_failed`
+ * rows by identifier accumulates ACROSS OtpCode rows, so re-sending no longer
+ * resets the budget.
+ *
+ * 10 / 15 min, above the per-row 5 so the familiar per-OTP message still comes
+ * first for an ordinary typo, and this only bites the re-send loop.
+ *
+ * DELIBERATELY SOFT AND SELF-HEALING — no hard, admin-reset tier like MFA's
+ * (:260). MFA gates staff; OTP gates PATIENTS, and a patient locked out of
+ * sign-in cannot log a BP reading or answer an escalation. An admin-reset lock
+ * on that path converts a brute-force defence into a clinical-availability
+ * risk. The window simply rolls off.
+ */
+// Exported so the spec asserts against the real threshold instead of a copy
+// that can silently drift from it.
+export const OTP_ACCOUNT_LOCK_THRESHOLD = 10
+const OTP_ACCOUNT_LOCK_WINDOW_MS = 15 * 60_000
+
 /** True if any of the user's roles makes TOTP mandatory. */
 function requiresMfa(roles: UserRole[]): boolean {
   return roles.some((r) => MFA_REQUIRED_ROLES.includes(r))
@@ -290,6 +319,9 @@ export class AuthService {
     private mfaService: MfaService,
     private webAuthnService: WebAuthnService,
     private displayIdService: DisplayIdService,
+    // L3 (2026-07-14) — encrypts User.phoneNumber at rest (same AES-256-GCM
+    // envelope as the MFA TOTP secret). CommonModule is @Global.
+    private encryption: EncryptionService,
   ) {}
 
   /**
@@ -1461,6 +1493,54 @@ export class AuthService {
     }
   }
 
+  /** V-03 — failed OTP verifies for one identifier inside `sinceMs`. Keyed on
+   *  `identifier` (the email), not userId, because OTP verification runs before
+   *  a User row is guaranteed to exist. Mirrors countRecentFailedMfa. */
+  private async countRecentFailedOtp(
+    identifier: string,
+    sinceMs: number,
+  ): Promise<number> {
+    return this.prisma.authLog.count({
+      where: {
+        identifier,
+        event: 'otp_failed',
+        createdAt: { gt: new Date(Date.now() - sinceMs) },
+      },
+    })
+  }
+
+  /**
+   * V-03 — throw if this identifier has failed too many OTP verifies recently,
+   * regardless of how many times the OTP was re-sent. Soft + self-healing by
+   * design; see OTP_ACCOUNT_LOCK_THRESHOLD.
+   */
+  private async assertNotOtpLocked(
+    identifier: string,
+    context?: { deviceId?: string; ipAddress?: string; userAgent?: string },
+  ): Promise<void> {
+    const failures = await this.countRecentFailedOtp(
+      identifier,
+      OTP_ACCOUNT_LOCK_WINDOW_MS,
+    )
+    if (failures < OTP_ACCOUNT_LOCK_THRESHOLD) return
+
+    await this.logAuthEvent({
+      event: 'otp_locked',
+      identifier,
+      method: 'otp',
+      deviceId: context?.deviceId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: { failures, windowMs: OTP_ACCOUNT_LOCK_WINDOW_MS, scope: 'account' },
+      success: false,
+      errorCode: 'otp_account_locked_temporary',
+    })
+    throw new ForbiddenException({
+      message: 'Too many incorrect attempts. Please wait a few minutes and try again.',
+      errorCode: 'otp_account_locked_temporary',
+    })
+  }
+
   private async loadActiveUser(userId: string): Promise<MinimalUser> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -2390,9 +2470,10 @@ export class AuthService {
   }
 
   // Public entry point used by the post-login consent gate (onboarding privacy
-  // step). Records the patient's Terms + Privacy agreement once, on the AuthLog
-  // audit trail (no new table). Idempotent in spirit — a returning user who
-  // already consented never reaches the gate, so it isn't called again.
+  // step). Records the patient's Terms + Privacy agreement. Two writes: the
+  // AuthLog `policy_acknowledged` event stays the immutable audit trail, and
+  // the User columns are the fast-read mirror onboarding checks so it can skip
+  // the privacy step on a re-ask (A5) — without an audit-log scan per load.
   async recordConsent(
     userId: string,
     policyVersion: string,
@@ -2404,6 +2485,13 @@ export class AuthService {
       ipAddress: context?.ipAddress,
       userAgent: context?.userAgent,
       via: 'onboarding',
+    })
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        policyAcknowledgedAt: new Date(),
+        acknowledgedPolicyVersion: policyVersion,
+      },
     })
     return { recorded: true }
   }
@@ -2916,12 +3004,20 @@ export class AuthService {
         success: false,
         errorCode: 'account_not_active',
       })
-      // Silent success — return the happy-path shape WITHOUT generating or
-      // sending an OTP, so we never disclose to an unauthenticated requester
-      // that this email exists-but-is-inactive (info-disclosure). The block is
-      // still audited above; a non-ACTIVE user who somehow holds a valid code
-      // is still stopped at verifyOtp.
-      return { message: 'OTP sent successfully' }
+      // Product decision (2026-07-14, signed off): surface the account-status
+      // error AT SEND for a deactivated/suspended/blocked account, so the
+      // patient immediately gets the "reactivate" guidance instead of a dead
+      // "OTP sent" that goes nowhere (no code is ever minted for them). Same
+      // error shape verifyOtp throws, so the FE maps it to the reactivate CTA.
+      //
+      // TRADEOFF: this reveals that an email is registered-but-inactive
+      // (enumeration). Accepted for the UX of the Ward 7/8 patient cohort.
+      // SYSTEM rows are handled ABOVE and stay fully silent; non-existent
+      // emails still fall through to the generic success path (their existence
+      // is NOT disclosed). Still audited above regardless.
+      throw new ForbiddenException(
+        `Account is ${existingUser.accountStatus.toLowerCase()}`,
+      )
     }
 
     // Check for recent OTP request (rate limiting)
@@ -2988,6 +3084,13 @@ export class AuthService {
     if (context?.appContext === 'admin') {
       await this.assertAdminAccessAllowed(normalizedEmail)
     }
+
+    // V-03 — account-scoped lock, checked BEFORE the OtpCode lookup and before
+    // bcrypt, so a locked identifier costs an index count and nothing else.
+    // The per-row `attempts` check below still runs first for a normal typo
+    // (5 < 10), so ordinary UX is unchanged; this only catches the delete-and-
+    // resend loop that resets `attempts` to 0.
+    await this.assertNotOtpLocked(normalizedEmail, context)
 
     // Find the most recent unexpired OTP
     const otpRecord = await this.prisma.otpCode.findFirst({
@@ -3196,9 +3299,34 @@ export class AuthService {
   async submitProfile(userId: string, dto: ProfileDto): Promise<ProfileResult> {
     const patch = this.buildProfilePatch(dto)
 
+    // Onboarding completion is IDENTITY-gated: only a non-empty name or a
+    // communication preference counts. Reminder prefs must never complete
+    // onboarding — they always fall back to a schema default (09:00/22:00/
+    // 07:00), so treating them as "the patient told us something" marked
+    // patients COMPLETED who had supplied nothing. A reminder-only payload
+    // still persists its fields; it just leaves onboardingStatus alone.
+    const hasIdentity =
+      (typeof dto.name === 'string' && dto.name.trim() !== '') ||
+      (dto.communicationPreference !== undefined &&
+        dto.communicationPreference !== null)
+
+    // Reminder step answered (any of the three fields posted). Recorded so a
+    // re-ask on another device shows the identity step only — localStorage is
+    // device-local and cannot carry this.
+    const hasReminderPrefs =
+      dto.reminderTime !== undefined ||
+      dto.quietHoursStart !== undefined ||
+      dto.quietHoursEnd !== undefined
+
     const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: { ...patch, onboardingStatus: OnboardingStatus.COMPLETED },
+      data: {
+        ...patch,
+        ...(hasIdentity
+          ? { onboardingStatus: OnboardingStatus.COMPLETED }
+          : {}),
+        ...(hasReminderPrefs ? { reminderPreferenceSet: true } : {}),
+      },
       select: {
         name: true,
         dateOfBirth: true,
@@ -3206,6 +3334,7 @@ export class AuthService {
         preferredLanguage: true,
         timezone: true,
         onboardingStatus: true,
+        reminderPreferenceSet: true,
       },
     })
 
@@ -3217,9 +3346,18 @@ export class AuthService {
   async patchProfile(userId: string, dto: ProfileDto): Promise<ProfileResult> {
     const patch = this.buildProfilePatch(dto)
 
+    // Editing reminders from the profile page counts as answering them, same
+    // as the onboarding step — otherwise a patient who set a time here would
+    // still be re-asked for reminders on their next device. PATCH never
+    // touches onboardingStatus; identity completion is submitProfile's job.
+    const hasReminderPrefs =
+      dto.reminderTime !== undefined ||
+      dto.quietHoursStart !== undefined ||
+      dto.quietHoursEnd !== undefined
+
     const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: patch,
+      data: { ...patch, ...(hasReminderPrefs ? { reminderPreferenceSet: true } : {}) },
       select: {
         name: true,
         dateOfBirth: true,
@@ -3232,6 +3370,7 @@ export class AuthService {
         quietHoursStart: true,
         quietHoursEnd: true,
         onboardingStatus: true,
+        reminderPreferenceSet: true,
       },
     })
 
@@ -3255,6 +3394,32 @@ export class AuthService {
     if (dto.quietHoursStart !== undefined)
       patch.quietHoursStart = dto.quietHoursStart
     if (dto.quietHoursEnd !== undefined) patch.quietHoursEnd = dto.quietHoursEnd
+
+    // L3 (2026-07-14) — SMS reminders.
+    if (dto.phoneNumber !== undefined) {
+      if (dto.phoneNumber === null || dto.phoneNumber === '') {
+        // Clearing the number MUST also revoke consent — keeping a consent
+        // record for a number we no longer hold would be a false TCPA record,
+        // and a later re-entry has to re-consent explicitly.
+        patch.phoneNumber = null
+        patch.smsConsent = false
+        patch.smsConsentAt = null
+        patch.smsConsentMethod = null
+      } else {
+        // Encrypted at rest (AES-256-GCM envelope) — same treatment as the MFA
+        // TOTP secret. Never stored or logged in plaintext.
+        patch.phoneNumber = this.encryption.encrypt(dto.phoneNumber)
+      }
+    }
+    if (dto.smsConsent !== undefined) {
+      patch.smsConsent = dto.smsConsent
+      // The consent RECORD is server-stamped — a client can never forge the
+      // timestamp/method. Revoking clears it rather than leaving a stale trail.
+      patch.smsConsentAt = dto.smsConsent ? new Date() : null
+      patch.smsConsentMethod = dto.smsConsent ? 'in_app_checkbox' : null
+      // Consenting again after a STOP is an explicit re-opt-in.
+      if (dto.smsConsent) patch.smsOptedOut = false
+    }
 
     return patch
   }
@@ -3292,12 +3457,36 @@ export class AuthService {
         reminderTime: true,
         quietHoursStart: true,
         quietHoursEnd: true,
+        // Onboarding step routing — see the field comment in user.prisma.
+        reminderPreferenceSet: true,
+        // A5 — lets onboarding skip the privacy step when this already matches
+        // the current POLICY_VERSION.
+        acknowledgedPolicyVersion: true,
+        // L3 (2026-07-14) — SMS reminders. The patient sees + manages their OWN
+        // number, so it's decrypted below before returning. smsOptedOut is
+        // surfaced (read-only) so Profile can explain why texts stopped after a
+        // STOP reply. smsConsentAt/Method are the compliance record and are
+        // deliberately NOT exposed.
+        phoneNumber: true,
+        smsConsent: true,
+        smsOptedOut: true,
         createdAt: true,
       },
     })
 
     if (!user) {
       throw new NotFoundException('User not found')
+    }
+
+    // Stored as an AES-256-GCM envelope — decrypt for the owner's own profile.
+    // A corrupt/undecryptable value degrades to null rather than 500-ing the
+    // whole profile read.
+    if (user.phoneNumber) {
+      try {
+        user.phoneNumber = this.encryption.decrypt(user.phoneNumber)
+      } catch {
+        user.phoneNumber = null
+      }
     }
 
     // MFA status for the profile "Security" surface. mfaEnabled mirrors the
@@ -3372,6 +3561,19 @@ export class AuthService {
       reminderTime: user.reminderTime,
       quietHoursStart: user.quietHoursStart,
       quietHoursEnd: user.quietHoursEnd,
+      // Onboarding step routing — the re-ask on a second device shows the
+      // identity step only when this is already true.
+      reminderPreferenceSet: user.reminderPreferenceSet,
+      // A5 — onboarding skips the privacy step when this === POLICY_VERSION.
+      acknowledgedPolicyVersion: user.acknowledgedPolicyVersion,
+      // L1 — SMS reminder prefs. phoneNumber is the DECRYPTED value (see the
+      // envelope decrypt above) and is returned ONLY here, on the owner's own
+      // profile read, so they can see/edit their number. smsConsentAt /
+      // smsConsentMethod stay server-side: they are the TCPA record, not a
+      // client-editable field.
+      phoneNumber: user.phoneNumber,
+      smsConsent: user.smsConsent,
+      smsOptedOut: user.smsOptedOut,
       onboardingStatus: user.onboardingStatus,
       enrollmentStatus: user.enrollmentStatus,
       // MFA status (additive) — drives the profile Security pill.
@@ -3434,10 +3636,16 @@ export class AuthService {
         success: false,
         errorCode: 'account_not_active',
       })
-      // Silent success — same as sendOtp: return the happy-path shape without
-      // creating or sending a magic link, so we never disclose that the account
-      // exists-but-is-inactive. The block is audited above.
-      return { message: 'Magic link sent successfully' }
+      // Product decision (2026-07-14, signed off): surface the account-status
+      // error AT SEND for a deactivated/suspended/blocked account so the patient
+      // gets the reactivate guidance immediately. Mirrors sendOtp; same error
+      // shape verify throws → FE maps it to the reactivate CTA. TRADEOFF: reveals
+      // an email is registered-but-inactive (enumeration), accepted for the
+      // Ward 7/8 cohort UX. SYSTEM rows stay silent above; non-existent emails
+      // still fall through to generic success. Audited above regardless.
+      throw new ForbiddenException(
+        `Account is ${existingUser.accountStatus.toLowerCase()}`,
+      )
     }
 
     // Rate limiting: 1 magic link per email per 60s

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { signInAdmin, signInPatient, authedApi } from '../helpers/auth.js'
-import { postSessionWithTwoReadings } from '../helpers/api.js'
+import { postSessionWithTwoReadings, gotoPatientDetailById,
+} from '../helpers/api.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
@@ -30,7 +31,7 @@ test.describe('B1 — PERSONALIZED +20 tolerance band visibility', () => {
     await tc.dispose()
 
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, aisha.id)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
 
     const helper = page.locator(byTestId(T.admin.thresholdSbpBandHelper))
@@ -97,7 +98,7 @@ test.describe('B3 — STANDARD / PERSONALIZED mode badge on the admin AlertCard'
     await tc.dispose()
 
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, aisha.id)
     await page.locator(byTestId(T.admin.detailTab('alerts'))).click()
     const badge = page.locator(byTestId(T.admin.alertModeBadge(alertId)))
     await expect(badge).toBeVisible({ timeout: 20_000 })
@@ -139,7 +140,7 @@ test.describe('B3 — STANDARD / PERSONALIZED mode badge on the admin AlertCard'
     await api.dispose()
     try {
       await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-      await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+      await gotoPatientDetailById(page, ADMIN_BASE_URL, aisha.id)
       await page.locator(byTestId(T.admin.detailTab('alerts'))).click()
       const badge = page.locator(byTestId(T.admin.alertModeBadge(personalized!.id)))
       await expect(badge).toBeVisible({ timeout: 20_000 })
@@ -190,7 +191,7 @@ test.describe('B2 — co-fired alert rows grouped by reading', () => {
     expect(open.length, 'expected ≥2 co-fired alerts').toBeGreaterThanOrEqual(2)
     try {
       await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-      await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+      await gotoPatientDetailById(page, ADMIN_BASE_URL, aisha.id)
       await page.locator(byTestId(T.admin.detailTab('alerts'))).click()
       await expect(page.locator(byTestId(T.admin.alertGroupHeader)).first()).toBeVisible({ timeout: 20_000 })
     } finally {

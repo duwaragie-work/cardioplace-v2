@@ -986,10 +986,27 @@ export async function executeJournalTool(
         // and downstream UI all see consistent values. Without this, the
         // patient's check-in CARD shows "All taken" while the missed-med
         // list silently exists in another column.
-        const effectiveMedicationTaken =
-          missedMedications && missedMedications.length > 0
-            ? false
-            : args.medication_taken
+        let effectiveMedicationTaken: boolean | undefined
+        if (missedMedications && missedMedications.length > 0) {
+          // Patient-sourced detail present → a genuine, confirmed miss.
+          effectiveMedicationTaken = false
+        } else if (
+          // #2b (flag-gated, DEFAULT OFF — MED_ADHERENCE_CONFIRM_GUARD_ENABLED).
+          // Clinical-safety guard: a bare medication_taken=false with NO
+          // missed_medications detail is an UNCONFIRMED miss — the model marked
+          // it without a per-med "did you take X?" exchange, and an unearned
+          // miss-day can trigger RULE_MEDICATION_MISSED the patient never earned.
+          // Neutralise to undefined so the adherence rule skips it (same as
+          // scheduled_later). A real miss carries the detail and took the branch
+          // above. OFF by default: enabling it changes what can fire an alert
+          // and echoes a previously-removed gate — needs Manisha sign-off.
+          process.env.MED_ADHERENCE_CONFIRM_GUARD_ENABLED === 'true' &&
+          args.medication_taken === false
+        ) {
+          effectiveMedicationTaken = undefined
+        } else {
+          effectiveMedicationTaken = args.medication_taken
+        }
         // Defence-in-depth symptom mapping: even when the LLM puts the
         // patient's symptom only in the freeform `args.symptoms` array
         // (e.g. ["chest pain"]) and forgets to set the matching structured
@@ -1541,11 +1558,16 @@ export async function executeJournalTool(
           // compared against "17:36" (UTC) — every delete bounced with
           // "0 readings removed / 1 could not be deleted".
           const tz = ctx.timezone ?? 'America/New_York'
-          console.log(`[delete_checkin] Found ${entries.length} entries, looking for date=${argDate} time=${origTime} (tz=${tz})`)
-          for (const e of entries) {
-            const local = tzWallclockFromIso(e.measuredAt, tz)
-            console.log(`  entry: date=${local.date} time=${local.time} id=${e.id}`)
-          }
+          // V-05: this loop printed EVERY one of the patient's readings with
+          // its local wall-clock time — dates tied to an individual are Safe
+          // Harbor identifiers, and the enumeration reveals their whole
+          // monitoring cadence. The count + the id list keep the delete
+          // dispatcher debuggable; ids resolve against the audited DB.
+          console.log(
+            `[delete_checkin] Found ${entries.length} entries (tz=${tz}), ids=[${entries
+              .map((e: { id: string }) => e.id)
+              .join(',')}]`,
+          )
 
           const match = entries.find((e: any) => {
             const local = tzWallclockFromIso(e.measuredAt, tz)

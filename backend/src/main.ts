@@ -78,6 +78,32 @@ async function bootstrap() {
   app.useBodyParser('json', { limit: '25mb' })
   app.useBodyParser('urlencoded', { extended: true, limit: '25mb' })
 
+  // V-03 prerequisite (2026-07-17) — client IP resolution behind the LB.
+  //
+  // Express defaults `trust proxy` to false, so `req.ip` is the SOCKET peer —
+  // in any hosted deploy that's the load balancer, identical for every user.
+  // That breaks two things at once: the rate limiter buckets the whole world
+  // together, and `cls.set('ip', req.ip)` stamps the LB's address onto every
+  // AccessLog row (§164.312(b) wants the actor's origin, not ours).
+  //
+  // The number matters and MUST match the real topology. It counts hops from
+  // the RIGHT of X-Forwarded-For, so:
+  //   • too LOW  → req.ip is a proxy address. Over-throttles (everyone shares a
+  //     bucket) and the audit IP is wrong — bad, but fails CLOSED.
+  //   • too HIGH → req.ip is read from an attacker-supplied XFF segment. They
+  //     mint a fresh throttle bucket per request and forge the audit IP —
+  //     fails OPEN. This is why `trust proxy: true` is NOT used here: it trusts
+  //     the leftmost XFF value, which is entirely client-controlled.
+  // Default 0 (= no proxy) is the fail-closed choice and is correct for local
+  // dev. Set TRUST_PROXY_HOPS to the real hop count in each deployed env.
+  const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0)
+  if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) {
+    app.set('trust proxy', trustProxyHops)
+    console.log(`🔗 trust proxy: ${trustProxyHops} hop(s) — req.ip from X-Forwarded-For`)
+  } else {
+    console.log('🔗 trust proxy: off — req.ip is the socket peer (set TRUST_PROXY_HOPS behind a load balancer)')
+  }
+
   app.useWebSocketAdapter(new IoAdapter(app))
   app.use(cookieParser())
 

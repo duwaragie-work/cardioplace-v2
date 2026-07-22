@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { signInAdmin, authedApi } from '../helpers/auth.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
-import { waitForAlerts, editThresholdViaUI, resolveAlertViaModal } from '../helpers/api.js'
+import { waitForAlerts, editThresholdViaUI, resolveAlertViaModal, gotoPatientDetailById,
+} from '../helpers/api.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 import { byTestId, T } from '../helpers/selectors.js'
 
@@ -65,7 +66,7 @@ test.describe('Threshold-needed: navigation + resolvability + close-off (admin U
 
       // ── Admin opens the patient; banner is present ──
       await signInAdmin(page, ADMINS.support.email, ADMIN_BASE_URL)
-      await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+      await gotoPatientDetailById(page, ADMIN_BASE_URL, aisha.id)
       await page.locator(byTestId(T.admin.detailHeader)).waitFor({ state: 'visible', timeout: 30_000 })
       await expect(page.locator(byTestId(T.admin.thresholdNeededBanner))).toBeVisible({ timeout: 20_000 })
 
@@ -91,7 +92,7 @@ test.describe('Threshold-needed: navigation + resolvability + close-off (admin U
       await expect
         .poll(async () => (await tc.findUser(PATIENTS.aisha.email)).enrollmentStatus, { timeout: 20_000 })
         .toBe('ENROLLED')
-      await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+      await gotoPatientDetailById(page, ADMIN_BASE_URL, aisha.id)
       await page.locator(byTestId(T.admin.detailTab('alerts'))).click()
       await expect(page.locator(byTestId(T.admin.thresholdNeededBanner))).toBeHidden({ timeout: 15_000 })
 

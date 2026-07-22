@@ -71,7 +71,19 @@ test.describe('Phase 3 §K — admin notifications', () => {
     const row = page.locator(byTestId(T.admin.alertRow(id)))
     await expect(row).toBeVisible({ timeout: 25_000 })
     await row.click()
-    await expect(page).toHaveURL(new RegExp(`/patients/${aisha.id}`), { timeout: 20_000 })
+    // An alert-driven click carries the OPAQUE alert id (`?alert=<alertId>`);
+    // the detail shell resolves the patient from it server-side. The alert id
+    // is not PHI — a patient id would be. (A patient-row click, which has no
+    // alert to key off, uses the sessionStorage hand-off and a bare route.)
+    await expect(page).toHaveURL(new RegExp(`/patients/detail\\?alert=${id}$`), {
+      timeout: 20_000,
+    })
+    // …and the patient actually renders, i.e. the alert really did resolve.
+    await expect(page.locator(byTestId(T.admin.detailHeader))).toBeVisible({
+      timeout: 20_000,
+    })
+    // The patient id never appears in the URL.
+    expect(page.url()).not.toContain(aisha.id)
     await tc.dispose()
   })
 })

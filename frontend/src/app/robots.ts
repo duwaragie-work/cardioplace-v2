@@ -1,5 +1,8 @@
 import type { MetadataRoute } from 'next'
 
+// B3 (static export) — prerender to a static /robots.txt file (see sitemap.ts).
+export const dynamic = 'force-static'
+
 /**
  * /robots.txt — Next 16 file convention. Closes B8 from
  * qa/reports/RESULTS.md (was returning text/html via the catch-all). The

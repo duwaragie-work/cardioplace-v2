@@ -31,7 +31,7 @@ import { API_BASE_URL } from '../playwright.config.js'
  * use a 2-reading same-session submission + 8 days of benign history to
  * clear the pre-Day-3 gate (exact recipe from spec 19).
  *
- * RULE_BRADY_HR_ASYMPTOMATIC is intentionally NOT covered (engine logic not
+ * RULE_BRADY_ABSOLUTE is intentionally NOT covered (engine logic not
  * wired pending Manisha's threshold sign-off — see doc §I note).
  */
 

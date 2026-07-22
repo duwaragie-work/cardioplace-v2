@@ -77,6 +77,47 @@ export class TestControl {
   }
 
   /**
+   * Turn the V-03 auth rate limiter on/off at runtime (2026-07-17).
+   *
+   * The suite runs with the limiter disabled (AUTH_THROTTLE_DISABLED=1) so the
+   * ~100 specs that sign in as shared seed accounts don't trip 5/60s on their
+   * own auth. tests/75 — the spec that proves the limiter — flips it back on
+   * around its own block and off again after. The guard reads the flag live per
+   * request, so no backend restart is needed.
+   */
+  async setAuthThrottle(enabled: boolean): Promise<{ throttleEnabled: boolean }> {
+    return this.post('test-control/auth/throttle', { enabled })
+  }
+
+  /**
+   * Seed `count` failed-auth rows for one identifier (2026-07-17).
+   *
+   * Use this instead of POSTing wrong OTPs in a loop. V-03's rate limiter caps
+   * /otp/verify at 5 per 60s per ip:email — that limiter exists precisely to
+   * make "N rapid failed logins for one account from one client" impossible, so
+   * an HTTP-driven loop can no longer reach the CRITICAL threshold and never
+   * should again.
+   *
+   * This is not a shortcut around the system under test: the rows are written
+   * through the same `authLog.create` that `authFailureExtension` wraps, so the
+   * real AUTH_EVENTS.FAILURE evaluator fires exactly as in production — only
+   * the HTTP hop is skipped. IPs vary per row by default, which also makes this
+   * a truer model of the distributed burst the CRITICAL tier is meant to catch
+   * (the per-ip:email limiter does not stop 50 IPs × 1 attempt each).
+   */
+  async seedFailedAuth(
+    identifier: string,
+    count: number,
+    ipAddress?: string,
+  ): Promise<{ seeded: number }> {
+    return this.post('test-control/auth/seed-failed', {
+      identifier,
+      count,
+      ...(ipAddress ? { ipAddress } : {}),
+    })
+  }
+
+  /**
    * Deterministically fire T+0 for one alert. Unlike runEscalationScan (which
    * only advances overdue ladders + fires queued events), this awaits the real
    * fireT0 dispatch for a fresh alert, so the T+0 Notification rows are
@@ -490,6 +531,32 @@ export class TestControl {
     status: 'NOT_COMPLETED' | 'COMPLETED',
   ): Promise<void> {
     await this.post('test-control/user/set-onboarding-status', { userId, status })
+  }
+
+  /**
+   * Onboarding suite (spec 03, A1–A5) — roll a patient back to cold
+   * un-onboarded state: NOT_COMPLETED, no name/comm/reminder/consent, and the
+   * `policy_acknowledged` AuthLog rows deleted so A5's duplicate-consent check
+   * starts from zero. Keyed by email; returns the id for follow-up calls.
+   * HTTP replacement for the proof specs' `docker exec psql` reset.
+   */
+  async resetOnboarding(email: string): Promise<{ userId: string }> {
+    return this.post('test-control/reset/onboarding', { email })
+  }
+
+  /** A5 — count a user's `policy_acknowledged` AuthLog rows (must stay 1 on re-ask). */
+  async countPolicyAck(userId: string): Promise<{ count: number }> {
+    return this.get(
+      `test-control/audit/policy-ack-count?userId=${encodeURIComponent(userId)}`,
+    )
+  }
+
+  /**
+   * A5 version-awareness — force a stale stored `acknowledgedPolicyVersion` so
+   * onboarding re-shows the privacy step (simulates a POLICY_VERSION bump).
+   */
+  async setPolicyAckVersion(email: string, version: string): Promise<void> {
+    await this.post('test-control/user/set-policy-ack-version', { email, version })
   }
 
   /** Force a user's `profileVerificationStatus` (UNVERIFIED/VERIFIED/CORRECTED). */

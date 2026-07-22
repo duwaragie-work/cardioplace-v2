@@ -6,6 +6,7 @@ import {
   correctProfileFieldViaUI,
   editThresholdViaUI,
   admitPatientViaUI,
+  gotoPatientDetailById,
 } from '../helpers/api.js'
 import { API_BASE_URL, ADMIN_BASE_URL, PATIENT_BASE_URL } from '../playwright.config.js'
 import { byTestId, T } from '../helpers/selectors.js'
@@ -177,7 +178,7 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
     await stageScratch(tc, olive.id, { enrolled: false, hcm: true, withThreshold: false })
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await expectNeedsThreshold(page)
     await tc.dispose()
   })
@@ -188,7 +189,7 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
     await stageScratch(tc, olive.id, { enrolled: false, hcm: true, withThreshold: false })
 
     await signInAdmin(page, ADMINS.ops.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.detailHeader)).waitFor({ state: 'visible', timeout: 20_000 })
     await page.waitForTimeout(2500)
     // OPS can't author thresholds → NOT auto-landed: stays on the default tab.
@@ -211,7 +212,14 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
     await stageScratch(tc, olive.id, { enrolled: true, withThreshold: true })
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
+    // evaluateAll does NOT auto-wait, and the detail shell resolves its patient
+    // client-side now (id off the URL), so the tabs mount a beat after
+    // navigation. Wait for the first tab before snapshotting the order.
+    await page
+      .locator('[role="tablist"] [data-testid^="admin-tab-"]')
+      .first()
+      .waitFor({ state: 'visible', timeout: 20_000 })
     const order = await page
       .locator('[role="tablist"] [data-testid^="admin-tab-"]')
       .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')))
@@ -230,7 +238,7 @@ test.describe('THR-REVIEW + enrollment safety (UI E2E)', () => {
     await stageScratch(tc, olive.id, { enrolled: true, hcm: true, withThreshold: true })
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.detailHeader)).waitFor({ state: 'visible', timeout: 20_000 })
     // Let threshold + logs load + the gate settle — this is the window that,
     // unfixed, strands the page on Thresholds.
@@ -263,7 +271,7 @@ test.describe('Per-field profile verification (UI E2E)', () => {
     await tc.setUserCondition(olive.id, 'hasCAD', true)
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.profileConfirm('hasCAD'))).click()
 
     // Field flips to confirmed + the ✓ disables (IVR-08 idempotency).
@@ -293,7 +301,7 @@ test.describe('Per-field profile verification (UI E2E)', () => {
     await tc.setUserCondition(olive.id, 'hasCAD', true)
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.profileReject('hasCAD'))).click()
 
     await expect(page.locator(byTestId(T.admin.profileField('hasCAD')))).toHaveAttribute(
@@ -311,7 +319,7 @@ test.describe('Per-field profile verification (UI E2E)', () => {
     await stageScratch(tc, olive.id, { enrolled: true, verified: false, withThreshold: false })
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     const confirmAll = page.locator(byTestId(T.admin.profileConfirmAll))
     await expect(confirmAll).toBeVisible({ timeout: 20_000 })
     await confirmAll.click()
@@ -331,7 +339,7 @@ test.describe('Per-field profile verification (UI E2E)', () => {
     await tc.setUserCondition(olive.id, 'hasCAD', true)
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
 
     // Reject CAD → the gate engages.
     await page.locator(byTestId(T.admin.profileReject('hasCAD'))).click()
@@ -399,7 +407,7 @@ test.describe('Per-field profile verification (UI E2E)', () => {
     ])
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
 
     const field = page.locator(byTestId(T.admin.profileField('hasCAD')))
     await expect(field).toHaveAttribute('data-status', 'rejected', { timeout: 20_000 })
@@ -453,8 +461,11 @@ test.describe('Care-team notifications + deep-link (UI E2E)', () => {
       const row = page.locator(byTestId(T.admin.notificationRow(provNotice.id)))
       await row.waitFor({ state: 'visible', timeout: 20_000 })
       await row.click()
-      await page.waitForURL(new RegExp(`/patients/${olive.id}`), { timeout: 20_000 })
-      expect(page.url()).toContain(`/patients/${olive.id}`)
+      // F1 — bare /patients/detail route; the id is handed off via
+      // sessionStorage, so it must NOT be in the URL.
+      await page.waitForURL(/\/patients\/detail$/, { timeout: 20_000 })
+      expect(page.url()).toContain('/patients/detail')
+      expect(page.url()).not.toContain('id=')
     }
     await tc.dispose()
   })
@@ -506,7 +517,7 @@ test.describe('Timeline audit trail (UI E2E)', () => {
       .poll(async () => (await tc.findUser(PATIENTS.olive.email)).enrollmentStatus, { timeout: 15_000 })
       .toBe('ENROLLED')
 
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.detailTab('timeline'))).click()
     const tl = page.locator(byTestId(T.admin.timelineList))
     await expect(tl).toContainText(/enrollment reverted/i, { timeout: 20_000 })
@@ -529,7 +540,7 @@ test.describe('Timeline audit trail (UI E2E)', () => {
     await tc.setUserCondition(olive.id, 'hasAFib', true)
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     // Confirm CAD…
     await page.locator(byTestId(T.admin.profileConfirm('hasCAD'))).click()
     await expect(page.locator(byTestId(T.admin.profileField('hasCAD')))).toHaveAttribute(
@@ -548,7 +559,7 @@ test.describe('Timeline audit trail (UI E2E)', () => {
     // change on every re-run — heightCm would no-op once already set).
     await correctProfileFieldViaUI(page, olive.id, 'hasHeartFailure', 'true', 'QA: correct HF flag')
 
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.detailTab('timeline'))).click()
     const tl = page.locator(byTestId(T.admin.timelineList))
     // Timeline surfaces the real actor ROLE (provider / medical director) now,
@@ -599,7 +610,7 @@ test.describe('Variants + remaining coverage (UI E2E)', () => {
     await tc.setUserCondition(olive.id, 'hasDCM', true)
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     // Mandatory + no threshold → forced onto Thresholds, where the suggested
     // default + Apply button render.
     await expect(page.locator(byTestId(T.admin.detailTab('thresholds')))).toHaveAttribute(
@@ -622,7 +633,7 @@ test.describe('Variants + remaining coverage (UI E2E)', () => {
     await tc.setUserCondition(olive.id, 'diagnosedHypertension', true)
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.profileConfirm('hasCAD'))).click()
     await expect(page.locator(byTestId(T.admin.profileField('hasCAD')))).toHaveAttribute(
       'data-status',
@@ -636,7 +647,7 @@ test.describe('Variants + remaining coverage (UI E2E)', () => {
     expect(res.ok(), `patient edit: ${res.status()} ${await res.text()}`).toBeTruthy()
     await patientApi.dispose()
 
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     const banner = page.locator(byTestId(T.admin.profileChangedBanner))
     await expect(banner).toBeVisible({ timeout: 20_000 })
     await expect(banner).toContainText(/diagnosed hypertension/i)
@@ -669,7 +680,7 @@ test.describe('Variants + remaining coverage (UI E2E)', () => {
 
     // An editor opening the patient is locked (the threshold is now stale).
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await expectNeedsThreshold(page)
     await tc.dispose()
   })
@@ -688,7 +699,7 @@ test.describe('Variants + remaining coverage (UI E2E)', () => {
       .poll(async () => (await tc.findUser(PATIENTS.olive.email)).enrollmentStatus, { timeout: 15_000 })
       .toBe('ENROLLED')
 
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.detailTab('timeline'))).click()
     await expect(page.locator(byTestId(T.admin.timelineList))).toContainText(
       /enrollment completed by admin/i,
@@ -704,7 +715,7 @@ test.describe('Variants + remaining coverage (UI E2E)', () => {
     await stageScratch(tc, olive.id, { enrolled: false, hcm: true, withThreshold: false })
 
     await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await expectNeedsThreshold(page)
     await tc.dispose()
   })
@@ -758,7 +769,7 @@ test.describe('Seed-patient threshold-flag diagnosis (UI E2E)', () => {
       // Observe the real UI signal — the pulsing flag on the Thresholds tab
       // (the hard lock is gone; the flag is the new "needs threshold" marker).
       await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-      await page.goto(`${ADMIN_BASE_URL}/patients/${u.id}`)
+      await gotoPatientDetailById(page, ADMIN_BASE_URL, u.id)
       await page.locator(byTestId(T.admin.detailHeader)).waitFor({ state: 'visible', timeout: 20_000 })
       // Let the shell load logs + the gate settle before reading the flag.
       await page.waitForTimeout(2500)
@@ -855,7 +866,7 @@ test.describe('Profile correction UX (UI E2E)', () => {
     await api.dispose()
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.profileCorrect('heightCm'))).click()
     await page.locator(byTestId(T.admin.profileEditInput('heightCm'))).fill(String(current))
     await page.locator(byTestId(T.admin.profileEditSave('heightCm'))).click()
@@ -884,7 +895,7 @@ test.describe('Profile correction UX (UI E2E)', () => {
     await api.dispose()
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.profileCorrect('heightCm'))).click()
     // A decimal that differs from the current value → a real (invalid) change.
     await page.locator(byTestId(T.admin.profileEditInput('heightCm'))).fill(`${current}.5`)
@@ -910,7 +921,7 @@ test.describe('Profile correction UX (UI E2E)', () => {
     await api.dispose()
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.profileCorrect('heightCm'))).click()
     await page.locator(byTestId(T.admin.profileEditInput('heightCm'))).fill(String(current))
     await page.locator(byTestId(T.admin.profileEditSave('heightCm'))).click()
@@ -939,7 +950,7 @@ test.describe('Timeline actor role (UI E2E)', () => {
 
     // Dr. Samuel Okonkwo is a PROVIDER (and olive's primary provider).
     await signInAdmin(page, ADMINS.primaryProvider.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.profileConfirm('hasCAD'))).click()
     await expect(page.locator(byTestId(T.admin.profileField('hasCAD')))).toHaveAttribute(
       'data-status',
@@ -972,7 +983,7 @@ test.describe('Timeline actor role (UI E2E)', () => {
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
     await correctProfileFieldViaUI(page, olive.id, 'heightCm', String(next), 'QA: change height')
 
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.detailTab('timeline'))).click()
     const tl = page.locator(byTestId(T.admin.timelineList))
     await expect(tl).toContainText(new RegExp(`${next}\\s*cm`, 'i'), { timeout: 20_000 })
@@ -994,7 +1005,7 @@ test.describe('No-lock threshold navigation (UI E2E)', () => {
     await stageScratch(tc, olive.id, { enrolled: false, hcm: true, withThreshold: false })
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     // Land-first on Thresholds, with the flag.
     await expectNeedsThreshold(page)
 
@@ -1058,7 +1069,7 @@ test.describe('Threshold clear/delete + notify (UI E2E)', () => {
     await stageScratch(tc, olive.id, { enrolled: true, hcm: true, withThreshold: true })
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
 
     // Two-step clear.
@@ -1091,7 +1102,7 @@ test.describe('Threshold clear/delete + notify (UI E2E)', () => {
     expect(create.ok(), `seed threshold: ${create.status()} ${await create.text()}`).toBeTruthy()
 
     await signInAdmin(page, ADMIN.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${olive.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, olive.id)
     await page.locator(byTestId(T.admin.detailTab('thresholds'))).click()
     // Clear DBP-upper, keep DBP-lower, save.
     await page.locator(byTestId(T.admin.thresholdDbpUpper)).fill('')

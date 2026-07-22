@@ -9,7 +9,7 @@ import {
   shouldShowOnboardingForUser,
 } from "@/lib/onboarding";
 import { POLICY_VERSION } from "@cardioplace/shared";
-import { CheckCircle2, ShieldCheck, Ban, UserCheck, Lock } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ShieldCheck, Ban, UserCheck, Lock } from "lucide-react";
 import SpinnerIndicator from "@/components/ui/SpinnerIndicator";
 import { useLanguage } from "@/contexts/LanguageContext";
 import LandingHeader from "@/components/cardio/LandingHeader";
@@ -45,6 +45,9 @@ function halfHourSlots(startHour: number, endHour: number, includeHalfAtEnd = tr
 const ONBOARDING_REMINDER_SLOTS = halfHourSlots(6, 21, false);
 // Quiet hours: 00:00 → 23:30 inclusive.
 const ONBOARDING_QUIET_SLOTS = halfHourSlots(0, 23, true);
+// L3 — E.164, mirroring the backend ProfileDto so we fail in the UI rather than
+// round-tripping a 400.
+const SMS_PHONE_RE = /^\+[1-9]\d{7,14}$/;
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -57,17 +60,43 @@ export default function OnboardingPage() {
   const [reminderTime, setReminderTime] = useState("09:00");
   const [quietHoursStart, setQuietHoursStart] = useState("22:00");
   const [quietHoursEnd, setQuietHoursEnd] = useState("07:00");
+  // L3 (2026-07-14) — SMS reminders. Both OPTIONAL: leaving the phone blank is
+  // a valid outcome and the patient still gets in-app + push + email reminders.
+  // Consent is OPT-IN ONLY (starts false, never pre-checked) and the checkbox
+  // is hidden entirely until a number is entered.
+  const [smsPhone, setSmsPhone] = useState("");
+  const [smsConsent, setSmsConsent] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
   // Privacy/trust screen shows FIRST (V2-E Gap 7) — patients in the immigrant
   // cohort must see the "your data is private, not shared with government /
   // employer / anyone else" promise BEFORE they disclose any clinical info,
-  // or they won't enroll. "privacy" → reassurance step, "profile" → the form.
-  const [step, setStep] = useState<"privacy" | "profile">("privacy");
-  // Terms + Privacy consent — collected once here on the privacy step. Only new
-  // users reach onboarding, so returning users are never re-asked. Recorded on
-  // the AuthLog audit trail (event 'policy_acknowledged') via POST /v2/auth/consent.
+  // or they won't enroll.
+  //   "privacy"   → reassurance + Terms/Privacy consent
+  //   "profile"   → identity fields (name + comm preference)
+  //   "reminders" → daily reminder time + quiet hours
+  // Only the identity step completes onboarding. Reminders always have a
+  // usable default, so answering them says nothing about who the patient is.
+  const [step, setStep] = useState<"privacy" | "profile" | "reminders">("privacy");
+  // True once the patient has committed the identity step with data (Continue,
+  // not Skip) — i.e. the server row is now COMPLETED. If they skipped it, the
+  // only thing that lets them out of onboarding is this device's skip flag.
+  const [profileSubmitted, setProfileSubmitted] = useState(false);
+  // Server-side "reminders were already answered" (any device). null = not
+  // loaded yet; treated as false so a fresh patient still sees the step. On a
+  // re-ask (second device) this is true and the reminders step is skipped
+  // entirely — reminders already have a value, so asking again is noise.
+  const [reminderPreferenceSet, setReminderPreferenceSet] = useState<boolean | null>(null);
+  // False until the profile fetch (reminder + consent flags) resolves. Gates
+  // the first render so an already-consented patient doesn't flash the privacy
+  // step before A5 auto-advances past it.
+  const [flagsLoaded, setFlagsLoaded] = useState(false);
+  // Terms + Privacy consent — collected once on the privacy step. A5: a patient
+  // who already agreed to the current POLICY_VERSION skips this step on every
+  // later device (see the profile-fetch effect). Recorded both on the AuthLog
+  // audit trail (event 'policy_acknowledged') and in User.acknowledgedPolicyVersion
+  // via POST /v2/auth/consent.
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   useEffect(() => {
@@ -84,7 +113,9 @@ export default function OnboardingPage() {
     });
 
     if (!showOnboarding) {
-      if (typeof window !== "undefined") {
+      // 4.1 — never ship a user identifier to the console in production (it
+      // lands in shared/kiosk browser dev-tools). Dev-only diagnostic.
+      if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
         // eslint-disable-next-line no-console
         console.debug("[onboarding] redirect away from onboarding page", {
           userId: user.id,
@@ -96,6 +127,40 @@ export default function OnboardingPage() {
       router.replace("/dashboard");
     }
   }, [user, isLoading, router]);
+
+  // The auth response carries onboarding_required but not the reminder /
+  // consent flags, so read them from the profile. Resolves on mount, while the
+  // patient is still on the (possibly-to-be-skipped) privacy step.
+  useEffect(() => {
+    if (isLoading || !user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchWithAuth(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/v2/auth/profile`,
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setReminderPreferenceSet(!!data.reminderPreferenceSet);
+        // A5 — consent is asked once. A patient who already agreed to the
+        // CURRENT policy version skips the privacy step entirely (a re-ask on
+        // another device lands straight on identity). Only auto-advance from
+        // the untouched privacy step; never yank someone out of a later step.
+        if (data.acknowledgedPolicyVersion === POLICY_VERSION) {
+          setStep((s) => (s === "privacy" ? "profile" : s));
+        }
+      } catch {
+        // Best-effort — the null/privacy defaults are correct for a patient
+        // who has never answered these.
+      } finally {
+        if (!cancelled) setFlagsLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isLoading]);
 
   const isFormPartiallyFilled = name.trim() !== "" || communicationPreference !== "";
 
@@ -111,7 +176,7 @@ export default function OnboardingPage() {
       onboardingRequiredHint: user.onboardingRequired,
     });
 
-  if (isLoading || !user || isRedirecting || willRedirectAway) {
+  if (isLoading || !user || isRedirecting || willRedirectAway || !flagsLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <SpinnerIndicator size={40} className="text-[#7B00E0]" />
@@ -119,13 +184,21 @@ export default function OnboardingPage() {
     );
   }
 
-  async function submitProfile(body: Record<string, unknown>) {
+  /**
+   * POST the given fields to /v2/auth/profile. The endpoint marks
+   * onboardingStatus=COMPLETED only for payloads carrying identity (name or
+   * comm preference); a reminder-only payload persists its fields and leaves
+   * onboarding alone. Returns true on success. Deliberately does NOT navigate
+   * or flip local onboarding state — callers own that, because the identity
+   * step's Continue must land on the reminders step, not the dashboard.
+   */
+  async function postProfile(body: Record<string, unknown>): Promise<boolean> {
     setError("");
     setIsSubmitting(true);
     try {
       if (!user) {
         router.push("/sign-in");
-        return;
+        return false;
       }
       const timezone = getBrowserTimezone();
       const payload = timezone && !("timezone" in body) ? { ...body, timezone } : body;
@@ -146,43 +219,107 @@ export default function OnboardingPage() {
       if (!res.ok) {
         throw new Error(data.message || "Failed to save profile");
       }
-
-      markOnboardingComplete();
-      if (name.trim()) updateUser({ name: name.trim() });
-      router.push("/dashboard");
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to complete onboarding");
+      return false;
+    } finally {
       setIsSubmitting(false);
     }
   }
 
-  async function handleContinue() {
-    if (!isFormPartiallyFilled || isSubmitting) return;
-    await submitProfile({
-      name: name.trim() || null,
-      communicationPreference: communicationPreference || null,
-      // N8 (2026-07-13) — Reminder & Engagement prefs. Always pushed so a
-      // patient who tweaks the pickers before continuing sees their choice
-      // persist; defaults match backend so an untouched form is a no-op.
-      reminderTime,
-      quietHoursStart,
-      quietHoursEnd,
-    });
+  /** Leave onboarding as fully complete (server row is already COMPLETED). */
+  function finishOnboarded() {
+    markOnboardingComplete();
+    if (name.trim()) updateUser({ name: name.trim() });
+    router.push("/dashboard");
   }
 
-  async function handleSkip() {
-    if (isSubmitting) return;
+  /**
+   * Leave onboarding without identity. Nothing is persisted server-side, so
+   * `onboardingStatus` stays NOT_COMPLETED and another device still asks. The
+   * device flag (and the marker cookie it writes) is what stops the route
+   * guard bouncing this browser straight back here.
+   */
+  function finishSkipped() {
     if (!user) {
       router.push("/sign-in");
       return;
     }
-    // Skip is a client-only signal. We deliberately do NOT call POST
-    // /v2/auth/profile here — that would mark onboardingStatus=COMPLETED
-    // server-side, conflating "skipped" with "completed" (the admin can no
-    // longer tell them apart). The localStorage flag is enough to suppress
-    // the form on subsequent navigations within this browser.
     markOnboardingSkipped(user.id);
     router.push("/dashboard");
+  }
+
+  // ─── Identity step ──────────────────────────────────────────────────────
+  // Continue: persist identity (this is what marks COMPLETED server-side).
+  // Advance to reminders unless they're already answered — on a re-ask there
+  // is nothing left to ask, so finish here. We do NOT finalize locally before
+  // the reminders step: flipping onboardingStatus trips the redirect-away
+  // effect and would skip it.
+  async function handleProfileContinue() {
+    if (!isFormPartiallyFilled || isSubmitting) return;
+    const ok = await postProfile({
+      name: name.trim() || null,
+      communicationPreference: communicationPreference || null,
+    });
+    if (!ok) return;
+    setProfileSubmitted(true);
+    if (reminderPreferenceSet) {
+      finishOnboarded();
+      return;
+    }
+    setStep("reminders");
+  }
+
+  // Skip: no server call. Advance to reminders if they still need answering,
+  // otherwise leave as un-onboarded-but-dismissed.
+  function handleProfileSkip() {
+    if (isSubmitting) return;
+    setError("");
+    if (reminderPreferenceSet) {
+      finishSkipped();
+      return;
+    }
+    setStep("reminders");
+  }
+
+  // ─── Reminders step ─────────────────────────────────────────────────────
+  // Continue is the only exit (no Skip — daily reminders are always-on per
+  // Manisha's Patient Reminder spec §1D, so a Skip would just apply the 09:00
+  // default while implying it had opted out). Persisting reminders marks
+  // reminderPreferenceSet but never completes onboarding: if identity was
+  // skipped, the patient leaves as NOT_COMPLETED + device-dismissed.
+  async function handleRemindersContinue() {
+    if (isSubmitting) return;
+    // L3 — phone is optional; only send it when the patient typed a valid one.
+    // Consent can never travel without a number (it'd be a consent to text
+    // nothing), so it's forced false when the field is blank.
+    const phone = smsPhone.trim();
+    const sendPhone = phone.length > 0 && SMS_PHONE_RE.test(phone);
+    if (phone.length > 0 && !sendPhone) {
+      setError(t('onboarding.sms.phoneInvalid'));
+      return;
+    }
+    const ok = await postProfile({
+      reminderTime,
+      quietHoursStart,
+      quietHoursEnd,
+      ...(sendPhone
+        ? { phoneNumber: phone, smsConsent }
+        : { smsConsent: false }),
+    });
+    if (!ok) return;
+    if (profileSubmitted) {
+      finishOnboarded();
+      return;
+    }
+    finishSkipped();
+  }
+
+  function handleRemindersBack() {
+    if (isSubmitting) return;
+    setError("");
+    setStep("profile");
   }
 
   return (
@@ -301,18 +438,65 @@ export default function OnboardingPage() {
           {/* Left side - Form */}
           <div className="flex-1 w-full max-w-[400px] md:max-w-105 lg:max-w-130">
 
-            {/* Heading */}
+            {/* Back + step indicator share ONE row, Back on the left — it reads
+                as "leave this step" without competing with Continue/Skip at the
+                bottom. Only step 2 has somewhere to go back to; step 1 keeps the
+                indicator in its original position (centred on mobile).
+                Step indicator: two steps normally; on a re-ask (reminders
+                already answered on another device) identity is the only step,
+                so the total collapses to 1 rather than promising a step 2
+                that never comes. */}
+            <div
+              className={`mb-2 flex items-center gap-2 ${
+                step === 'reminders' ? 'justify-start' : 'justify-center md:justify-start'
+              }`}
+            >
+              {step === 'reminders' && (
+                <button
+                  type="button"
+                  data-testid="onboarding-reminders-back-btn"
+                  onClick={handleRemindersBack}
+                  disabled={isSubmitting}
+                  aria-label={t('onboarding.back')}
+                  className="inline-flex items-center gap-0.5 text-xs font-semibold uppercase tracking-wider text-[#7B00E0] hover:text-[#6600BC] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  <ChevronLeft aria-hidden="true" className="w-3.5 h-3.5" />
+                  {t('onboarding.back')}
+                </button>
+              )}
+              {step === 'reminders' && (
+                <span aria-hidden="true" className="text-[#e5d9f2] select-none">
+                  |
+                </span>
+              )}
+              <div
+                data-testid="onboarding-step-indicator"
+                className="text-xs font-semibold uppercase tracking-wider text-[#7B00E0]"
+              >
+                {/* A2 re-ask: total collapses to 1 when reminders were already
+                    set on another device, so we never promise a step 2 that
+                    the identity-only re-ask won't show. */}
+                {t('onboarding.stepIndicator')
+                  .replace('{n}', step === 'reminders' ? '2' : '1')
+                  .replace('{t}', reminderPreferenceSet ? '1' : '2')}
+              </div>
+            </div>
+
+            {/* Heading — step-aware */}
             <div className="mb-4 md:mb-6">
               <h1 className="font-semibold text-[#171717] text-2xl sm:text-3xl lg:text-4xl tracking-[-0.04em] mb-2 text-center md:text-left">
-                {t('onboarding.title')}
+                {step === 'reminders' ? t('onboarding.reminders.title') : t('onboarding.title')}
               </h1>
               <p className="text-[#4b5563] text-sm lg:text-base leading-relaxed max-w-105 text-center md:text-left">
-                {t('onboarding.subtitle')}
+                {step === 'reminders' ? t('onboarding.reminders.subtitle') : t('onboarding.subtitle')}
               </p>
             </div>
 
             {/* Form */}
             <div className="space-y-6 w-full">
+              {/* ─── Step 1 of 2: identity fields ─────────────────────────── */}
+              {step === 'profile' && (
+              <>
               {/* Name */}
               <div className="w-full max-w-105">
                 <div className="flex items-center justify-between gap-2 mb-2">
@@ -324,6 +508,7 @@ export default function OnboardingPage() {
                 <div className="flex items-center gap-2">
                   <input
                     id="onboarding-name"
+                    data-testid="onboarding-name-input"
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -363,11 +548,14 @@ export default function OnboardingPage() {
                 </select>
               </div>
 
-              {/* N8 (2026-07-13) — Reminder & Engagement pickers. Placed after
-                  the identity pair (name + comm-pref) so a patient who's
-                  already in the flow has the context to answer "what time
-                  works for you." All three have sensible defaults so a fast
-                  skip still ends up with usable values. */}
+              </>
+              )}
+
+              {/* ─── Step 2 of 2: reminder & quiet-hours pickers ──────────────
+                  All three have sensible backend defaults, so a patient who
+                  skips this step still ends up with usable values. */}
+              {step === 'reminders' && (
+              <>
               <div className="w-full max-w-105">
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <label htmlFor="onboarding-reminder-time" className="block font-semibold text-[#171717] text-xs lg:text-sm">
@@ -395,44 +583,111 @@ export default function OnboardingPage() {
                   {t('onboarding.reminders.quietHoursHeading')}
                 </div>
 
-                <div className="mb-3">
-                  <label htmlFor="onboarding-quiet-start" className="block text-[#525252] text-xs mb-1.5">
-                    {t('profile.reminders.startLabel')}
-                  </label>
-                  <select
-                    id="onboarding-quiet-start"
-                    data-testid="onboarding-quiet-start"
-                    value={quietHoursStart}
-                    onChange={(e) => setQuietHoursStart(e.target.value)}
-                    className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
-                  >
-                    {ONBOARDING_QUIET_SLOTS.map((slot) => (
-                      <option key={slot} value={slot}>{slot}</option>
-                    ))}
-                  </select>
-                </div>
+                {/* Start + End on one row (two columns). Stays side-by-side
+                    down to the smallest width — the 30-min "HH:MM" values are
+                    narrow, so two half-width selects still fit a phone. */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="onboarding-quiet-start" className="block text-[#525252] text-xs mb-1.5">
+                      {t('profile.reminders.startLabel')}
+                    </label>
+                    <select
+                      id="onboarding-quiet-start"
+                      data-testid="onboarding-quiet-start"
+                      value={quietHoursStart}
+                      onChange={(e) => setQuietHoursStart(e.target.value)}
+                      className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                    >
+                      {ONBOARDING_QUIET_SLOTS.map((slot) => (
+                        <option key={slot} value={slot}>{slot}</option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div>
-                  <label htmlFor="onboarding-quiet-end" className="block text-[#525252] text-xs mb-1.5">
-                    {t('profile.reminders.endLabel')}
-                  </label>
-                  <select
-                    id="onboarding-quiet-end"
-                    data-testid="onboarding-quiet-end"
-                    value={quietHoursEnd}
-                    onChange={(e) => setQuietHoursEnd(e.target.value)}
-                    className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
-                  >
-                    {ONBOARDING_QUIET_SLOTS.map((slot) => (
-                      <option key={slot} value={slot}>{slot}</option>
-                    ))}
-                  </select>
+                  <div>
+                    <label htmlFor="onboarding-quiet-end" className="block text-[#525252] text-xs mb-1.5">
+                      {t('profile.reminders.endLabel')}
+                    </label>
+                    <select
+                      id="onboarding-quiet-end"
+                      data-testid="onboarding-quiet-end"
+                      value={quietHoursEnd}
+                      onChange={(e) => setQuietHoursEnd(e.target.value)}
+                      className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                    >
+                      {ONBOARDING_QUIET_SLOTS.map((slot) => (
+                        <option key={slot} value={slot}>{slot}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <p className="mt-3 text-xs font-semibold text-[#92400E] bg-[#FEF3C7] rounded-lg px-3 py-2">
                   {t('onboarding.reminders.emergencyDisclaimer')}
                 </p>
               </div>
+
+              {/* L3 (2026-07-14) — text reminders. OPTIONAL: no number is a
+                  valid outcome (in-app + push + email still work). Consent is
+                  opt-in only and the checkbox stays hidden until a number is
+                  entered — per spec §2D, never offer consent with no number.
+                  Same `w-full max-w-105` as every other field so the column
+                  stays flush; vertical rhythm comes from the parent space-y-6. */}
+              <div className="w-full max-w-105">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label htmlFor="onboarding-sms-phone" className="block font-semibold text-[#171717] text-xs lg:text-sm">
+                    {t('onboarding.sms.phoneLabel')}
+                  </label>
+                  <AudioButton text={t('onboarding.sms.phoneAudio')} size="sm" />
+                </div>
+                <input
+                  id="onboarding-sms-phone"
+                  data-testid="onboarding-sms-phone"
+                  type="tel"
+                  inputMode="tel"
+                  value={smsPhone}
+                  onChange={(e) => setSmsPhone(e.target.value)}
+                  placeholder="+15550100"
+                  className="w-full h-11 lg:h-12 px-4 lg:px-5 bg-[rgba(243,232,255,0.1)] border border-[#e5d9f2] rounded-lg text-sm lg:text-base text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent transition-all"
+                />
+                <p className="mt-2 text-xs text-[#737373] leading-relaxed">
+                  {t('onboarding.sms.phoneHelp')}
+                </p>
+
+                {smsPhone.trim().length > 0 && (
+                  <div className="mt-3 rounded-lg border border-[#e5d9f2] bg-[rgba(243,232,255,0.25)] p-3">
+                    {/* `data-no-min-target` is the sanctioned opt-out of the
+                        global 44px tap-target rule (globals.css §Tap-target
+                        minimum) — that rule is why the box rendered huge. The
+                        WCAG intent is preserved WITHOUT the giant box: the
+                        <label> wraps the control, so the whole padded row
+                        (well over 44px) toggles it. Shaky-handed patients keep
+                        a big hit area; the visual box just matches the text. */}
+                    <label className="flex items-center gap-2 cursor-pointer py-1.5">
+                      <input
+                        type="checkbox"
+                        data-testid="onboarding-sms-consent"
+                        data-no-min-target
+                        checked={smsConsent}
+                        onChange={(e) => setSmsConsent(e.target.checked)}
+                        className="w-3.5 h-3.5 shrink-0 accent-[#7B00E0] cursor-pointer"
+                      />
+                      <span className="text-xs font-medium text-[#171717]">
+                        {t('profile.sms.consentLabel')}
+                      </span>
+                    </label>
+                    {/* Required TCPA disclosures (rates / no-health-info / STOP)
+                        as fine print under the plain-language action above. The
+                        two together carry all four mandated elements — counsel
+                        must review them AS A PAIR (packet Q3). */}
+                    <p className="pl-5.5 text-[0.6875rem] text-[#737373] leading-relaxed">
+                      {t('profile.sms.consentFinePrint')}
+                    </p>
+                  </div>
+                )}
+              </div>
+              </>
+              )}
 
               {/* Error Message — vibrant-red palette routed through brand
                   tokens so the chip matches other validation states across
@@ -453,33 +708,59 @@ export default function OnboardingPage() {
                 </div>
               )}
 
-              {/* Action buttons */}
-              <div className="pt-4 w-full max-w-105 space-y-2">
-                <button
-                  type="button"
-                  data-testid="onboarding-submit-btn"
-                  onClick={handleContinue}
-                  disabled={!isFormPartiallyFilled || isSubmitting}
-                  className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  {isSubmitting ? t('common.saving') : t('onboarding.continue')}
-                </button>
-                <button
-                  type="button"
-                  data-testid="onboarding-skip-btn"
-                  onClick={handleSkip}
-                  className="w-full text-sm text-[#737373] mt-4 cursor-pointer"
-                >
-                  {t('onboarding.skip')}
-                </button>
-              </div>
+              {/* Action buttons — step-aware.
+                  Step 1 Continue advances to reminders (does NOT reach the
+                  dashboard); Step 2 Continue/Skip is the only exit. */}
+              {step === 'profile' ? (
+                <div className="pt-4 w-full max-w-105 space-y-2">
+                  <button
+                    type="button"
+                    data-testid="onboarding-submit-btn"
+                    onClick={handleProfileContinue}
+                    disabled={!isFormPartiallyFilled || isSubmitting}
+                    className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {isSubmitting ? t('common.saving') : t('onboarding.continue')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="onboarding-skip-btn"
+                    onClick={handleProfileSkip}
+                    disabled={isSubmitting}
+                    className="w-full text-sm text-[#737373] mt-4 cursor-pointer disabled:opacity-50"
+                  >
+                    {t('onboarding.skip')}
+                  </button>
+                </div>
+              ) : (
+                <div className="pt-4 w-full max-w-105 space-y-2">
+                  <button
+                    type="button"
+                    data-testid="onboarding-reminders-submit-btn"
+                    onClick={handleRemindersContinue}
+                    disabled={isSubmitting}
+                    className="w-full h-12 lg:h-14 bg-[#7B00E0] rounded-full shadow-[0px_10px_15px_rgba(123,0,224,0.25)] font-semibold text-white text-sm lg:text-base hover:bg-[#6600BC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {isSubmitting ? t('common.saving') : t('onboarding.continue')}
+                  </button>
+                  {/* No Skip (A3 — daily reminders are always-on; a Skip would
+                      just apply the 09:00 default while implying opt-out) and no
+                      bottom Back: Back lives at the top of the step, above the
+                      step indicator. Continue is the only bottom action. */}
+                </div>
+              )}
               {/* (Privacy note and sign out text removed per design) */}
             </div>
           </div>
 
-          {/* Right side - Info Panel (match register panel) */}
-          <div className="hidden md:flex flex-1 items-center justify-center lg:justify-end">
-            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl md:p-6 lg:p-10 md:w-80 md:h-80 lg:w-110 lg:h-auto flex">
+          {/* Right side - Info Panel (match register panel).
+              `self-center` pins the card to the vertical middle of the row
+              regardless of how tall the form column gets — step 2 is taller
+              than step 1, and without this the card rides with the column.
+              Height is content-driven (no fixed md:h-80) so it stays centred
+              instead of stretching. */}
+          <div className="hidden md:flex flex-1 self-center items-center justify-center lg:justify-end">
+            <div className="bg-linear-to-br from-[#f3e8ff] to-[#e9d5ff] rounded-3xl md:p-6 lg:p-10 md:w-80 lg:w-110 flex">
               <div className="space-y-4 my-auto w-full">
                 <div className="flex items-center gap-3">
                   <div className="bg-[#7B00E0] size-10 lg:size-16 rounded-2xl flex items-center justify-center shrink-0">

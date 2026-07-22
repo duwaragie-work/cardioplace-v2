@@ -9,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config'
 import { createHash, randomBytes } from 'crypto'
 import { EmailService } from '../email/email.service.js'
+import { redactEmail } from '../common/logging/log-redact.js'
 import { EMAIL_TEMPLATE_VERSION, activationEmailHtml, roleLabel } from '../email/email-templates.js'
 import type { Prisma } from '../generated/prisma/client.js'
 import { AccountStatus, UserRole } from '../generated/prisma/enums.js'
@@ -1478,7 +1479,9 @@ export class UsersService {
           ? 'http://localhost:3000'
           : 'http://localhost:3001',
       )
-      const inviteUrl = `${baseUrl}/activate/${params.rawToken}`
+      // B3 (static export) — /activate is now a static route reading the token
+      // from `?token=` (was the /activate/<token> path segment).
+      const inviteUrl = `${baseUrl}/activate?token=${encodeURIComponent(params.rawToken)}`
 
       const subject = `You've been invited to Cardioplace — activate your account`
       const html = activationEmailHtml({
@@ -1499,7 +1502,7 @@ export class UsersService {
       })
     } catch (err) {
       this.logger.error(
-        `Failed to dispatch activation email to ${params.invite.email}`,
+        `Failed to dispatch activation email to ${redactEmail(params.invite.email)}`,
         err instanceof Error ? err.stack : String(err),
       )
     }

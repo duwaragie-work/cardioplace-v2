@@ -15,8 +15,8 @@ import { AccountStatus } from '../../generated/prisma/enums.js'
  * pre-2026-07-03 behaviour (SYSTEM_ACTOR, actorId null), which is safe.
  */
 
-// The eight principals. MUST match the seed (prisma/seed/system-principals.ts)
-// and the email convention system-<label>@internal.cardioplace.test.
+// MUST match the seed (prisma/seed/system-principals.ts) and the email
+// convention system-<label>@internal.cardioplace.test.
 export const SYSTEM_PRINCIPAL_LABELS = [
   'engine-alert-generator',
   'escalation-ladder',
@@ -36,9 +36,65 @@ export const SYSTEM_PRINCIPAL_LABELS = [
   // N2 (2026-07-13) — daily patient reminder cron (Reminder & Engagement).
   // Replaces gap-alert with an escalating-tone daily nudge.
   'daily-reminder',
+  // N-2 (Duwaragie 2026-07-14 triage) — support ops routing. Fires from the
+  // HTTP intake path (createContactTicket / createLockedOutTicket), NOT a
+  // cron — but the CLS-actor pattern is the same. Without this, the
+  // support_ops_notify email lands in EmailDisclosureLog with
+  // senderPrincipal='system-principal-unknown' and trips N7's
+  // UNATTRIBUTED_SYSTEM_DISCLOSURE detector.
+  'support-ops-notify',
+  // N-2 residual (2026-07-17) — emergency care-team dispatch. The
+  // emergency.flagged event is emitted from the PATIENT's own request context
+  // (chat.service.ts:239 / voice-tools.service.ts:1832), so without its own
+  // principal the caregiver disclosure is attributed to the patient — i.e. the
+  // audit trail claims the patient disclosed their own emergency to their
+  // caregiver, when the system did. Distinct from 'engine-alert-generator':
+  // this path is emergency detection, not the rule engine.
+  'emergency-dispatch',
+  // Support System (2026-07-20) — daily auto-close sweep that moves long-idle
+  // RESOLVED tickets to CLOSED. A real @Cron (unlike support-ops-notify), so
+  // its SupportTicket writes run outside any request context and need an actor.
+  'support-auto-close',
+  // Support System (2026-07-21) — "waiting on the patient" nudge sweep. Its own
+  // principal rather than reusing support-auto-close: this one DISCLOSES to the
+  // patient (notification + email), so the audit trail must distinguish it from
+  // the silent housekeeping close.
+  'support-nudge',
 ] as const
 
 export type SystemPrincipalLabel = (typeof SYSTEM_PRINCIPAL_LABELS)[number]
+
+/**
+ * Display name per principal, consumed by prisma/seed/system-principals.ts.
+ *
+ * This map lives here, next to the allowlist, on purpose. The seed row is
+ * LOAD-BEARING: without it `resolveCronActorId` returns null and the write
+ * silently falls back to senderPrincipal='system-principal-unknown' — the exact
+ * N-2 bug, restored, with every test still green. The header above used to say
+ * "MUST match the seed", which is a comment where a type should be.
+ *
+ * Typing this as Record<SystemPrincipalLabel, string> makes the compiler the
+ * guard: add a label to the allowlist and tsc refuses to build until it has a
+ * display name here, and the seed then picks it up automatically. Drift is not
+ * "tested for" — it is unrepresentable.
+ */
+export const SYSTEM_PRINCIPAL_DISPLAY_NAMES: Readonly<
+  Record<SystemPrincipalLabel, string>
+> = {
+  'engine-alert-generator': 'Alert Engine',
+  'escalation-ladder': 'Escalation Ladder',
+  'session-finalize': 'Session Finalize Cron',
+  'monthly-reask': 'Monthly Re-ask Cron',
+  'medication-hold-escalation': 'Medication Hold Escalation',
+  'monthly-report': 'Monthly Report Cron',
+  'content-scheduler': 'Content Scheduler',
+  'audit-exception-report': 'Audit Exception Report Cron',
+  'daily-reminder': 'Daily Reminder Cron',
+  'support-ops-notify': 'Support Ops Notify',
+  'emergency-dispatch': 'Emergency Care-Team Dispatch',
+  'support-auto-close': 'Support Auto-Close Cron',
+  'support-nudge': 'Support Awaiting-Reply Nudge Cron',
+}
 
 /**
  * The label passed to `runAsCronActor` is NOT always the principal label — the
@@ -63,6 +119,15 @@ export const CRON_LABEL_TO_PRINCIPAL: Readonly<Record<string, SystemPrincipalLab
   'cron-daily-reminder': 'daily-reminder',
   // Engine @OnEvent handler — no 'cron-' prefix; label == principal.
   'engine-alert-generator': 'engine-alert-generator',
+  // N-2 (2026-07-14 triage) — support-ops notify runs from the HTTP intake
+  // path; no cron prefix, label == principal.
+  'support-ops-notify': 'support-ops-notify',
+  // N-2 residual (2026-07-17) — @OnEvent handler; no cron prefix.
+  'emergency-dispatch': 'emergency-dispatch',
+  // Support System (2026-07-20) — daily auto-close sweep.
+  'cron-support-auto-close': 'support-auto-close',
+  // Support System (2026-07-21) — awaiting-reply nudge sweep.
+  'cron-support-nudge': 'support-nudge',
 }
 
 // Derive the principal label from a seed row's email:

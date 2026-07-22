@@ -7,6 +7,8 @@ import { DailyJournalController } from './daily_journal.controller.js';
 import { DailyJournalService } from './daily_journal.service.js';
 import { ROLES_KEY } from '../auth/decorators/roles.decorator.js';
 import { UserRole } from '../generated/prisma/enums.js';
+import { EncryptionService } from '../common/encryption.service.js';
+import { encryptionMock } from '../common/test/encryption.mock.js';
 
 const mockPrisma = {
   journalEntry: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn() },
@@ -24,6 +26,7 @@ describe('DailyJournalController', () => {
         DailyJournalService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EventEmitter2, useValue: mockEventEmitter },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile();
 

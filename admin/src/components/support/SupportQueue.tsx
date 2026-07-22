@@ -8,7 +8,9 @@ import {
 } from '@/lib/services/support.service';
 import TicketCard from './TicketCard';
 
-const STATUSES = ['', 'OPEN', 'IN_PROGRESS', 'RESOLVED'];
+// CLOSED is the terminal state the auto-close cron sets 14 days after resolve.
+// Without it here, closed tickets were unfilterable and invisible to triage.
+const STATUSES = ['', 'OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
 const CATEGORIES = ['', 'ACCOUNT', 'MFA', 'CLINICAL', 'BUG', 'OTHER'];
 const PRIORITIES = ['', 'HIGH', 'NORMAL', 'LOW'];
 

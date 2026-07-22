@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import {
+  assignTicket,
+  changePriority,
   getTicket,
   replyTicket,
   resolveTicket,
@@ -16,6 +18,7 @@ import ReplyBox from './ReplyBox';
 import IdentityVerifyToggle from './IdentityVerifyToggle';
 import ActionButtons from './ActionButtons';
 import ActionTimeline from './ActionTimeline';
+import TriageBar from './TriageBar';
 
 function formatDisplayId(value: string): string {
   if (value.length !== 13 || value.includes('-')) return value;
@@ -147,6 +150,19 @@ export default function SupportDetail({ ticketId }: { ticketId: string }) {
         </div>
       )}
 
+      {/* Triage first — pick the ticket up and set its priority before acting
+          on it. Both write to the action timeline below. */}
+      <TriageBar
+        assignedToOpsId={ticket.assignedToOpsId}
+        assignedToOpsName={ticket.assignedToOps?.name ?? null}
+        priority={ticket.priority}
+        onAssignToMe={() =>
+          withReload(() => assignTicket(ticket.id), 'Assigned to you.')
+        }
+        onChangePriority={(p) =>
+          withReload(() => changePriority(ticket.id, p), 'Priority updated.')
+        }
+      />
       <IdentityVerifyToggle
         verified={ticket.identityVerified}
         onVerify={(rationale) =>
@@ -169,7 +185,11 @@ export default function SupportDetail({ ticketId }: { ticketId: string }) {
       <ReplyBox
         onSend={(b) => withReload(() => replyTicket(ticket.id, b), 'Reply sent.')}
       />
-      <ActionTimeline actions={ticket.actions} />
+      <ActionTimeline
+        actions={ticket.actions}
+        reopenedAt={ticket.reopenedAt}
+        closedAt={ticket.closedAt}
+      />
     </div>
   );
 }

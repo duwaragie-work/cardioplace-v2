@@ -1,5 +1,6 @@
 import { SpanStatusCode } from '@opentelemetry/api'
 import { auditTracer } from './audit-tracer.js'
+import { redactEmail } from '../logging/log-redact.js'
 
 /**
  * N7 (2026-07-11) — producer-side tally sink for the DROPPED_AUDIT_WRITES
@@ -165,7 +166,11 @@ function spanAttributesForCtx(ctx: AuditWriteContext): Record<string, string> {
       'audit.template': ctx.template,
       'audit.templateVersion': ctx.templateVersion,
       ...(ctx.patientUserId ? { 'audit.patientUserId': ctx.patientUserId } : {}),
-      ...(ctx.recipientEmail ? { 'audit.recipientEmail': ctx.recipientEmail } : {}),
+      // V-05 sweep — recipientEmail is a patient/caregiver address; this ctx
+      // feeds BOTH the OTEL span above AND the console.error(JSON) below, so
+      // hashing it here closes both sinks at once. The DB row (once the write
+      // eventually succeeds, or via the tally) holds the real address.
+      ...(ctx.recipientEmail ? { 'audit.recipientEmailHash': redactEmail(ctx.recipientEmail) } : {}),
       ...(ctx.purpose ? { 'audit.purpose': ctx.purpose } : {}),
       ...(ctx.recipientCategory ? { 'audit.recipientCategory': ctx.recipientCategory } : {}),
     }
@@ -173,6 +178,7 @@ function spanAttributesForCtx(ctx: AuditWriteContext): Record<string, string> {
   return {
     'audit.event': ctx.event,
     ...(ctx.userId ? { 'audit.userId': ctx.userId } : {}),
-    ...(ctx.identifier ? { 'audit.identifier': ctx.identifier } : {}),
+    // V-05 sweep — identifier is the login email / OTP subject for auth-log.
+    ...(ctx.identifier ? { 'audit.identifierHash': redactEmail(ctx.identifier) } : {}),
   }
 }

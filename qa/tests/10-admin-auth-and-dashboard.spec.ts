@@ -28,6 +28,12 @@ test.describe('Admin app — per-role sign-in', () => {
     const fixtureOnly =
       key === 'multiPracticeProvider' &&
       process.env.SEED_TEST_FIXTURES !== 'true'
+    // `outOfScopeProvider` is a purpose-built spec-76 harness: PROVIDER role
+    // with ONE PracticeProvider membership (seed-idor-harness), no patient
+    // assignments. The single membership lets sign-in auto-resolve (satisfies
+    // auth.service.ts's "No practice membership" guard) while keeping the
+    // actor out-of-scope for every real Cedar Hill patient — which is what
+    // spec 76 needs. This smoke covers that the sign-in path itself works.
     test(`${key} (${account.roles.join(',')}) signs in and lands on the admin app`, async ({ page }) => {
       test.skip(fixtureOnly, 'account only seeded under SEED_TEST_FIXTURES=true')
       await signInAdmin(page, account.email, ADMIN_BASE_URL, landing)
@@ -119,8 +125,11 @@ test.describe('Admin app — patient list', () => {
   test('manisha sees the patient list with seeded archetypes', async ({ page }) => {
     await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
     await page.goto(`${ADMIN_BASE_URL}/patients`)
-    // The 5 seed patients should all surface
+    // The seeded named archetypes should all surface. The e2e-onboarding
+    // persona is deliberately un-onboarded (name: null) and cannot surface by
+    // name, so skip nameless entries in this by-name assertion.
     for (const p of Object.values(PATIENTS)) {
+      if (!p.name) continue
       await expect(
         page.getByText(p.name),
         `expected ${p.name} in patient list`,
@@ -204,7 +213,21 @@ test.describe('Phase 3 §C — admin dashboard triage', () => {
     await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
     await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
     await page.locator(byTestId(T.admin.dashboardAlertOpen(alertId))).click()
-    await expect(page).toHaveURL(new RegExp(`/patients/${aisha.id}`), { timeout: 20_000 })
+    // An alert-driven click carries the OPAQUE alert id — `?alert=<alertId>` —
+    // and the detail shell resolves the patient from it server-side. That is
+    // the allowed form: the alert id is not PHI, the patient id would be. (The
+    // sessionStorage hand-off, i.e. a bare /patients/detail, is what a
+    // patient-row click uses, where there is no alert to key off.)
+    await expect(page).toHaveURL(
+      new RegExp(`/patients/detail\\?alert=${alertId}$`),
+      { timeout: 20_000 },
+    )
+    // …and the patient actually renders, i.e. the alert really did resolve.
+    await expect(
+      page.locator(byTestId(T.admin.detailHeader)),
+    ).toBeVisible({ timeout: 20_000 })
+    // The patient id never appears in the URL.
+    expect(page.url()).not.toContain(aisha.id)
   })
 
   test('30a.4 — tier filter + search narrow the queue', async ({ page }) => {

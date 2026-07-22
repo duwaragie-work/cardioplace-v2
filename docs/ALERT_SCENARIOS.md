@@ -169,7 +169,7 @@ Quick scan by rule ID. Scenarios are ordered by spec file.
 | 33 | `RULE_AFIB_HR_LOW` | AFib + 3 readings + pulse 48 → L1 Low | `readingCount=2` → AFib gate closes |
 | 34 | `RULE_TACHY_HR` | Tachy + pulse 105 + prior 102 → L1 High | Prior pulse 80 → consecutive gate closes |
 | 35 | `RULE_SYMPTOM_OVERRIDE_GENERAL` | Brady + pulse 48 + chestPain → L2 wins | Precedence inverted → Brady symptomatic fires |
-| 36 | `RULE_BRADY_HR_ASYMPTOMATIC` | Brady + pulse 38 (no symptoms, no meds) → L1 Low | Add BB + raise pulse to 55 → suppression window |
+| 36 | `RULE_BRADY_ABSOLUTE` | Brady + pulse 38 (no symptoms, no meds) → **Tier 1** (HR <40 is Tier 1 regardless of symptoms — Manisha 2026-05-10; was L1 Low under the retired RULE_BRADY_HR_ASYMPTOMATIC) | Add BB + raise pulse to 55 → suppression window |
 | 37 | `RULE_PULSE_PRESSURE_WIDE` | 145/80 (PP 65) → Tier 3 | DBP 85 (PP 60) → strict `>60` fails |
 | 38 | `RULE_LOOP_DIURETIC_HYPOTENSION` | Loop diuretic + SBP 92 → Tier 3 | SBP 95 → strict `<95` fails |
 | 39 | `RULE_SYMPTOM_OVERRIDE_GENERAL` | visualChanges at 125/75 → L2 | Flag unset |
@@ -192,7 +192,7 @@ Quick scan by rule ID. Scenarios are ordered by spec file.
 | 56 | `RULE_STANDARD_L1_HIGH` | AFib + 3 readings + 165/92 + pulse 75 → AFib still gets BP alerts | SBP drops to 159 + pulse normal → null |
 | 57 | no alert | Admin user (resolver throws `ProfileNotFoundException`) | PatientProfile exists → engine runs |
 | 58 | `RULE_PREGNANCY_ACE_ARB` | Pregnant + Losartan (ARB standalone) → Tier 1 | Switch drugClass to DHP_CCB → null |
-| 59 | `RULE_BRADY_HR_ASYMPTOMATIC` | Brady + BB + pulse 38 → fires (BB suppresses 50–60 only) | Raise pulse to 55 → BB suppression silences |
+| 59 | `RULE_BRADY_ABSOLUTE` | Brady + BB + pulse 38 → fires (BB suppresses 50–60 only) | Raise pulse to 55 → BB suppression silences |
 | 60 | `RULE_MEDICATION_MISSED` | `medicationTaken=false` (no per-med) → Tier 2 | `medicationTaken=true` + empty `missedMedications` → null |
 | 61 | `RULE_MEDICATION_MISSED` | Per-medication miss (Lisinopril FORGOT) → physician msg names drug + reason | Empty `missedMedications` array → falls back to generic wording |
 | 62 | `RULE_STANDARD_L1_HIGH` + `RULE_MEDICATION_MISSED` | BP L1 High + `medicationTaken=false` → TWO rows | Flip `medicationTaken=true` → only BP row fires |
@@ -934,7 +934,7 @@ All emit `tier=BP_LEVEL_1_HIGH`, `dismissible=true`, `mode=STANDARD`.
 | Reading | BP | 115/70, pulse 38 |
 
 **Expected DeviationAlert row**
-- `tier=BP_LEVEL_1_LOW` · `ruleId=RULE_BRADY_HR_ASYMPTOMATIC`
+- `tier=TIER_1_CONTRAINDICATION` · `ruleId=RULE_BRADY_ABSOLUTE`
 - `physicianMessage` contains `"asymptomatic bradycardia"`
 
 **Negative case** — Add Metoprolol (BB) AND raise pulse to 55 → BB suppression window 50–60 silences the rule → null. (Pulse 38 + BB still fires — see Scenario 59.)
@@ -953,7 +953,7 @@ All emit `tier=BP_LEVEL_1_HIGH`, `dismissible=true`, `mode=STANDARD`.
 | Reading | BP | 118/72, pulse 38 |
 
 **Expected DeviationAlert row**
-- `tier=BP_LEVEL_1_LOW` · `ruleId=RULE_BRADY_HR_ASYMPTOMATIC`
+- `tier=TIER_1_CONTRAINDICATION` · `ruleId=RULE_BRADY_ABSOLUTE`
 - `physicianMessage` contains `"asymptomatic bradycardia"`
 
 **Negative case** — Raise pulse to 55 → within BB suppression window 50–60 → null (matches Scenario 19).
@@ -1160,7 +1160,7 @@ These scenarios assert **no** `DeviationAlert.create` call — either a benign r
 
 **Expected behavior** — no row.
 
-**Negative case** — Pulse 38 → below window → `RULE_BRADY_HR_ASYMPTOMATIC` (matches Scenario 59).
+**Negative case** — Pulse 38 → below window → `RULE_BRADY_ABSOLUTE` (matches Scenario 59).
 
 ---
 

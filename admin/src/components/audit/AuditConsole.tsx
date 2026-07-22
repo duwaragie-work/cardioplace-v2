@@ -325,12 +325,13 @@ export default function AuditConsole() {
         )}
       </div>
 
-      {/* Result count + top pagination */}
-      <div className="flex items-center justify-between mb-2">
+      {/* Result count + top pagination — wrap on narrow screens so the wider
+          pager (with the jump-to-page input) doesn't overflow the viewport. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <p className="text-[11px]" style={{ color: 'var(--brand-text-muted)' }} data-testid="audit-count">
           {loading ? 'Loading…' : total === 0 ? 'No records' : `Showing ${from}–${to} of ${total}`}
         </p>
-        <Pager page={page} totalPages={totalPages} loading={loading} onPrev={() => goPage(page - 1)} onNext={() => goPage(page + 1)} />
+        <Pager page={page} totalPages={totalPages} loading={loading} onPrev={() => goPage(page - 1)} onNext={() => goPage(page + 1)} onGo={goPage} />
       </div>
 
       {/* Table */}
@@ -373,7 +374,7 @@ export default function AuditConsole() {
 
       {/* Bottom pagination */}
       <div className="flex items-center justify-end mt-3">
-        <Pager page={page} totalPages={totalPages} loading={loading} onPrev={() => goPage(page - 1)} onNext={() => goPage(page + 1)} />
+        <Pager page={page} totalPages={totalPages} loading={loading} onPrev={() => goPage(page - 1)} onNext={() => goPage(page + 1)} onGo={goPage} />
       </div>
     </div>
   );
@@ -449,15 +450,35 @@ function Pager({
   loading,
   onPrev,
   onNext,
+  onGo,
 }: {
   page: number;
   totalPages: number;
   loading: boolean;
   onPrev: () => void;
   onNext: () => void;
+  onGo: (next: number) => void;
 }) {
+  // Local draft so the field can be typed/cleared freely; it only commits to a
+  // real page change on submit (Enter or Go). Kept as a string so the user can
+  // clear it mid-edit without it snapping to a number.
+  const [draft, setDraft] = useState('');
+
+  const commit = () => {
+    const parsed = Number.parseInt(draft, 10);
+    if (Number.isNaN(parsed)) {
+      setDraft('');
+      return;
+    }
+    // Clamp into range so "9999" on a 120-page log lands on the last page
+    // instead of an empty out-of-range fetch.
+    const clamped = Math.min(Math.max(parsed, 1), totalPages);
+    if (clamped !== page) onGo(clamped);
+    setDraft('');
+  };
+
   return (
-    <div className="flex items-center gap-2" data-testid="audit-pager">
+    <div className="flex flex-wrap items-center gap-2" data-testid="audit-pager">
       <PagerButton disabled={loading || page <= 1} onClick={onPrev} testId="audit-prev" ariaLabel="Previous page">
         <ChevronLeft className="w-4 h-4" />
       </PagerButton>
@@ -467,6 +488,43 @@ function Pager({
       <PagerButton disabled={loading || page >= totalPages} onClick={onNext} testId="audit-next" ariaLabel="Next page">
         <ChevronRight className="w-4 h-4" />
       </PagerButton>
+
+      {/* Jump-to-page — for logs with many pages, skip clicking Next 100 times.
+          Hidden when everything fits on a single page. */}
+      {totalPages > 1 && (
+        <form
+          className="flex items-center gap-1.5 pl-1"
+          onSubmit={(e) => {
+            e.preventDefault();
+            commit();
+          }}
+        >
+          <label className="text-[11.5px] font-medium" style={{ color: 'var(--brand-text-secondary)' }}>
+            Go to
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={totalPages}
+            inputMode="numeric"
+            value={draft}
+            disabled={loading}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={String(page)}
+            aria-label={`Jump to page (1 to ${totalPages})`}
+            data-testid="audit-goto-input"
+            className="w-14 h-8 px-2 rounded-lg border border-slate-200 bg-white text-slate-700 text-[12px] text-center tabular-nums outline-none focus:ring-2 focus:ring-[#7B00E0] focus:border-transparent disabled:opacity-40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          />
+          <button
+            type="submit"
+            disabled={loading || draft.trim() === ''}
+            data-testid="audit-goto-btn"
+            className="h-8 px-2.5 rounded-lg border border-slate-200 bg-white text-slate-600 text-[12px] font-semibold hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+          >
+            Go
+          </button>
+        </form>
+      )}
     </div>
   );
 }

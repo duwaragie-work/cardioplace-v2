@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config'
 import { ClsService } from 'nestjs-cls'
 import nodemailer, { type Transporter } from 'nodemailer'
 import { writeAuditWithRetry } from '../common/audit/write-with-retry.js'
+import { redactEmail } from '../common/logging/log-redact.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import {
   type EmailTemplateName,
@@ -202,16 +203,21 @@ export class EmailService implements OnModuleInit {
           subject,
           html,
         })
+        // V-05 sweep — `to` can be a patient/caregiver address and `subject` a
+        // clinical event ("Urgent Blood Pressure Alert"); the pair identifies a
+        // patient's condition. Hash the recipient so ops keep "same recipient?"
+        // correlation without the address. Subject kept: it's a static template
+        // label, and with the recipient hashed it no longer names anyone.
         this.logger.log(
-          `Email sent to ${to} — id: ${info.messageId} — subject: ${subject}`,
+          `Email sent to ${redactEmail(to)} — id: ${info.messageId} — subject: ${subject}`,
         )
         return true
       }
-      this.logger.error(`Email failed for ${to}: no transport configured`)
+      this.logger.error(`Email failed for ${redactEmail(to)}: no transport configured`)
       return false
     } catch (error) {
       this.logger.error(
-        `Email failed for ${to}`,
+        `Email failed for ${redactEmail(to)}`,
         error instanceof Error ? error.message : error,
       )
       return false
@@ -315,7 +321,7 @@ export class EmailService implements OnModuleInit {
     }
     const data = (await res.json().catch(() => ({}))) as { id?: string }
     this.logger.log(
-      `Email sent to ${to} via Resend — id: ${data.id ?? '?'} — subject: ${subject}`,
+      `Email sent to ${redactEmail(to)} via Resend — id: ${data.id ?? '?'} — subject: ${subject}`,
     )
   }
 }

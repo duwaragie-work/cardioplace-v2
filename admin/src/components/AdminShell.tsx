@@ -38,7 +38,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     PUBLIC_PATHS.has(pathname) ||
     pathname.startsWith('/sign-in/') ||   // pre-session sub-routes: select-practice, MFA challenge, forced TOTP enroll
     pathname.startsWith('/auth/') ||
-    pathname.startsWith('/activate/')
+    pathname.startsWith('/activate')
   ) {
     return <>{children}</>;
   }

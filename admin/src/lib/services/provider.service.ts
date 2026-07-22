@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './token'
+import { httpErrorFrom } from './http-error'
 
 const API = process.env.NEXT_PUBLIC_API_URL
 
@@ -38,7 +39,10 @@ export async function getPatientSummary(userId: string) {
   const res = await fetchWithAuth(`${API}/api/provider/patients/${userId}/summary`)
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.message || `Request failed: ${res.status}`)
+    // Throws an HttpError so PatientDetailShell can branch on the STATUS for
+    // its out-of-scope bounce. Before S1 the status was discarded here and the
+    // redirect keyed off the backend's 403 prose — see lib/services/http-error.ts.
+    throw httpErrorFrom(err, res.status)
   }
   const json = await res.json()
   return json.data ?? json

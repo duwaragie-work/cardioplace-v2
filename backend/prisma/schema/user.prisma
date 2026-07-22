@@ -30,6 +30,45 @@ model User {
   reminderTime            String?                  @default("09:00")
   quietHoursStart         String?                  @default("22:00")
   quietHoursEnd           String?                  @default("07:00")
+  // True once the patient has been through the onboarding reminders step.
+  // The three fields above always hold a usable value (defaults), so they
+  // cannot distinguish "patient chose 09:00" from "nobody ever asked" — this
+  // flag carries that fact across devices, which localStorage cannot. Drives
+  // the onboarding re-ask: a second device shows the identity step only and
+  // never re-asks for reminders. Orthogonal to `onboardingStatus`, which is
+  // identity-gated (name/comm) and never flipped by reminder prefs.
+  reminderPreferenceSet   Boolean                  @default(false)
+  // Terms + Privacy consent (A5). Recorded once, in a column, so onboarding
+  // can skip the privacy step for a patient who already agreed — without
+  // scanning the AuthLog on every load. The immutable audit trail is still
+  // the AuthLog `policy_acknowledged` event; these two are the fast-read
+  // mirror. `acknowledgedPolicyVersion` is version-aware: if POLICY_VERSION
+  // is bumped, the stored version no longer matches and the patient
+  // legitimately re-consents to the new policy.
+  policyAcknowledgedAt      DateTime?
+  acknowledgedPolicyVersion String?
+
+  // ── SMS reminders (L1, 2026-07-14) ────────────────────────────────────────
+  // SMS is an ADDITIVE 4th channel on the N2 reminder dispatcher — it never
+  // replaces in-app / push / email. The message itself is PHI-free and purely
+  // directional ("You have a reminder waiting…"), so none of this carries
+  // clinical content.
+  //
+  // phoneNumber is stored as an EncryptionService envelope (AES-256-GCM) — the
+  // same at-rest treatment as the MFA TOTP secret, never plaintext. Decrypted
+  // in exactly two places: the SMS send path, and the owner's own profile read
+  // (so they can see/edit their number). Never logged — send logs carry a
+  // hashed recipient only (L8).
+  phoneNumber             String?
+  // Opt-in ONLY (never pre-checked). consentAt + consentMethod are the TCPA /
+  // §164.528 compliance record, retained for enrollment + 6 years.
+  smsConsent              Boolean                  @default(false)
+  smsConsentAt            DateTime?
+  smsConsentMethod        String? // e.g. "in_app_checkbox"
+  // Set when the patient replies STOP. Twilio honours it carrier-side, but we
+  // MUST refuse to send too — never rely on the provider alone.
+  smsOptedOut             Boolean                  @default(false)
+
   isVerified              Boolean                  @default(false)
   roles                   UserRole[]               @default([PATIENT])
   onboardingStatus        OnboardingStatus         @default(NOT_COMPLETED)

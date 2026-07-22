@@ -35,7 +35,8 @@ test.describe('5Y — locked-out flow', () => {
     const submit = await publicPost({
       email: PATIENTS.aisha.email,
       description: 'Lost my authenticator and recovery codes.',
-      contactPhone: '555-0100',
+      // L-3 — the locked-out form no longer collects a callback phone; the
+      // `contactPhone` field was removed from the DTO.
     })
     expect(submit.status, 'locked-out submit').toBe(201)
     const ticketNumber = (submit.body as { ticketNumber: string }).ticketNumber

@@ -15,6 +15,8 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { Throttle } from '@nestjs/throttler'
+import { AuthThrottlerGuard } from '../common/guards/auth-throttler.guard.js'
 import type { Request, Response } from 'express'
 import { UserRole } from '../generated/prisma/enums.js'
 import { AccountLifecycleService } from '../users/account-lifecycle.service.js'
@@ -63,7 +65,36 @@ type AuthedReq = Request & {
   user: { id: string; email: string | null; roles: UserRole[] }
 }
 
+/**
+ * V-03 — the tight bucket for routes that either guess a credential or send a
+ * message: 5 attempts per minute per ip:email, vs the controller-wide 20/60s.
+ *
+ * It overrides the 'default' throttler for the decorated handler rather than
+ * naming a second limiter, because ThrottlerGuard evaluates EVERY configured
+ * throttler on EVERY guarded route — a second named entry would apply its limit
+ * controller-wide, not just where named. See app.module.ts.
+ *
+ * 5/60s deliberately mirrors the existing OtpCode 5-attempt lockout
+ * (auth.service.ts:3023) so the two controls agree instead of one silently
+ * masking the other.
+ */
+const STRICT_AUTH_THROTTLE = { limit: 5, ttl: 60_000 } as const
+
+/**
+ * V-03 (Humaira assessment 2026-07-14, CRITICAL) — every route here was
+ * unthrottled: a 6-digit OTP (10^6 space) could be brute-forced, and otp/send /
+ * magic-link/send could be flooded to exhaust resources and burn the email
+ * sender's reputation. ThrottlerModule was configured in app.module.ts but no
+ * guard consumed it and no route named a limiter, so the config was inert.
+ *
+ * Mounted at the controller so the whole auth surface is covered by default —
+ * including routes added later, which is the failure mode a per-route list
+ * invites. The buckets are keyed ip:email (AuthThrottlerGuard) and land on the
+ * 'default' 20/60s limiter; the credential-guessing routes below tighten that
+ * to 5/60s with @Throttle.
+ */
 @Controller('v2/auth')
+@UseGuards(AuthThrottlerGuard)
 export class AuthController {
   constructor(
     private authService: AuthService,
@@ -174,6 +205,7 @@ export class AuthController {
   // ─── Email OTP ────────────────────────────────────────────────────────────────
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('otp/send')
   sendOtp(@Body() dto: SendOtpDto, @Req() req: Request) {
     const context = {
@@ -184,6 +216,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('otp/verify')
   async verifyOtp(
     @Body() dto: VerifyOtpDto,
@@ -408,6 +441,7 @@ export class AuthController {
   // challenge token), so they're Public and issue + set cookies on success.
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('mfa/challenge')
   async mfaChallenge(
     @Body() dto: MfaChallengeDto,
@@ -431,6 +465,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('mfa/recovery')
   async mfaRecovery(
     @Body() dto: MfaRecoveryDto,
@@ -513,6 +548,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('webauthn/authenticate/verify')
   async webAuthnAuthVerify(
     @Body() dto: WebAuthnAuthVerifyDto,
@@ -533,6 +569,7 @@ export class AuthController {
   // Recovery-code sign-in — the only fallback when biometric can't be used on
   // this device. Consumes a code, regenerates the set, issues the session.
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('webauthn/authenticate/recovery')
   async webAuthnAuthRecovery(
     @Body() dto: WebAuthnRecoverySignInDto,
@@ -622,6 +659,7 @@ export class AuthController {
   // ─── Magic Link ────────────────────────────────────────────────────────────────
 
   @Public()
+  @Throttle({ default: STRICT_AUTH_THROTTLE })
   @Post('magic-link/send')
   sendMagicLink(@Body() dto: SendOtpDto, @Req() req: Request) {
     const context = this.buildAuthContext(req)
@@ -643,15 +681,20 @@ export class AuthController {
     try {
       const context = this.buildAuthContext(req)
       const result = await this.authService.verifyMagicLink(token, context)
+      // PHI audit 1.8 — the short-lived challenge token rides the URL FRAGMENT
+      // (`#…`), NOT the query string. A fragment is never sent to the server, so
+      // CloudFront/S3 never logs it and it never leaks via Referer; the challenge
+      // page reads it client-side (readChallengeHash) and scrubs it. A `?query=`
+      // here would land the challenge token in the static-host access log.
+      //
       // Phase/practice-identity — magic-link can also surface the selector
-      // requirement when the recipient is a multi-practice provider. Redirect
-      // to the FE selector page carrying the short-lived challenge token.
+      // requirement when the recipient is a multi-practice provider.
       if ('status' in result && result.status === 'PRACTICE_SELECT_REQUIRED') {
         const sp = new URLSearchParams({
           challengeToken: result.challengeToken,
           practices: JSON.stringify(result.practices),
         })
-        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/select-practice?${sp.toString()}`)
+        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/select-practice#${sp.toString()}`)
         return
       }
       // MFA gate — if an enrolled provider/admin ever arrives via magic link,
@@ -659,7 +702,7 @@ export class AuthController {
       // the selector redirect above). Patients have no TOTP so never hit this.
       if ('status' in result && result.status === 'MFA_REQUIRED') {
         const sp = new URLSearchParams({ challengeToken: result.challengeToken })
-        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/mfa-challenge?${sp.toString()}`)
+        res.redirect(`${adminAppUrl ?? patientAppUrl}/sign-in/mfa-challenge#${sp.toString()}`)
         return
       }
       // Patient biometric gate — a patient with a registered device bounces to
@@ -667,7 +710,7 @@ export class AuthController {
       // the patient app (biometric is patient-side; providers use TOTP above).
       if ('status' in result && result.status === 'WEBAUTHN_REQUIRED') {
         const sp = new URLSearchParams({ challengeToken: result.challengeToken })
-        res.redirect(`${patientAppUrl}/sign-in/biometric?${sp.toString()}`)
+        res.redirect(`${patientAppUrl}/sign-in/biometric#${sp.toString()}`)
         return
       }
       // Magic-link verify is a top-level GET (clicked from an email) so the
@@ -681,17 +724,14 @@ export class AuthController {
         ? (adminAppUrl ?? patientAppUrl)
         : patientAppUrl
 
-      const params = new URLSearchParams({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        userId: result.userId,
-        email: result.email ?? '',
-        name: result.name ?? '',
-        roles: result.roles.join(','),
-        login_method: result.login_method,
-        onboarding_required: String(result.onboarding_required),
-      })
-      res.redirect(`${targetUrl}/auth/magic-link?${params.toString()}`)
+      // V-11 / PHI audit 1.1 — redirect to a TOKENLESS URL. The access + refresh
+      // tokens (and email/name) used to ride the query string here, where
+      // CloudFront/S3 would log them verbatim — a refresh token in a log is a
+      // durable account-takeover primitive. They are now delivered ONLY via the
+      // HttpOnly cookies set just above (scoped to this API origin); the landing
+      // page calls POST /auth/refresh with credentials:'include' to mint a fresh
+      // access token and reads the profile for its roles/onboarding state.
+      res.redirect(`${targetUrl}/auth/magic-link`)
     } catch {
       res.redirect(`${patientAppUrl}/auth/magic-link?error=expired`)
     }

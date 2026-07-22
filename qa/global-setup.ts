@@ -52,6 +52,26 @@ async function globalSetup(): Promise<void> {
     }
   }
 
+  // 3. Support tickets — ALWAYS cleared, even under SKIP_RESET.
+  //
+  // Both support rate limits count SupportTicket rows in a time window
+  // (3/user/5min for authenticated intake, 5/IP/hour for the anonymous
+  // locked-out + public-contact doors), and reset/test-patients deliberately
+  // never touched the support tables. So the rows accumulated and the 5W/5X/5Y/5Z
+  // specs started 429-ing each other on any local re-run inside the window —
+  // failures that look like regressions but are pure test-data debt.
+  //
+  // Deliberately outside the SKIP_RESET guard: SKIP_RESET exists to preserve
+  // *clinical* fixture state (alerts/readings) when pointing at staging, and
+  // this only ever deletes test-domain or loopback-IP tickets.
+  const supportReset = await ctx.post('test-control/support/reset', { data: {} })
+  if (!supportReset.ok()) {
+    console.warn(
+      `\n⚠ /test-control/support/reset returned ${supportReset.status()}. ` +
+        'Support specs may 429 on a re-run inside the rate-limit window.\n',
+    )
+  }
+
   await ctx.dispose()
 }
 

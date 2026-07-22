@@ -29,6 +29,15 @@ COPY backend ./backend
 # Backend's prebuild handles `npm run build:shared` + `prisma generate`
 RUN npm run build -w healplace-v2-backend
 
+# #3-img (2026-07-18) — bake the embedding model into the image so prod does
+# NOT fetch it from huggingface.co on every boot (that runtime dependency left
+# RAG silently degraded on any HF blip — see EmbeddingService). Download once at
+# BUILD time into a cache dir; the runtime stage copies it and EmbeddingService
+# loads cache-first (offline-safe cold boot). If HF is unreachable at build the
+# build fails loudly here, which is the right place to catch it.
+ENV EMBEDDING_MODEL_CACHE_DIR=/app/.hf-cache
+RUN node -e "import('@huggingface/transformers').then(async(m)=>{const{pipeline,env}=m;env.cacheDir=process.env.EMBEDDING_MODEL_CACHE_DIR;env.allowLocalModels=false;await pipeline('feature-extraction','Xenova/all-MiniLM-L6-v2');console.log('embedding model prefetched to '+env.cacheDir);}).catch((e)=>{console.error('embedding prefetch failed',e);process.exit(1)})"
+
 # ── Production image ──────────────────────────────────────────────────────────
 FROM node:20-slim
 
@@ -56,6 +65,12 @@ RUN npm install --no-save --workspaces=false tsx prisma
 # Built outputs
 COPY --from=builder /app/shared/dist ./shared/dist
 COPY --from=builder /app/backend/dist ./backend/dist
+
+# #3-img — the baked embedding model (~50MB). EmbeddingService reads
+# EMBEDDING_MODEL_CACHE_DIR and loads from here cache-first, so a cold boot
+# needs no huggingface.co round-trip.
+ENV EMBEDDING_MODEL_CACHE_DIR=/app/.hf-cache
+COPY --from=builder /app/.hf-cache /app/.hf-cache
 # `backend/proto` was the gRPC schema for the old Python `adk-service` voice
 # bridge. Voice now runs in-process inside Nest via `@google/genai` Live (PR
 # #32), so the proto dir was removed from the repo and this COPY line is no

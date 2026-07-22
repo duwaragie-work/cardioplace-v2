@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test'
+
+import { gotoPatientDetailById } from '../helpers/api.js'
 import { signInPatient, signInAdmin, authedApi } from '../helpers/auth.js'
 import { PATIENTS, ADMINS } from '../helpers/accounts.js'
 import { byTestId, T } from '../helpers/selectors.js'
@@ -71,7 +73,7 @@ test.describe('Bug 14 deprecation — two buffer commits stay two sessions', () 
 
       // Admin Readings tab — also two separate cards.
       await signInAdmin(page, ADMINS.medicalDirector.email, ADMIN_BASE_URL)
-      await page.goto(`${ADMIN_BASE_URL}/patients/${u.id}`)
+      await gotoPatientDetailById(page, ADMIN_BASE_URL, u.id)
       await page.locator(byTestId(T.admin.detailTab('readings'))).click()
       await expect(page.locator(byTestId(T.admin.readingsList))).toBeVisible({ timeout: 25_000 })
       await expect(page.locator(byTestId(T.admin.readingsCard(r1.id)))).toBeVisible()

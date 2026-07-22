@@ -7,6 +7,7 @@ import {
   adminAcknowledgeAlert,
   gotoPatientAlertsTab,
   waitForAlerts,
+  gotoPatientDetailById,
 } from '../helpers/api.js'
 import { HOURS } from '../helpers/time.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
@@ -154,7 +155,7 @@ test.describe('Escalation ladder copy after ack/resolve', () => {
     await adminAcknowledgeAlert(adminApi, tier1!.id)
 
     await signInAdmin(page, ADMINS.manisha.email, ADMIN_BASE_URL)
-    await page.goto(`${ADMIN_BASE_URL}/patients/${u.id}`)
+    await gotoPatientDetailById(page, ADMIN_BASE_URL, u.id)
 
     // The patient-detail shell defaults to the Profile tab. Switch to
     // Alerts. (`?alert=` query is not currently honored — `useSearchParams`

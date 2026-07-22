@@ -23,6 +23,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '@/lib/auth-context';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { CHAT_PROMPTS, isChatPromptId } from '@/lib/chat-prompts';
 import {
   streamChatMessage,
   getChatSessions,
@@ -1636,16 +1637,20 @@ export default function AIChatInterface() {
     el.style.height = Math.min(el.scrollHeight, max) + 'px';
   }, [inputValue]);
 
-  // ── Pre-fill input from query param (e.g. /chat?q=My%20BP%20readings) ────
+  // ── Pre-fill input from an opaque prompt ID (e.g. /chat?prompt=chip1) ─────
+  // 1.9 — the URL carries only a fixed allowlisted ID, never free text, so no
+  // patient input (PHI) can land in the access log / history / Referer. The
+  // localized prompt text is resolved here, client-side. An unknown ID is
+  // ignored. (The legacy `?q=<text>` param is intentionally no longer read.)
   const qParamHandled = useRef(false);
   useEffect(() => {
     if (qParamHandled.current) return;
-    const q = searchParams?.get('q');
-    if (q) {
-      setInputValue(q);
+    const promptId = searchParams?.get('prompt');
+    if (isChatPromptId(promptId)) {
+      setInputValue(t(CHAT_PROMPTS[promptId]));
       qParamHandled.current = true;
     }
-  }, [searchParams]);
+  }, [searchParams, t]);
 
   // ── Load sessions ─────────────────────────────────────────────────────────
   useEffect(() => {

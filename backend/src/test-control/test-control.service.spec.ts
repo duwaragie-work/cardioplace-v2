@@ -3,11 +3,14 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { ClsService } from 'nestjs-cls'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { TestControlService } from './test-control.service.js'
+import { SupportService } from '../support/support.service.js'
 import { AuditExceptionReportService } from '../crons/audit-exception-report.service.js'
 import { DailyReminderService } from '../crons/daily-reminder.service.js'
 import { MonthlyReaskService } from '../crons/monthly-reask.service.js'
 import { EscalationService } from '../daily_journal/services/escalation.service.js'
 import { MedicationHoldEscalationService } from '../crons/medication-hold-escalation.service.js'
+import { EncryptionService } from '../common/encryption.service.js'
+import { encryptionMock } from '../common/test/encryption.mock.js'
 
 // F33 — the test-control module gains a medication-hold-escalation cron driver
 // so the audit + Playwright suites no longer wait for the daily 15:00 UTC cron.
@@ -66,6 +69,10 @@ describe('TestControlService — medication-hold escalation cron driver (F33)', 
           provide: AuditExceptionReportService,
           useValue: {},
         },
+        { provide: EncryptionService, useValue: encryptionMock() },
+        // Support sweep drivers (auto-close / awaiting-reply nudge) — unused by
+        // the medication-hold path, but a constructor dep, so it must resolve.
+        { provide: SupportService, useValue: {} },
       ],
     }).compile()
     service = module.get(TestControlService)

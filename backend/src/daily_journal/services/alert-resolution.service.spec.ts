@@ -1,11 +1,17 @@
 import { jest } from '@jest/globals'
-import { BadRequestException, NotFoundException } from '@nestjs/common'
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 import { PatientAccessService } from '../../common/patient-access.service.js'
 import { UserRole } from '../../generated/prisma/enums.js'
 import { PrismaService } from '../../prisma/prisma.service.js'
 import { AlertResolutionService } from './alert-resolution.service.js'
 import { EscalationService } from './escalation.service.js'
+import { EncryptionService } from '../../common/encryption.service.js'
+import { encryptionMock } from '../../common/test/encryption.mock.js'
 
 // Phase/7 — covers the user-specified test surface items related to
 // resolution: tier-compat + rationale validation (Tier 1 / Tier 2 #1 / Tier 2
@@ -15,6 +21,9 @@ describe('AlertResolutionService', () => {
   let service: AlertResolutionService
   let prisma: Record<string, any>
   let escalation: { scheduleRetry: jest.Mock }
+  // Hoisted (was a beforeEach-local const) so tests can assert the scope gate
+  // fired and can make it refuse — see the V-01 deny-path tests below.
+  let access: { assertCanAccessPatient: jest.Mock<any> }
 
   const adminId = 'admin-1'
   // Actor wraps adminId + roles to match the May 2026 role-scope service
@@ -70,8 +79,9 @@ describe('AlertResolutionService', () => {
 
     // PatientAccessService is no-op mocked: SUPER_ADMIN actor bypasses the
     // real implementation's scope lookup anyway, but a stub keeps the unit
-    // tests isolated from PrismaService internals.
-    const access = {
+    // tests isolated from PrismaService internals. Tests that need the DENY
+    // path override this mock to reject (the real service throws Forbidden).
+    access = {
       assertCanAccessPatient: (jest.fn() as jest.Mock<any>).mockResolvedValue(undefined),
     }
 
@@ -81,6 +91,7 @@ describe('AlertResolutionService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: EscalationService, useValue: escalation },
         { provide: PatientAccessService, useValue: access },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
 
@@ -369,7 +380,7 @@ describe('AlertResolutionService', () => {
         ],
       })
 
-      const payload = await service.buildAuditPayload(alertId)
+      const payload = await service.buildAuditPayload(alertId, actor)
 
       // Auto-populated 13 (per CLINICAL_SPEC §V2-D audit table)
       expect(payload.alertId).toBe(alertId)
@@ -406,7 +417,7 @@ describe('AlertResolutionService', () => {
         resolutionRationale: null,
         escalationEvents: [],
       })
-      const payload = await service.buildAuditPayload(alertId)
+      const payload = await service.buildAuditPayload(alertId, actor)
       expect(payload.timeToAcknowledgmentMs).toBeNull()
       expect(payload.timeToResolutionMs).toBeNull()
       expect(payload.escalationTriggered).toBe(false)
@@ -414,9 +425,50 @@ describe('AlertResolutionService', () => {
 
     it('404 on missing alert', async () => {
       prisma.deviationAlert.findUnique.mockResolvedValue(null)
-      await expect(service.buildAuditPayload(alertId)).rejects.toThrow(
+      await expect(service.buildAuditPayload(alertId, actor)).rejects.toThrow(
         NotFoundException,
       )
+    })
+
+    // ── V-01 regression (Humaira 2026-07-14, CRITICAL) ────────────────────
+    // This endpoint returned the full 15-field payload for ANY alertId to any
+    // staff account in the controller's @Roles set — cross-tenant PHI at scale.
+    describe('V-01 — cross-tenant scope gate', () => {
+      it("gates on the alert's OWNING patient, not the caller", async () => {
+        prisma.deviationAlert.findUnique.mockResolvedValue({
+          ...baseAlert,
+          escalationEvents: [],
+        })
+
+        await service.buildAuditPayload(alertId, actor)
+
+        // baseAlert.userId — the patient the alert belongs to.
+        expect(access.assertCanAccessPatient).toHaveBeenCalledWith(actor, 'user-1')
+      })
+
+      it('propagates Forbidden when the patient is outside the actor scope', async () => {
+        prisma.deviationAlert.findUnique.mockResolvedValue({
+          ...baseAlert,
+          escalationEvents: [],
+        })
+        access.assertCanAccessPatient.mockRejectedValue(
+          new ForbiddenException('Requested record is outside your role scope'),
+        )
+
+        await expect(service.buildAuditPayload(alertId, actor)).rejects.toThrow(
+          ForbiddenException,
+        )
+      })
+
+      it('404s a missing alert WITHOUT consulting the scope gate (no id oracle)', async () => {
+        // 404-before-403: a Forbidden here would confirm the id exists.
+        prisma.deviationAlert.findUnique.mockResolvedValue(null)
+
+        await expect(service.buildAuditPayload(alertId, actor)).rejects.toThrow(
+          NotFoundException,
+        )
+        expect(access.assertCanAccessPatient).not.toHaveBeenCalled()
+      })
     })
   })
 

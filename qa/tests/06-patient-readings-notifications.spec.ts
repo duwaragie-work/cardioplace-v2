@@ -211,7 +211,9 @@ test.describe('Phase 4h — notifications (20h)', () => {
     const link = page.locator(`[data-testid="notification-row-detail-${alertIds[0]}"]`)
     await link.waitFor({ state: 'visible', timeout: 12_000 })
     await link.click()
-    await page.waitForURL(new RegExp(`/alerts/${alertIds[0]}`), {
+    // F1 — in-app click navigates to the BARE /alerts route (the alert id is
+    // handed off via sessionStorage, never the URL).
+    await page.waitForURL(/\/alerts$/, {
       timeout: 12_000,
     })
     await expect(

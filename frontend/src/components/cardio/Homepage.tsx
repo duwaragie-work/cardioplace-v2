@@ -4,10 +4,11 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Mic, Send, Activity, Heart, MessageCircle, CheckCircle, AlertTriangle, Brain, Building2, Play, X } from 'lucide-react';
+import { Mic, Send, Activity, Heart, MessageCircle, CheckCircle, AlertTriangle, SlidersHorizontal, Building2, Play, X } from 'lucide-react';
 import { BsSoundwave } from "react-icons/bs";
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/lib/auth-context';
+import { CHAT_PROMPTS, type ChatPromptId } from '@/lib/chat-prompts';
 import LandingHeader from './LandingHeader';
 import LandingFooter from './LandingFooter';
 
@@ -155,20 +156,22 @@ export default function Homepage() {
                 {/* Prompt chips — single row */}
                 <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                   <span className="text-white/70 text-[0.625rem] sm:text-xs font-semibold uppercase tracking-wider shrink-0">Try now</span>
-                  {(['home.chip1', 'home.chip2', 'home.chip3'] as const).map((key) => (
+                  {(Object.keys(CHAT_PROMPTS) as ChatPromptId[]).map((id) => (
                     <button
-                      key={key}
+                      key={id}
                       onClick={() => {
-                        const text = t(key);
                         if (isAuthenticated) {
-                          router.push(`/chat?q=${encodeURIComponent(text)}`);
+                          // 1.9 — pass an opaque prompt ID, NOT the text. The
+                          // chat page localizes it; nothing free-text (→ PHI)
+                          // ever reaches the URL / access log.
+                          router.push(`/chat?prompt=${id}`);
                         } else {
                           router.push('/sign-in');
                         }
                       }}
                       className="backdrop-blur-md bg-white/15 border border-white/25 text-white text-[0.5rem] sm:text-xs md:text-sm px-2.5 sm:px-3 md:px-4 py-1 sm:py-1.5 rounded-full hover:bg-white/25 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
                     >
-                      {t(key)}
+                      {t(CHAT_PROMPTS[id])}
                     </button>
                   ))}
                 </div>
@@ -367,10 +370,12 @@ export default function Homepage() {
               </div>
             </div>
 
-            {/* Card 4 - Continuously Learning */}
+            {/* Card 4 - Personalized to Each Patient (physician-set, per-patient
+                rule-based thresholds — SlidersHorizontal for "tuned/tailored").
+                Was a Brain icon under the old ML "continuously learning" copy. */}
             <div className="rounded-[32px] sm:rounded-[48px] p-6 sm:p-8 flex flex-col min-h-[320px] sm:min-h-[480px] transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:brightness-110 active:scale-[0.98]" style={{ backgroundImage: 'linear-gradient(148deg, #7b00e0 6%, #c79afd 98%)' }}>
               <div className="bg-[#c79afd] w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mb-6 sm:mb-8">
-                <Brain className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
+                <SlidersHorizontal className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
               </div>
               <h3 className="text-white font-bold text-xl sm:text-xl leading-snug mb-3 sm:mb-4">{t('home.learning')}</h3>
               <p className="text-white text-sm sm:text-base leading-[1.8]">{t('home.learningDesc')}</p>

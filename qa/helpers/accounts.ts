@@ -97,6 +97,18 @@ export const PATIENTS = {
     archetype: 'Young adult (18–29 bucket) — general adult HTN',
     expectedRuleId: null,
   },
+
+  // ─── Onboarding E2E fixture (spec 03, A1–A5) ─────────────────────────────
+  // Seeded UN-onboarded (NOT_COMPLETED, no name/comm/reminder/consent, no
+  // PatientProfile). The only persona that walks the onboarding flow from
+  // cold; reset back to this state via test-control `resetOnboarding`.
+  e2eOnboarding: {
+    email:
+      process.env.PATIENT_E2E_ONBOARDING_EMAIL ?? 'e2e-onboarding@cardioplace.test',
+    name: null,
+    archetype: 'Un-onboarded — onboarding flow subject',
+    expectedRuleId: null,
+  },
 } as const
 
 export type SeedPatientKey = keyof typeof PATIENTS
@@ -141,6 +153,20 @@ export const ADMINS = {
       'coordinator.fernando@cardioplace.test',
     roles: ['COORDINATOR'],
     name: 'Lakshitha Fernando',
+  },
+  // 2026-07-17 — PROVIDER with NO PracticeProvider row and NO patient
+  // assignment. By construction, PatientAccessService rejects every patient
+  // for this actor, which is exactly the "scoped PROVIDER outside the alert's
+  // scope" case that spec 76 (V-01/V-04 IDOR) needs to assert. The three
+  // other provider-role personas (primary, backup, multiPractice) are all
+  // assigned to Cedar Hill and would legitimately return 200 on a Cedar Hill
+  // alert. See backend/prisma/seed/admins.ts for the seed rationale.
+  outOfScopeProvider: {
+    email:
+      process.env.ADMIN_OUT_OF_SCOPE_PROVIDER_EMAIL ??
+      'outofscope-provider@cardioplace.test',
+    roles: ['PROVIDER'],
+    name: 'Dr. Ines Vega',
   },
   // June 2026 — phase/practice-identity (Manisha 2026-06-12 §1). Seeded
   // ONLY when SEED_TEST_FIXTURES=true so production seed stays single-

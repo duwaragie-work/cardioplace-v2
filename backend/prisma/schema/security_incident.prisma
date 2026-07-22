@@ -36,7 +36,13 @@ model SecurityIncident {
 
   // Ownership. openedByOpsId is the reviewer who escalated; assignedToOpsId is
   // the current owner (defaults to the opener, reassignable).
+  //
+  // openedBySystem: true when the real-time failed-auth evaluator auto-opened
+  // this incident (openedByOpsId is then the `audit-exception-report` system
+  // principal, which is filtered out of staff-list queries — so the worklist UI
+  // renders "Opened automatically" instead of an empty opener name).
   openedByOpsId   String
+  openedBySystem  Boolean @default(false)
   assignedToOpsId String?
 
   // Resolution trail.

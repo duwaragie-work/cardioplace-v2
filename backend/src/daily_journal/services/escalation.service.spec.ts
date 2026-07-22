@@ -9,6 +9,8 @@ import { SmsService } from '../../sms/sms.service.js'
 import { JOURNAL_EVENTS } from '../constants/events.js'
 import { EscalationService, escalationEmailBody } from './escalation.service.js'
 import type { AlertCreatedEvent } from '../interfaces/events.interface.js'
+import { EncryptionService } from '../../common/encryption.service.js'
+import { encryptionMock } from '../../common/test/encryption.mock.js'
 
 // Phase/7 — EscalationService state-machine tests.
 //
@@ -147,7 +149,10 @@ describe('escalationEmailBody — HIPAA notify-and-link (PHI)', () => {
   it.each(CLINICAL_ROLES)('%s email keeps the non-PHI handle, link + footer', (role) => {
     const { html } = render(role)
     expect(html).toContain('CP-PAT-K8M2R4N-7') // formatted displayId reference
-    expect(html).toContain('https://admin.test/patients/patient-1?alert=alert-1')
+    // No patient id in the link — the admin shell resolves the patient from the
+    // opaque alert id server-side (B3/F1, "no patient id in URLs").
+    expect(html).toContain('https://admin.test/patients/detail?alert=alert-1')
+    expect(html).not.toContain('patient-1?alert=')
     expect(html).toContain('protected health information') // HIPAA footer
   })
 
@@ -165,11 +170,15 @@ describe('escalationEmailBody — HIPAA notify-and-link (PHI)', () => {
 describe('EscalationService', () => {
   let service: EscalationService
   let prisma: Record<string, any>
+  // Records every cls.set(k, v) so a test can prove which system principal a
+  // handler ran as. Reset per test in the beforeEach below.
+  let clsSets: Array<[string, unknown]> = []
   let eventEmitter: { emit: jest.Mock }
   let email: { sendEmail: jest.Mock }
   let createdEvents: Array<{ id: string; data: any }>
 
   beforeEach(async () => {
+    clsSets = []
     createdEvents = []
 
     prisma = {
@@ -269,13 +278,19 @@ describe('EscalationService', () => {
         },
         {
           // runAsCronActor wraps handleCron in cls.run — pass-through stub.
+          // `set` records so tests can assert WHICH system principal a handler
+          // ran as (see the N-2-residual test on onEmergencyFlagged) — the
+          // label is what lands in EmailDisclosureLog.senderPrincipal.
           provide: ClsService,
           useValue: {
             run: (fn: () => unknown) => fn(),
-            set: () => undefined,
+            set: (k: string, v: unknown) => {
+              clsSets.push([k, v])
+            },
             get: () => null,
           },
         },
+        { provide: EncryptionService, useValue: encryptionMock() },
       ],
     }).compile()
 
@@ -452,6 +467,31 @@ describe('EscalationService', () => {
   // project_notification_tab_split_2026_06_04.
   // ────────────────────────────────────────────────────────────────────────
   describe('onEmergencyFlagged — care-team pages set EMERGENCY_FLAGGED', () => {
+    // N-2 residual (2026-07-17). N-2 wrapped the five named templates and the
+    // sibling handleAlertCreated, but missed this handler. emergency.flagged is
+    // emitted from the PATIENT's own request context, so unwrapped, the
+    // caregiver disclosure is logged either unattributed or — worse —
+    // attributed to the patient, i.e. the trail claims the patient disclosed
+    // their own emergency to their caregiver.
+    it('runs as the emergency-dispatch system principal, not the patient', async () => {
+      prisma.patientCaregiver = {
+        findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([]),
+      }
+      prisma.patientProviderAssignment = {
+        findUnique: (jest.fn() as jest.Mock<any>).mockResolvedValue(null),
+      }
+
+      await service.onEmergencyFlagged({
+        userId: 'patient-1',
+        situation: 'Chest pain and dizziness',
+        source: 'voice-tool',
+      } as any)
+
+      // systemActorLabel is what resolves to EmailDisclosureLog.senderPrincipal.
+      expect(clsSets).toContainEqual(['systemActorLabel', 'emergency-dispatch'])
+      expect(clsSets).toContainEqual(['actorType', 'SYSTEM_ACTOR'])
+    })
+
     it('caregiver + provider DASHBOARD rows all carry EMERGENCY_FLAGGED (never ALERT_*)', async () => {
       prisma.patientCaregiver = {
         findMany: (jest.fn() as jest.Mock<any>).mockResolvedValue([
@@ -1549,7 +1589,7 @@ describe('EscalationService', () => {
       expect(html).toContain('Cedar Hill Internal Medicine')
       expect(html).toContain('within 4 hours')
       expect(html).toContain(
-        'https://admin.cardioplaceai.com/patients/patient-1?alert=alert-1',
+        'https://admin.cardioplaceai.com/patients/detail?alert=alert-1',
       )
       expect(html).toContain('primary provider') // role banner
       expect(html).toContain('Alert ID: alert-1')
@@ -1733,7 +1773,7 @@ describe('EscalationService', () => {
       expect(out.subject).not.toMatch(/urgent/i)
     })
 
-    it('escalationEmailBody routes PATIENT recipients to the patient app /alerts/{id} URL', () => {
+    it('escalationEmailBody routes PATIENT recipients to the patient app /alerts?id={alertId} URL', () => {
       const out = escalationEmailBody({
         alert: buildAlert({ tier: 'BP_LEVEL_2' }) as any,
         step: 'T0',
@@ -1745,14 +1785,14 @@ describe('EscalationService', () => {
         now: new Date('2026-04-22T15:00:00Z'),
       })
       // Patient gets the patient-app URL and the patient-flavored CTA label.
-      expect(out.html).toContain('https://app.cardioplaceai.com/alerts/alert-1')
+      expect(out.html).toContain('https://app.cardioplaceai.com/alerts?id=alert-1')
       expect(out.html).toContain('View your alert')
       // Crucially — does NOT include the admin-app URL anywhere.
       expect(out.html).not.toContain('https://admin.cardioplaceai.com')
       expect(out.html).not.toContain('/patients/patient-1')
     })
 
-    it('escalationEmailBody routes provider recipients to the admin app /patients/{id}?alert={id} URL', () => {
+    it('escalationEmailBody routes provider recipients to the admin app /patients/detail?alert={alertId} URL', () => {
       const out = escalationEmailBody({
         alert: buildAlert({ tier: 'BP_LEVEL_2' }) as any,
         step: 'T0',
@@ -1764,11 +1804,13 @@ describe('EscalationService', () => {
         now: new Date('2026-04-22T15:00:00Z'),
       })
       expect(out.html).toContain(
-        'https://admin.cardioplaceai.com/patients/patient-1?alert=alert-1',
+        'https://admin.cardioplaceai.com/patients/detail?alert=alert-1',
       )
       expect(out.html).toContain('View in dashboard')
       // Provider should NOT see the patient-app URL.
       expect(out.html).not.toContain('https://app.cardioplaceai.com')
+      // …and the patient id must not ride in the link (the whole point).
+      expect(out.html).not.toContain('/patients/patient-1')
     })
 
     it('escalationEmailBody handles missing DOB gracefully', () => {

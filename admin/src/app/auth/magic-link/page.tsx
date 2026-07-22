@@ -1,66 +1,49 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth, type AdminAuthResponse } from "@/lib/auth-context";
+import { useAuth } from "@/lib/auth-context";
 
-// Bridges sign-in tokens passed via URL params into admin auth state.
-// Two callers redirect here:
-//   1. Backend magic-link verify (auth.controller.ts) — for SUPER_ADMIN users
-//      who clicked a magic link from email.
-//   2. Patient sign-in (frontend/src/app/sign-in/page.tsx) — when an admin
-//      user authenticated on the patient app, so they don't have to sign in
-//      twice across origins.
+// Bridges a cross-origin admin sign-in into admin auth state. Two callers, both
+// now TOKENLESS (PHI audit 1.1 / 1.2 / V-11):
+//   1. Backend magic-link verify (auth.controller.ts) — a SUPER_ADMIN who
+//      clicked a link from email. The redirect now sets HttpOnly cookies and
+//      lands here with NO tokens in the URL.
+//   2. Patient sign-in bridge (frontend/src/app/sign-in/page.tsx) — an admin who
+//      authenticated on the patient app; the OTP verify already set the
+//      admin-scoped HttpOnly cookies.
+// Either way we authenticate via the COOKIE: AuthProvider's mount rehydrate
+// calls POST /auth/refresh with credentials:'include'. No token is read from the
+// URL (so nothing lands in the CloudFront/S3 access log); this page only reads
+// `?error=` and routes once the session resolves.
 function MagicLinkHandler() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { login } = useAuth();
+  const { user, isLoading } = useAuth();
   const [error, setError] = useState("");
-  const [processing, setProcessing] = useState(true);
-  const calledRef = useRef(false);
+
+  const errorParam = searchParams.get("error");
 
   useEffect(() => {
-    if (calledRef.current) return;
-    calledRef.current = true;
-
-    const errorParam = searchParams.get("error");
     if (errorParam) {
       setError(
         errorParam === "expired"
           ? "This sign-in link has expired or already been used."
-          : "Something went wrong. Please try again."
+          : "Something went wrong. Please try again.",
       );
-      setProcessing(false);
       return;
     }
-
-    const accessToken = searchParams.get("accessToken");
-    const refreshToken = searchParams.get("refreshToken");
-    const userId = searchParams.get("userId");
-
-    if (!accessToken || !userId) {
-      setError("Invalid sign-in link.");
-      setProcessing(false);
+    // Wait for the cookie-based mount rehydrate to settle.
+    if (isLoading) return;
+    if (!user) {
+      setError("This sign-in link is invalid or has expired.");
       return;
     }
-
-    const authResponse: AdminAuthResponse = {
-      accessToken,
-      refreshToken: refreshToken ?? undefined,
-      userId,
-      email: searchParams.get("email") || undefined,
-      name: searchParams.get("name") || undefined,
-      roles: searchParams.get("roles")?.split(",").filter(Boolean) || [],
-    };
-
-    login(authResponse);
-
-    // Full page navigation so the proxy reads the freshly-set cookie.
+    // Full page navigation so the proxy reads the freshly-established cookie.
     window.location.href = "/dashboard";
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [errorParam, user, isLoading]);
 
-  if (processing) {
+  if (!error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="text-center">

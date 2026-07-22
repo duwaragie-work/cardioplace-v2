@@ -256,6 +256,9 @@ const en = {
   'checkin.optionD.screenC.body': 'We saved your reading and let your care team know they should check in with you.',
   'checkin.optionD.screenC.safetyFooter': "If you're feeling unwell right now, please call your doctor or 911.",
   'checkin.optionD.screenC.done': 'Back to dashboard',
+  // Shown instead of the above when an uncommitted buffered reading is still
+  // waiting — the CTA returns to the check-in so it isn't left unsent.
+  'checkin.optionD.screenC.doneFinishOther': 'Finish your other reading',
   // Bug 26 — confirmed-normal Screen C variant (PLACEHOLDER pending Manisha CONFIRM).
   'checkin.optionD.confirmedNormal.title': 'Your second reading looks better',
   'checkin.optionD.confirmedNormal.body': 'Your follow-up reading is in a safer range. We saved both readings and let your care team know — they may still reach out to check in.',
@@ -315,6 +318,7 @@ const en = {
   // B5 — confirmation screen
   'checkin.confirm.title': 'Reading sent',
   'checkin.confirm.titleMulti': 'Reading {n} sent',
+  'checkin.confirm.lookingGood': 'Looking good — keep it up!',
   'checkin.confirm.subtitle': 'Your care team gets it right away.',
   // #88 — un-enrolled patients: no care team yet, engine didn't run.
   'checkin.confirm.subtitleUnenrolled': "We're setting up your care team. They'll start reviewing your readings once your enrollment is complete.",
@@ -561,14 +565,14 @@ const en = {
   'settings.badge.alwaysOn': 'Always on',
   'settings.badge.on': 'On',
   'settings.badge.recommended': 'Recommended',
-  'settings.notif.title': 'Notifications',
-  'settings.notif.desc': 'Get alerts about your readings and reminders on this device — even when the app is closed.',
+  'settings.notif.title': 'Pop-up notifications',
+  'settings.notif.desc': 'Get pop-up alerts about your readings and reminders on this device — even when the app is closed. This only changes this device. You still see your messages inside the app.',
   'settings.notif.badgeBlocked': 'Blocked',
   'settings.notif.badgeOff': 'Off',
-  'settings.notif.turnOn': 'Turn on notifications',
-  'settings.notif.turnOff': 'Turn off notifications',
-  'settings.notif.turnedOn': 'Notifications are on for this device.',
-  'settings.notif.turnedOff': 'Notifications are off for this device.',
+  'settings.notif.turnOn': 'Turn on pop-up notifications',
+  'settings.notif.turnOff': 'Turn off pop-up notifications',
+  'settings.notif.turnedOn': 'Pop-up notifications are on for this device.',
+  'settings.notif.turnedOff': 'Pop-up notifications are off for this device. You still see messages inside the app.',
   'settings.notif.blockedHelp': 'Notifications are blocked in your browser. Allow them for this site in your browser settings, then try again.',
   'settings.notif.unsupported': "This browser or device doesn't support notifications. On iPhone or iPad, add Cardioplace to your Home Screen first, then turn them on.",
   'settings.notif.error': 'Something went wrong. Please try again.',
@@ -617,6 +621,41 @@ const en = {
   'settings.danger.close.requested': 'Check your email. We sent a link to confirm closing your account. It expires in 1 hour.',
   'settings.danger.processing': 'Processing…',
   'settings.danger.error': 'Something went wrong. Please try again.',
+
+  // ─── Settings — error fallbacks + Contact support section (i18n sweep) ──────
+  'settings.error.load': 'Could not load settings.',
+  'settings.bio.errorSetup': 'Could not set up biometric.',
+  'settings.bio.errorRename': 'Could not rename device.',
+  'settings.bio.errorRemove': 'Could not remove device.',
+  'settings.recovery.errorRegenerate': 'Could not regenerate codes.',
+  'settings.support.title': 'Contact support',
+  'settings.support.intro':
+    "Need help with your account, sign-in, or something in the app? Send our team a message and we'll follow up by email.",
+  'settings.support.myRequests': 'View my requests →',
+  'settings.support.goToSupport': 'Go to Support →',
+
+  // Contact-support form (embedded in Settings)
+  'support.form.categoryAccount': 'Account',
+  'support.form.categoryMfa': 'MFA',
+  'support.form.categoryClinical': 'Clinical question',
+  'support.form.categoryBug': 'Bug',
+  'support.form.categoryOther': 'Other',
+  'support.form.subject': 'Subject',
+  'support.form.category': 'Category',
+  'support.form.message': 'Message',
+  'support.form.messagePlaceholder': 'How can we help?',
+  'support.form.reachBy': 'Prefer to be reached by:',
+  'support.form.email': 'Email',
+  'support.form.phone': 'Phone',
+  'support.form.comingSoon': '(coming soon)',
+  'support.form.sending': 'Sending…',
+  'support.form.send': 'Send message',
+  /** Transient confirmation shown alongside the inline success card. */
+  'support.form.sentToast': 'Request sent.',
+  'support.form.error': 'Could not send your message.',
+  'support.form.successPrefix': 'Thanks — your request',
+  'support.form.successSuffix': "was received. We'll get back to you by email.",
+
   'settings.close.pageTitle': 'Confirm account closure',
   'settings.close.pageDesc': 'Click below to permanently close your Cardioplace account. This cannot be undone.',
   'settings.close.confirmButton': 'Permanently close my account',
@@ -694,6 +733,30 @@ const en = {
   'profile.reminders.saveButton': 'Save',
   'profile.reminders.savingButton': 'Saving…',
   'profile.reminders.cancelButton': 'Cancel',
+  // L3 (2026-07-14) — text reminders (SMS). The consent line is the exact TCPA
+  // wording under counsel review (packet Q3) — do not reword without sign-off.
+  'profile.sms.heading': 'Text reminders',
+  'profile.sms.editHeading': 'Edit text reminders',
+  'profile.sms.phoneLabel': 'Mobile number',
+  'profile.sms.phoneHelp': 'Optional. Include your country code, like +1 555 010 0000.',
+  'profile.sms.phoneInvalid': 'Please enter your number with a country code, like +15550100.',
+  // The checkbox says the ACTION in plain words (≤5th-grade); the required TCPA
+  // disclosures sit under it as fine print. Both together still carry all four
+  // mandated elements — what you agree to, rates, no-health-info, STOP — so the
+  // pair must be reviewed by counsel TOGETHER (packet Q3). The old separate
+  // "sender explainer" line was dropped: it existed only to explain why texts
+  // came from "Healplace" and not "Cardioplace", which is moot now the sender
+  // IS Cardioplace.
+  'profile.sms.consentLabel': 'Text me reminders',
+  'profile.sms.consentFinePrint':
+    'Texts come from Cardioplace. No health information is included. Message rates may apply. Reply STOP anytime.',
+  'profile.sms.optedOutNotice':
+    'You replied STOP, so texts are turned off. Tick the box above to turn them back on.',
+  'profile.sms.statusLabel': 'Text reminders',
+  'profile.sms.statusOn': 'On',
+  'profile.sms.statusOff': 'Off',
+  'profile.sms.statusStopped': 'Stopped (you replied STOP)',
+  'profile.sms.notSet': 'Not set',
 
   // ─── Readings ──────────────────────────────────────────────────────────────
   'readings.title': 'My Readings',
@@ -947,6 +1010,7 @@ const en = {
   'register.accountSuspended': 'Your account has been suspended. Please contact support.',
   'register.accountBlocked': 'Your account has been blocked. Please contact support.',
   'register.accountDeactivated': 'This account has been deactivated. Contact your care team to reactivate it.',
+  'register.contactSupportReactivate': 'Contact support to reactivate →',
   'register.accountClosed': 'This account has been permanently closed and cannot be reopened.',
   'register.checkEmail': 'Check your email!',
   'register.magicLinkDesc': 'We sent a sign-in link. Tap it to log in.',
@@ -959,10 +1023,16 @@ const en = {
   // Support — public "locked out / can’t sign in" page (Fix 12).
   'support.locked.title': 'Need help signing in?',
   'support.locked.subtitle': 'Tell us what’s happening and our team will contact you to verify your identity before making any account changes.',
-  'support.locked.statusBanner': 'You can also check the status of an existing request by clicking the link in your confirmation email.',
+  // N-1 (Duwaragie 2026-07-14 triage). This promised "the link in your
+  // confirmation email"; the email has no link, and the only ticket view
+  // (/support/my-tickets) needs a sign-in — which the reader of THIS page
+  // cannot do, since it is the locked-out page. The triage fix allowed either
+  // sending the confirmation or removing the copy: the confirmation shipped,
+  // so this now describes what that email actually offers — a ticket number
+  // and a reply address.
+  'support.locked.statusBanner': 'Already sent a request? Your confirmation email has your ticket number — reply to that email and we\'ll add anything new to the same ticket.',
   'support.locked.email': 'Your account email',
   'support.locked.description': 'What’s happening? (e.g. I lost my authenticator app and recovery codes)',
-  'support.locked.phone': 'Callback phone (optional)',
   'support.locked.submit': 'Request help',
   'support.locked.submitting': 'Submitting…',
   'support.locked.successLead': 'Thanks — your request',
@@ -970,7 +1040,7 @@ const en = {
   'support.locked.error': 'Could not submit your request.',
   'support.locked.backToSignIn': 'Back to sign in',
   // Support — patient "My support requests" history page (Fix 9).
-  'support.mytickets.back': 'Back to settings',
+  'support.mytickets.back': 'Back to support',
   'support.mytickets.title': 'My support requests',
   'support.mytickets.subtitle': 'Track the status of requests you’ve sent our team.',
   'support.mytickets.loading': 'Loading…',
@@ -979,10 +1049,82 @@ const en = {
   'support.mytickets.statusOpen': 'Open',
   'support.mytickets.statusInProgress': 'In progress',
   'support.mytickets.statusResolved': 'Resolved',
+  'support.mytickets.statusClosed': 'Closed',
   'support.mytickets.replies': 'replies',
   'support.mytickets.support': 'Support',
   'support.mytickets.you': 'You',
   'support.mytickets.resolvedNote': 'This request was resolved.',
+  'support.mytickets.closedNote': 'This request is closed.',
+  // Derived from the last reply's author (backend `awaitingParty`), not a status.
+  'support.mytickets.yourTurn': 'Your reply needed',
+  'support.mytickets.replyPlaceholder': 'Write a reply…',
+  'support.mytickets.replySend': 'Send reply',
+  'support.mytickets.replySending': 'Sending…',
+  'support.mytickets.replyError': 'Could not send your reply.',
+  'support.mytickets.replySent': 'Reply sent.',
+  'support.mytickets.reopen': 'Reopen this request',
+  'support.mytickets.reopening': 'Reopening…',
+  'support.mytickets.reopenError': 'Could not reopen this request.',
+  'support.mytickets.reopenNote': 'Still need help? You can reopen this for 7 days.',
+  'support.mytickets.reopened': 'Request reopened.',
+  'support.mytickets.close': 'Yes, this is resolved',
+  'support.mytickets.closing': 'Closing…',
+  'support.mytickets.closed': 'Request closed.',
+  'support.mytickets.closeError': 'Could not close this request.',
+  'support.mytickets.closeNote': 'The reopen window has passed. You can confirm this is done.',
+
+  // ── /support hub — one adaptive surface for signed-out and signed-in ────
+  'support.hub.title': 'Support',
+  'support.hub.subtitle': 'Get help with your account, sign-in, or the app.',
+  'support.hub.loading': 'Loading…',
+  'support.hub.emergencyTitle': 'If this is an emergency',
+  // Reuses the Manisha-approved 911 sentence from register.medicalDisclaimer
+  // (Handoff 4 A1) rather than authoring new emergency wording.
+  'support.hub.emergencyBody': 'In an emergency, call 911.',
+  'support.hub.cantSignIn': 'I can’t sign in',
+  'support.hub.cantSignInBody': 'Locked out, lost your authenticator, or not getting your code.',
+  'support.hub.generalContact': 'Send us a message',
+  'support.hub.generalContactBody': 'A general question about Cardioplace.',
+  'support.hub.signInPrompt': 'Already have an account?',
+  'support.hub.signInCta': 'Sign in to track your requests',
+  'support.hub.raiseTitle': 'Raise a request',
+  'support.hub.raiseBody': 'Account, sign-in, or something not working in the app.',
+  'support.hub.myRequests': 'My requests',
+  'support.hub.myRequestsBody': 'Track status and reply to our team.',
+  'support.hub.accountSecurity': 'Account & security',
+  'support.hub.accountSecurityBody': 'Sign-in, two-step verification, and recovery codes.',
+  'support.hub.legal': 'Privacy & terms',
+  'support.hub.helpCenter': 'Help Center',
+  'support.hub.helpCenterBody': 'Answers to common questions about the app.',
+
+  // Help Center / FAQ (public, reads contentType=FAQ).
+  'support.help.title': 'Help Center',
+  'support.help.subtitle': 'Answers to the questions we get most often.',
+  'support.help.loading': 'Loading…',
+  'support.help.searchPlaceholder': 'Search help articles',
+  'support.help.noResults': 'No articles match your search.',
+  'support.help.empty': 'No articles yet — please check back soon.',
+  'support.help.stillNeedHelp': 'Still need help?',
+
+  // Clinical-vs-operational split. ⚠ PLACEHOLDER WORDING — pending Dr. Singal
+  // sign-off (patient-safety copy, same bar as the alert messages). Only the
+  // 911 sentence below is already-approved text.
+  'support.clinical.title': 'This looks like a medical question',
+  'support.clinical.body': 'Support can help with your account and the app, but not with your health. For anything about your symptoms, your readings, or your medicines, please reach your care team.',
+  'support.clinical.ctaChat': 'Message my care team',
+  'support.clinical.ctaSignedOut': 'Sign in to reach your care team',
+  'support.clinical.emergency': 'In an emergency, call 911.',
+
+  // Public (signed-out) contact form → POST /v2/support/public-contact.
+  'support.publiccontact.email': 'Your email',
+  'support.publiccontact.subject': 'Subject',
+  'support.publiccontact.message': 'How can we help?',
+  'support.publiccontact.noPhi': 'Please don’t include health information in this form.',
+  'support.publiccontact.send': 'Send message',
+  'support.publiccontact.sending': 'Sending…',
+  'support.publiccontact.successLead': 'Thanks — your request',
+  'support.publiccontact.successTail': 'is in. We’ll reply by email.',
+  'support.publiccontact.error': 'Could not send your message.',
   // Handoff 4 A1 — medical disclaimer (Manisha Doc 1). MVP US-only: 911 stays
   // hardcoded per CROSS_HANDOFF_ADDENDUM_2026_06_03.md.
   'register.medicalDisclaimer': 'Cardioplace helps you track your health and stay connected to your care team. It is not a substitute for medical advice, diagnosis, or treatment. In an emergency, call 911.',
@@ -1006,6 +1148,15 @@ const en = {
   'onboarding.reminders.quietEndLabel': 'Quiet hours end',
   'onboarding.reminders.quietHoursHeading': 'Quiet hours (no reminders during this time)',
   'onboarding.reminders.emergencyDisclaimer': 'Emergency health alerts will always come through, even during quiet hours.',
+  // L3 (2026-07-14) — optional SMS reminders during onboarding.
+  'onboarding.sms.phoneLabel': 'Mobile number (optional)',
+  'onboarding.sms.phoneAudio': 'What is your mobile number? This is optional — you can leave it blank.',
+  'onboarding.sms.phoneHelp': 'Add it only if you want text reminders. Include your country code, like +1 555 010 0000.',
+  'onboarding.sms.phoneInvalid': 'Please enter your number with a country code, like +15550100 — or leave it blank.',
+  'onboarding.reminders.title': 'Set up your reminders',
+  'onboarding.reminders.subtitle': 'Choose when we check in with you. You can change this anytime in Settings.',
+  'onboarding.stepIndicator': 'Step {n} of {t}',
+  'onboarding.back': 'Back',
   'onboarding.invalidDob': 'Please enter a valid date of birth.',
   'onboarding.continue': 'Continue',
   'onboarding.skip': 'Skip for now',
@@ -1039,9 +1190,16 @@ const en = {
   'landing.legal': 'Legal',
   'landing.privacy': 'Privacy Policy',
   'landing.terms': 'Terms of Service',
+  'landing.hipaaNotice': 'HIPAA Notice',
+  'landing.cookiePolicy': 'Cookie Policy',
+  'landing.accessibility': 'Accessibility',
+  'landing.nondiscrimination': 'Nondiscrimination',
+  'landing.telehealthConsent': 'Telehealth Consent',
   'landing.contact': 'Contact',
   'landing.dashboard': 'Dashboard',
   'landing.getInTouch': 'Get in Touch',
+  'landing.supportBlurb': 'Questions about your account or the app? Our support team is here to help.',
+  'landing.goToSupport': 'Go to Support',
   'landing.messageSent': 'Message sent!',
   'landing.messageReply': "We'll get back to you soon.",
   'landing.yourEmail': 'Your email',
@@ -1075,8 +1233,8 @@ const en = {
   'home.aiQuote': '"Your blood pressure today is slightly above your 7-day average. Have you taken your Lisinopril this morning? I can remind you again at noon if that helps."',
   'home.escalation': 'Escalation When It Matters',
   'home.escalationDesc': 'When readings deviate from a patient\'s individual baseline, the platform generates a structured alert to the care team. Level 1: reviewed within 24 hours. Level 2: patient told to call 911 immediately. The care team is notified simultaneously.',
-  'home.learning': 'Continuously Learning',
-  'home.learningDesc': 'No one-size-fits-all thresholds. Trained on CDC NHANES cardiovascular data and learns from every patient interaction getting more precise over time for the communities it serves.',
+  'home.learning': 'Personalized to Each Patient',
+  'home.learningDesc': 'No one-size-fits-all thresholds. Alert rules are set by physicians and tailored to each patient\'s conditions and medications, following established clinical guidelines for the communities it serves.',
   'home.silentLiteracy': 'SILENT LITERACY ARCHITECTURE',
   'home.soundTitle': 'No Reading Required. Ever.',
   'home.soundDesc': 'Most health technology asks patients to disclose what they need. Cardioplace infers it. The platform reads response patterns, how fast a patient replies, which mode they choose, whether their answers suggest comprehension, and adapts automatically.\n\nNo patient is ever labelled. No patient is ever asked if they can read. Care reaches them exactly where they are.',
@@ -1085,7 +1243,7 @@ const en = {
   'home.forPatients': 'For Patients',
   'home.forPatientsSubtitle': 'Living with Hypertension or Heart Disease in Wards 7 and 8',
   'home.patient1': 'Check-ins by text or voice, your choice, every day.',
-  'home.patient2': 'No smartphone required. No reading needed. Just tap and speak.',
+  'home.patient2': 'No typing needed. No reading needed. Just tap and speak.',
   'home.patient3': 'Blood pressure monitors provided at no cost.',
   'home.patient4': 'Your care team sees what is happening before you have to call.',
   'home.forCareTeams': 'For Care Teams',
@@ -1151,8 +1309,8 @@ const en = {
   'about.principle3Desc': 'Check-ins are available in English, Spanish, French, German, and Amharic, with additional languages in development. Voice interaction means language and literacy barriers disappear entirely.',
   'about.principle4Title': 'Sustainability cannot depend on grants.',
   'about.principle4Desc': 'CMS Remote Patient Monitoring billing means the platform generates recurring revenue for participating hospitals from the first month of enrollment. This program is designed to outlast its funding.',
-  'about.principle5Title': 'The platform gets smarter the more it is used.',
-  'about.principle5Desc': "Cardioplace is trained on validated cardiovascular datasets including the CDC's NHANES survey, the gold standard for blood pressure, medication, and demographic data in the US. As patients in Ward 7 and Ward 8 use the platform, we learn what normal looks like for that community specifically. The alerts become more accurate over time, and more relevant to the people they are protecting.",
+  'about.principle5Title': 'Every alert follows physician-set clinical rules.',
+  'about.principle5Desc': "Cardioplace does not guess. Every alert follows explicit rules written and signed off by physicians, grounded in established cardiovascular guidelines such as those from the AHA and ACC. Thresholds are personalized to each patient's conditions, medications, and age, so the same reading can mean different things for different people, exactly as a clinician would judge it.",
   'about.silentLiteracyTitle': 'Silent Literacy Architecture',
   'about.silentLiteracyDesc1': 'Every other health literacy platform asks patients to declare what they need. Cardioplace watches instead.\n\nResponse latency. Modality choice. Teach-back accuracy. The platform reads these signals passively and adapts communication automatically, delivering voice, text, or a combination based on what each patient actually does, not what they say they prefer.',
   'about.silentLiteracyDesc2': 'No patient is ever evaluated. No patient is ever labelled. Dignity is not an accommodation. It is the default.',

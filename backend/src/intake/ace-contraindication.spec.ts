@@ -21,6 +21,10 @@ const baseArgs = {
   changedBy: 'admin-1',
   changedByRole: 'ADMIN' as const,
   reason: 'Angioedema contraindication',
+  // V-06 — the helper stores `rationaleEncrypted` alongside `rationale` on the
+  // audit row. Callers must precompute; the test supplies a static envelope
+  // shape (unit tests don't exercise real crypto).
+  reasonEncrypted: 'iv:tag:ct',
   now: new Date('2026-06-03T10:00:00Z'),
 }
 

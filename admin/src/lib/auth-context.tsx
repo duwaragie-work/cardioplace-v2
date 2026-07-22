@@ -110,8 +110,12 @@ const AuthContext = createContext<AuthContextType>({
 // the patient app's pattern — the JWT itself never sees JS-readable storage.
 function writeAuthMarkers(roles: string[]) {
   if (typeof document === 'undefined') return;
-  document.cookie = `${AUTH_MARKER_COOKIE}=1; path=/; max-age=2592000; SameSite=Lax`;
-  document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax`;
+  // 3.2 — HTTPS-gated `Secure` (see the patient app for the rationale): adds
+  // Secure in prod without breaking http:// dev/staging, which would otherwise
+  // drop the cookie and loop proxy.ts back to /sign-in.
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${AUTH_MARKER_COOKIE}=1; path=/; max-age=2592000; SameSite=Lax${secure}`;
+  document.cookie = `${AUTH_ROLE_COOKIE}=${encodeURIComponent(roles.join(','))}; path=/; max-age=2592000; SameSite=Lax${secure}`;
 }
 
 function clearAuthMarkers() {
@@ -184,28 +188,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // On mount: try a silent refresh against the HttpOnly refresh_token cookie.
   useEffect(() => {
-    // Skip rehydrate when we're handling a fresh magic-link sign-in.
-    // MagicLinkHandler is about to call login() with the tokens from the
-    // URL params; running /refresh here would consume the just-issued
-    // refresh token and race with the destination page's own mount-time
-    // rehydrate. Refresh-token rotation is single-use, so whichever fetch
-    // reaches the backend second gets a 401 — and the loser's rehydrate
-    // clears user state, which bounces the destination page to /sign-in.
-    if (typeof window !== 'undefined') {
-      const pathname = window.location.pathname;
-      const isFreshMagicLink =
-        pathname === '/auth/magic-link' &&
-        new URLSearchParams(window.location.search).has('accessToken');
-      // Phase/practice-identity pre-session bounce fix —
-      // /sign-in/select-practice has only a short-lived challenge token
-      // in sessionStorage, no refresh-token cookie yet. Running rehydrate
-      // here gets a 401, clears auth markers, and bounces the user back
-      // to /sign-in before they can pick a practice.
-      const isSelectPractice = pathname.startsWith('/sign-in/select-practice');
-      if (isFreshMagicLink || isSelectPractice) {
-        setIsLoading(false);
-        return;
-      }
+    // F4 — the "fresh magic-link ?accessToken=" skip was removed: the backend
+    // no longer emits tokens in the magic-link redirect (A1/V-11), so the param
+    // never exists and the magic-link page waits for this rehydrate anyway.
+    //
+    // The select-practice skip stays: /sign-in/select-practice holds only a
+    // short-lived challenge token in sessionStorage with no refresh cookie yet,
+    // so running rehydrate there gets a 401, clears markers, and bounces the
+    // user back to /sign-in before they can pick a practice.
+    if (
+      typeof window !== 'undefined' &&
+      window.location.pathname.startsWith('/sign-in/select-practice')
+    ) {
+      setIsLoading(false);
+      return;
     }
 
     let cancelled = false;

@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { signInAdmin, authedApi } from '../helpers/auth.js'
 import { ADMINS, PATIENTS } from '../helpers/accounts.js'
 import { newTestControl } from '../helpers/test-control.js'
-import { waitForAlerts, editThresholdViaUI } from '../helpers/api.js'
+import { waitForAlerts, editThresholdViaUI, gotoPatientDetailById,
+} from '../helpers/api.js'
 import { API_BASE_URL, ADMIN_BASE_URL } from '../playwright.config.js'
 import { byTestId, T } from '../helpers/selectors.js'
 
@@ -95,7 +96,7 @@ test.describe('Enrollment-gap full flow (real serious-condition path)', () => {
 
       // ── Admin UI: threshold banner on EVERY tab + threshold-pending badge ──
       await signInAdmin(page, ADMINS.support.email, ADMIN_BASE_URL)
-      await page.goto(`${ADMIN_BASE_URL}/patients/${aisha.id}`)
+      await gotoPatientDetailById(page, ADMIN_BASE_URL, aisha.id)
       await page.locator(byTestId(T.admin.detailHeader)).waitFor({ state: 'visible', timeout: 30_000 })
       // Banner on the default tab…
       await expect(

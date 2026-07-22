@@ -34,19 +34,28 @@ test.describe('Bug 19 — no active-session prompt after an explicit close', () 
       await bufferReadingViaWizard(page, { systolic: 126, diastolic: 82, heartRate: 70 })
       await expect(page.locator(byTestId('checkin-buffer-title'))).toBeVisible({ timeout: 15_000 })
       await commitBuffer(page)
-      await expect(page).toHaveURL(/\/check-in/, { timeout: 15_000 }) // confirmation overlay
+      // Wait for the confirmation UI to actually render — the previous
+      // `toHaveURL(/\/check-in/)` was a trivially-true check (we were already
+      // on /check-in) and did not gate on the network. The confirmation screen
+      // renders AFTER the for-loop of createJournalEntry POSTs resolves
+      // (CheckIn.tsx: setShowConfirmation(true) fires post-loop), and the
+      // LAST POST carries closeSession:true → backend stamps sessionClosedAt
+      // inside its updateMany. Without this wait, /dashboard navigation could
+      // race the still-in-flight last POST — /sessions/active then returned
+      // the not-yet-closed session, wizard bailed to `checkin-open-session-
+      // prompt`, and check-in-submit never rendered. All 3 CI retries hit this.
+      //
+      // checkin-looking-good is deterministic here because 126/82 sits inside
+      // isBpNormalRange (SBP 90-129 + DBP 60-84) — the confirmation screen
+      // renders the positive-tail badge only in that band + non-emergency.
+      await expect(page.locator(byTestId('checkin-looking-good'))).toBeVisible({ timeout: 15_000 })
 
       // Within 5 min, start a new check-in — NO "add to this session?" prompt.
       //
-      // commitBuffer sends `closeSession: true` on the last reading, which
-      // schedules a background sessionClosedAt stamp on the backend. On slow
-      // CI runners the frontend can fetch /sessions/active before that write
-      // commits — activeSession comes back non-null, the wizard bails out to
-      // the "checkin-open-session-prompt" branch (see CheckIn.tsx:3135), and
-      // neither `check-in-submit` nor a fresh wizard renders. Round-trip via
-      // /dashboard first: it forces a full CheckIn unmount + gives the async
-      // session-close a moment to settle, so the subsequent /check-in fetch
-      // sees a truly closed session.
+      // Round-trip via /dashboard first: it forces a full CheckIn unmount so
+      // the subsequent /check-in fetch sees the closed session from a clean
+      // component tree (the confirmation UI otherwise sits on /check-in and
+      // masks the fresh-wizard render on soft re-navigation).
       await page.goto('/dashboard')
       await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {})
       await page.goto('/check-in')

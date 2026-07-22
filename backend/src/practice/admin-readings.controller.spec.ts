@@ -136,7 +136,7 @@ describe('AdminReadingsController', () => {
       ['delete', () => controller.delete(req('prov-2', [UserRole.PROVIDER]), 'p-out', 'e1', ctxNull)],
     ])('out-of-scope MED_DIR/PROVIDER → 403 from %s, service never reached', async (_name, call) => {
       mockAccess.assertCanAccessPatient.mockRejectedValueOnce(
-        new ForbiddenException('Patient p-out is outside your role scope'),
+        new ForbiddenException('Requested record is outside your role scope'),
       )
 
       await expect(call()).rejects.toThrow(ForbiddenException)

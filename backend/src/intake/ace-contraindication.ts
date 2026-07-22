@@ -55,6 +55,13 @@ export interface RetroUpgradeArgs {
   changedByRole: VerifierRole
   /** Audit rationale, e.g. "Angioedema contraindication (alert …)". */
   reason: string
+  /**
+   * V-06 sibling — encrypted `reason` (from EncryptionService.encryptNullable).
+   * Required so the audit row's `rationaleEncrypted` stays in lock-step with
+   * `rationale` at every call site; callers precompute so this helper stays
+   * dependency-free (no EncryptionService injection into a pure-function file).
+   */
+  reasonEncrypted: string | null
   now?: Date
 }
 
@@ -115,6 +122,7 @@ export async function retroUpgradeAceArbHoldsForContraindication(
         changeType: VerificationChangeType.ADMIN_CORRECT,
         discrepancyFlag: true,
         rationale: args.reason,
+        rationaleEncrypted: args.reasonEncrypted,
       },
     })
   }

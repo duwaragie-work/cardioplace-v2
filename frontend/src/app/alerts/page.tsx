@@ -1,0 +1,407 @@
+'use client';
+
+// Patient alert detail (Flow C). Fetches the alert by id, then dispatches:
+//   • BP_LEVEL_2 / BP_LEVEL_2_SYMPTOM_OVERRIDE → EmergencyAlertScreen (C1+C2)
+//   • TIER_1_CONTRAINDICATION                   → TierAlertView (C3, red)
+//   • BP_LEVEL_1_HIGH                           → TierAlertView (C4, orange)
+//   • BP_LEVEL_1_LOW                            → TierAlertView (C5, blue)
+//   • TIER_3_INFO                               → TierAlertView (passive green)
+//   • TIER_2_DISCREPANCY                        → admin-only → soft 404
+//
+// Backend has no GET /alerts/:id yet — we fetch the user's alert list and
+// find by id. For a typical patient that's a small list. Replace with a
+// dedicated endpoint when one lands.
+
+import { useEffect, useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { ArrowLeft, AlertCircle, ShieldCheck } from 'lucide-react';
+import { useAuth } from '@/lib/auth-context';
+import { useLanguage } from '@/contexts/LanguageContext';
+import {
+  getAlerts,
+  acknowledgeAlert,
+  type DeviationAlertDto,
+} from '@/lib/services/journal.service';
+import { getProfile } from '@/lib/services/auth.service';
+import EmergencyAlertScreen from '@/components/alerts/EmergencyAlertScreen';
+import TierAlertView from '@/components/alerts/TierAlertView';
+import { readNavId, stashNavId } from '@/lib/nav-handoff';
+
+
+function AlertSkeleton() {
+  return (
+    <main id="main" className="min-h-screen" style={{ backgroundColor: '#FAFBFF' }}>
+      <div className="max-w-2xl mx-auto px-4 md:px-8 py-6 space-y-5">
+        <div
+          className="rounded-2xl p-5 sm:p-6"
+          style={{ backgroundColor: 'white', border: '1.5px solid var(--brand-border)' }}
+        >
+          <div className="flex items-start gap-4">
+            <div
+              className="rounded-2xl animate-pulse"
+              style={{ width: 56, height: 56, backgroundColor: '#EDE9F6' }}
+            />
+            <div className="flex-1 space-y-3">
+              <div
+                className="h-5 rounded-md animate-pulse"
+                style={{ width: '70%', backgroundColor: '#EDE9F6' }}
+              />
+              <div
+                className="h-3 rounded-md animate-pulse"
+                style={{ width: '40%', backgroundColor: '#EDE9F6' }}
+              />
+              <div
+                className="h-3 rounded-md animate-pulse"
+                style={{ width: '90%', backgroundColor: '#EDE9F6' }}
+              />
+              <div
+                className="h-3 rounded-md animate-pulse"
+                style={{ width: '85%', backgroundColor: '#EDE9F6' }}
+              />
+            </div>
+          </div>
+        </div>
+        <div
+          className="rounded-2xl p-5 animate-pulse"
+          style={{ height: 90, backgroundColor: '#EDE9F6' }}
+        />
+        <div
+          className="rounded-full animate-pulse"
+          style={{ height: 48, backgroundColor: '#EDE9F6' }}
+        />
+      </div>
+    </main>
+  );
+}
+
+/**
+ * Friendly "no action needed" screen for alerts that are admin-only
+ * (Tier 2 medication-discrepancy). The alert exists — it's just not for
+ * the patient to act on. Distinct from NotFound so the user doesn't think
+ * something is broken when they arrive here from a stale link.
+ */
+function CareTeamOnly() {
+  const router = useRouter();
+  const { t } = useLanguage();
+  return (
+    <main
+      id="main"
+      className="min-h-screen flex items-center justify-center px-4"
+      style={{ backgroundColor: '#FAFBFF' }}
+    >
+      <div className="max-w-sm w-full text-center">
+        <div
+          className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center"
+          style={{ backgroundColor: 'var(--brand-success-green-light)' }}
+        >
+          <ShieldCheck
+            aria-hidden="true"
+            className="w-8 h-8"
+            style={{ color: 'var(--brand-success-green)' }}
+          />
+        </div>
+        <h1
+          className="text-[1.25rem] font-bold mb-2"
+          style={{ color: 'var(--brand-text-primary)' }}
+        >
+          Reviewed by your care team
+        </h1>
+        <p
+          className="text-[0.84375rem] mb-6 leading-relaxed"
+          style={{ color: 'var(--brand-text-secondary)' }}
+        >
+          {t('alerts.notFound.tier2')}
+        </p>
+        <button
+          type="button"
+          onClick={() => router.push('/dashboard')}
+          className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
+          style={{
+            backgroundColor: 'var(--brand-primary-purple)',
+            boxShadow: 'var(--brand-shadow-button)',
+          }}
+        >
+          <ArrowLeft aria-hidden="true" className="w-4 h-4" />
+          {t('alerts.notFound.backToDashboard')}
+        </button>
+      </div>
+    </main>
+  );
+}
+
+function NotFound({ reason }: { reason: string }) {
+  const router = useRouter();
+  const { t } = useLanguage();
+  return (
+    <main
+      id="main"
+      className="min-h-screen flex items-center justify-center px-4"
+      style={{ backgroundColor: '#FAFBFF' }}
+    >
+      <div className="max-w-sm w-full text-center">
+        <div
+          className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center"
+          style={{ backgroundColor: 'var(--brand-warning-amber-light)' }}
+        >
+          <AlertCircle
+            aria-hidden="true"
+            className="w-8 h-8"
+            style={{ color: 'var(--brand-warning-amber-text)' }}
+          />
+        </div>
+        <h1
+          className="text-[1.25rem] font-bold mb-2"
+          style={{ color: 'var(--brand-text-primary)' }}
+        >
+          {t('alerts.notFound.title')}
+        </h1>
+        <p
+          className="text-[0.84375rem] mb-6 leading-relaxed"
+          style={{ color: 'var(--brand-text-secondary)' }}
+        >
+          {reason}
+        </p>
+        <button
+          type="button"
+          onClick={() => router.push('/dashboard')}
+          className="inline-flex items-center gap-2 h-11 px-6 rounded-full text-white font-bold text-[0.875rem] cursor-pointer"
+          style={{
+            backgroundColor: 'var(--brand-primary-purple)',
+            boxShadow: 'var(--brand-shadow-button)',
+          }}
+        >
+          <ArrowLeft aria-hidden="true" className="w-4 h-4" />
+          {t('alerts.notFound.backToDashboard')}
+        </button>
+      </div>
+    </main>
+  );
+}
+
+// B3 (static export) — was a dynamic /alerts/[id] route; now a static /alerts
+// shell that reads the opaque alert id from `?id=` and fetches client-side. A
+// dynamic segment can't be statically exported without baking real ids into the
+// bundle. `useSearchParams` requires a Suspense boundary (the default export).
+function AlertDetailContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  // F1 — the alert id is STATE (not derived), seeded from the URL `?id=`
+  // (deep-link) or sessionStorage (in-app click → bare route, id off the CDN
+  // log; URL wins so a fresh deep-link isn't shadowed by a stale stash). Keeping
+  // it in state lets the same-route "next alert" nav below just setId() +
+  // re-fetch, instead of router.push('/alerts') which wouldn't remount.
+  const [id, setId] = useState<string>(
+    () => searchParams.get('id') ?? readNavId('alertDetail')?.id ?? '',
+  );
+  const { isLoading, isAuthenticated } = useAuth();
+  const { t } = useLanguage();
+
+  // Neither a deep-link id nor a stash (bare load, e.g. tab reopened) → back to
+  // the alerts list rather than a 404/empty detail.
+  useEffect(() => {
+    if (!id) router.replace('/notifications?tab=alerts');
+  }, [id, router]);
+
+  const [alert, setAlert] = useState<DeviationAlertDto | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [ackLoading, setAckLoading] = useState(false);
+  // F27 — the escalation pipeline defers ALL dispatch until the patient is
+  // ENROLLED, so a pre-enrollment patient's care team has NOT been notified.
+  // Surface that truthfully instead of a false reassurance. Default false so
+  // an enrolled patient (or a transient profile-load failure) never gets the
+  // scarier pre-enrollment copy by mistake.
+  const [isPreEnrollment, setIsPreEnrollment] = useState(false);
+  // Cluster 6 Q4 (Manisha 5/9/26) — when a pregnant patient at 175/115 fires
+  // both BP_LEVEL_2 + RULE_PREGNANCY_ACE_ARB, surface them sequentially:
+  // 911 screen first, then route to the Tier-1 ACE/ARB contraindication
+  // after the patient acknowledges the emergency. This is the id of that
+  // follow-up alert if it exists on the patient's active list.
+  const [nextActiveAlertId, setNextActiveAlertId] = useState<string | null>(null);
+
+  // Auth gate
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      router.replace('/sign-in');
+    }
+  }, [isAuthenticated, isLoading, router]);
+
+  // F27 — resolve the patient's enrollment status so the alert surfaces can
+  // tell the truth about whether the care team was actually notified.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await getProfile();
+        if (!cancelled) {
+          setIsPreEnrollment(p?.enrollmentStatus != null && p.enrollmentStatus !== 'ENROLLED');
+        }
+      } catch {
+        // Leave the default (false) — never show the pre-enrollment notice on
+        // a transient profile-load failure.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isLoading]);
+
+  // Fetch alerts and find by id
+  useEffect(() => {
+    if (isLoading || !isAuthenticated) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const list = await getAlerts();
+        if (cancelled) return;
+        const found = Array.isArray(list) ? list.find((a) => a.id === id) : null;
+        if (!found) {
+          setError(t('alerts.notFound.body'));
+        } else {
+          setAlert(found);
+          // Cluster 6 Q4 — when the current view is the L2 emergency,
+          // look for a co-fired Tier-1 ACE/ARB pregnancy contraindication
+          // on the same patient. If one is OPEN/ACKNOWLEDGED, hold its id
+          // so the post-acknowledge handler can route the patient there
+          // after they've seen the 911 CTA.
+          const isCurrentEmergency =
+            found.tier === 'BP_LEVEL_2' ||
+            found.tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE'
+          if (isCurrentEmergency && Array.isArray(list)) {
+            const ace = list.find(
+              (a) =>
+                a.id !== found.id &&
+                a.ruleId === 'RULE_PREGNANCY_ACE_ARB' &&
+                (a.status === 'OPEN' || a.status === 'ACKNOWLEDGED'),
+            )
+            if (ace) setNextActiveAlertId(ace.id)
+          }
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : t('alerts.notFound.loadError'));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isAuthenticated, isLoading, t]);
+
+  async function handleAcknowledge() {
+    if (!alert || ackLoading) return;
+    // CLINICAL_SPEC V2-C — Tier 1 contraindications (and any other alert the
+    // backend marks `dismissible: false`) cannot be acknowledged by the
+    // patient. The acknowledge endpoint sets acknowledgedAt + status=
+    // ACKNOWLEDGED, which the escalation cron treats as "stop paging." If
+    // the patient could acknowledge a Tier 1, the provider ladder would
+    // silently die — a clinical-safety hole. Defense in depth: the child
+    // views also hide the button when dismissible=false; this guard
+    // ensures even a stray prop wiring can't bypass the rule.
+    if (alert.dismissible === false) return;
+    setAckLoading(true);
+    try {
+      await acknowledgeAlert(alert.id);
+      // optimistic: mirror the new status locally so the view flips to
+      // "I've seen this" without a refetch round-trip
+      setAlert((prev) =>
+        prev
+          ? { ...prev, status: 'ACKNOWLEDGED', acknowledgedAt: new Date().toISOString() }
+          : prev,
+      );
+      // Cluster 6 Q4 (Manisha 5/9/26) — sequential surface. After the
+      // patient acknowledges the BP-L2 911 screen, push them to the Tier-1
+      // ACE/ARB contraindication so they see both safety messages — but
+      // never simultaneously. Best-effort: if the follow-up alert is gone
+      // (provider resolved it between fetch and ack), fall through to the
+      // banner view here.
+      if (nextActiveAlertId) {
+        // F1 — same-route hand-off: stash + setId (re-fetches via the [id]
+        // effect). router.push('/alerts') wouldn't remount (same URL), and
+        // '/alerts?id=' would leak the id into the CDN log.
+        stashNavId('alertDetail', { id: nextActiveAlertId });
+        setId(nextActiveAlertId);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('alerts.notFound.ackError'));
+    } finally {
+      setAckLoading(false);
+    }
+  }
+
+  if (isLoading || loading) {
+    return <AlertSkeleton />;
+  }
+
+  if (error || !alert) {
+    return <NotFound reason={error || t('alerts.notFound.unavailable')} />;
+  }
+
+  // Dispatch by tier — and fall back to BP-reading thresholds when the
+  // rule engine hasn't tagged this row yet (legacy v1 alert with tier=null).
+  // Per CLINICAL_SPEC, SBP ≥180 OR DBP ≥120 is BP Level 2 regardless of how
+  // it was originally classified, so we route it to the emergency screen.
+  const tier = alert.tier;
+  const sbp = alert.journalEntry?.systolicBP ?? 0;
+  const dbp = alert.journalEntry?.diastolicBP ?? 0;
+  // Cluster 8 (Manisha 5/18/26, P0) — ACE-angioedema is also a full-screen
+  // emergency: airway-obstruction risk + 911 routing per the signed-off
+  // spec. EmergencyAlertScreen branches on tier internally so the body +
+  // TTS reuse the signed-off RULE_ACE_ANGIOEDEMA / RULE_GENERIC_ANGIOEDEMA
+  // patient message instead of the BP-L2 copy.
+  const isEmergency =
+    tier === 'BP_LEVEL_2' ||
+    tier === 'BP_LEVEL_2_SYMPTOM_OVERRIDE' ||
+    tier === 'TIER_1_ANGIOEDEMA' ||
+    (tier == null && (sbp >= 180 || dbp >= 120));
+
+  const hasPatientMessage =
+    typeof alert.patientMessage === 'string' &&
+    alert.patientMessage.trim().length > 0;
+  if (tier === 'TIER_2_DISCREPANCY' && !hasPatientMessage) {
+    // Tier 2 with NO patient-facing message is admin-only per V2-C. Patients
+    // shouldn't land here, but a stale link or bookmark can still lead here —
+    // render a friendly "reviewed by your care team" screen instead of a
+    // misleading "not found" error. F32 — a Tier 2 that DOES carry a
+    // patientMessage (e.g. the A5-3 beta-blocker carve-out) is patient-facing
+    // and falls through to the normal TierAlertView below.
+    return <CareTeamOnly />;
+  }
+
+  // Only show the full-screen red takeover for OPEN emergencies. Once the
+  // patient has acknowledged (or care team resolved it), fall through to the
+  // banner-style TierAlertView so they see a clear "you've seen this" state
+  // instead of being trapped on a 911-prompt with no exit.
+  const isResolved = alert.status === 'ACKNOWLEDGED' || alert.status === 'RESOLVED';
+  if (isEmergency && !isResolved) {
+    return (
+      <EmergencyAlertScreen
+        alert={alert}
+        onAcknowledge={handleAcknowledge}
+        isPreEnrollment={isPreEnrollment}
+      />
+    );
+  }
+
+  return (
+    <TierAlertView
+      alert={alert}
+      acknowledging={ackLoading}
+      onAcknowledge={handleAcknowledge}
+      isPreEnrollment={isPreEnrollment}
+    />
+  );
+}
+
+export default function AlertDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <AlertDetailContent />
+    </Suspense>
+  );
+}

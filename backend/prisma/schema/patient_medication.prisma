@@ -23,10 +23,13 @@ model PatientMedication {
   // escalation cron so a given rung never double-fires; reset to 0 when the
   // medication leaves HOLD.
   holdEscalationLevel      Int                          @default(0)
-  rawInputText             String?
-  notes                    String?                      @db.Text
-  pillImageUrl             String?
-  plainLanguageDescription String?                      @db.Text
+  rawInputText                      String?
+  rawInputTextEncrypted             String?
+  notes                             String?                      @db.Text
+  notesEncrypted                    String?                      @db.Text
+  pillImageUrl                      String?
+  plainLanguageDescription          String?                      @db.Text
+  plainLanguageDescriptionEncrypted String?                      @db.Text
   // #85 — canonical drug identity (shared catalog `id`, e.g. "losartan" for
   // BOTH Cozaar and Losartan), resolved via matchToCatalog(drugName). Enables
   // brand/generic dedup. Null for off-catalog / free-text meds — dedup skipped.
