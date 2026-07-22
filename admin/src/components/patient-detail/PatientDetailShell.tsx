@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getPatientSummary } from '@/lib/services/provider.service';
+import { isOutOfScopeError } from '@/lib/services/http-error';
 import { getBMI } from '@cardioplace/shared';
 import {
   getPatientProfile,
@@ -210,7 +211,11 @@ export default function PatientDetailShell({ patientId }: Props) {
         // an out-of-scope reason so the user sees a clear "not authorized"
         // instead of a raw error banner. Backend is authoritative on this
         // check via assertCanAccessPatient.
-        if (msg.includes('403') || /forbidden/i.test(msg) || /outside your role scope/i.test(msg)) {
+        //
+        // Keyed off the STATUS, not the message text. This used to match the
+        // backend's 403 prose, which quietly made a server-side wording change
+        // able to break the redirect — see lib/services/http-error.ts (S1).
+        if (isOutOfScopeError(e)) {
           router.replace('/patients?reason=out-of-scope');
           return;
         }
