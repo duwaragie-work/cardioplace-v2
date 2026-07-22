@@ -10,6 +10,11 @@ backend/.env.local
 backend/.env.shared-backup
 *.shared-backup
 backend/src/generated/
+# transformers.js embedding-model cache (~86MB all-MiniLM-L6-v2). Lives outside
+# node_modules so it survives `npm ci`, which would otherwise force a fresh
+# download every reinstall — and an interrupted download leaves a truncated
+# model.onnx that fails with "Protobuf parsing failed" (2026-07-22).
+backend/.model-cache/
 
 # Frontend
 frontend/.next/
@@ -61,6 +66,12 @@ coverage/
 qa/test-results/
 qa/playwright-report/
 qa/reports/
+# Playwright writes `test-results/` relative to the CWD, so running the suite
+# from the repo root drops one here too — screenshots, videos and traces of
+# failing runs. Same class of proof artifact as the qa/ paths above; both were
+# untracked-but-unignored, so a `git add -A` would have committed them.
+test-results/
+qa/screenshots-manual-run/
 
 # Temp
 .temp

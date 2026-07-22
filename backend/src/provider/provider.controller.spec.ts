@@ -82,7 +82,7 @@ describe('ProviderController — alert scope gates', () => {
 
     it('does NOT mutate when the patient is outside the actor scope', async () => {
       access.assertCanAccessPatient.mockRejectedValue(
-        new ForbiddenException('Patient patient-b is outside your role scope'),
+        new ForbiddenException('Requested record is outside your role scope'),
       )
 
       await expect(
@@ -130,7 +130,7 @@ describe('ProviderController — alert scope gates', () => {
 
     it('does NOT read when the patient is outside the actor scope', async () => {
       access.assertCanAccessPatient.mockRejectedValue(
-        new ForbiddenException('Patient patient-b is outside your role scope'),
+        new ForbiddenException('Requested record is outside your role scope'),
       )
 
       await expect(

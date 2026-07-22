@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common'
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common'
 import { UserRole } from '../generated/prisma/enums.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 
@@ -38,7 +38,36 @@ export interface ActorUser {
  */
 @Injectable()
 export class PatientAccessService {
+  private readonly logger = new Logger(PatientAccessService.name)
+
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Deny messages are deliberately GENERIC — they never name the patient or
+   * practice that was refused (alert-resolve IDOR review, 2026-07-21 · S1).
+   *
+   * The escalation deep-link design keeps the patient **user id** out of URLs
+   * because that is the sensitive identifier; the alert id is the opaque one.
+   * An interpolated id here handed that user id back to ANY authenticated
+   * staff account — including one scoped to a different practice — in exchange
+   * for an alert id, reconstructing the exact alertId → patientId mapping the
+   * design removed. Not an IDOR (no clinical data, needs a valid staff JWT),
+   * but it undercuts the "an alert id is inert without authorization" property
+   * the whole Amplify decision rests on.
+   *
+   * The id still reaches server-side logs via `denyLog()` — V-05
+   * (common/logging/log-redact.ts) permits IDs/booleans/byte counts in stdout
+   * and bars only clinical content, and a scope verdict carries neither
+   * condition nor reading.
+   *
+   * ⚠️ Do NOT "restore" the helpful id to these strings. patient-access
+   * .service.spec.ts asserts the identifier is absent and will fail.
+   */
+  private denyLog(scope: string, identifier: string, actorId: string): void {
+    this.logger.warn(
+      `access denied (${scope}): actor=${actorId} target=${identifier}`,
+    )
+  }
 
   /**
    * Patient-detail mutations (threshold edit, complete-onboarding, alert
@@ -83,8 +112,9 @@ export class PatientAccessService {
       return
     }
 
+    this.denyLog('patient', patientUserId, actor.id)
     throw new ForbiddenException(
-      `Patient ${patientUserId} is outside your role scope`,
+      'Requested record is outside your role scope',
     )
   }
 
@@ -117,8 +147,9 @@ export class PatientAccessService {
     for (const practiceId of ids) {
       const ok = await this.medHeadsPractice(actor.id, practiceId)
       if (!ok) {
+        this.denyLog('practice-assignment', practiceId, actor.id)
         throw new ForbiddenException(
-          `Practice ${practiceId} is outside your MED_DIR scope`,
+          'Requested record is outside your MED_DIR scope',
         )
       }
     }
@@ -230,8 +261,9 @@ export class PatientAccessService {
     ) {
       return
     }
+    this.denyLog('practice-management', practiceId, actor.id)
     throw new ForbiddenException(
-      `Practice ${practiceId} is outside your management scope`,
+      'Requested record is outside your management scope',
     )
   }
 

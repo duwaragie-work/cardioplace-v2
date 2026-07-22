@@ -3,6 +3,7 @@
 // and verification logs. All calls use the existing fetchWithAuth helper.
 
 import { fetchWithAuth } from './token'
+import { httpErrorFrom } from './http-error'
 
 const API = process.env.NEXT_PUBLIC_API_URL
 
@@ -274,7 +275,9 @@ export interface PatientAlert {
 async function jsonOrThrow<T>(res: Response, fallbackMsg = 'Request failed'): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.message || `${fallbackMsg}: ${res.status}`)
+    // HttpError keeps the status alongside the message — same text as before,
+    // but callers can now branch on the code instead of parsing prose (S1).
+    throw httpErrorFrom(err, res.status, fallbackMsg)
   }
   const json = await res.json()
   return (json.data ?? json) as T

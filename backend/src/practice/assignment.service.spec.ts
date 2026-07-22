@@ -204,7 +204,7 @@ describe('AssignmentService — May 2026 hardening', () => {
   describe('MED_DIR practice scope', () => {
     it('create denies MED_DIR who does not head the target practice', async () => {
       access.assertCanModifyPracticeAssignment.mockRejectedValueOnce(
-        new ForbiddenException('Practice practice-A is outside your MED_DIR scope'),
+        new ForbiddenException('Requested record is outside your MED_DIR scope'),
       )
       const medActor: ActorUser = { id: 'md-other', roles: [UserRole.MEDICAL_DIRECTOR] }
       await expect(
