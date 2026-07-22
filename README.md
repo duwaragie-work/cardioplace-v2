@@ -29,7 +29,14 @@
 
 ```bash
 $ npm install
+$ npm run build:shared
 ```
+
+> After `npm install`, run `npm run build:shared` before the first `make dev`.
+> The backend imports `@cardioplace/shared` through the package's built `dist/`,
+> which does not exist on a fresh clone — without this the backend fails to
+> compile with `Module '@cardioplace/shared' has no exported member ...`.
+> (CI runs `build:shared` in its build step, so it is unaffected.)
 
 ## Compile and run the project
 
