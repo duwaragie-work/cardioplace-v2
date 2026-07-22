@@ -30,10 +30,37 @@ describe('httpErrorFrom', () => {
     expect(e.status).toBe(500)
   })
 
-  it('ignores a non-string message rather than rendering "[object Object]"', () => {
-    // Nest validation errors send `message` as an ARRAY of strings. Stringifying
-    // that into the banner is how users end up reading "[object Object]".
-    const e = httpErrorFrom({ message: ['a must be a string'] }, 400)
+  // Nest sends `message` as a STRING for a thrown HttpException and a STRING[]
+  // for a ValidationPipe failure. The array case is load-bearing, not cosmetic:
+  // ProfileTab's friendlyCorrectionError() regex-matches the raw class-validator
+  // text to render "Height must be a whole number." An earlier version of this
+  // helper accepted only strings, so arrays fell through to the generic fallback
+  // and that guidance silently degraded — caught by spec 31.28 in CI, not here.
+  // These tests exist so it is caught here next time.
+  it('preserves a class-validator message array so field guidance still resolves', () => {
+    const e = httpErrorFrom(
+      { message: ['corrections.heightCm must be an integer number'] },
+      400,
+      'Could not correct profile',
+    )
+    expect(e.message).toBe('corrections.heightCm must be an integer number')
+    // The property ProfileTab actually depends on.
+    expect(e.message).toMatch(/integer|number/i)
+    expect(e.status).toBe(400)
+  })
+
+  it('joins a multi-error validator array', () => {
+    const e = httpErrorFrom(
+      { message: ['heightCm must not be less than 50', 'heightCm must not be greater than 250'] },
+      400,
+    )
+    expect(e.message).toBe(
+      'heightCm must not be less than 50, heightCm must not be greater than 250',
+    )
+  })
+
+  it('still refuses a plain object rather than rendering "[object Object]"', () => {
+    const e = httpErrorFrom({ message: { nested: 'oops' } }, 400)
     expect(e.message).toBe('Request failed: 400')
   })
 })

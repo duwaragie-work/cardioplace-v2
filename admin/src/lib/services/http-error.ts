@@ -39,8 +39,29 @@ export function httpErrorFrom(
   status: number,
   fallbackMsg = 'Request failed',
 ): HttpError {
-  const serverMsg = typeof body?.message === 'string' ? body.message : ''
-  return new HttpError(serverMsg || `${fallbackMsg}: ${status}`, status)
+  return new HttpError(serverMessage(body?.message) || `${fallbackMsg}: ${status}`, status)
+}
+
+/**
+ * Nest sends `message` as a STRING for thrown HttpExceptions and as a
+ * STRING[] for ValidationPipe failures. Both must survive.
+ *
+ * The array case is not cosmetic: ProfileTab's `friendlyCorrectionError()`
+ * regex-matches the raw class-validator text ("corrections.heightCm must be an
+ * integer number") to render "Height must be a whole number." Drop the array
+ * and that guidance silently degrades to "Please check the value and try
+ * again" — which is exactly what happened when this helper first shipped
+ * accepting only strings (spec 31.28 caught it in CI).
+ *
+ * Anything else (objects) returns '' so the caller's fallback wins, rather
+ * than rendering a literal "[object Object]" at the user.
+ */
+function serverMessage(message: unknown): string {
+  if (typeof message === 'string') return message
+  if (Array.isArray(message)) {
+    return message.filter((m) => typeof m === 'string').join(', ')
+  }
+  return ''
 }
 
 /**

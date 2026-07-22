@@ -1,5 +1,5 @@
 import { getPatientSummary } from './provider.service'
-import { getPatientProfile } from './patient-detail.service'
+import { correctPatientProfile, getPatientProfile } from './patient-detail.service'
 import { isOutOfScopeError } from './http-error'
 import { fetchWithAuth } from './token'
 
@@ -88,6 +88,33 @@ describe.each([
     const err = await call().catch((e: unknown) => e)
     expect((err as { status?: number }).status).toBe(403)
     expect(isOutOfScopeError(err)).toBe(true)
+  })
+})
+
+describe('validation errors keep their class-validator text (spec 31.28)', () => {
+  beforeEach(() => mockFetch.mockReset())
+
+  it('correctPatientProfile surfaces the raw validator message, not a fallback', async () => {
+    // The exact CI regression: a 400 from ValidationPipe carries
+    // `message: string[]`. ProfileTab regex-matches that text to render
+    // "Height must be a whole number." When httpErrorFrom accepted only
+    // strings, this collapsed to "Could not correct profile: 400" and the
+    // patient-facing guidance degraded to "Please check the value and try
+    // again" — green in every unit test, caught only by the e2e spec.
+    mockFetch.mockResolvedValue(
+      res(400, { message: ['corrections.heightCm must be an integer number'] }),
+    )
+
+    const err = await correctPatientProfile(
+      'p-1',
+      { heightCm: 170.5 } as never,
+      'qa',
+    ).catch((e: unknown) => e)
+
+    expect((err as Error).message).toMatch(/integer number/i)
+    expect((err as { status?: number }).status).toBe(400)
+    // A 400 is not a scope denial — it must not bounce the user out.
+    expect(isOutOfScopeError(err)).toBe(false)
   })
 })
 
