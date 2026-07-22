@@ -66,6 +66,12 @@ coverage/
 qa/test-results/
 qa/playwright-report/
 qa/reports/
+# Playwright writes `test-results/` relative to the CWD, so running the suite
+# from the repo root drops one here too — screenshots, videos and traces of
+# failing runs. Same class of proof artifact as the qa/ paths above; both were
+# untracked-but-unignored, so a `git add -A` would have committed them.
+test-results/
+qa/screenshots-manual-run/
 
 # Temp
 .temp
